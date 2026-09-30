@@ -12,6 +12,8 @@ interface MinimalLayoutProps {
     fullWidth?: boolean;
     noPadding?: boolean;
     glassMode?: boolean;
+    /** Подпись у стрелки «назад» (мастер брони: «К выбору времени»). */
+    backLabel?: string;
 }
 
 export function MinimalLayout({
@@ -21,6 +23,7 @@ export function MinimalLayout({
     fullWidth = false,
     noPadding = false,
     glassMode = false,
+    backLabel = 'Назад',
 }: MinimalLayoutProps) {
     const navigate = useNavigate();
     const resetBooking = useBookingStore(s => s.reset);
@@ -47,27 +50,32 @@ export function MinimalLayout({
                         maxWidth: fullWidth ? 1920 : 960,
                         margin: '0 auto',
                         padding: '10px 24px',
+                        minHeight: 64,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
                     }}>
                         {/* Left: back + logo */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            {/* «Назад» с подписью — одна на экран (G3-11): раньше рядом
+                                жили ещё «← Назад» у кнопки оплаты и серое «Назад» в корзине. */}
                             {showBackButton && (
                                 <button
+                                    type="button"
                                     onClick={handleBack}
                                     style={{
-                                        width: 44, height: 44,
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        minHeight: 44, padding: '0 14px 0 10px',
+                                        display: 'flex', alignItems: 'center', gap: 6,
                                         border: `1px solid ${GH.ink10}`,
                                         borderRadius: 8,
                                         background: 'transparent',
-                                        color: GH.ink60,
+                                        color: GH.ink,
+                                        fontFamily: GH_SANS, fontSize: 14, fontWeight: 500,
                                         cursor: 'pointer',
                                     }}
-                                    aria-label="Назад"
                                 >
-                                    <ArrowLeft size={16} />
+                                    <ArrowLeft size={16} aria-hidden="true" />
+                                    {backLabel}
                                 </button>
                             )}
                             <Link
@@ -75,7 +83,7 @@ export function MinimalLayout({
                                 onClick={resetBooking}
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 15,
+                                    fontSize: 16,
                                     fontWeight: 600,
                                     letterSpacing: '0.06em',
                                     color: GH.ink,
@@ -94,11 +102,12 @@ export function MinimalLayout({
                                     to="/login"
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 6,
-                                        padding: '8px 18px',
+                                        minHeight: 44,
+                                        padding: '0 18px',
                                         background: GH.accent,
                                         color: COLOR.onAccent,
                                         borderRadius: 8,
-                                        fontSize: 13,
+                                        fontSize: 14,
                                         fontWeight: 600,
                                         fontFamily: GH_SANS,
                                         textDecoration: 'none',
@@ -110,16 +119,19 @@ export function MinimalLayout({
                                 </Link>
                             ) : (
                                 <button
+                                    type="button"
                                     onClick={() => navigate('/dashboard')}
+                                    aria-label={`Мой кабинет — ${currentUser.name ?? ''}`}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 10,
-                                        padding: '6px 14px',
+                                        minHeight: 44,
+                                        padding: '0 14px',
                                         background: GH.ink5,
                                         border: `1px solid ${GH.ink8}`,
                                         borderRadius: 8,
                                         cursor: 'pointer',
                                         fontFamily: GH_SANS,
-                                        fontSize: 13,
+                                        fontSize: 14,
                                         fontWeight: 500,
                                         color: GH.ink,
                                     }}

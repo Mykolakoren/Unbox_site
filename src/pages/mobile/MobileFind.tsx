@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, CalendarDays, Check, ExternalLink, Link as LinkIcon, Loader2, Move, Repeat, X } from 'lucide-react';
+import { BellRing, CalendarDays, Check, Link as LinkIcon, Loader2, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -16,13 +16,72 @@ import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { COLOR, STATUS, Z } from '../../design/tokens';
-import { formatDayMonth, formatDayMonthShort, formatGel, formatWeekdayShort } from '../../utils/format';
+import { formatDayMonth, formatDayMonthShort, formatGel, formatRelativeDay, formatWeekdayShort } from '../../utils/format';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
+import { Field, Select } from '../../components/ui/Field';
+import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeModal';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { catalogPath } from '../../utils/catalogPath';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
 const DURATIONS = [60, 90, 120, 180]; // minutes
+
+/* Волна 2, пакет B (G4-04): последний выбор «Где / Тип / Сколько» запоминаем
+ * на этом устройстве, чтобы сводка «Сегодня · 1 ч · оба центра» чаще всего
+ * была готовой. Хранилище может быть недоступно (приватный режим, запрет
+ * сайта) — тогда просто работаем с настройками по умолчанию. */
+const FIND_PREFS_KEY = 'unbox_find_prefs_v1';
+const ALL_LOCS = ['unbox_one', 'unbox_uni'];
+const ALL_SPACES: SpaceType[] = ['individual', 'group', 'capsule'];
+type FindPrefs = { locs?: string[]; spaces?: string[]; dur?: number };
+
+function readFindPrefs(): FindPrefs {
+    try {
+        const raw = localStorage.getItem(FIND_PREFS_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed as FindPrefs : {};
+    } catch {
+        return {};
+    }
+}
+
+function writeFindPrefs(prefs: FindPrefs) {
+    try {
+        localStorage.setItem(FIND_PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+        /* приватный режим / нет места — не страшно */
+    }
+}
+
+/** Сохранённый набор, если он непустой и весь из допустимых значений. */
+function validSet<T extends string>(saved: unknown, allowed: readonly T[]): Set<T> | null {
+    if (!Array.isArray(saved) || saved.length === 0) return null;
+    const ok = saved.filter((x): x is T => allowed.includes(x as T));
+    return ok.length === saved.length ? new Set(ok) : null;
+}
+
+// Большие залы для подписи фильтра — из данных (X3-20: раньше подпись перечисляла и 9-й,
+// а кабинет 9 закрыт).
+const GROUP_HALLS_SUB = (() => {
+    const nums = RESOURCES
+        .filter(r => r.type === 'cabinet' && r.isActive !== false && (r.capacity ?? 0) > 4)
+        .map(r => r.name.replace(/^Кабинет\s*/, ''));
+    return nums.length > 1 ? `залы ${nums.join(', ')}` : nums.length === 1 ? `зал ${nums[0]}` : 'группы';
+})();
+
+const SPACE_WORD: Record<SpaceType, string> = { individual: 'кабинет', group: 'зал', capsule: 'капсула' };
+
+function pluralWindows(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'окно';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'окна';
+    return 'окон';
+}
 
 export function MobileFind() {
     const navigate = useNavigate();
@@ -115,9 +174,15 @@ export function MobileFind() {
         const d = new Date(raw + 'T00:00:00');
         return Number.isFinite(d.getTime()) ? d : null;
     })();
+    // Запоминаем выбор только в обычном поиске: предвыбор кабинета (?cab=),
+    // перенос и привязка к сессии — разовые сценарии, их не сохраняем.
+    const rememberPrefs = !searchParams.get('cab') && !rescheduleId && !linkSessionId;
+    const [savedPrefs] = useState<FindPrefs>(() => (rememberPrefs ? readFindPrefs() : {}));
     const initialDuration = (() => {
         const raw = searchParams.get('dur');
-        if (!raw) return 60;
+        if (!raw) {
+            return typeof savedPrefs.dur === 'number' && DURATIONS.includes(savedPrefs.dur) ? savedPrefs.dur : 60;
+        }
         const n = Number(raw);
         return DURATIONS.includes(n) ? n : 60;
     })();
@@ -157,10 +222,19 @@ export function MobileFind() {
     // Using Set lets us treat add/remove uniformly via toggle().
     const [locs, setLocs] = useState<Set<string>>(() => {
         const loc = cabResource?.locationId;   // Resource.locationId — string | undefined
-        return loc ? new Set([loc]) : new Set(['unbox_one', 'unbox_uni']);
+        if (loc) return new Set([loc]);
+        return validSet(savedPrefs.locs, ALL_LOCS) ?? new Set(ALL_LOCS);
     });
-    const [spaces, setSpaces] = useState<Set<SpaceType>>(
-        () => cabResource ? new Set([spaceOfRes(cabResource)]) : new Set(['individual', 'group', 'capsule']));
+    const [spaces, setSpaces] = useState<Set<SpaceType>>(() => {
+        if (cabResource) return new Set([spaceOfRes(cabResource)]);
+        return validSet(savedPrefs.spaces, ALL_SPACES) ?? new Set(ALL_SPACES);
+    });
+    // Фильтры свёрнуты в строку-сводку; «Изменить» открывает шторку.
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    useEffect(() => {
+        if (!rememberPrefs || locs.size === 0 || spaces.size === 0) return;
+        writeFindPrefs({ locs: [...locs], spaces: [...spaces], dur: duration });
+    }, [rememberPrefs, locs, spaces, duration]);
     const [rescheduling, setRescheduling] = useState(false);
     // Защита от повторного тапа, пока идёт запрос привязки/переноса. Второй
     // тап по соседнему кабинету создавал ВТОРУЮ бронь (со списанием), а при
@@ -238,6 +312,42 @@ export function MobileFind() {
             return next;
         });
     };
+
+    // «Сообщить, когда освободится» (G4-06, X2-08): когда окон нет или нужного
+    // кабинета нет в списке — подписка через общее окно WaitlistSubscribeModal.
+    const waitlistEnabled = canBook && !rescheduleId && !linkSessionMeta;
+    const waitlistRooms = useMemo(() => searchRooms(locs, spaces), [locs, spaces]);
+    const waitlistStarts = useMemo(() => {
+        const out: number[] = [];
+        const minStart = dayOffset === 0 ? tbilisiNow().totalMins : 0;
+        for (let t = 9 * 60; t + duration <= 22 * 60; t += 30) {
+            if (t > minStart) out.push(t);
+        }
+        return out;
+    }, [dayOffset, duration]);
+    const [waitlistPickerOpen, setWaitlistPickerOpen] = useState(false);
+    const [wlStartPick, setWlStartPick] = useState<number | null>(null);
+    const [wlRoomPick, setWlRoomPick] = useState<string | null>(null);
+    const [waitlistModalOpen, setWaitlistModalOpen] = useState(false);
+    const wlStart = wlStartPick != null && waitlistStarts.includes(wlStartPick) ? wlStartPick : (waitlistStarts[0] ?? null);
+    const wlRoomDefault = [cabResource?.id, favCab].find(id => id && waitlistRooms.some(r => r.id === id))
+        ?? waitlistRooms[0]?.id ?? null;
+    const wlRoomId = wlRoomPick && waitlistRooms.some(r => r.id === wlRoomPick) ? wlRoomPick : wlRoomDefault;
+    const wlRoom = wlRoomId ? RESOURCES.find(r => r.id === wlRoomId) : undefined;
+
+    // Строка-сводка: «Сегодня · 1 ч · оба центра · все помещения».
+    const summary = [
+        formatRelativeDay(targetDate),
+        formatBookingDuration(duration),
+        locs.size === ALL_LOCS.length ? 'оба центра'
+            : locs.size === 0 ? 'центр не выбран'
+                : LOCATIONS.filter(l => locs.has(l.id)).map(l => l.name).join(', '),
+        spaces.size === ALL_SPACES.length ? 'все помещения'
+            : spaces.size === 0 ? 'тип не выбран'
+                : ALL_SPACES.filter(x => spaces.has(x)).map(x => SPACE_WORD[x]).join(', '),
+    ].join(' · ');
+    const title = linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно';
+    useDocumentTitle(title);
 
     async function chooseWindow(startMin: number, resourceId: string) {
         if (!resourceId) return;
@@ -339,7 +449,7 @@ export function MobileFind() {
                 toast.info('Анкета одобрена — доступ к бронированию скоро откроет администратор');
             } else {
                 toast.info('Чтобы бронировать, заполните анкету специалиста', {
-                    action: { label: 'Анкета', onClick: () => navigate(SPECIALIST_APPLICATION_PATH) },
+                    action: { label: 'Анкета', onClick: () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) },
                 });
             }
             return;
@@ -365,24 +475,33 @@ export function MobileFind() {
         <>
             <div style={{
                 paddingTop: 16,
-                paddingBottom: 'calc(110px + env(safe-area-inset-bottom, 0px))',
-                display: 'flex', flexDirection: 'column', gap: 18,
+                paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+                display: 'flex', flexDirection: 'column', gap: 16,
             }}>
-                <div style={{ padding: '0 16px' }}>
-                    <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                        {linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно'}
-                    </h1>
-                    <p style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
-                        {linkSessionMeta
-                            ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
-                            : rescheduleId
-                                ? 'Выберите новое время — старый слот освободится.'
-                                : 'Выберите день, длительность и место.'}
-                    </p>
+                <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
+                            {title}
+                        </h1>
+                        {(linkSessionMeta || rescheduleId) && (
+                            <p style={{ fontSize: 14, color: COLOR.ink60, margin: '4px 0 0' }}>
+                                {linkSessionMeta
+                                    ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
+                                    : 'Выберите новое время — старый слот освободится.'}
+                            </p>
+                        )}
+                    </div>
+                    {/* Календарь — экран внутри приложения: без значка внешней
+                        ссылки и без липкой кнопки, перекрывавшей первый результат. */}
                     {!linkSessionMeta && !rescheduleId && (
-                        <p style={{ fontSize: 12, color: STATUS.pending.fg, marginTop: 4 }}>
-                            Пиковые часы 09–10 и 20–22: +5 ₾ за каждый час пика.
-                        </p>
+                        <Button
+                            variant="secondary"
+                            size="touch"
+                            icon={<CalendarDays size={16} aria-hidden="true" />}
+                            onClick={() => navigate('/m/calendar')}
+                        >
+                            Календарь
+                        </Button>
                     )}
                 </div>
 
@@ -488,189 +607,43 @@ export function MobileFind() {
                     </div>
                 )}
 
-                {/* When */}
-                <FieldGroup label="Когда">
-                    {/* Today/Tomorrow — flat 50/50 row */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                        {[0, 1].map(off => {
-                            const d = addDays(new Date(), off);
-                            const top = off === 0 ? 'Сегодня' : 'Завтра';
-                            const bot = formatDayMonth(d);
-                            const active = dayOffset === off;
-                            return (
-                                <button
-                                    key={off}
-                                    aria-pressed={active}
-                                    onClick={() => setDayOffset(off)}
-                                    style={{
-                                        background: active ? COLOR.ink : COLOR.sunken,
-                                        color: active ? COLOR.onInk : COLOR.ink,
-                                        border: 'none',
-                                        borderRadius: 14,
-                                        padding: '14px 16px',
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit',
-                                        textAlign: 'left',
-                                    }}
-                                >
-                                    <div style={{ fontSize: 16, fontWeight: 600 }}>{top}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{bot}</div>
-                                </button>
-                            );
-                        })}
-                    </div>
-                    {/* Next 5 days as compact square chips + "Другой день" */}
-                    <ChipsRow>
-                        {[2, 3, 4, 5, 6, 7, 8].map(off => {
-                            const d = addDays(new Date(), off);
-                            const wd = formatWeekdayShort(d);
-                            const dayLabel = formatDayMonthShort(d);
-                            const active = dayOffset === off;
-                            return (
-                                <button
-                                    key={off}
-                                    aria-pressed={active}
-                                    onClick={() => { setDayOffset(off); setCustomDate(null); }}
-                                    style={{
-                                        background: active ? COLOR.ink : COLOR.sunken,
-                                        color: active ? COLOR.onInk : COLOR.ink,
-                                        border: 'none',
-                                        borderRadius: 12,
-                                        padding: '10px 12px',
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit',
-                                        textAlign: 'center',
-                                        flex: '0 0 auto',
-                                        minWidth: 64,
-                                    }}
-                                >
-                                    <div style={{ fontSize: 12, fontWeight: 600 }}>{wd}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{dayLabel}</div>
-                                </button>
-                            );
-                        })}
-                        {/* Native date input — covers any future date past the
-                            7-day chip strip. Wrapping the <input> in a label
-                            lets us style it like the other chips while still
-                            popping the OS date picker on tap. */}
-                        <label
-                            style={{
-                                background: dayOffset === -1 ? COLOR.ink : COLOR.sunken,
-                                color: dayOffset === -1 ? COLOR.onInk : COLOR.ink,
-                                borderRadius: 12,
-                                padding: '10px 12px',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                textAlign: 'center',
-                                flex: '0 0 auto',
-                                minWidth: 88,
-                                position: 'relative',
-                            }}
-                        >
-                            <div style={{ fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <CalendarDays size={14} aria-hidden="true" /> Другой
-                            </div>
-                            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-                                {dayOffset === -1 && customDate
-                                    ? formatDayMonthShort(customDate)
-                                    : 'день'}
-                            </div>
-                            <input
-                                type="date"
-                                min={fmtDate(new Date(), 'yyyy-MM-dd')}
-                                // Сервер отдаёт занятость на 60 дней вперёд. Дальше этой
-                                // границы список показывал бы ВСЕ кабинеты свободными
-                                // (занятость не загружена) → клиент выбирал слот и получал
-                                // отказ уже на оформлении. Ограничиваем выбор.
-                                max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}
-                                value={customDate ? fmtDate(customDate, 'yyyy-MM-dd') : ''}
-                                onChange={e => {
-                                    if (!e.target.value) return;
-                                    const [y, m, d] = e.target.value.split('-').map(Number);
-                                    const picked = new Date(y, m - 1, d, 0, 0, 0, 0);
-                                    setCustomDate(picked);
-                                    setDayOffset(-1);
-                                }}
-                                style={{
-                                    position: 'absolute',
-                                    inset: 0,
-                                    opacity: 0,
-                                    cursor: 'pointer',
-                                }}
-                            />
-                        </label>
-                    </ChipsRow>
-                </FieldGroup>
-
-                {/* Duration */}
-                <FieldGroup label="Сколько">
-                    <ChipsRow>
-                        {DURATIONS.map(d => {
-                            const active = duration === d;
-                            return (
-                                <button
-                                    key={d}
-                                    aria-pressed={active}
-                                    onClick={() => setDuration(d)}
-                                    style={{
-                                        background: active ? COLOR.ink : COLOR.sunken,
-                                        color: active ? COLOR.onInk : COLOR.ink,
-                                        border: 'none',
-                                        borderRadius: 12,
-                                        minHeight: 44,
-                                        padding: '0 16px',
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit',
-                                        flex: '0 0 auto',
-                                    }}
-                                >
-                                    <span style={{ fontWeight: 600, fontSize: 14 }}>
-                                        {formatBookingDuration(d)}
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </ChipsRow>
-                </FieldGroup>
-
-                {/* Where — multi-select */}
-                <FieldGroup label="Где">
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        {LOCATIONS.filter(l => l.id === 'unbox_one' || l.id === 'unbox_uni').map(l => (
-                            <CheckCard
-                                key={l.id}
-                                checked={locs.has(l.id)}
-                                onClick={() => toggleLoc(l.id)}
-                                title={l.name}
-                                sub={l.address}
-                            />
-                        ))}
-                    </div>
-                </FieldGroup>
-
-                {/* Space type — multi-select */}
-                <FieldGroup label="Тип помещения">
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                        <CheckCard
-                            checked={spaces.has('individual')}
-                            onClick={() => toggleSpace('individual')}
-                            title="Кабинет"
-                            sub="до 4 чел."
-                        />
-                        <CheckCard
-                            checked={spaces.has('group')}
-                            onClick={() => toggleSpace('group')}
-                            title="Большой зал"
-                            sub="залы 7, 8, 9"
-                        />
-                        <CheckCard
-                            checked={spaces.has('capsule')}
-                            onClick={() => toggleSpace('capsule')}
-                            title="Капсула"
-                            sub="1 чел."
-                        />
-                    </div>
-                </FieldGroup>
+                {/* Строка-сводка фильтров (G4-04): результаты — на первом экране. */}
+                <div style={{ padding: '0 16px' }}>
+                    <button
+                        type="button"
+                        onClick={() => setFiltersOpen(true)}
+                        aria-haspopup="dialog"
+                        aria-expanded={filtersOpen}
+                        aria-label={`Поиск: ${summary}. Изменить`}
+                        className="press"
+                        style={{
+                            width: '100%',
+                            minHeight: 48,
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '8px 12px',
+                            background: COLOR.sunken,
+                            border: 'none',
+                            borderRadius: 12,
+                            color: COLOR.ink,
+                            fontFamily: 'inherit',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        <SlidersHorizontal size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: 1.35 }}>
+                            {summary}
+                        </span>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
+                            Изменить
+                        </span>
+                    </button>
+                    {!linkSessionMeta && !rescheduleId && (
+                        <p style={{ fontSize: 12, color: STATUS.pending.fg, margin: '8px 0 0' }}>
+                            Пиковые часы 09–10 и 20–22: +5 ₾ за каждый час пика.
+                        </p>
+                    )}
+                </div>
 
                 {/* Results. Чипы — только когда занятость загружена: пока
                     грузится — заглушки, при сбое — ошибка с «Повторить». */}
@@ -700,7 +673,7 @@ export function MobileFind() {
                         />
                     )}
                     {!occupancyReady && occupancyStatus !== 'error' && <SkeletonRows height={84} />}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {/* One chip per (time, resource) — owner+Galina 2026-05-31:
                             раньше строка показывала «Свободно: Каб.1, Каб.2, ...»
                             и тап всегда брал первый из списка. Пользователь
@@ -710,16 +683,18 @@ export function MobileFind() {
                             <div
                                 key={s.startMin}
                                 style={{
-                                    background: COLOR.card,
-                                    border: `1px solid ${COLOR.ink10}`,
-                                    borderRadius: 14,
-                                    padding: '12px 14px',
-                                    display: 'flex',
-                                    flexDirection: 'column',
+                                    // Волна 2 (G4-05): строка «время слева — кабинеты справа»
+                                    // с тонкой линией вместо карточки на каждое время —
+                                    // список заметно короче, глазу есть за что зацепиться.
+                                    display: 'grid',
+                                    gridTemplateColumns: '52px minmax(0, 1fr)',
                                     gap: 8,
+                                    alignItems: 'start',
+                                    padding: '10px 0',
+                                    borderTop: `1px solid ${COLOR.ink08}`,
                                 }}
                             >
-                                <div style={{ fontSize: 18, fontWeight: 600, color: COLOR.ink }}>
+                                <div className="num" style={{ fontSize: 16, fontWeight: 600, color: COLOR.ink, lineHeight: '44px' }}>
                                     {minsToHm(s.startMin)}
                                 </div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -739,13 +714,15 @@ export function MobileFind() {
                                                     // Пересдача — янтарная обводка вместо
                                                     // чёрной заливки: визуально «особый»
                                                     // слот, отличается от обычных свободных.
-                                                    background: isReRent ? STATUS.pending.bg : COLOR.ink,
-                                                    color: isReRent ? STATUS.pending.fg : COLOR.onInk,
-                                                    border: isReRent ? `1px solid ${STATUS.pending.fg}4D` : 'none',
-                                                    borderRadius: 999,
+                                                    // Волна 2: контурные чипы вместо
+                                                    // сплошной стены чёрных таблеток.
+                                                    background: isReRent ? STATUS.pending.bg : COLOR.card,
+                                                    color: isReRent ? STATUS.pending.fg : COLOR.ink,
+                                                    border: isReRent ? `1px solid ${STATUS.pending.fg}4D` : `1px solid ${COLOR.ink20}`,
+                                                    borderRadius: 8,
                                                     // Главный тап брони — цель 44 px (было 32).
                                                     minHeight: 44,
-                                                    padding: '0 14px',
+                                                    padding: '4px 12px',
                                                     fontSize: 14,
                                                     fontWeight: 600,
                                                     cursor: chipsBusy ? 'default' : 'pointer',
@@ -760,19 +737,23 @@ export function MobileFind() {
                                                 }}
                                             >
                                                 {isReRent && <Repeat size={14} aria-hidden="true" />}
-                                                {r?.name ?? rid}
-                                                {/* Ставка прямо на чипе: цена не должна
-                                                    появляться впервые только на оформлении. */}
-                                                {r?.hourlyRate != null && (
-                                                    <span style={{ fontSize: 12, fontWeight: 500 }}>
-                                                        {formatGel(r.hourlyRate)}/ч
-                                                    </span>
-                                                )}
+                                                {/* Волна 2: название и ставка в две строки —
+                                                    чип вдвое уже, в строку помещаются два. */}
+                                                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2, textAlign: 'left' }}>
+                                                    <span>{r?.name ?? rid}</span>
+                                                    {/* Ставка прямо на чипе: цена не должна
+                                                        появляться впервые только на оформлении. */}
+                                                    {r?.hourlyRate != null && (
+                                                        <span className="num" style={{ fontSize: 12, fontWeight: 500 }}>
+                                                            {formatGel(r.hourlyRate)}/ч
+                                                        </span>
+                                                    )}
+                                                </span>
                                                 {isPending
                                                     ? <Loader2 size={11} className="animate-spin" />
                                                     : isReRent
                                                         ? <span style={{ fontSize: 12, fontWeight: 600 }}>пересдача</span>
-                                                        : <ArrowRight size={14} aria-hidden="true" />}
+                                                        : null}
                                             </button>
                                         );
                                     })}
@@ -791,57 +772,312 @@ export function MobileFind() {
                         <EmptyState
                             compact
                             title="В этот день всё занято"
-                            hint="Попробуйте другой день, длительность или фильтры."
+                            hint={waitlistEnabled
+                                ? 'Попробуйте другой день или длительность — или попросите сообщить, когда освободится.'
+                                : 'Попробуйте другой день, длительность или фильтры.'}
+                            action={dayOffset === 0 && waitlistStarts.length === 0
+                                // Вечером «сегодня» уже закончилось — сразу на завтра.
+                                ? { label: 'Смотреть завтра', onClick: () => { setDayOffset(1); setCustomDate(null); } }
+                                : { label: 'Изменить поиск', onClick: () => setFiltersOpen(true) }}
                         />
+                    )}
+
+                    {/* «Сообщить, когда освободится»: при пустом дне — сразу
+                        открытая карточка, иначе — тихая кнопка под списком. */}
+                    {occupancyReady && waitlistEnabled && waitlistRooms.length > 0 && waitlistStarts.length > 0 && (
+                        (slots.length === 0 || waitlistPickerOpen) ? (
+                            <div style={{
+                                marginTop: 16,
+                                border: `1px solid ${COLOR.ink10}`,
+                                borderRadius: 16,
+                                padding: 16,
+                                background: COLOR.card,
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
+                                    <BellRing size={18} aria-hidden="true" />
+                                    Сообщить, когда освободится
+                                </div>
+                                <p style={{ fontSize: 14, color: COLOR.ink60, margin: '4px 0 12px' }}>
+                                    Выберите время и кабинет — пришлём сообщение, как только в этом центре освободится место.
+                                </p>
+                                {wlStart != null && (
+                                    <>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: 8 }}>
+                                            <Field label="Время">
+                                                <Select
+                                                    value={String(wlStart)}
+                                                    onChange={e => setWlStartPick(Number(e.target.value))}
+                                                >
+                                                    {waitlistStarts.map(t => (
+                                                        <option key={t} value={t}>{minsToHHMM(t)}–{minsToHHMM(t + duration)}</option>
+                                                    ))}
+                                                </Select>
+                                            </Field>
+                                            <Field label="Кабинет">
+                                                <Select
+                                                    value={wlRoomId ?? ''}
+                                                    onChange={e => setWlRoomPick(e.target.value)}
+                                                >
+                                                    {waitlistRooms.map(rr => (
+                                                        <option key={rr.id} value={rr.id}>
+                                                            {rr.name}{locs.size > 1 ? ` · ${LOCATIONS.find(l => l.id === rr.locationId)?.name ?? ''}` : ''}
+                                                        </option>
+                                                    ))}
+                                                </Select>
+                                            </Field>
+                                        </div>
+                                        <div style={{ marginTop: 12 }}>
+                                            <Button
+                                                block
+                                                variant={slots.length === 0 ? 'primary' : 'secondary'}
+                                                icon={<BellRing size={16} aria-hidden="true" />}
+                                                onClick={() => setWaitlistModalOpen(true)}
+                                                disabled={!wlRoom}
+                                            >
+                                                Сообщить, когда освободится
+                                            </Button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        ) : (
+                            <div style={{ marginTop: 12 }}>
+                                <Button
+                                    variant="quiet"
+                                    icon={<BellRing size={16} aria-hidden="true" />}
+                                    onClick={() => setWaitlistPickerOpen(true)}
+                                    style={{ whiteSpace: 'normal', textAlign: 'left', paddingLeft: 0 }}
+                                >
+                                    Нет нужного времени? Сообщить, когда освободится
+                                </Button>
+                            </div>
+                        )
                     )}
                 </div>
             </div>
 
-            {/* Sticky bottom: link to desktop calendar */}
-            <div style={{
-                position: 'fixed',
-                bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: '100%',
-                maxWidth: 480,
-                padding: '8px 16px',
-                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
-                zIndex: Z.sticky,
-                pointerEvents: 'none',
-            }}>
-                <button
-                    onClick={() => navigate('/m/calendar')}
-                    style={{
-                        pointerEvents: 'auto',
-                        width: '100%',
-                        background: COLOR.card,
-                        color: COLOR.ink,
-                        border: `1px solid ${COLOR.ink}`,
-                        borderRadius: 12,
-                        padding: '12px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 14,
-                        fontWeight: 600,
-                        boxShadow: `0 4px 16px ${COLOR.ink05}`,
-                    }}
-                >
-                    Календарь
-                    <ExternalLink size={14} />
-                </button>
-            </div>
+
+            {/* Фильтры — в шторке. Результаты за ней обновляются сразу. */}
+            <Sheet
+                open={filtersOpen}
+                onClose={() => setFiltersOpen(false)}
+                title="Когда и где искать"
+                footer={
+                    <Button block onClick={() => setFiltersOpen(false)}>
+                        {occupancyReady && slots.length > 0
+                            ? `Показать ${slots.length} ${pluralWindows(slots.length)}`
+                            : 'Готово'}
+                    </Button>
+                }
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {/* When */}
+                    <FieldGroup label="Когда">
+                        {/* Today/Tomorrow — flat 50/50 row */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                            {[0, 1].map(off => {
+                                const d = addDays(new Date(), off);
+                                const top = off === 0 ? 'Сегодня' : 'Завтра';
+                                const bot = formatDayMonth(d);
+                                const active = dayOffset === off;
+                                return (
+                                    <button
+                                        key={off}
+                                        aria-pressed={active}
+                                        onClick={() => setDayOffset(off)}
+                                        style={{
+                                            background: active ? COLOR.ink : COLOR.sunken,
+                                            color: active ? COLOR.onInk : COLOR.ink,
+                                            border: 'none',
+                                            borderRadius: 14,
+                                            padding: '14px 16px',
+                                            cursor: 'pointer',
+                                            fontFamily: 'inherit',
+                                            textAlign: 'left',
+                                        }}
+                                    >
+                                        <div style={{ fontSize: 16, fontWeight: 600 }}>{top}</div>
+                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{bot}</div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {/* Next 5 days as compact square chips + "Другой день" */}
+                        <ChipsRow>
+                            {[2, 3, 4, 5, 6, 7, 8].map(off => {
+                                const d = addDays(new Date(), off);
+                                const wd = formatWeekdayShort(d);
+                                const dayLabel = formatDayMonthShort(d);
+                                const active = dayOffset === off;
+                                return (
+                                    <button
+                                        key={off}
+                                        aria-pressed={active}
+                                        onClick={() => { setDayOffset(off); setCustomDate(null); }}
+                                        style={{
+                                            background: active ? COLOR.ink : COLOR.sunken,
+                                            color: active ? COLOR.onInk : COLOR.ink,
+                                            border: 'none',
+                                            borderRadius: 12,
+                                            padding: '10px 12px',
+                                            cursor: 'pointer',
+                                            fontFamily: 'inherit',
+                                            textAlign: 'center',
+                                            flex: '0 0 auto',
+                                            minWidth: 64,
+                                        }}
+                                    >
+                                        <div style={{ fontSize: 12, fontWeight: 600 }}>{wd}</div>
+                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{dayLabel}</div>
+                                    </button>
+                                );
+                            })}
+                            {/* Native date input — covers any future date past the
+                                7-day chip strip. Wrapping the <input> in a label
+                                lets us style it like the other chips while still
+                                popping the OS date picker on tap. */}
+                            <label
+                                style={{
+                                    background: dayOffset === -1 ? COLOR.ink : COLOR.sunken,
+                                    color: dayOffset === -1 ? COLOR.onInk : COLOR.ink,
+                                    borderRadius: 12,
+                                    padding: '10px 12px',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                    textAlign: 'center',
+                                    flex: '0 0 auto',
+                                    minWidth: 88,
+                                    position: 'relative',
+                                }}
+                            >
+                                <div style={{ fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    <CalendarDays size={14} aria-hidden="true" /> Другой
+                                </div>
+                                <div style={{ fontSize: 12, color: dayOffset === -1 ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>
+                                    {dayOffset === -1 && customDate
+                                        ? formatDayMonthShort(customDate)
+                                        : 'день'}
+                                </div>
+                                <input
+                                    type="date"
+                                    min={fmtDate(new Date(), 'yyyy-MM-dd')}
+                                    // Сервер отдаёт занятость на 60 дней вперёд. Дальше этой
+                                    // границы список показывал бы ВСЕ кабинеты свободными
+                                    // (занятость не загружена) → клиент выбирал слот и получал
+                                    // отказ уже на оформлении. Ограничиваем выбор.
+                                    max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}
+                                    value={customDate ? fmtDate(customDate, 'yyyy-MM-dd') : ''}
+                                    onChange={e => {
+                                        if (!e.target.value) return;
+                                        const [y, m, d] = e.target.value.split('-').map(Number);
+                                        const picked = new Date(y, m - 1, d, 0, 0, 0, 0);
+                                        setCustomDate(picked);
+                                        setDayOffset(-1);
+                                    }}
+                                    style={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        opacity: 0,
+                                        cursor: 'pointer',
+                                    }}
+                                />
+                            </label>
+                        </ChipsRow>
+                    </FieldGroup>
+
+                    {/* Duration */}
+                    <FieldGroup label="Сколько">
+                        <ChipsRow>
+                            {DURATIONS.map(d => {
+                                const active = duration === d;
+                                return (
+                                    <button
+                                        key={d}
+                                        aria-pressed={active}
+                                        onClick={() => setDuration(d)}
+                                        style={{
+                                            background: active ? COLOR.ink : COLOR.sunken,
+                                            color: active ? COLOR.onInk : COLOR.ink,
+                                            border: 'none',
+                                            borderRadius: 12,
+                                            minHeight: 44,
+                                            padding: '0 16px',
+                                            cursor: 'pointer',
+                                            fontFamily: 'inherit',
+                                            flex: '0 0 auto',
+                                        }}
+                                    >
+                                        <span style={{ fontWeight: 600, fontSize: 14 }}>
+                                            {formatBookingDuration(d)}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </ChipsRow>
+                    </FieldGroup>
+
+                    {/* Where — multi-select */}
+                    <FieldGroup label="Где">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            {LOCATIONS.filter(l => l.id === 'unbox_one' || l.id === 'unbox_uni').map(l => (
+                                <CheckCard
+                                    key={l.id}
+                                    checked={locs.has(l.id)}
+                                    onClick={() => toggleLoc(l.id)}
+                                    title={l.name}
+                                    sub={l.address}
+                                />
+                            ))}
+                        </div>
+                    </FieldGroup>
+
+                    {/* Space type — multi-select */}
+                    <FieldGroup label="Тип помещения">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                            <CheckCard
+                                checked={spaces.has('individual')}
+                                onClick={() => toggleSpace('individual')}
+                                title="Кабинет"
+                                sub="до 4 чел."
+                            />
+                            <CheckCard
+                                checked={spaces.has('group')}
+                                onClick={() => toggleSpace('group')}
+                                title="Большой зал"
+                                sub={GROUP_HALLS_SUB}
+                            />
+                            <CheckCard
+                                checked={spaces.has('capsule')}
+                                onClick={() => toggleSpace('capsule')}
+                                title="Капсула"
+                                sub="1 чел."
+                            />
+                        </div>
+                    </FieldGroup>
+
+                </div>
+            </Sheet>
+
+            {waitlistModalOpen && wlRoom && wlStart != null && (
+                <WaitlistSubscribeModal
+                    isOpen
+                    onClose={() => setWaitlistModalOpen(false)}
+                    resourceId={wlRoom.id}
+                    resourceName={wlRoom.name}
+                    locationName={LOCATIONS.find(l => l.id === wlRoom.locationId)?.name}
+                    date={targetDate}
+                    startTime={minsToHHMM(wlStart)}
+                    endTime={minsToHHMM(wlStart + duration)}
+                    onSubscribed={() => setWaitlistPickerOpen(false)}
+                />
+            )}
         </>
     );
 }
 
 function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
     return (
-        <div style={{ padding: '0 16px' }}>
+        <div>
             <SectionTitle>{label}</SectionTitle>
             {children}
         </div>
@@ -869,8 +1105,9 @@ function ChipsRow({ children }: { children: React.ReactNode }) {
             gap: 8,
             overflowX: 'auto',
             paddingBottom: 4,
-            margin: '0 -16px',
-            padding: '0 16px 4px',
+            // Лента до краёв шторки (поля тела шторки — 24 px).
+            margin: '0 -24px',
+            padding: '0 24px 4px',
             scrollbarWidth: 'none',
         }}>
             {children}
@@ -943,6 +1180,20 @@ const bannerCloseBtn: React.CSSProperties = {
     display: 'grid',
     placeItems: 'center',
 };
+
+/** Кабинеты под текущие фильтры — для «Сообщить, когда освободится».
+ *  Те же правила, что в buildFreeWindows (её не трогаем): сдаваемые,
+ *  не Neo School, выбранный центр и тип («Кабинет» — до 4 чел.,
+ *  «Большой зал» — больше 4 или групповой формат, «Капсула» — капсулы). */
+function searchRooms(locs: Set<string>, spaces: Set<SpaceType>) {
+    return RESOURCES.filter(r => {
+        if (r.locationId === 'neo_school' || !r.locationId || r.isActive === false || !locs.has(r.locationId)) return false;
+        if (r.type === 'capsule') return spaces.has('capsule');
+        const cap = r.capacity ?? 4;
+        const canGroup = r.formats?.includes('group') ?? false;
+        return (spaces.has('individual') && cap <= 4) || (spaces.has('group') && (cap > 4 || canGroup));
+    }).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+}
 
 // ─── availability math ────────────────────────────────────────────
 function minsToHHMM(m: number) {

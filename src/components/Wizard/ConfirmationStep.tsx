@@ -3,7 +3,6 @@ import { calculatePrice } from '../../utils/pricing';
 import { getMyBookingsPath } from '../../utils/userPaths';
 import { useUserStore } from '../../store/userStore';
 import { bookingsApi } from '../../api/bookings';
-import { LegacyButton as Button } from '../ui/LegacyButton';
 import { PhoneInput } from '../ui/PhoneInput';
 import {
     CheckCircle,
@@ -11,10 +10,11 @@ import {
     Calendar as CalendarIcon,
     ArrowRight,
     RefreshCw,
-    Home,
     Loader2,
     AlertCircle,
     Repeat,
+    Clock,
+    Plus,
 } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { useState, useMemo, useEffect, useRef } from 'react';
@@ -22,12 +22,13 @@ import { EXTRAS, RESOURCES, availableExtrasForResource } from '../../utils/data'
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
-import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
+import { format, startOfWeek, endOfWeek, isWithinInterval, isSameDay } from 'date-fns';
 import { motion } from 'framer-motion';
 import { useCrmStore } from '../../store/crmStore';
 import { User as UserIcon, Gift, MessageCircle, Ticket } from 'lucide-react';
 import { COLOR } from '../../design/tokens';
-import { formatDayMonth, formatGel } from '../../utils/format';
+import { formatDateLabel, formatDayMonth, formatGel } from '../../utils/format';
+import { parseUTC } from '../../utils/bookingHelpers';
 import { ruCountWord } from '../../utils/plural';
 import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
@@ -759,50 +760,53 @@ export function ConfirmationStep() {
         setTimeout(() => { handleConfirm(); }, 0);
     };
 
-    const handleAddToCalendar = () => {
-        if (!state.startTime) return;
-        const [h, m] = state.startTime.split(':').map(Number);
+    // Событие для календаря — из корзины (первый период). state.startTime у
+    // брони из сетки пустой, и кнопки календаря молча ничего не делали.
+    const calendarEvent = () => {
+        const item = cartDetails[0];
+        const startTime = item?.startTime || state.startTime;
+        if (!startTime) return null;
+        const duration = item?.duration || state.duration;
+        const [h, m] = startTime.split(':').map(Number);
         const start = new Date(state.date);
         start.setHours(h, m, 0, 0);
-        const end = new Date(start.getTime() + state.duration * 60000);
+        const end = new Date(start.getTime() + duration * 60000);
 
-        const resource = RESOURCES.find(r => r.id === state.resourceId);
+        const resource = RESOURCES.find(r => r.id === (item?.resourceId || state.resourceId));
         const loc = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
             : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
             : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
             : 'Unbox, Батуми';
-        const event = {
+        return {
             title: `Unbox: ${resource?.name || 'Кабинет'}`,
-            description: `${currentUser?.name || ''}\n${resource?.name || ''}, ${state.duration} мин`,
+            description: `${currentUser?.name || ''}\n${resource?.name || ''}, ${duration} мин`,
             location: loc,
             startTime: start,
             endTime: end
         };
+    };
 
-        window.open(generateGoogleCalendarUrl(event), '_blank');
+    const handleAddToCalendar = () => {
+        const event = calendarEvent();
+        if (event) window.open(generateGoogleCalendarUrl(event), '_blank');
     };
 
     const handleDownloadIcs = () => {
-        if (!state.startTime) return;
-        const [h, m] = state.startTime.split(':').map(Number);
-        const start = new Date(state.date);
-        start.setHours(h, m, 0, 0);
-        const end = new Date(start.getTime() + state.duration * 60000);
-
-        const resource = RESOURCES.find(r => r.id === state.resourceId);
-        const loc = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
-            : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
-            : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
-            : 'Unbox, Батуми';
-        const event = {
-            title: `Unbox: ${resource?.name || 'Кабинет'}`,
-            description: `${currentUser?.name || ''}\n${resource?.name || ''}, ${state.duration} мин`,
-            location: loc,
-            startTime: start,
-            endTime: end
-        };
-        downloadIcsFile(event);
+        const event = calendarEvent();
+        if (event) downloadIcsFile(event);
     };
+
+    // Только что созданная бронь ждёт одобрения администратора (горячая бронь)?
+    // Смотрим на брони этой корзины, а не на все брони клиента (G3-02):
+    // раньше любая старая бронь «на одобрении» делала «подтверждено» неправдой.
+    const createdPending = confirmed && !isRescheduling && cartDetails.some(item =>
+        bookings.some(b =>
+            b.resourceId === item.resourceId
+            && b.startTime === item.startTime
+            && (b.status === 'pending_approval' || (b as { status: string }).status === 'pendingApproval')
+            && isSameDay(parseUTC(b.date as unknown as string), new Date(state.date)),
+        ),
+    );
 
     // --- Loading state while checking availability ---
     if (isCheckingAvailability) {
@@ -843,43 +847,61 @@ export function ConfirmationStep() {
                     <p className="text-ink-60 text-sm">Выберите другое время.</p>
                 </div>
 
-                <Button
-                    variant="outline"
-                    size="lg"
-                    onClick={() => navigate(-1)}
-                    className="gap-2"
-                >
-                    <ArrowRight size={18} className="rotate-180" />
-                    Вернуться к расписанию
-                </Button>
+                {/* Раньше navigate(-1) — уводил со страницы мастера, а не к сетке (G3-11). */}
+                <UiButton variant="secondary" size="touch" onClick={() => state.setStep(2)}>
+                    Выбрать другое время
+                </UiButton>
             </motion.div>
         );
     }
 
     if (confirmed) {
+        const first = cartDetails[0];
+        const firstRes = first ? RESOURCES.find(r => r.id === first.resourceId) : null;
+        const title = isRescheduling ? 'Бронь перенесена'
+            : isEditing ? 'Изменения сохранены'
+            : createdPending ? 'Ждём подтверждения администратора'
+            : isSeries ? 'Серия создана'
+            : 'Вы забронировали кабинет';
         return (
-            <div className="text-center py-12 animate-in fade-in zoom-in duration-500">
-                <div className="w-20 h-20 bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] rounded-full flex items-center justify-center mx-auto mb-6">
-                    <CheckCircle size={40} aria-hidden="true" />
+            <div className="py-8" role="status" aria-live="polite">
+                <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center mb-6"
+                    style={createdPending
+                        ? { background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)' }
+                        : { background: 'var(--status-ok-bg)', color: 'var(--status-ok-fg)' }}
+                >
+                    {createdPending ? <Clock size={28} aria-hidden="true" /> : <CheckCircle size={28} aria-hidden="true" />}
                 </div>
-                <h2 className="text-heading font-semibold mb-4 text-ink">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
-                <p className="text-ink-60 max-w-md mx-auto mb-8">
-                    {isEditing ? 'Изменения сохранены.' : 'Мы отправили подтверждение на вашу почту. Ждём вас в Unbox!'}
+                <h2 className="text-heading font-semibold mb-3 text-ink">{title}</h2>
+                {first && !isSeries && (
+                    <p className="text-body text-ink mb-2">
+                        {formatDateLabel(state.date, { capitalize: true, withYear: 'auto' })} · <span className="num">{first.startTime}</span>
+                        {firstRes ? ` · ${firstRes.name}` : ''}
+                    </p>
+                )}
+                <p className="text-ink-60 max-w-lg mb-8">
+                    {createdPending
+                        ? 'До начала меньше 12 часов, поэтому бронь подтверждает администратор. Как только он ответит, пришлём уведомление. Бронь уже видна в «Моих бронях» с пометкой «Ждём подтверждения».'
+                        : isEditing
+                            ? 'Бронь уже обновлена в «Моих бронях».'
+                            : 'Бронь уже в «Моих бронях». Сейчас откроем их.'}
                 </p>
 
-                <div className="flex flex-col sm:flex-row justify-center gap-4">
-                    <Button variant="outline" onClick={handleAddToCalendar}>
-                        <CalendarIcon size={18} className="mr-2" />
-                        Google Calendar
-                    </Button>
-                    <Button variant="outline" onClick={handleDownloadIcs}>
-                        <Download size={18} className="mr-2" />
-                        Скачать .ics
-                    </Button>
-                    <Button onClick={() => window.location.reload()}>
-                        <Home size={18} className="mr-2" />
-                        На главную
-                    </Button>
+                <div className="flex flex-wrap gap-3">
+                    <UiButton size="touch" onClick={() => navigate(getMyBookingsPath(currentUser))}>
+                        К моим броням
+                    </UiButton>
+                    {!createdPending && first && (
+                        <>
+                            <UiButton variant="secondary" size="touch" icon={<CalendarIcon size={18} aria-hidden="true" />} onClick={handleAddToCalendar}>
+                                Google Календарь
+                            </UiButton>
+                            <UiButton variant="secondary" size="touch" icon={<Download size={18} aria-hidden="true" />} onClick={handleDownloadIcs}>
+                                Скачать .ics
+                            </UiButton>
+                        </>
+                    )}
                 </div>
             </div>
         );
@@ -894,13 +916,13 @@ export function ConfirmationStep() {
             className="space-y-4 sm:space-y-8"
         >
             <div>
-                <h2 className="text-xl sm:text-2xl font-semibold mb-1 sm:mb-2">Подтверждение</h2>
+                <h2 className="text-heading font-semibold mb-1 sm:mb-2 text-ink">Подтверждение брони</h2>
                 <p className="text-ink-60 text-sm sm:text-base">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
             </div>
 
             <div className="space-y-3 sm:space-y-4 max-w-md">
                 {effectiveUser ? (
-                    <div className="p-3 sm:p-4 rounded-xl"
+                    <div className="p-3 sm:p-4"
                         style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
                         <div className="text-xs sm:text-sm text-ink-60 mb-0.5">Бронирование на имя:</div>
                         <div className="font-semibold text-sm sm:text-base text-ink">{effectiveUser.name}</div>
@@ -912,15 +934,15 @@ export function ConfirmationStep() {
                     <>
                         <div className="space-y-2">
                             <label htmlFor="guest-name" className="text-sm font-medium text-ink">Имя *</label>
-                            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="Иван Иванов" />
+                            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full px-4 min-h-11 rounded-lg border border-ink-20 bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="Иван Иванов" />
                         </div>
                         <div className="space-y-2">
                             <label htmlFor="guest-phone" className="text-sm font-medium text-ink">Телефон</label>
-                            <PhoneInput id="guest-phone" value={guestPhone} onChange={setGuestPhone} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" />
+                            <PhoneInput id="guest-phone" value={guestPhone} onChange={setGuestPhone} className="w-full px-4 min-h-11 rounded-lg border border-ink-20 bg-card focus:outline-none focus:ring-2 focus:ring-accent" />
                         </div>
                         <div className="space-y-2">
                             <label htmlFor="guest-email" className="text-sm font-medium text-ink">Email *</label>
-                            <input id="guest-email" type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="ivan@example.com" />
+                            <input id="guest-email" type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="w-full px-4 min-h-11 rounded-lg border border-ink-20 bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="ivan@example.com" />
                         </div>
                         {(!guestName.trim() || !guestEmail.trim()) && (
                             <p className="text-xs text-[var(--status-pending-fg)]">* Заполните имя и email для бронирования</p>
@@ -934,7 +956,7 @@ export function ConfirmationStep() {
                 them (target_user_id), and the CRM-clients dropdown below
                 refetches scoped to their roster. */}
             {isAdminActor && specialistChoices.length > 0 && (
-                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-ink-10">
                     <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
                         <UserIcon size={16} aria-hidden="true" /> За кого бронируете?
                     </h3>
@@ -947,7 +969,7 @@ export function ConfirmationStep() {
                             // different specialist's CRM and would 403 on submit.
                             setSelectedCrmClientId('');
                         }}
-                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg border border-ink-20 min-h-11 focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
                     >
                         <option value="">— За себя ({currentUser?.name || currentUser?.email}) —</option>
                         {specialistChoices
@@ -966,14 +988,14 @@ export function ConfirmationStep() {
 
             {/* CRM Client Selector (for specialists) */}
             {crmClients.length > 0 && (
-                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-ink-10">
                     <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
                         <UserIcon size={16} aria-hidden="true" /> Привязать клиента
                     </h3>
                     <select
                         value={selectedCrmClientId}
                         onChange={(e) => setSelectedCrmClientId(e.target.value)}
-                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg border border-ink-20 min-h-11 focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
                     >
                         <option value="">— Без привязки к клиенту —</option>
                         {crmClients.map(c => (
@@ -988,7 +1010,7 @@ export function ConfirmationStep() {
 
             {/* Payment Method Selector — при переносе способ оплаты не меняется. */}
             {effectiveUser && !isRescheduling && (
-                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-ink-10">
                     <h3 className="font-semibold text-base sm:text-lg text-ink">Способ оплаты</h3>
                     {/* Варианты в порядке сервера: бонус → абонемент → баланс. */}
                     <div role="radiogroup" aria-label="Способ оплаты" className="grid gap-2 sm:gap-3">
@@ -1000,11 +1022,11 @@ export function ConfirmationStep() {
                                 aria-checked={payMethod === 'bonus'}
                                 aria-disabled={!isBonusEligible}
                                 className={`
-                                    relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
+                                    relative p-3 sm:p-4 rounded-lg border-2 cursor-pointer transition-all min-h-11
                                     ${payMethod === 'bonus'
                                         ? 'border-accent bg-accent-soft ring-1 ring-accent'
                                         : 'border-ink-20 hover:border-ink-40 bg-card'}
-                                    ${!isBonusEligible ? 'opacity-50 pointer-events-none' : ''}
+                                    ${!isBonusEligible ? 'bg-sunken border-ink-10 cursor-not-allowed' : ''}
                                 `}
                                 onClick={() => pickPay('bonus')}
                                 onKeyDown={(e) => {
@@ -1020,12 +1042,12 @@ export function ConfirmationStep() {
                                             {payMethod === 'bonus' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                         </div>
                                         <Gift size={16} className="text-ink-60" aria-hidden="true" />
-                                        <span className="font-semibold text-ink">Бонусные часы</span>
+                                        <span className="font-semibold text-ink">Бонус</span>
                                     </div>
                                     <span className="font-semibold text-[var(--status-ok-fg)]">Бесплатно</span>
                                 </div>
                                 <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
-                                    Доступно: {fmtHours(totalBonusHours)} бонусов
+                                    Бесплатные бонусные часы: {fmtHours(totalBonusHours)}
                                     {!isBonusEligible && <span className="text-ink ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
                                 </div>
                             </div>
@@ -1038,11 +1060,11 @@ export function ConfirmationStep() {
                             aria-checked={payMethod === 'subscription'}
                             aria-disabled={!isSubscriptionEligible}
                             className={`
-                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
+                                relative p-3 sm:p-4 rounded-lg border-2 cursor-pointer transition-all min-h-11
                                 ${payMethod === 'subscription'
                                     ? 'border-accent bg-accent-soft ring-1 ring-accent'
                                     : 'border-ink-20 hover:border-ink-40 bg-card'}
-                                ${!isSubscriptionEligible ? 'opacity-50 pointer-events-none' : ''}
+                                ${!isSubscriptionEligible ? 'bg-sunken border-ink-10 cursor-not-allowed' : ''}
                             `}
                             onClick={() => pickPay('subscription')}
                             onKeyDown={(e) => {
@@ -1057,7 +1079,7 @@ export function ConfirmationStep() {
                                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'subscription' ? 'border-accent' : 'border-ink-60'}`}>
                                         {payMethod === 'subscription' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                     </div>
-                                    <span className="font-semibold text-ink">Списать с абонемента</span>
+                                    <span className="font-semibold text-ink">Абонемент</span>
                                 </div>
                                 <span className="num font-semibold text-ink">
                                     {fmtHours(totalBookingHours)}{subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}
@@ -1086,11 +1108,11 @@ export function ConfirmationStep() {
                             aria-checked={payMethod === 'balance'}
                             aria-disabled={!isSelectable('balance', plan, isSeries)}
                             className={`
-                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
+                                relative p-3 sm:p-4 rounded-lg border-2 cursor-pointer transition-all min-h-11
                                 ${payMethod === 'balance'
                                     ? 'border-accent bg-accent-soft ring-1 ring-accent'
                                     : 'border-ink-20 hover:border-ink-40 bg-card'}
-                                ${!isSelectable('balance', plan, isSeries) ? 'opacity-50 pointer-events-none' : ''}
+                                ${!isSelectable('balance', plan, isSeries) ? 'bg-sunken border-ink-10 cursor-not-allowed' : ''}
                             `}
                             onClick={() => pickPay('balance')}
                             onKeyDown={(e) => {
@@ -1105,7 +1127,7 @@ export function ConfirmationStep() {
                                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'balance' ? 'border-accent' : 'border-ink-60'}`}>
                                         {payMethod === 'balance' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                     </div>
-                                    <span className="font-semibold text-ink">Списать с баланса</span>
+                                    <span className="font-semibold text-ink">С баланса</span>
                                 </div>
                                 {isSelectable('balance', plan, isSeries) && (
                                     <span className="num font-semibold text-ink">{formatGel(totalPrice)}</span>
@@ -1130,7 +1152,7 @@ export function ConfirmationStep() {
                 bookings have zero extras), expandable for the rare case. */}
             {effectiveUser && !isRescheduling && !isEditing && (
                 <details
-                    className="group pt-3 sm:pt-4 border-t border-unbox-light"
+                    className="group pt-3 sm:pt-4 border-t border-ink-10"
                     style={{ cursor: 'pointer' }}
                 >
                     <summary
@@ -1157,7 +1179,7 @@ export function ConfirmationStep() {
                                     type="button"
                                     onClick={() => state.toggleExtra(e.id)}
                                     aria-pressed={sel}
-                                    className={`p-3 rounded-xl border text-left transition-colors ${
+                                    className={`p-3 min-h-11 rounded-lg border text-left transition-colors ${
                                         sel
                                             ? 'bg-accent-soft border-accent'
                                             : 'bg-card border-ink-20 hover:border-ink-40'
@@ -1176,7 +1198,7 @@ export function ConfirmationStep() {
 
             {/* Recurring Booking Selector */}
             {effectiveUser && !isRescheduling && !isEditing && (
-                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-ink-10">
                     <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
                         <Repeat size={16} aria-hidden="true" /> Повторение
                     </h3>
@@ -1192,7 +1214,7 @@ export function ConfirmationStep() {
                                 type="button"
                                 onClick={() => setRecurringPattern(p.id)}
                                 aria-pressed={recurringPattern === p.id}
-                                className={`py-2 sm:py-2.5 rounded-xl border text-xs font-semibold transition-colors text-center ${
+                                className={`min-h-11 px-2 rounded-lg border text-sm font-medium transition-colors text-center ${
                                     recurringPattern === p.id
                                         ? 'bg-accent text-on-accent border-accent'
                                         : 'border-ink-20 text-ink-60 hover:border-accent hover:text-accent-ink'
@@ -1203,7 +1225,7 @@ export function ConfirmationStep() {
                         ))}
                     </div>
                     {recurringPattern && (
-                        <div className="flex items-center gap-2.5 bg-sunken rounded-xl px-3 py-2.5">
+                        <div className="flex items-center gap-2.5 bg-sunken px-3 py-2.5">
                             <input
                                 type="number"
                                 value={recurringOccurrences}
@@ -1213,7 +1235,8 @@ export function ConfirmationStep() {
                                 }}
                                 min={2}
                                 max={recurringPattern === 'monthly' ? 24 : 52}
-                                className="w-16 px-2 py-1.5 rounded-lg border border-ink-20 text-sm text-center focus:outline-none focus:ring-2 focus:ring-accent bg-card"
+                                aria-label="Сколько повторений"
+                                className="w-20 min-h-11 px-2 rounded-lg border border-ink-20 text-body text-center focus:outline-none focus:ring-2 focus:ring-accent bg-card"
                             />
                             <span className="text-xs text-ink-60">
                                 повторений · {recurringPattern === 'monthly'
@@ -1228,9 +1251,9 @@ export function ConfirmationStep() {
                 </div>
             )}
 
-            <div className="pt-4 sm:pt-8 border-t border-unbox-light">
+            <div className="pt-4 sm:pt-8 border-t border-ink-10">
                 {isRescheduling && oldBooking && (
-                    <div className="mb-6 p-4 rounded-xl"
+                    <div className="mb-6 p-4"
                         style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
                         <h4 className="font-semibold flex items-center gap-2 text-ink mb-3">
                             <RefreshCw size={18} aria-hidden="true" /> Перенос бронирования
@@ -1274,7 +1297,7 @@ export function ConfirmationStep() {
                             </div>
                         </div>
 
-                        <div className="mt-4 pt-3 border-t border-unbox-light flex justify-between items-center text-sm">
+                        <div className="mt-4 pt-3 border-t border-ink-10 flex justify-between items-center text-sm">
                             <span className="text-ink">Разница к оплате:</span>
                             <span className="num font-semibold text-lg text-ink">
                                 {rescheduleDiff > 0.005
@@ -1289,16 +1312,9 @@ export function ConfirmationStep() {
                 )}
 
                 <div className="flex gap-3 flex-col sm:flex-row">
-                    <button
-                        type="button"
-                        onClick={() => state.setStep(state.step - 1)}
-                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl border-2 border-unbox-light text-ink font-semibold text-sm sm:text-base hover:bg-ink-05 transition-colors cursor-pointer"
-                    >
-                        ← Назад
-                    </button>
-                    <Button size="lg" className="flex-1 md:flex-none" onClick={handleConfirm} disabled={isLoadingPricing || isSubmitting}>
+                    <UiButton size="touch" className="flex-1 md:flex-none" onClick={handleConfirm} loading={isLoadingPricing || isSubmitting}>
                         {isLoadingPricing || isSubmitting
-                            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> {isLoadingPricing ? 'Считаем цену…' : 'Бронируем…'}</>
+                            ? (isLoadingPricing ? 'Считаем цену…' : 'Бронируем…')
                             : isRescheduling
                                 ? 'Подтвердить перенос'
                                 : isEditing
@@ -1311,7 +1327,7 @@ export function ConfirmationStep() {
                                                 ? `Списать ${fmtHours(totalBookingHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
                                                 : `Оплатить ${formatGel(totalPrice)}`
                         }
-                    </Button>
+                    </UiButton>
                 </div>
             </div>
 

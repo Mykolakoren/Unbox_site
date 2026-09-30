@@ -62,7 +62,7 @@ export function DiscountProgress() {
     const isPersonalWinning = personalDiscount > 0 && personalDiscount >= progressiveDiscount;
 
     return (
-        <div className="p-6 rounded-2xl relative overflow-hidden"
+        <div className="p-6 relative overflow-hidden"
             style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
 
             <div className="flex justify-between items-start mb-4 relative z-10">
@@ -88,7 +88,7 @@ export function DiscountProgress() {
 
             {/* Personal discount info */}
             {personalDiscount > 0 && (
-                <div className={`flex items-center gap-2 mb-4 p-2.5 rounded-xl relative z-10 ${
+                <div className={`flex items-center gap-2 mb-4 p-2.5 rounded-lg relative z-10 ${
                     isPersonalWinning
                         ? 'bg-accent-soft border border-accent/30'
                         : 'bg-sunken border border-ink-10'
@@ -145,7 +145,7 @@ export function DiscountProgress() {
                 </div>
 
                 {(!personalDiscount || !isPersonalWinning) && (
-                    <div className="flex justify-between items-center p-3 rounded-xl mt-1 bg-sunken">
+                    <div className="flex justify-between items-center p-3 rounded-lg mt-1 bg-sunken">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-card border border-ink-10">
                                 <TrendingUp size={16} className="text-ink" aria-hidden="true" />

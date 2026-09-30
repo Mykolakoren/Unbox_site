@@ -1,11 +1,24 @@
 import type { FC } from 'react';
 import { toast } from 'sonner';
 import { useUserStore, type User } from '../store/userStore';
-import { Calendar, RefreshCcw, Snowflake, CheckCircle2 } from 'lucide-react';
-import { LegacyButton as Button } from './ui/LegacyButton';
+import { Calendar, RefreshCcw, Snowflake, CheckCircle2, Send } from 'lucide-react';
+import { Button } from './ui/Button';
 import { parseISO } from 'date-fns';
 import { formatDayMonth } from '../utils/format';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
+
+/** Сколько раз можно поставить абонемент на паузу (pricing_policy.yaml →
+ *  max_freeze_count_per_subscription; сервер: users/admin.py, freeze_count >= 1 → отказ). */
+const FREEZE_LIMIT = 1;
+const ADMIN_TG = 'https://t.me/UnboxCenter';
+
+const fmtHours = (h: number) =>
+    `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Number(h) || 0)} ч`;
+
+/** Ссылка на Telegram администратора с готовым текстом (решение владельца 30.09). */
+function adminTelegramUrl(text: string): string {
+    return `${ADMIN_TG}?text=${encodeURIComponent(text)}`;
+}
 
 interface SubscriptionCardProps {
     user: User;
@@ -14,150 +27,169 @@ interface SubscriptionCardProps {
 export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
     const { toggleSubscriptionFreeze, currentUser } = useUserStore();
     const sub = user.subscription;
-    // Заморозку проводит только админ (эндпоинт require_admin). Клиенту
+    // Заморозку напрямую проводит только админ (эндпоинт require_admin). Клиенту
     // раньше показывалась рабочая на вид кнопка → 403 «Not enough privileges».
+    // Клиент просит паузу у администратора в Telegram — готовым сообщением;
+    // /subscriptions/toggle-freeze отсюда не зовём (решение владельца 30.09).
     const viewerIsAdmin = ['owner', 'senior_admin', 'admin'].includes(currentUser?.role || '') || !!currentUser?.isAdmin;
 
     if (!sub) return null;
 
     const plan = SUBSCRIPTION_PLANS.find(p => p.id === sub.planId);
     const totalWithBonus = sub.totalHours + (sub.bonusHours || 0);
-    const percentRemaining = (sub.remainingHours / totalWithBonus) * 100;
+    const percentRemaining = totalWithBonus > 0 ? Math.min(100, (sub.remainingHours / totalWithBonus) * 100) : 0;
 
-    const canFreeze = !sub.isFrozen && sub.freezeCount < 1;
+    // freezeCount с сервера — сколько пауз УЖЕ ИСПОЛЬЗОВАНО (users/admin.py
+    // увеличивает его при каждой заморозке), а не сколько осталось. На телефоне
+    // (MobileSubscription) это число показано как «Заморозок осталось» — наоборот.
+    const freezesUsed = Number(sub.freezeCount) || 0;
+    const freezesLeft = Math.max(0, FREEZE_LIMIT - freezesUsed);
+    const canFreeze = !sub.isFrozen && freezesLeft > 0;
     const frozenUntil = sub.isFrozen && sub.frozenUntil ? parseISO(sub.frozenUntil) : null;
     const pauseOver = !!frozenUntil && frozenUntil.getTime() < Date.now();
     const frozenUntilLabel = frozenUntil ? formatDayMonth(frozenUntil) : '';
 
+    const who = [user.name, user.email].filter(Boolean).join(', ');
+    const freezeRequestUrl = adminTelegramUrl(
+        `Здравствуйте! Прошу поставить на паузу мой абонемент «${sub.name}» на 7 дней. ${who}`,
+    );
+    const unfreezeRequestUrl = adminTelegramUrl(
+        `Здравствуйте! Прошу снять паузу с моего абонемента «${sub.name}». ${who}`,
+    );
+
+    const cell = 'border-t border-ink-10 py-3';
+
     return (
-        // Wave 1: светлая карточка Grid House (бумага, тонкая рамка) вместо
-        // тёмной со свечением — один визуальный язык с остальным кабинетом.
-        <div className="bg-card text-ink p-6 rounded-lg border border-ink-10 relative overflow-hidden">
-            <div className="relative">
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <div className="text-ink-60 text-sm font-medium mb-1">Абонемент</div>
-                        <h3 className="text-2xl font-semibold flex items-center gap-2">
-                            {sub.name}
-                            {(sub.bonusHours || 0) > 0 && (
-                                <span className="bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-caption font-medium px-1.5 py-0.5 rounded">
-                                    +{sub.bonusHours} ч бонус
-                                </span>
-                            )}
-                        </h3>
-                    </div>
-                    {sub.isFrozen && (
-                        <div className="bg-[var(--status-info-bg)] text-[var(--status-info-fg)] px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
-                            <Snowflake size={12} aria-hidden="true" />
-                            Заморожен
-                        </div>
-                    )}
+        // Grid House: бумага, тонкая линия, без скруглений, тени и свечения.
+        <section className="bg-card text-ink p-5 border border-ink-10" aria-label={`Абонемент «${sub.name}»`}>
+            <div className="flex justify-between items-start gap-3 mb-4">
+                <div className="min-w-0">
+                    <div className="text-ink-60 text-small mb-1">Абонемент</div>
+                    <h3 className="text-title font-semibold flex flex-wrap items-center gap-2 m-0">
+                        {sub.name}
+                        {(sub.bonusHours || 0) > 0 && (
+                            <span className="ui-badge ui-badge--ok">+{fmtHours(sub.bonusHours || 0)} бонус</span>
+                        )}
+                    </h3>
                 </div>
-
-                {/* Progress Bar */}
-                <div className="mb-5">
-                    <div className="flex justify-between text-sm mb-2">
-                        <span className="text-ink-60">Остаток часов</span>
-                        <span className="num font-semibold">{sub.remainingHours} / {totalWithBonus} ч</span>
-                    </div>
-                    <div className="h-2 bg-ink-10 rounded-full overflow-hidden">
-                        <div
-                            className={`h-full rounded-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-[var(--status-danger-solid)]' : 'bg-accent'}`}
-                            style={{ width: `${percentRemaining}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* Perks Section */}
-                {plan?.perks && plan.perks.length > 0 && (
-                    <div className="mb-5 space-y-1.5">
-                        {plan.perks.map((perk, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs text-ink-80">
-                                <CheckCircle2 size={12} className="text-[var(--status-ok-fg)] shrink-0" aria-hidden="true" />
-                                {perk}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Details Grid */}
-                <div className="grid grid-cols-2 gap-3 mb-5">
-                    <div className="bg-sunken p-2.5 rounded-lg">
-                        <div className="flex items-center gap-2 text-ink-60 text-caption uppercase tracking-[0.06em] mb-1">
-                            <Calendar size={12} />
-                            Действует до
-                        </div>
-                        <div className="font-semibold text-sm">
-                            {formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}
-                        </div>
-                    </div>
-
-                    <div className="bg-sunken p-2.5 rounded-lg">
-                        <div className="flex items-center gap-2 text-ink-60 text-caption uppercase tracking-[0.06em] mb-1">
-                            <RefreshCcw size={12} />
-                            Переносы
-                        </div>
-                        <div className="font-semibold text-sm">
-                            {sub.freeReschedules > 0 ? `${sub.freeReschedules} доступно` : 'Нет'}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Action */}
-                {viewerIsAdmin ? (
-                <div className="space-y-2">
-                    <Button
-                        variant="outline"
-                        disabled={!canFreeze && !sub.isFrozen}
-                        className={`w-full h-11 border border-ink-20 bg-card hover:bg-ink-05 text-ink hover:text-ink rounded-lg ${sub.isFrozen ? 'bg-[var(--status-info-bg)] text-[var(--status-info-fg)] border-transparent' : ''}`}
-                        onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
-                            toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
-                    >
-                        <Snowflake size={16} className="mr-2" />
-                        {sub.isFrozen ? 'Разморозить' : 'Заморозить на 7 дней'}
-                    </Button>
-
-                    {!canFreeze && !sub.isFrozen && (
-                        <p className="text-caption text-center text-ink-60">
-                            Лимит заморозок исчерпан (1 раз)
-                        </p>
-                    )}
-                </div>
-                ) : (
-                <div className="space-y-2 text-center">
-                    {sub.isFrozen ? (
-                        <p className="text-xs text-ink-80 leading-snug">
-                            {pauseOver
-                                ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Пока абонемент на паузе, брони оплачиваются с баланса.`
-                                : 'Пока абонемент на паузе, часы не списываются — брони оплачиваются с баланса.'}
-                        </p>
-                    ) : (
-                        <p className="text-xs text-ink-60 leading-snug">
-                            {canFreeze
-                                ? 'Абонемент можно один раз поставить на паузу на 7 дней — через администратора.'
-                                : 'Пауза по этому абонементу уже использована.'}
-                        </p>
-                    )}
-                    {(canFreeze || sub.isFrozen) && (
-                        <a
-                            href="https://t.me/UnboxCenter"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 w-full h-11 rounded-lg border border-ink-20 text-sm text-ink hover:bg-ink-05 transition-colors"
-                        >
-                            <Snowflake size={16} />
-                            {sub.isFrozen ? 'Снять паузу — написать администратору' : 'Попросить паузу у администратора'}
-                        </a>
-                    )}
-                </div>
-                )}
-
-                {sub.isFrozen && frozenUntil && (
-                    <div className={`text-center text-caption font-medium mt-3 py-1.5 rounded-lg ${pauseOver ? 'text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]' : 'text-[var(--status-info-fg)] bg-[var(--status-info-bg)]'}`}>
-                        {pauseOver ? `Пауза закончилась ${frozenUntilLabel} — администратор ещё не снял её` : `На паузе до ${frozenUntilLabel}`}
-                    </div>
+                {sub.isFrozen && (
+                    <span className="ui-badge ui-badge--info shrink-0">
+                        <Snowflake size={14} aria-hidden="true" />
+                        На паузе
+                    </span>
                 )}
             </div>
-        </div>
+
+            {/* Остаток часов */}
+            <div className="mb-4">
+                <div className="flex justify-between text-small mb-2">
+                    <span className="text-ink-60">Осталось часов</span>
+                    <span className="num font-semibold">{fmtHours(sub.remainingHours)} из {fmtHours(totalWithBonus)}</span>
+                </div>
+                <div
+                    className="h-2 bg-ink-10 overflow-hidden"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={totalWithBonus}
+                    aria-valuenow={sub.remainingHours}
+                    aria-label="Остаток часов абонемента"
+                >
+                    <div
+                        className={`h-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-[var(--status-danger-solid)]' : 'bg-accent'}`}
+                        style={{ width: `${percentRemaining}%` }}
+                    />
+                </div>
+            </div>
+
+            {/* Что входит */}
+            {plan?.perks && plan.perks.length > 0 && (
+                <ul className="mb-4 space-y-1.5 list-none p-0">
+                    {plan.perks.map((perk, i) => (
+                        <li key={i} className="flex items-center gap-2 text-small text-ink-80">
+                            <CheckCircle2 size={14} className="text-[var(--status-ok-fg)] shrink-0" aria-hidden="true" />
+                            {perk}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            <dl className="m-0 text-small">
+                <div className={`${cell} flex justify-between gap-3`}>
+                    <dt className="flex items-center gap-2 text-ink-60"><Calendar size={14} aria-hidden="true" /> Действует до</dt>
+                    <dd className="m-0 font-medium">{formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}</dd>
+                </div>
+                <div className={`${cell} flex justify-between gap-3`}>
+                    <dt className="flex items-center gap-2 text-ink-60"><RefreshCcw size={14} aria-hidden="true" /> Бесплатные переносы</dt>
+                    <dd className="m-0 font-medium">{sub.freeReschedules > 0 ? `осталось ${sub.freeReschedules}` : 'нет'}</dd>
+                </div>
+                <div className={`${cell} flex justify-between gap-3`}>
+                    <dt className="flex items-center gap-2 text-ink-60"><Snowflake size={14} aria-hidden="true" /> Пауза на 7 дней</dt>
+                    <dd className="m-0 font-medium">
+                        {sub.isFrozen ? 'идёт сейчас' : `осталось ${freezesLeft} из ${FREEZE_LIMIT}`}
+                    </dd>
+                </div>
+            </dl>
+
+            {sub.isFrozen && frozenUntil && (
+                <div className={`mt-3 px-3 py-2 text-small font-medium ${pauseOver ? 'text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]' : 'text-[var(--status-info-fg)] bg-[var(--status-info-bg)]'}`}>
+                    {pauseOver
+                        ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Пока абонемент на паузе, брони оплачиваются с баланса.`
+                        : `На паузе до ${frozenUntilLabel}. Пока абонемент на паузе, часы не списываются — брони оплачиваются с баланса.`}
+                </div>
+            )}
+
+            {/* Действие */}
+            <div className="mt-4 space-y-2">
+                {viewerIsAdmin ? (
+                    <>
+                        <Button
+                            variant="secondary"
+                            size="touch"
+                            block
+                            disabled={!canFreeze && !sub.isFrozen}
+                            icon={<Snowflake size={16} aria-hidden="true" />}
+                            onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
+                                toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
+                        >
+                            {sub.isFrozen ? 'Снять паузу' : 'Поставить на паузу на 7 дней'}
+                        </Button>
+                        {!canFreeze && !sub.isFrozen && (
+                            <p className="text-caption text-center text-ink-60 m-0">
+                                Пауза по этому абонементу уже использована
+                            </p>
+                        )}
+                    </>
+                ) : sub.isFrozen ? (
+                    <a
+                        href={unfreezeRequestUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ui-btn ui-btn--secondary ui-btn--touch ui-btn--block"
+                    >
+                        <Send size={16} aria-hidden="true" />
+                        Попросить снять паузу
+                    </a>
+                ) : canFreeze ? (
+                    <>
+                        <a
+                            href={freezeRequestUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ui-btn ui-btn--secondary ui-btn--touch ui-btn--block"
+                        >
+                            <Snowflake size={16} aria-hidden="true" />
+                            Попросить заморозку
+                        </a>
+                        <p className="text-caption text-center text-ink-60 m-0">
+                            Откроется Telegram администратора с готовым сообщением
+                        </p>
+                    </>
+                ) : (
+                    <p className="text-small text-center text-ink-60 m-0">
+                        Пауза по этому абонементу уже использована
+                    </p>
+                )}
+            </div>
+        </section>
     );
 };

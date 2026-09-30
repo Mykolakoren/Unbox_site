@@ -1,5 +1,6 @@
 import type { BookingHistoryItem } from '../../store/types';
 import { formatGel } from '../../utils/format';
+import { fmtHours } from '../../utils/paymentPriority';
 
 /**
  * Booking price label, payment-method-aware.
@@ -13,7 +14,7 @@ import { formatGel } from '../../utils/format';
  *   <span>{priceLabel(booking)}</span>
  *
  * Rules:
- *   - paymentMethod === 'subscription' → "1.5 ч из абонемента"
+ *   - paymentMethod === 'subscription' → "1,5 ч из абонемента"
  *   - paymentMethod === 'bonus'        → "1 ч из бонусов"
  *   - else (balance / unknown legacy)  → "60 ₾" (общий formatGel: «1 250 ₾»)
  *   - if finalPrice is 0 (admin-zero / promo)        → "Бесплатно"
@@ -24,7 +25,11 @@ export function priceLabel(b: BookingHistoryItem): string {
     const price = b.finalPrice ?? 0;
 
     if (method === 'subscription') {
-        return `${formatHours(hoursDeducted)} из абонемента`;
+        // У абонементной брони final_price = деньги сверх часов (пиковая
+        // надбавка, допуслуги) — сервер: subscription_peak_debt.
+        return price > 0
+            ? `${formatHours(hoursDeducted)} из абонемента + ${formatGel(price, { fraction: 0 })}`
+            : `${formatHours(hoursDeducted)} из абонемента`;
     }
     if (method === 'bonus') {
         return `${formatHours(hoursDeducted)} из бонусов`;
@@ -33,7 +38,7 @@ export function priceLabel(b: BookingHistoryItem): string {
     return formatGel(price, { fraction: 0 });
 }
 
+/** «1,5 ч» — десятичная запятая, без «,0» (было «1.5 ч»). */
 function formatHours(h: number): string {
-    if (h % 1 === 0) return `${h} ч`;
-    return `${h.toFixed(1)} ч`;
+    return fmtHours(h);
 }

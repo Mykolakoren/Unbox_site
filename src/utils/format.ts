@@ -206,3 +206,110 @@ export function formatTimeRange(start: DateLike, end: DateLike, opts: DateOption
     const to = formatTime(end, { ...opts, fallback: '' });
     return to ? `${from}–${to}` : from;
 }
+
+// ── Относительные дни и «через сколько» (волна 2, шаг 0) ────────────────
+
+/** Календарный день момента в поясе — «2026-09-30». Календарная строка
+ *  «YYYY-MM-DD» остаётся своим днём (как в остальных форматтерах). */
+function dayKey(d: DateLike, timeZone?: string): string | null {
+    const r = resolve(d, timeZone);
+    if (!r) return null;
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            year: 'numeric', month: '2-digit', day: '2-digit', timeZone: r.timeZone,
+        }).formatToParts(r.date);
+        const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+        return `${get('year')}-${get('month')}-${get('day')}`;
+    } catch {
+        return null;
+    }
+}
+
+function daysBetween(fromKey: string, toKey: string): number {
+    const a = YMD_RE.exec(fromKey);
+    const b = YMD_RE.exec(toKey);
+    if (!a || !b) return NaN;
+    const ua = Date.UTC(+a[1], +a[2] - 1, +a[3]);
+    const ub = Date.UTC(+b[1], +b[2] - 1, +b[3]);
+    return Math.round((ub - ua) / 86_400_000);
+}
+
+export interface RelativeDayOptions extends DateOptions {
+    /** «Сейчас» — для тестов и для одного «сейчас» на весь список. */
+    now?: DateLike;
+    /** По умолчанию «Сегодня» / «Завтра» с заглавной, дата — «ср, 30 сент.».
+     *  true — заглавная и у даты («Ср, 30 сент.»), false — всё строчными
+     *  («сегодня» — для середины фразы: «сегодня в 14:00»). */
+    capitalize?: boolean;
+    /** Год у даты: 'auto' (по умолчанию) — только если не текущий. */
+    withYear?: boolean | 'auto';
+}
+
+/**
+ * «Сегодня» / «Завтра» / «Вчера» / «ср, 30 сент.» — день относительно сегодня.
+ * Пояс — как у остальных форматтеров: «YYYY-MM-DD» — календарный день как
+ * есть, Date/ISO — в поясе браузера или в opts.timeZone (BATUMI_TZ для
+ * времени из базы). «Сегодня» считается в том же поясе.
+ */
+export function formatRelativeDay(d: DateLike, opts: RelativeDayOptions = {}): string {
+    const key = dayKey(d, opts.timeZone);
+    if (!key) return opts.fallback ?? '—';
+    const nowKey = dayKey(opts.now ?? new Date(), opts.timeZone);
+    const diff = nowKey ? daysBetween(nowKey, key) : NaN;
+    const word = diff === 0 ? 'Сегодня' : diff === 1 ? 'Завтра' : diff === -1 ? 'Вчера' : null;
+    if (word) return opts.capitalize === false ? word.toLowerCase() : word;
+
+    const withYear = opts.withYear === true || ((opts.withYear ?? 'auto') === 'auto' && needsYear(d, opts));
+    const s = fmt(d, withYear
+        ? { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }
+        : { weekday: 'short', day: 'numeric', month: 'short' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    const clean = s.replace(/\s?г\.$/, '');
+    return opts.capitalize === true ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
+function pluralDays(n: number): string {
+    const m10 = n % 10;
+    const m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'день';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'дня';
+    return 'дней';
+}
+
+export interface StartsInOptions {
+    /** Конец встречи. Без него после начала всегда «идёт сейчас». */
+    end?: DateLike;
+    /** «Сейчас» — для тестов и для одного «сейчас» на весь список. */
+    now?: DateLike;
+    /** Что показать, если начала нет или оно битое. По умолчанию «». */
+    fallback?: string;
+}
+
+/**
+ * Сколько осталось до начала: «через 20 мин», «через 1 ч 30 мин», «через 3 ч»,
+ * «через 2 дня»; уже началась — «идёт сейчас»; прошла (есть end) — «закончилась».
+ * Считает разницу моментов, поэтому пояс не важен: передайте Date или ISO
+ * со временем (бронь — new Date(`${date}T${startTime}`), как везде в коде).
+ */
+export function formatStartsIn(start: DateLike, opts: StartsInOptions = {}): string {
+    const s = resolve(start);
+    const n = resolve(opts.now ?? new Date());
+    if (!s || !n) return opts.fallback ?? '';
+    const diffMs = s.date.getTime() - n.date.getTime();
+    if (diffMs > 0) {
+        const mins = Math.ceil(diffMs / 60_000);
+        if (mins < 60) return `через ${mins} мин`;
+        if (mins < 24 * 60) {
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            // До трёх часов минуты важны («через 1 ч 20 мин»), дальше — округляем.
+            if (h < 3 && m >= 5) return `через ${h} ч ${m} мин`;
+            return `через ${Math.round(mins / 60)} ч`;
+        }
+        const days = Math.round(mins / (24 * 60));
+        return `через ${days} ${pluralDays(days)}`;
+    }
+    const e = opts.end !== undefined ? resolve(opts.end) : null;
+    if (e && n.date.getTime() >= e.date.getTime()) return 'закончилась';
+    return 'идёт сейчас';
+}

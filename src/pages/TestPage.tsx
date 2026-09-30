@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronLeft, ExternalLink } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ExternalLink } from 'lucide-react';
 import { getTest, calcScore } from '../data/tests';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { STATUS } from '../design/tokens';
+import { PublicHeader } from '../components/public/PublicHeader';
+import { catalogPath } from '../utils/catalogPath';
 
 export function TestPage() {
         const { testId } = useParams<{ testId: string }>();
@@ -107,19 +109,9 @@ function GridHouseTestPage({
 
     return (
         <div style={{ minHeight: '100vh', fontFamily: GH_SANS, background: GH.paper, color: GH.ink }}>
-            {/* Header */}
-            <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px clamp(16px, 4vw, 24px)', borderBottom: `2px solid ${GH.ink}` }}>
-                <button
-                    onClick={() => navigate(-1)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', fontFamily: GH_SANS }}
-                >
-                    <ArrowLeft size={14} /> Назад
-                </button>
-                <div style={{ width: 1, height: 16, background: GH.ink10 }} />
-                <Link to="/" style={{ ...ghtpMono, color: GH.ink60, textDecoration: 'none', fontSize: 12 }}>
-                    UNBOX
-                </Link>
-            </header>
+            {/* G1-11 / G1-21: общая шапка сайта. Раньше «Назад» был navigate(-1) —
+                пришедшего по прямой ссылке (Instagram) он уводил с сайта. */}
+            <PublicHeader />
 
             {/* Main content */}
             <main style={{ maxWidth: 640, margin: '0 auto', padding: '32px clamp(16px, 4vw, 20px) 80px' }}>
@@ -196,8 +188,10 @@ function GridHouseTestPage({
 
                             {/* CTAs */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                {/* G1-11: «Найти специалиста» ведёт в каталог, а не на «/»,
+                                    где снова мог открыться экран выбора. */}
                                 <Link
-                                    to="/"
+                                    to={catalogPath('/specialists')}
                                     style={{
                                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                                         padding: '14px 0', background: GH.ink, color: GH.paper, fontWeight: 700,

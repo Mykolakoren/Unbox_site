@@ -48,10 +48,15 @@ def test_series_cancel_plural_is_genitive():
 
 def test_detail_sheet_esc_ignored_while_trimming():
     src = _read("src/pages/mobile/BookingDetailSheet.tsx")
+    # Волна 2: шторка брони на общем Sheet — Esc обрабатывает он. Суть та же:
+    # пока открыто окно «Сократить бронь», Esc/свайп карточку не закрывают.
     m = re.search(r"const onKey = \(e: KeyboardEvent\) => \{(.*?)\};", src, re.S)
-    assert m, "не нашли обработчик Esc в BookingDetailSheet"
-    assert "trimming" in m.group(1), \
-        "Esc снова закрывает карточку под окном «Сократить бронь» (нужна проверка trimming)"
+    if m:
+        assert "trimming" in m.group(1), \
+            "Esc снова закрывает карточку под окном «Сократить бронь» (нужна проверка trimming)"
+    else:
+        assert "<Sheet" in src and "dismissible={!trimming}" in src, \
+            "Esc снова закрывает карточку под окном «Сократить бронь» (нужно dismissible={!trimming})"
 
 
 # ── 5 ────────────────────────────────────────────────────────────────────
@@ -76,7 +81,12 @@ def test_next_blocked_while_overlap_dialog_open():
     assert "setNextPending(true)" in body and "finally" in body and "setNextPending(false)" in body, \
         "handleNext не блокирует повторный тап, пока открыт вопрос"
     assert "disabled={selectedSlots.length === 0}" not in src, "кнопка «Далее» не учитывает открытый вопрос"
-    assert src.count("disabled={nextDisabled}") >= 4, "не все кнопки «Далее» блокируются на время вопроса"
+    # Волна 2, пакет D: мёртвые ветки `isGH ? … : <LegacyButton>` вырезаны —
+    # кнопок «Далее» стало две (телефон и компьютер). Суть та же: КАЖДАЯ кнопка,
+    # что зовёт handleNext, заблокирована на время вопроса.
+    n_next = src.count("onClick={handleNext}")
+    assert n_next >= 2, "кнопок «Далее» меньше двух — сторож смотрит не туда"
+    assert src.count("disabled={nextDisabled}") >= n_next, "не все кнопки «Далее» блокируются на время вопроса"
 
 
 # ── 7 ────────────────────────────────────────────────────────────────────

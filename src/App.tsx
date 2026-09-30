@@ -1,16 +1,9 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { MinimalLayout } from './components/MinimalLayout';
-import { Summary } from './components/Summary';
-// Wizard Steps
-import { ChessboardStep } from './components/Wizard/ChessboardStep';
-import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+// Мастер брони (/checkout) — в своём файле (волна 2, шаг 0).
+import { BookingWizard } from './components/Wizard/BookingWizard';
 // Store
-import { useBookingStore } from './store/bookingStore';
 import { useUserStore } from './store/userStore';
-import { canBookCabinets } from './utils/permissions';
-import { useSpecialistApplicationStatus } from './hooks/useSpecialistApplication';
-import { SpecialistGateCard } from './components/SpecialistGate';
 
 // "/" — the only page on the critical path, so it is the only eager one.
 // Everything below used to be eager too, which meant a visitor landing on "/"
@@ -78,6 +71,7 @@ const MobileToday = lazy(() => import('./pages/mobile/MobileToday').then(m => ({
 const MobileMyBookings = lazy(() => import('./pages/mobile/MobileMyBookings').then(m => ({ default: m.MobileMyBookings })));
 const MobileFind = lazy(() => import('./pages/mobile/MobileFind').then(m => ({ default: m.MobileFind })));
 const MobileProfile = lazy(() => import('./pages/mobile/MobileProfile').then(m => ({ default: m.MobileProfile })));
+const MobileProfileEdit = lazy(() => import('./pages/mobile/MobileProfileEdit').then(m => ({ default: m.MobileProfileEdit })));
 const MobileCheckout = lazy(() => import('./pages/mobile/MobileCheckout').then(m => ({ default: m.MobileCheckout })));
 const MobileCalendar = lazy(() => import('./pages/mobile/MobileCalendar').then(m => ({ default: m.MobileCalendar })));
 const MobileCrmLayout = lazy(() => import('./pages/mobile/crm/MobileCrmLayout').then(m => ({ default: m.MobileCrmLayout })));
@@ -106,183 +100,6 @@ const MobileSubscription = lazy(() => import('./pages/mobile/MobileSubscription'
 const MobileBonuses = lazy(() => import('./pages/mobile/MobileBonuses').then(m => ({ default: m.MobileBonuses })));
 const MobilePlaces = lazy(() => import('./pages/mobile/MobilePlaces').then(m => ({ default: m.MobilePlaces })));
 
-import { GH, GH_SANS } from './hooks/useDesignFlag';
-
-// Booking Flow Wrapper
-function BookingWizard() {
-  const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
-  const wizardMode = useBookingStore(s => s.mode);
-  const selectedSlots = useBookingStore(s => s.selectedSlots);
-  const users = useUserStore(s => s.users);
-  // Вошедший, но ещё не специалист (роль user): сервер откажет в брони на
-  // «Оплатить». Говорим об этом сразу, до выбора времени и оплаты.
-  // Перенос/правка своей брони (editBookingId) — не новая бронь, её не трогаем.
-  const currentUser = useUserStore(s => s.currentUser);
-  const needsApplication = !!currentUser && !canBookCabinets(currentUser) && !editBookingId;
-  const applicationStatus = useSpecialistApplicationStatus(currentUser, needsApplication);
-
-  // Excel #73 — warn before leaving an in-progress booking.
-  // Browser-native confirm via beforeunload covers: tab close, page reload,
-  // external navigation (typing a new URL). For internal React Router
-  // navigation we rely on the fact that most exit points in the wizard are
-  // explicit buttons — they reset the store themselves. Having the full
-  // useBlocker solution would need upgrading to a data router; beforeunload
-  // already catches the real "oh no I closed the tab" case.
-  useEffect(() => {
-    const hasUnsavedWork = selectedSlots.length > 0 && step >= 2 && !editBookingId && !needsApplication;
-    if (!hasUnsavedWork) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Chrome/Edge require setting returnValue explicitly. Modern browsers
-      // ignore the custom string and show their own generic prompt.
-      e.returnValue = 'Вы не завершили процесс бронирования. Уйти со страницы?';
-      return e.returnValue;
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [selectedSlots.length, step, editBookingId, needsApplication]);
-
-  // Resolve friendly name for the "booking-for" admin-proxy banner
-  const proxyUser = bookingForUser
-    ? users.find(u => u.email === bookingForUser || u.id === bookingForUser)
-    : null;
-
-  /* GH card style */
-  const ghCard: React.CSSProperties = {
-    background: '#fff',
-    border: `1px solid ${GH.ink8}`,
-    borderRadius: 12,
-    overflow: 'hidden',
-  };
-
-  if (needsApplication) {
-    return (
-      <MinimalLayout glassMode noPadding>
-        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8">
-          <SpecialistGateCard variant="desktop" status={applicationStatus} />
-        </div>
-      </MinimalLayout>
-    );
-  }
-
-  return (
-    <MinimalLayout glassMode fullWidth={step === 2} noPadding>
-
-      {/* The reschedule dup-creation bug was fixed & verified
-          (CLAUDE.md → "Решённые баги": фикс 2026-05-23, проверка 2026-05-26 —
-          0 дублей на 50 новых броней). The old red "может создать дубль"
-          warning banner was removed so it stops eroding trust on every
-          reschedule. The neutral edit banner below still covers reschedule via
-          its `editBookingId` condition. */}
-      {editBookingId && (
-        <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
-          <div style={{
-            background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
-            padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            fontFamily: GH_SANS, fontSize: 14,
-          }}>
-            <span style={{ fontWeight: 500 }}>
-              {wizardMode === 'reschedule'
-                ? 'Вы переносите существующее бронирование'
-                : 'Вы редактируете существующее бронирование'}
-            </span>
-            <button onClick={() => reset()}
-              style={{ fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
-              {wizardMode === 'reschedule' ? 'Отменить перенос' : 'Отменить редактирование'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Admin-proxy booking banner — visible on every step so the admin
-          can't forget whose booking they're creating. Click "Сбросить" to
-          clear target and book for themselves. */}
-      {bookingForUser && (
-        <div
-          className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}
-          style={{ position: 'sticky', top: 8, zIndex: 20 }}
-        >
-          <div style={{
-            background: '#EDE9FE',
-            border: `1px solid ${GH.ink10}`,
-            color: '#5B21B6',
-            padding: '12px 16px',
-            borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            fontFamily: GH_SANS,
-            fontSize: 14,
-            boxShadow: '0 4px 12px rgba(91,33,182,0.08)',
-          }}>
-            <span>
-              <strong style={{ fontWeight: 700 }}>
-                Бронь для клиента: {proxyUser?.name || bookingForUser}
-              </strong>
-              {proxyUser?.email && proxyUser.email !== proxyUser.name && (
-                <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 13 }}>
-                  {proxyUser.email}
-                </span>
-              )}
-            </span>
-            <button
-              onClick={() => setBookingForUser(null)}
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                textDecoration: 'underline',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: '#5B21B6',
-              }}
-            >
-              Сбросить → бронь для себя
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 2 ? (
-        /* ── Step 2: Full-width chessboard ── */
-        <div className="max-w-[1920px] mx-auto px-6 md:px-12">
-          <div style={ghCard}>
-            <ChessboardStep />
-          </div>
-        </div>
-      ) : (
-        /* ── Steps 3 & 4: two-column layout ── */
-        <div className="max-w-6xl mx-auto px-4 md:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8">
-              {step === 1 && <Navigate to="/" replace />}
-              {/* Owner 2026-05-27: merged Options step into Confirmation —
-                  Format is already pickable on the chessboard, Extras are
-                  only 4 items, the gap step felt redundant. Render
-                  ConfirmationStep for both step==3 and step==4 so every
-                  caller that still navigates to step:3 keeps working. */}
-              {(step === 3 || step === 4) && (
-                <div style={{ ...ghCard, padding: 32 }}>
-                  <ConfirmationStep />
-                </div>
-              )}
-            </div>
-            {step < 5 && (
-              <div className="lg:col-span-4 hidden lg:block">
-                <div style={{ ...ghCard, position: 'sticky' as const, top: 80 }}>
-                  <Summary />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-    </MinimalLayout>
-  );
-}
-
 import { Toaster } from 'sonner';
 import { MotionConfig } from 'framer-motion';
 import { ConfirmDialogProvider } from './components/ui/ConfirmDialogProvider';
@@ -295,6 +112,10 @@ import { FONT, Z } from './design/tokens';
 const DevUiPage = import.meta.env.DEV
   ? lazy(() => import('./dev/DevUiPage').then(m => ({ default: m.DevUiPage })))
   : null;
+
+// ?forceDesktop=1 однажды в этой вкладке — больше не переадресуем на /m
+// до её закрытия (отладка админами). В памяти, не в sessionStorage.
+let forceDesktopThisTab = false;
 
 function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
@@ -339,14 +160,22 @@ function App() {
   // and qualify, replace the URL — using replaceState keeps the back-stack
   // clean.
   const currentUser = useUserStore(s => s.currentUser);
+  // Волна 2 (X2-02): проверяем адрес не один раз при загрузке пользователя,
+  // а при КАЖДОЙ смене адреса — иначе ссылка из колокольчика или из бота,
+  // открытая уже внутри приложения (/crm/clients/5, /profile), оставалась
+  // компьютерной страницей на телефоне.
+  const { pathname } = useLocation();
   useEffect(() => {
     if (!currentUser) return;
+    if (new URLSearchParams(window.location.search).get('forceDesktop') === '1') forceDesktopThisTab = true;
+    if (forceDesktopThisTab) return;
     // 2026-06-02 owner: убрали canBook-гейт и forceDesktop-эскейп.
     // /m теперь ЕДИНСТВЕННЫЙ мобильный интерфейс — старая «десктоп-в-
     // мобиле» больше не доступна юзерам, чтобы они не путались между
     // двумя версиями. Эскейп остался ТОЛЬКО через явный URL-параметр
     // ?forceDesktop=1 (для админов на момент отладки), без UI-кнопки.
-    if (new URLSearchParams(window.location.search).get('forceDesktop') === '1') return;
+    // Волна 2: флаг помним до закрытия вкладки (forceDesktopThisTab) —
+    // проверка теперь идёт на каждом переходе, а параметр в адресе теряется.
     try {
       const inStandalone = window.matchMedia?.('(display-mode: standalone)').matches
         || (window.navigator as any).standalone === true;
@@ -357,15 +186,28 @@ function App() {
         [/^\/dashboard\/bookings\/?$/, '/m/bookings'],
         [/^\/dashboard\/waitlist\/?$/, '/m/waitlist'],
         [/^\/dashboard\/bonuses\/?$/, '/m/bonuses'],
-        [/^\/subscriptions\/?$/, '/m/subscription'],
+        // G3-23 / X2-02: профиль из бота (/profile → /dashboard/profile) на
+        // телефоне — мобильный «Я», а не компьютерный кабинет.
+        [/^\/dashboard\/profile\/?$/, '/m/me'],
+        // /subscriptions — витрина тарифов (как catalogPath), не «мой абонемент».
+        [/^\/subscriptions\/?$/, '/m/tariffs'],
         [/^\/booking-rules\/?$/, '/m/booking-rules'],
         [/^\/admin\/?$/, '/m/admin'],
-        [/^\/admin\/bookings\/?$/, '/m/admin/bookings'],
-        [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // /admin/finance, /admin/users, etc.
+        // Точные двойники мобильной админки (X2-02) — раньше всё сворачивалось
+        // в /m/admin/dashboard, и заявку/пользователя приходилось искать.
+        [/^\/admin\/users\/([^/]+)\/?$/, '/m/admin/users/$1'],
+        [/^\/admin\/knowledge-base\/?$/, '/m/admin/kb'],
+        [/^\/admin\/(bookings|users|finance|tasks|specialists|crm|cabinets|team|waitlist|access-rights)\/?$/, '/m/admin/$1'],
+        [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // остальные разделы админки
         [/^\/crm\/?$/, '/m/crm'],
         // Расписание — до общего правила ниже, иначе ссылка «Расписание»
         // с телефона молча открывала «Сегодня».
         [/^\/crm\/schedule\/?$/, '/m/crm/schedule'],
+        // Точные двойники мобильной CRM (X2-02): карточка клиента из
+        // уведомления открывается карточкой, а не «Сегодня».
+        [/^\/crm\/clients\/([^/]+)\/?$/, '/m/crm/clients/$1'],
+        [/^\/crm\/finances\/?$/, '/m/crm/finance'],
+        [/^\/crm\/(clients|sessions|notes|profile)\/?$/, '/m/crm/$1'],
         [/^\/crm\/[^/]+\/?$/, '/m/crm'],
         [/^\/profile\/?$/, '/m/me'],
         [/^\/explore\/?$/, '/m/find'],
@@ -392,7 +234,7 @@ function App() {
         }
       }
     } catch { /* matchMedia unavailable in some embedded webviews — ignore */ }
-  }, [currentUser]);
+  }, [currentUser, pathname]);
 
   const lazyFallback = (
     <div className="flex items-center justify-center min-h-screen">
@@ -411,7 +253,8 @@ function App() {
       <Routes>
         {DevUiPage && <Route path="/dev/ui" element={<DevUiPage />} />}
         {/* Public Booking Flow */}
-        <Route path="/" element={<ExplorePage />} />
+        {/* Лендинг теперь ленивый: при устаревшем чанке после деплоя — автоперезагрузка из ModuleErrorBoundary. */}
+        <Route path="/" element={<ModuleErrorBoundary moduleName="Главная"><ExplorePage /></ModuleErrorBoundary>} />
         <Route path="/explore" element={<Navigate to="/" replace />} />
         <Route path="/location/:locationId" element={<LocationDetailsPage />} />
         <Route path="/cabinet/:resourceId" element={<CabinetPage />} />
@@ -517,6 +360,8 @@ function App() {
           <Route path="bookings" element={<MobileMyBookings />} />
           <Route path="find" element={<MobileFind />} />
           <Route path="me" element={<MobileProfile />} />
+          {/* Имя и телефон с телефона — тот же PATCH /users/me, что на компьютере. */}
+          <Route path="profile" element={<MobileProfileEdit />} />
           <Route path="subscription" element={<MobileSubscription />} />
           <Route path="bonuses" element={<MobileBonuses />} />
           <Route path="checkout" element={<MobileCheckout />} />
@@ -531,6 +376,9 @@ function App() {
           <Route path="location/:locationId" element={<LocationDetailsPage />} />
           <Route path="cabinet/:resourceId" element={<CabinetPage />} />
           <Route path="booking-rules" element={<BookingRulesPage />} />
+          {/* Анкета специалиста внутри мобильной оболочки: раньше с телефона
+              она открывалась компьютерной страницей без нижнего меню. */}
+          <Route path="become-specialist" element={<BecomeSpecialistPage />} />
           {/* Тарифы внутри мобильной оболочки: раньше кнопки вели на /subscriptions
               и клиент вылетал в «компьютерный» вид без нижнего меню. */}
           <Route path="tariffs" element={<SubscriptionsPage />} />

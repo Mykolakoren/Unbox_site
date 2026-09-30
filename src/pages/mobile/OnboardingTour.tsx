@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { useScrollLock } from './useScrollLock';
-import { ArrowRight, Calendar, CheckCircle2, Compass, Home, Search, Smartphone, User as UserIcon, X } from 'lucide-react';
+import { ArrowRight, Calendar, CheckCircle2, Home, Search, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { COLOR, FONT, Z } from '../../design/tokens';
 
@@ -61,85 +61,88 @@ export interface Step {
     targetSelector?: string;
 }
 
-// Wave 1: обращение «вы» со строчной буквы, без жаргона («тап», «шорткаты»,
-// «хоумскрин», «PWA»).
-const STEPS: Step[] = [
+// Волна 2 (G4-11): шаги по ролям. Раньше тур был один на всех, и обычный
+// клиент читал про «CRM-клиентов», «незакрытые задачи» и «привязку клиента».
+// Номер шага («2 из 3») тур считает сам — в подписях его нет.
+
+/** Клиент: три шага — главное, как найти время и что делать с бронью. */
+const CLIENT_STEPS: Step[] = [
     {
-        icon: Compass,
-        title: 'Добро пожаловать в мобильный кабинет Unbox',
-        pill: 'Знакомство',
+        icon: Home,
+        title: 'Сегодня — ваша ближайшая встреча',
+        pill: 'Главная',
+        targetSelector: '[data-tour="tab-today"]',
         body: (
             <>
-                Это ваш основной инструмент с телефона: <b>бронь кабинетов, ваши сессии,
-                клиенты из CRM</b>. Покажем за полминуты, как тут всё устроено, — нажимайте «Дальше».
+                Сверху — <b>ближайшая бронь</b>: когда, где и как оплачена. Там же «Маршрут»
+                и «Детали». Ниже — кнопка «Забронировать кабинет» и следующие брони.
             </>
         ),
     },
     {
-        icon: Home,
-        title: 'Сегодня',
-        pill: '1 из 5 · Главная',
-        targetSelector: '[data-tour="tab-today"]',
+        icon: Search,
+        title: 'Свободно — кабинет за три шага',
+        pill: 'Поиск',
+        targetSelector: '[data-tour="tab-find"]',
         body: (
             <>
-                Сюда вы попадаете по умолчанию. На главной — <b>ближайшие брони</b>, кнопка
-                «Забронировать» и «Повторить из последних» — быстрый повтор ваших недавних броней.
-                Если есть незакрытые задачи или предупреждение по балансу — увидите их сверху.
+                Выберите <i>когда → сколько → где</i> и нажмите на свободное окно.
+                Оплату и время проверите на следующем экране.
             </>
         ),
     },
     {
         icon: Calendar,
         title: 'Мои брони',
-        pill: '2 из 5 · История',
+        pill: 'Брони',
         targetSelector: '[data-tour="tab-bookings"]',
         body: (
             <>
-                Все ваши брони — будущие, серии и прошедшие. <b>Свайп влево</b> по карточке —
-                быстрые действия (отменить / пересдать). <b>Нажмите</b> на карточку — откроется
-                окно с переносом, продлением и привязкой клиента из CRM.
+                Все ваши брони по дням. <b>Нажмите</b> на бронь — перенести, пересдать или отменить.
+                <b> Свайп влево</b> — то же быстрее.
             </>
         ),
     },
+];
+
+/** Специалист и администратор: те же шаги + где CRM и профиль. */
+const SPECIALIST_STEPS: Step[] = [
+    CLIENT_STEPS[0],
+    CLIENT_STEPS[1],
     {
-        icon: Search,
-        title: 'Свободно',
-        pill: '3 из 5 · Поиск',
-        targetSelector: '[data-tour="tab-find"]',
+        ...CLIENT_STEPS[2],
         body: (
             <>
-                Свободный кабинет — в <b>три шага</b>: <i>когда → сколько → где</i>.
-                Можно отметить <b>любимый кабинет</b> (в профиле), выбрать любую дату
-                и тип помещения. Внизу — переход в полный календарь.
+                Все ваши брони по дням и серии. <b>Нажмите</b> на бронь — перенести, пересдать,
+                отменить или привязать клиента из CRM. <b>Свайп влево</b> — быстрые действия.
             </>
         ),
     },
     {
         icon: UserIcon,
         title: 'Я',
-        pill: '4 из 5 · Профиль',
+        pill: 'Профиль',
         targetSelector: '[data-tour="tab-me"]',
         body: (
             <>
-                Баланс, абонемент, бонусы. Привязка Telegram-бота. Любимый кабинет. Контакты
-                и связь с администратором. Отсюда же — быстрый переход в <b>CRM</b> и (для
-                администраторов) в <b>Админку</b>. И этот обзор можно запустить заново.
-            </>
-        ),
-    },
-    {
-        icon: Smartphone,
-        title: 'Добавьте на главный экран',
-        pill: '5 из 5 · Приложение',
-        body: (
-            <>
-                На «Сегодня» сверху есть чёрная плашка «Добавьте на главный экран» — нажмите
-                на неё, там пошаговая инструкция. Unbox откроется как настоящее приложение:
-                <b> без рамок браузера, значком на главном экране</b>. Так удобнее всего.
+                Баланс, абонемент, бонусы, уведомления в Telegram. Отсюда же — вход в <b>CRM</b>
+                {' '}и (для администраторов) в <b>Админку</b>. Этот обзор можно запустить заново.
             </>
         ),
     },
 ];
+
+/** Шаги по умолчанию для /m: клиенту — короткие, специалисту — с CRM. */
+function defaultSteps(role: string | undefined): Step[] {
+    return role && role !== 'user' ? SPECIALIST_STEPS : CLIENT_STEPS;
+}
+
+/** «1 из 5 · Главная» в подписях старых туров (CRM, админка) → «Главная»:
+ *  номер шага тур рисует сам, из числа шагов. */
+function pillText(pill: string | undefined): string | undefined {
+    if (!pill) return undefined;
+    return pill.replace(/^\s*\d+\s+из\s+\d+\s*·?\s*/, '') || undefined;
+}
 
 export function OnboardingTour({
     onClose,
@@ -148,7 +151,7 @@ export function OnboardingTour({
 }: {
     onClose: () => void;
     /** Override steps to repurpose the runner for a different workspace
-     *  (e.g. /m/crm or /m/admin). Defaults to the cabinet (/m) STEPS. */
+     *  (e.g. /m/crm or /m/admin). Defaults to the cabinet (/m) steps by role. */
     steps?: Step[];
     /** Override localStorage key prefix so each workspace tracks its own
      *  "tour seen" flag. Defaults to the cabinet prefix. */
@@ -156,7 +159,7 @@ export function OnboardingTour({
 }) {
     const { currentUser } = useUserStore();
     const [step, setStep] = useState(0);
-    const allSteps = steps && steps.length > 0 ? steps : STEPS;
+    const allSteps = steps && steps.length > 0 ? steps : defaultSteps(currentUser?.role);
     const total = allSteps.length;
     const current = allSteps[step];
     const Icon = current.icon;
@@ -186,34 +189,6 @@ export function OnboardingTour({
             }}
         >
             <Spotlight selector={current.targetSelector} onClickBackdrop={finish} />
-
-            {/* Skip — small unobtrusive top-right button */}
-            <button
-                onClick={finish}
-                aria-label="Пропустить"
-                style={{
-                    position: 'absolute',
-                    top: 'calc(16px + env(safe-area-inset-top, 0px))',
-                    right: 16,
-                    background: `${COLOR.onInk}26`,
-                    border: 'none',
-                    borderRadius: 999,
-                    color: COLOR.onInk,
-                    fontFamily: 'inherit',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    minHeight: 44,
-                    padding: '0 16px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    backdropFilter: 'blur(4px)',
-                    zIndex: Z.tour + 2,
-                }}
-            >
-                <X size={14} /> Пропустить
-            </button>
 
             {/* Card */}
             <div
@@ -268,17 +243,15 @@ export function OnboardingTour({
                     }}>
                         <Icon size={22} />
                     </div>
-                    {current.pill && (
-                        <div style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            color: COLOR.ink60,
-                        }}>
-                            {current.pill}
-                        </div>
-                    )}
+                    <div style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: COLOR.ink60,
+                    }}>
+                        {step + 1} из {total}{pillText(current.pill) ? ` · ${pillText(current.pill)}` : ''}
+                    </div>
                 </div>
 
                 {/* Title */}
@@ -309,6 +282,26 @@ export function OnboardingTour({
                     marginTop: 8,
                     alignItems: 'center',
                 }}>
+                    {/* «Пропустить» — внизу, рядом с «Дальше» (раньше висел сверху
+                        и наезжал на баннер установки). */}
+                    {step < total - 1 && (
+                        <button
+                            onClick={finish}
+                            style={{
+                                background: 'transparent',
+                                color: COLOR.ink60,
+                                border: 'none',
+                                fontSize: 14,
+                                fontWeight: 600,
+                                minHeight: 44,
+                                padding: '0 4px',
+                                cursor: 'pointer',
+                                fontFamily: 'inherit',
+                            }}
+                        >
+                            Пропустить
+                        </button>
+                    )}
                     {step > 0 ? (
                         <button
                             onClick={() => setStep(s => s - 1)}
@@ -316,7 +309,7 @@ export function OnboardingTour({
                                 background: 'transparent',
                                 color: COLOR.ink60,
                                 border: 'none',
-                                fontSize: 13,
+                                fontSize: 14,
                                 fontWeight: 600,
                                 minHeight: 44,
                                 padding: '0 4px',

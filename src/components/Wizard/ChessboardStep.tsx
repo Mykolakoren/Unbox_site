@@ -5,12 +5,14 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useState, useMemo, useEffect, useRef } from 'react';
-import clsx from 'clsx';
-import { LegacyButton as Button } from '../ui/LegacyButton';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '../ui/Button';
 import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock, X } from 'lucide-react';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { isPeakTime } from '../../utils/pricing';
+import { PRICING_CONFIG } from '../../utils/pricingConfig';
+import { getMyBookingsPath } from '../../utils/userPaths';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { COLOR, STATUS } from '../../design/tokens';
 import { EmptyState } from '../ui/EmptyState';
@@ -28,6 +30,17 @@ function useIsMobile(breakpoint = 768) {
     }, [breakpoint]);
     return isMobile;
 }
+
+/** «30 мин», «1 ч», «1,5 ч». */
+function formatDurationMin(mins: number): string {
+    if (mins < 60) return `${mins} мин`;
+    return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(mins / 60)} ч`;
+}
+
+/** Доплата за пиковый час — из конфига цен (только подпись, расчёт не здесь). */
+const PEAK_SURCHARGE = PRICING_CONFIG.peak_hours.surcharge_per_hour_gel;
+/** «Занято» — штриховка поверх тёплого фона; «прошло» — ровный серый (sunken). */
+const BUSY_BG = `repeating-linear-gradient(135deg, ${COLOR.ink10} 0 1px, transparent 1px 6px), ${GH.cellDead}`;
 
 export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const {
@@ -49,7 +62,27 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
     const [isLoadingBookings, setIsLoadingBookings] = useState(true);
     const isMobile = useIsMobile();
-    const isGH = true;
+    const navigate = useNavigate();
+
+    // «Назад» с сетки — туда, откуда пришли (страница кабинета, «Мои брони»).
+    // Раньше шёл setStep(1), а шаг 1 — это редирект на главную: клиент терял
+    // выбор и оказывался на лендинге (G3-11). Выбор времени остаётся в сторе.
+    const goBack = () => {
+        setHighlightedResourceId(null);
+        const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+        if (idx > 0) navigate(-1);
+        else navigate(currentUser ? getMyBookingsPath(currentUser) : '/', { replace: true });
+    };
+
+    // Прошедшее время (и то, что начнётся раньше, чем его можно забронировать) —
+    // не «занято»: его не занять и на него не подписаться. Только для вида,
+    // клавиатуры и окна «следить»; правила брони — в isSlotBlocked (не трогаем).
+    const isSlotClosed = (timeStr: string) => {
+        const slotDate = new Date(date);
+        const [h, m] = timeStr.split(':').map(Number);
+        slotDate.setHours(h, m, 0, 0);
+        return isBefore(slotDate, addMinutes(new Date(), isPrivileged ? 0 : 30));
+    };
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     const reloadBookings = () => {
@@ -582,6 +615,78 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
 
 
+    // ── Клавиатура (G3-10, X4-10) ──
+    // Ячейка — role="button". В порядке Tab — одна ячейка (roving tabindex):
+    // выбранная, а если выбора нет — первая, которую ещё можно забронировать.
+    // Стрелки ходят по сетке, Home/End — к началу/концу дня, Enter/пробел —
+    // то же, что клик мышью (выбор идёт через те же handlePointerDown/Up).
+    const [focusKey, setFocusKey] = useState<string | null>(null);
+    const tabStopKey = useMemo(() => {
+        if (focusKey && resources.some(r => focusKey.startsWith(`${r.id}|`))) return focusKey;
+        if (selectedSlots[0]) return selectedSlots[0];
+        const first = resources[0];
+        if (!first) return null;
+        const t = timeSlots.find(ts => !isSlotClosed(ts)) ?? timeSlots[timeSlots.length - 1];
+        return `${first.id}|${t}`;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusKey, resources, selectedSlots, timeSlots, date]);
+
+    const removeBlock = (blk: { resId: string; start: number; end: number }) => {
+        const idsToRemove = new Set<string>();
+        for (let i = blk.start; i <= blk.end; i++) {
+            idsToRemove.add(`${blk.resId}|${timeSlots[i]}`);
+        }
+        useBookingStore.getState().replaceSlots(
+            useBookingStore.getState().selectedSlots.filter(s => !idsToRemove.has(s))
+        );
+    };
+
+    const activateCell = (resId: string, timeStr: string) => {
+        if (isSlotClosed(timeStr) && !isSelected(resId, timeStr)) return;
+        if (isSelected(resId, timeStr)) {
+            // Как «×» у периода: убираем весь период, куда входит ячейка.
+            const blk = getBlockAt(resId, timeSlots.indexOf(timeStr));
+            if (blk) removeBlock(blk);
+            return;
+        }
+        // Тот же путь, что клик мышью: нажали и отпустили.
+        handlePointerDown(resId, timeStr, 'new');
+        handlePointerUp();
+    };
+
+    const focusCell = (resId: string, timeStr: string) => {
+        const el = document.querySelector<HTMLElement>(`[data-resid="${resId}"][data-time="${timeStr}"]`);
+        if (!el) return;
+        el.focus();
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+
+    const handleCellKeyDown = (e: React.KeyboardEvent, resId: string, timeStr: string) => {
+        const ri = resources.findIndex(r => r.id === resId);
+        const ti = timeSlots.indexOf(timeStr);
+        let nr = ri;
+        let nt = ti;
+        switch (e.key) {
+            case 'ArrowRight': nt = Math.min(timeSlots.length - 1, ti + 1); break;
+            case 'ArrowLeft': nt = Math.max(0, ti - 1); break;
+            case 'ArrowDown': nr = Math.min(resources.length - 1, ri + 1); break;
+            case 'ArrowUp': nr = Math.max(0, ri - 1); break;
+            case 'Home': nt = 0; break;
+            case 'End': nt = timeSlots.length - 1; break;
+            case 'Enter':
+            case ' ':
+                e.preventDefault();
+                activateCell(resId, timeStr);
+                return;
+            default:
+                return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        const target = resources[nr];
+        if (target) focusCell(target.id, timeSlots[nt]);
+    };
+
     const getPrice = (resId: string) => {
         const resource = resources.find(r => r.id === resId);
         if (!resource) return '';
@@ -683,11 +788,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
 
         return (
-            <div style={isGH ? { paddingBottom: 128, padding: '16px 12px 128px', fontFamily: GH_SANS, position: 'relative' as const } : undefined}
-                 className={isGH ? '' : "animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4 relative"}>
+            <div style={{ paddingBottom: 128, padding: '16px 12px 128px', fontFamily: GH_SANS, position: 'relative' as const }}>
                 {/* Loading overlay while bookings are being fetched */}
                 {isLoadingBookings && (
-                    <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}D9`, backdropFilter: 'blur(4px)' }}>
+                    <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}E6` }}>
                         <div className="flex flex-col items-center gap-3">
                             <div className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
                             <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загружаем расписание…</span>
@@ -697,19 +801,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h2 style={isGH ? { fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
-                            className={isGH ? '' : "text-xl font-bold"}>Выберите время</h2>
-                        <p style={isGH ? { fontSize: 13, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
-                           className={isGH ? '' : "text-unbox-grey text-sm"}>
+                        <h2 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 }}>Выберите время</h2>
+                        <p style={{ fontSize: 13, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 }}>
                             {formatDateLabel(date, { capitalize: true, withYear: 'auto' })}
                         </p>
                     </div>
-                    <button onClick={() => setStep(1)}
-                        aria-label="Назад"
-                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${GH.ink10}`, borderRadius: 8, background: 'transparent', color: GH.ink60, cursor: 'pointer' } : undefined}
-                        className={isGH ? '' : "p-2 rounded-xl border border-unbox-light text-unbox-grey"}>
-                        <ArrowLeft size={18} />
-                    </button>
+                    <Button variant="secondary" size="touch" onClick={goBack} aria-label="Назад" icon={<ArrowLeft size={18} aria-hidden="true" />} />
                 </div>
 
                 {/* Format switcher — mobile segmented control */}
@@ -764,13 +861,11 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     с двумя стрелками по 44 px семь дней на 375 px сжимались до
                     ~32 px (мимо пальца). Так стрелки остаются 44×44, а дни
                     занимают всю ширину (~46 px на 375). */}
-                <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
-                     className={isGH ? '' : "flex flex-col gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"}>
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                         <button onClick={handlePrevWeek}
                             aria-label="Предыдущая неделя"
-                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                            className={isGH ? '' : "min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white text-unbox-grey"}>
+                            style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' }}>
                             <ChevronLeft size={18} />
                         </button>
                         <div style={{ flex: 1, textAlign: 'center', fontSize: 14, fontWeight: 500, color: GH.ink60 }} aria-live="polite">
@@ -778,12 +873,11 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         </div>
                         <button onClick={handleNextWeek}
                             aria-label="Следующая неделя"
-                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                            className={isGH ? '' : "min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white text-unbox-grey"}>
+                            style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' }}>
                             <ChevronRight size={18} />
                         </button>
                     </div>
-                    <div className={isGH ? '' : "grid grid-cols-7 gap-1"} style={isGH ? { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 3 } : undefined}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 3 }}>
                         {weekDays.map(day => {
                             const isSelectedDate = isSameDay(day, date);
                             return (
@@ -791,25 +885,17 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     key={day.toISOString()}
                                     onClick={() => setDate(day)}
                                     aria-pressed={isSelectedDate}
-                                    style={isGH ? {
+                                    style={{
                                         display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
                                         minHeight: 44, minWidth: 0,
                                         padding: '8px 0', borderRadius: 8, border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
                                         background: isSelectedDate ? GH.accent : GH.card,
                                         color: isSelectedDate ? COLOR.onAccent : GH.ink60,
                                         cursor: 'pointer', transition: 'all 0.15s',
-                                    } : undefined}
-                                    className={isGH ? '' : clsx(
-                                        "flex flex-col items-center py-2 rounded-xl transition-all text-xs",
-                                        isSelectedDate
-                                            ? "bg-unbox-green text-white shadow-md"
-                                            : "bg-white text-unbox-grey border border-unbox-light/50"
-                                    )}
+                                    }}
                                 >
-                                    <span style={isGH ? { fontSize: 12, fontWeight: 600, textTransform: 'uppercase' as const, fontFamily: GH_MONO } : undefined}
-                                          className={isGH ? '' : "text-[9px] font-bold uppercase"}>{format(day, 'EEEEEE', { locale: ru })}</span>
-                                    <span style={isGH ? { fontSize: 14, fontWeight: 600 } : undefined}
-                                          className={isGH ? '' : "text-sm font-bold"}>{format(day, 'd')}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase' as const, fontFamily: GH_MONO }}>{format(day, 'EEEEEE', { locale: ru })}</span>
+                                    <span style={{ fontSize: 14, fontWeight: 600 }}>{format(day, 'd')}</span>
                                 </button>
                             );
                         })}
@@ -848,53 +934,40 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 )}
 
                 {/* Resource selector — horizontal scroll */}
-                <div style={isGH ? { display: 'flex', gap: 8, overflowX: 'auto' as const, paddingBottom: 8, marginBottom: 12 } : undefined}
-                     className={isGH ? '' : "flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide"}>
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto' as const, paddingBottom: 8, marginBottom: 12 }}>
                     {resources.map((r, idx) => (
                         <button
                             key={r.id}
                             onClick={() => setMobileResourceIdx(idx)}
-                            style={isGH ? {
+                            style={{
                                 flexShrink: 0, padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
                                 border: `1px solid ${mobileResourceIdx === idx ? GH.accent : GH.ink10}`,
                                 background: mobileResourceIdx === idx ? GH.accent : GH.card,
                                 color: mobileResourceIdx === idx ? COLOR.onAccent : GH.ink,
                                 cursor: 'pointer', fontFamily: GH_SANS, transition: 'all 0.15s',
-                            } : undefined}
-                            className={isGH ? '' : clsx(
-                                "shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
-                                mobileResourceIdx === idx
-                                    ? "bg-unbox-green text-white border-unbox-green shadow-sm"
-                                    : "bg-white text-unbox-grey border-unbox-light hover:border-unbox-green/40"
-                            )}
+                            }}
                         >
-                            <div style={isGH ? { fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const } : undefined}
-                                 className={isGH ? '' : "font-bold text-xs whitespace-nowrap"}>{r.name}</div>
-                            <div style={isGH ? { fontSize: 12, color: mobileResourceIdx === idx ? COLOR.onAccent : GH.ink60, whiteSpace: 'nowrap' as const, fontFamily: GH_MONO } : undefined}
-                                 className={isGH ? '' : "text-[10px] opacity-70 whitespace-nowrap"}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
+                            <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const }}>{r.name}</div>
+                            <div style={{ fontSize: 12, color: mobileResourceIdx === idx ? COLOR.onAccent : GH.ink60, whiteSpace: 'nowrap' as const, fontFamily: GH_MONO }}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
                         </button>
                     ))}
                 </div>
 
                 {/* Selected block summary */}
                 {mobileBlock && mobileResource && (
-                    <div style={isGH ? {
+                    <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         background: `${GH.accent}12`, border: `1px solid ${GH.accent}30`,
                         borderRadius: 8, padding: '12px 16px', marginBottom: 12,
-                    } : undefined}
-                         className={isGH ? '' : "flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3 mb-3"}>
+                    }}>
                         <div>
-                            <div style={isGH ? { fontSize: 14, fontWeight: 600, color: GH.ink } : undefined}
-                                 className={isGH ? '' : "text-sm font-bold text-unbox-dark"}>{mobileBlockStart} — {mobileBlockEnd}</div>
-                            <div style={isGH ? { fontSize: 12, color: GH.ink60, fontFamily: GH_MONO } : undefined}
-                                 className={isGH ? '' : "text-xs text-unbox-grey"}>{mobileBlockDuration} мин · {mobileResource.name}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: GH.ink }}>{mobileBlockStart} — {mobileBlockEnd}</div>
+                            <div style={{ fontSize: 12, color: GH.ink60, fontFamily: GH_MONO }}>{mobileBlockDuration} мин · {mobileResource.name}</div>
                         </div>
                         <button
                             onClick={() => useBookingStore.getState().setSlotRange(mobileResource.id, [])}
                             aria-label="Убрать выбранное время"
-                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: STATUS.danger.bg, color: STATUS.danger.fg, border: 'none', cursor: 'pointer' } : undefined}
-                            className={isGH ? '' : "p-1.5 rounded-lg bg-red-100 text-red-500 hover:bg-red-200 transition-colors"}
+                            style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: STATUS.danger.bg, color: STATUS.danger.fg, border: 'none', cursor: 'pointer' }}
                         >
                             <X size={16} strokeWidth={2.5} aria-hidden="true" />
                         </button>
@@ -902,21 +975,24 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 )}
 
                 {/* 2-column time grid: XX:00 | XX:30 */}
-                <div style={isGH ? { borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.card, padding: 8 } : undefined}
-                     className={isGH ? '' : "rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5"}>
+                <div style={{ borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.card, padding: 8 }}>
                     {mobileResource && mobileHourPairs.map(([left, right]) => (
-                        <div key={left} style={isGH ? { display: 'flex', gap: 6, marginBottom: 6 } : undefined} className={isGH ? '' : "flex gap-1.5"}>
+                        <div key={left} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                             {[left, right].map((time, colIdx) => {
                                 if (!time) return <div key={`empty-${colIdx}`} className="flex-1" />;
                                 const isHourCol = colIdx === 0;
                                 const blocked = isSlotBlocked(mobileResource.id, time);
                                 const selected = isSelected(mobileResource.id, time);
                                 const bookerName = blocked ? getSlotBookerInfo(mobileResource.id, time) : null;
+                                const closed = blocked && !selected && isSlotClosed(time);
 
                                 return (
                                     <button
                                         key={time}
+                                        aria-disabled={closed || undefined}
                                         onClick={() => {
+                                            // Прошедшее время — без окна «следить» (G3-09).
+                                            if (closed) return;
                                             if (blocked) {
                                                 setWaitlistData({ resourceId: mobileResource.id, time });
                                                 setIsWaitlistOpen(true);
@@ -930,7 +1006,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                         // не срабатывал. Теперь все занятые
                                         // ячейки кликабельны (открывается окно
                                         // подписки).
-                                        style={isGH ? {
+                                        style={{
                                             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                                             padding: '12px 12px', borderRadius: 8, minHeight: 48, border: 'none',
                                             fontFamily: GH_MONO, fontSize: 13, cursor: 'pointer',
@@ -938,45 +1014,27 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                             color: blocked ? GH.ink60 : selected ? COLOR.onAccent : GH.ink,
                                             outline: !blocked && !selected ? `1px solid ${GH.ink8}` : 'none',
                                             transition: 'all 0.15s',
-                                        } : undefined}
-                                        className={isGH ? '' : clsx(
-                                            "flex-1 flex items-center justify-between px-3 py-3 rounded-xl transition-all min-h-[48px]",
-                                            blocked
-                                                ? "bg-gray-50 text-gray-400 active:scale-[0.97]"
-                                                : selected
-                                                    ? "bg-unbox-green text-white shadow-sm"
-                                                    : isPeakTime(time)
-                                                        ? "bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]"
-                                                        : "bg-white text-unbox-dark border border-unbox-light/40 active:scale-[0.97]"
-                                        )}
+                                        }}
                                     >
                                         <div className="flex items-center gap-2 min-w-0">
-                                            <span style={isGH ? { fontSize: 13, fontWeight: 600, fontFamily: GH_MONO, fontVariantNumeric: 'tabular-nums' as const } : undefined}
-                                                  className={isGH ? '' : clsx(
-                                                "text-sm font-bold tabular-nums",
-                                                selected ? "text-white" : blocked ? "text-gray-300" : "text-unbox-dark"
-                                            )}>
+                                            <span style={{ fontSize: 13, fontWeight: 600, fontFamily: GH_MONO, fontVariantNumeric: 'tabular-nums' as const }}>
                                                 {time}
                                             </span>
                                             {blocked && bookerName && (
-                                                <span style={isGH ? { fontSize: 12, color: GH.ink60 } : undefined}
-                                                      className={isGH ? '' : "text-[10px] text-gray-400 truncate"}>{bookerName}</span>
+                                                <span style={{ fontSize: 12, color: GH.ink60 }}>{bookerName}</span>
                                             )}
                                             {blocked && !bookerName && (
-                                                <span style={isGH ? { fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 } : undefined}
-                                                      className={isGH ? '' : "text-[10px] text-gray-400 flex items-center gap-0.5"}>
-                                                    <Clock size={12} aria-hidden="true" /> Занято · следить
+                                                <span style={{ fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    {closed ? 'Прошло' : <><Clock size={12} aria-hidden="true" /> Занято · следить</>}
                                                 </span>
                                             )}
                                         </div>
                                         {selected ? (
-                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', background: `${COLOR.onAccent}40`, display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}
-                                                 className={isGH ? '' : "w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0"}>
+                                            <div style={{ width: 20, height: 20, borderRadius: '50%', background: `${COLOR.onAccent}40`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                                             </div>
                                         ) : !blocked ? (
-                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', border: `2px solid ${GH.ink10}` } : undefined}
-                                                 className={isGH ? '' : "w-5 h-5 rounded-full border-2 border-unbox-light shrink-0"} />
+                                            <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${GH.ink10}` }} />
                                         ) : null}
                                     </button>
                                 );
@@ -986,48 +1044,23 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 </div>
 
                 {/* Fixed bottom bar */}
-                <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
+                <div className="fixed bottom-0 left-0 right-0 z-50">
                     <div
-                        style={isGH ? {
-                            borderRadius: 12, padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            background: GH.paper, borderTop: `1px solid ${GH.ink8}`,
-                            boxShadow: '0 -2px 12px rgba(0,0,0,0.04)',
-                        } : {
-                            background: 'rgba(255,255,255,0.85)',
-                            backdropFilter: 'blur(24px)',
-                            WebkitBackdropFilter: 'blur(24px)',
-                            border: '1px solid rgba(255,255,255,0.50)',
-                            boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
+                        style={{
+                            padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            background: GH.paper, borderTop: `1px solid ${GH.ink10}`,
                         }}
-                        className={isGH ? '' : "rounded-2xl p-3.5 flex items-center justify-between"}
                     >
-                        <div style={isGH ? { fontSize: 14, color: GH.ink, fontFamily: GH_SANS } : undefined} className={isGH ? '' : "text-sm text-unbox-dark"}>
+                        <div style={{ fontSize: 14, color: GH.ink, fontFamily: GH_SANS }}>
                             {selectedSlots.length > 0 ? (
-                                <span><span style={isGH ? { fontWeight: 600, color: GH.accent } : undefined} className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length * 30}</span> мин выбрано</span>
+                                <span><span style={{ fontWeight: 600, color: GH.accent }}>{selectedSlots.length * 30}</span> мин выбрано</span>
                             ) : (
-                                <span style={isGH ? { color: GH.ink60 } : undefined} className={isGH ? '' : "text-unbox-grey"}>Выберите время</span>
+                                <span style={{ color: GH.ink60 }}>Выберите время</span>
                             )}
                         </div>
-                        {isGH ? (
-                            <button
-                                disabled={nextDisabled}
-                                onClick={handleNext}
-                                style={{
-                                    padding: '10px 24px', borderRadius: 8, border: 'none',
-                                    background: nextDisabled ? GH.ink10 : GH.accent,
-                                    color: nextDisabled ? GH.ink30 : COLOR.onAccent,
-                                    fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
-                                    cursor: nextDisabled ? 'not-allowed' : 'pointer',
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                }}
-                            >
-                                Далее <ArrowRight size={14} />
-                            </button>
-                        ) : (
-                            <Button disabled={nextDisabled} onClick={handleNext} size="sm" className="shadow-md px-6">
-                                Далее <ArrowRight size={14} className="ml-1" />
-                            </Button>
-                        )}
+                        <Button size="touch" disabled={nextDisabled} onClick={handleNext} iconRight={<ArrowRight size={16} aria-hidden="true" />}>
+                            Далее
+                        </Button>
                     </div>
                 </div>
 
@@ -1065,24 +1098,15 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
     // ── DESKTOP VIEW (original) ──
 
-    /* GH button helper */
-    const ghBtn = (active: boolean): React.CSSProperties => ({
-        padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-        fontFamily: GH_SANS, cursor: 'pointer', border: `1px solid ${active ? GH.accent : GH.ink10}`,
-        background: active ? GH.accent : 'transparent', color: active ? COLOR.onAccent : GH.ink,
-        display: 'inline-flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
-    });
-
     return (
-        <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS, position: 'relative' as const } : undefined}
-             className={isGH ? '' : "space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6 relative"}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS, position: 'relative' as const }}>
             {/* Excel #24 — banner when user clicked "+ Ещё период" in Summary */}
             {pendingAddResourceId && (
                 <div style={{
                     background: STATUS.pending.bg,
                     color: STATUS.pending.fg,
                     padding: '12px 16px',
-                    borderRadius: 8,
+                    borderRadius: 0,
                     fontFamily: GH_SANS,
                     fontSize: 14,
                     display: 'flex',
@@ -1109,20 +1133,18 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             )}
             {/* Loading overlay while bookings are being fetched */}
             {isLoadingBookings && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}D9`, backdropFilter: 'blur(4px)' }}>
+                <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}E6` }}>
                     <div className="flex flex-col items-center gap-3">
                         <div className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
                         <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загружаем расписание…</span>
                     </div>
                 </div>
             )}
-            <div className={isGH ? '' : "flex flex-col md:flex-row justify-between items-start md:items-center gap-4"}
-                 style={isGH ? { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 16 } : undefined}>
+            <div
+                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 16 }}>
                 <div>
-                    <h2 style={isGH ? { fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
-                        className={isGH ? '' : "text-2xl font-bold"}>Выберите время</h2>
-                    <p style={isGH ? { fontSize: 14, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
-                       className={isGH ? '' : "text-unbox-grey"}>
+                    <h2 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 }}>Выберите время</h2>
+                    <p style={{ fontSize: 14, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 }}>
                         {formatDateLabel(date, { capitalize: true, withYear: 'auto' })} · {
                             bookingFormat === 'individual' ? 'Индивидуально · 20 ₾/ч' :
                             bookingFormat === 'intervision' ? 'Интервизия · 30 ₾/ч' : 'Группа · 35 ₾/ч'
@@ -1176,107 +1198,59 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         })}
                     </div>
                 </div>
-                <div style={isGH ? { display: 'flex', flexWrap: 'wrap' as const, gap: 8 } : undefined}
-                     className={isGH ? '' : "flex flex-wrap gap-2"}>
-                    {!embedded && (
-                        <>
-                            {isGH ? (
-                                <>
-                                    <button style={ghBtn(showAllLocations)} onClick={() => setShowAllLocations(!showAllLocations)}>
-                                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
-                                    </button>
-                                    <button style={ghBtn(false)} onClick={() => setStep(1)}>
-                                        <ArrowLeft size={14} /> Назад
-                                    </button>
-                                </>
-                            ) : (
-                                <>
-                                    <Button
-                                        variant={showAllLocations ? 'primary' : 'outline'}
-                                        size="sm"
-                                        onClick={() => setShowAllLocations(!showAllLocations)}
-                                    >
-                                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => setStep(1)}>
-                                        <ArrowLeft size={16} className="mr-2" /> Назад
-                                    </Button>
-                                </>
-                            )}
-                        </>
-                    )}
-                    {highlightedResourceId && locationId && (
-                        isGH ? (
-                            <button style={ghBtn(false)} onClick={() => { setHighlightedResourceId(null); window.history.back(); }}>
-                                <ArrowLeft size={14} /> К выбору кабинетов
-                            </button>
-                        ) : (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                    setHighlightedResourceId(null);
-                                    window.history.back();
-                                }}
-                            >
-                                <ArrowLeft size={16} className="mr-2" /> К выбору кабинетов
-                            </Button>
-                        )
-                    )}
-                </div>
+                {/* Одна «Назад» на шаг — в шапке мастера (MinimalLayout). Здесь
+                    было ещё две: «Назад» (уводила на главную) и «К выбору кабинетов». */}
+                {!embedded && (
+                    <Button
+                        variant="secondary"
+                        size="touch"
+                        aria-pressed={showAllLocations}
+                        onClick={() => setShowAllLocations(!showAllLocations)}
+                    >
+                        {showAllLocations ? 'Показать текущий центр' : 'Показать все центры'}
+                    </Button>
+                )}
             </div>
 
-            {/* Week Picker */}
-            <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
-                 className={isGH ? '' : "flex items-center gap-2 p-1.5 rounded-2xl border border-unbox-light/60"}>
+            {/* Week Picker — Grid House: тонкие линии, без скруглений и подложек. */}
+            <div style={{ display: 'flex', alignItems: 'stretch', border: `1px solid ${GH.ink10}`, background: GH.card }}>
                 <button onClick={handlePrevWeek}
                     aria-label="Предыдущая неделя"
-                    style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                    className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
-                    <ChevronLeft size={18} />
+                    style={{ width: 44, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', borderRight: `1px solid ${GH.ink10}`, color: GH.ink, cursor: 'pointer' }}>
+                    <ChevronLeft size={18} aria-hidden="true" />
                 </button>
-                <div style={isGH ? { flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 } : undefined}
-                     className={isGH ? '' : "flex-1 grid grid-cols-7 gap-1.5"}>
-                    {weekDays.map(day => {
+                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                    {weekDays.map((day, di) => {
                         const isSelectedDate = isSameDay(day, date);
                         return (
                             <button
                                 key={day.toISOString()}
                                 onClick={() => setDate(day)}
-                                style={isGH ? {
+                                aria-pressed={isSelectedDate}
+                                aria-label={formatDateLabel(day, { capitalize: true })}
+                                style={{
                                     display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
-                                    padding: '10px 0', borderRadius: 8,
-                                    border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
-                                    background: isSelectedDate ? GH.accent : GH.card,
-                                    color: isSelectedDate ? COLOR.onAccent : GH.ink60,
-                                    cursor: 'pointer', transition: 'all 0.15s',
-                                } : undefined}
-                                className={isGH ? '' : clsx(
-                                    "flex flex-col items-center justify-center py-2.5 rounded-xl transition-all duration-200 text-sm",
-                                    isSelectedDate
-                                        ? "bg-unbox-green text-white shadow-lg shadow-unbox-green/30 scale-[1.04] border border-unbox-green/20"
-                                        : "bg-white text-unbox-grey border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
-                                )}
+                                    minHeight: 56, padding: '8px 0',
+                                    border: 'none', borderLeft: di > 0 ? `1px solid ${GH.ink10}` : 'none',
+                                    background: isSelectedDate ? GH.accent : 'transparent',
+                                    color: isSelectedDate ? COLOR.onAccent : GH.ink,
+                                    cursor: 'pointer', transition: 'background 0.15s',
+                                }}
                             >
-                                <span style={isGH ? { fontSize: 12, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: 4, fontFamily: GH_MONO } : undefined}
-                                      className={isGH ? '' : clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelectedDate ? "opacity-80" : "opacity-50")}>
+                                <span style={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: 4, fontFamily: GH_MONO, color: isSelectedDate ? COLOR.onAccent : GH.ink60 }}>
                                     {format(day, 'EEE', { locale: ru })}
                                 </span>
-                                <span style={isGH ? { fontSize: 16, fontWeight: 600, lineHeight: 1 } : undefined}
-                                      className={isGH ? '' : "text-base font-bold leading-none"}>{format(day, 'd')}</span>
+                                <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>{format(day, 'd')}</span>
                             </button>
                         );
                     })}
                 </div>
                 <button onClick={handleNextWeek}
                     aria-label="Следующая неделя"
-                    style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                    className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
-                    <ChevronRight size={18} />
+                    style={{ width: 44, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', borderLeft: `1px solid ${GH.ink10}`, color: GH.ink, cursor: 'pointer' }}>
+                    <ChevronRight size={18} aria-hidden="true" />
                 </button>
             </div>
-
-
 
             {occupancyFailed && (
                 <ErrorBar
@@ -1291,9 +1265,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 <div style={{
                     padding: '12px 16px',
                     background: STATUS.pending.bg,
-                    borderRadius: 8, fontSize: 14, color: STATUS.pending.fg, lineHeight: 1.5,
+                    borderRadius: 0, fontSize: 14, color: STATUS.pending.fg, lineHeight: 1.5,
                 }}>
-                    Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> (Кабинеты 7, 8, 9) — показан расширенный список.
+                    Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> (кабинеты 7 и 8) — показан расширенный список.
                 </div>
             )}
 
@@ -1305,39 +1279,45 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 />
             )}
 
-            {/* The Grid - Refactored to Horizontal Layout */}
+            {/* Сетка. Ячейка — кнопка: мышью её жмут и тянут (как раньше),
+                с клавиатуры — стрелки по сетке, Enter/пробел выбирает (G3-10).
+                В порядке Tab — одна ячейка (roving tabindex), а не двести. */}
             {resources.length > 0 && (
-            <div style={isGH ? { border: `1px solid ${GH.ink8}`, borderRadius: 12, overflowX: 'auto' as const, isolation: 'isolate' as const } : undefined}
-                 className={isGH ? '' : "border border-white/40 rounded-2xl overflow-x-auto scrollbar-visible glass-card isolate"}>
-                <table style={isGH ? { width: '100%', fontSize: 13, textAlign: 'left' as const, whiteSpace: 'nowrap' as const, borderCollapse: 'collapse' as const, fontFamily: GH_SANS } : undefined}
-                       className={isGH ? '' : "w-full text-sm text-left whitespace-nowrap border-collapse"}>
-                    <thead style={isGH ? { borderBottom: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.45)' }}
-                           className={isGH ? '' : "text-unbox-dark font-medium border-b border-unbox-light/60"}>
+            <div className="scrollbar-visible" style={{ border: `1px solid ${GH.ink10}`, overflowX: 'auto' as const, isolation: 'isolate' as const }}>
+                <table
+                    aria-label="Свободное время по кабинетам"
+                    style={{ width: '100%', fontSize: 14, textAlign: 'left' as const, whiteSpace: 'nowrap' as const, borderCollapse: 'collapse' as const, fontFamily: GH_SANS }}>
+                    <thead style={{ borderBottom: `1px solid ${GH.ink10}`, background: GH.card }}>
                         <tr>
-                            <th style={isGH ? {
-                                position: 'sticky' as const, left: 0, padding: 12, borderRight: `1px solid ${GH.ink8}`,
-                                zIndex: 20, width: 128, fontWeight: 600, fontSize: 12, color: GH.ink,
+                            <th scope="col" style={{
+                                position: 'sticky' as const, left: 0, padding: 12, borderRight: `1px solid ${GH.ink10}`,
+                                zIndex: 20, width: 128, fontWeight: 500, fontSize: 12, color: GH.ink60,
                                 background: GH.paper, fontFamily: GH_MONO, textTransform: 'uppercase' as const, letterSpacing: '0.06em',
-                            } : { background: 'rgba(212,226,225,0.60)' }}
-                                className={isGH ? '' : "sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/50 z-20 w-32 font-bold text-unbox-dark text-xs"}>
+                            }}>
                                 Кабинет
                             </th>
-                            {timeSlots.map(time => (
-                                <th key={time}
-                                    style={isGH ? {
-                                        padding: 6, textAlign: 'center' as const, minWidth: 48,
-                                        borderRight: `1px solid ${GH.ink5}`, fontSize: 12, fontWeight: 600,
-                                        textTransform: 'uppercase' as const, fontFamily: GH_MONO,
-                                        color: isPeakTime(time) ? STATUS.pending.fg : GH.ink60,
-                                        background: isPeakTime(time) ? `${STATUS.pending.bg}20` : 'transparent',
-                                    } : undefined}
-                                    className={isGH ? '' : clsx(
-                                    "p-1.5 text-center min-w-[48px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
-                                    isPeakTime(time) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
-                                )}>
-                                    {time}
-                                </th>
-                            ))}
+                            {timeSlots.map(time => {
+                                const peak = isPeakTime(time);
+                                return (
+                                    <th key={time} scope="col"
+                                        style={{
+                                            padding: '6px 4px', textAlign: 'center' as const, minWidth: 48, verticalAlign: 'top' as const,
+                                            borderRight: `1px solid ${GH.ink5}`, fontSize: 12, fontWeight: 500,
+                                            fontFamily: GH_MONO,
+                                            color: peak ? STATUS.pending.fg : GH.ink60,
+                                            background: peak ? STATUS.pending.bg : 'transparent',
+                                        }}>
+                                        {time}
+                                        {/* Пиковые часы подписаны прямо в шапке — раньше жёлтые
+                                            колонки ничем не объяснялись (G3-09). */}
+                                        {peak && time.endsWith(':00') && (
+                                            <div style={{ fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, lineHeight: 1.2 }}>
+                                                +{PEAK_SURCHARGE} ₾
+                                            </div>
+                                        )}
+                                    </th>
+                                );
+                            })}
                         </tr>
                     </thead>
                     <tbody>
@@ -1345,28 +1325,27 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                             const isHighlighted = highlightedResourceId === r.id;
                             return (
                             <tr key={r.id}
-                                style={isGH ? { background: isHighlighted ? `${GH.accent}08` : 'transparent' } : undefined}
-                                className={isGH ? '' : clsx("hover:bg-unbox-light/10 group", isHighlighted && "bg-unbox-green/[0.06]")}>
-                                <td style={isGH ? {
+                                style={{ background: isHighlighted ? COLOR.accentSoft : 'transparent', borderBottom: `1px solid ${GH.ink5}` }}>
+                                <th scope="row" style={{
                                     position: 'sticky' as const, left: 0, padding: 12,
-                                    borderRight: `1px solid ${isHighlighted ? GH.accent + '40' : GH.ink8}`,
-                                    zIndex: 10, width: 128,
-                                    background: isHighlighted ? `${GH.accent}14` : GH.paper,
-                                    boxShadow: '2px 0 5px rgba(0,0,0,0.02)',
-                                } : { background: isHighlighted ? 'rgba(71,109,107,0.12)' : 'rgba(212,226,225,0.50)' }}
-                                    className={isGH ? '' : clsx(
-                                    "sticky left-0 backdrop-blur-sm p-3 border-r z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)] w-32",
-                                    isHighlighted ? "border-r-unbox-green/40" : "border-r-unbox-light/40"
-                                )}>
-                                    <div style={isGH ? { fontWeight: 600, fontSize: 12, lineHeight: 1.3, color: isHighlighted ? GH.accent : GH.ink } : undefined}
-                                         className={isGH ? '' : clsx("font-bold text-xs leading-tight", isHighlighted ? "text-unbox-green" : "text-unbox-dark")}>{r.name}</div>
-                                    <div style={isGH ? { fontSize: 12, color: GH.ink60, lineHeight: 1.3, fontFamily: GH_MONO } : undefined}
-                                         className={isGH ? '' : "text-[9px] text-unbox-grey leading-tight"}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
-                                </td>
+                                    borderRight: `1px solid ${isHighlighted ? GH.accent : GH.ink10}`,
+                                    zIndex: 10, width: 128, textAlign: 'left' as const,
+                                    background: isHighlighted ? COLOR.accentSoft : GH.paper,
+                                }}>
+                                    <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: isHighlighted ? COLOR.accentInk : GH.ink }}>{r.name}</div>
+                                    <div style={{ fontSize: 12, fontWeight: 400, color: GH.ink60, lineHeight: 1.3, fontFamily: GH_MONO }}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
+                                </th>
                                 {timeSlots.map(time => {
                                     const isBlocked = isSlotBlocked(r.id, time);
                                     const selected = isSelected(r.id, time);
                                     const isHovered = hoverSlot?.resId === r.id && hoverSlot?.timeStr === time;
+                                    // «Прошло» ≠ «занято»: прошлое не выбрать и на него
+                                    // не подписаться. Занятое будущее — можно «следить».
+                                    const closed = isBlocked && !selected && isSlotClosed(time);
+                                    const busy = isBlocked && !closed;
+                                    const peak = isPeakTime(time);
+                                    const cellKey = `${r.id}|${time}`;
+                                    const isFocused = focusKey === cellKey;
 
                                     // Look up the chunk containing THIS specific
                                     // slot, not just the first/biggest in the
@@ -1382,25 +1361,42 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     // Handlers for resizing
                                     const ResizeHandle = ({ type }: { type: 'start' | 'end' }) => (
                                         <div
-                                            className={`absolute top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center z-20 hover:bg-white/20 transition-colors ${type === 'start' ? 'left-0 rounded-l-md' : 'right-0 rounded-r-md'}`}
+                                            className={`absolute top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center z-20 hover:bg-on-accent/20 transition-colors ${type === 'start' ? 'left-0' : 'right-0'}`}
                                             onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); handlePointerDown(r.id, time, type === 'start' ? 'resize-start' : 'resize-end'); }}
                                         >
-                                            <div className="w-1 h-3 bg-white/70 rounded-full" />
+                                            <div className="w-1 h-3 bg-on-accent/70 rounded-full" />
                                         </div>
                                     );
 
+                                    const cellLabel = `${r.name}, ${time}, ${
+                                        selected ? 'выбрано — Enter уберёт период'
+                                        : closed ? 'уже не забронировать'
+                                        : busy ? 'занято — Enter, чтобы следить за освобождением'
+                                        : peak ? `свободно, пиковый час +${PEAK_SURCHARGE} ₾`
+                                        : 'свободно'}`;
+
                                     return (
-                                        <td key={`${r.id}-${time}`}
-                                            style={isGH ? { padding: 0, borderRight: `1px solid ${GH.ink5}`, height: 56, position: 'relative' as const } : undefined}
-                                            className={isGH ? '' : "p-0 border-r border-unbox-light/30 h-14 relative group/slot"}>
+                                        <td key={cellKey}
+                                            style={{ padding: 0, borderRight: `1px solid ${GH.ink5}`, height: 56, position: 'relative' as const }}>
                                             <div
                                                 data-resid={r.id}
                                                 data-time={time}
+                                                role="button"
+                                                tabIndex={cellKey === tabStopKey ? 0 : -1}
+                                                aria-label={cellLabel}
+                                                aria-pressed={selected}
+                                                aria-disabled={closed || undefined}
+                                                onFocus={() => setFocusKey(cellKey)}
+                                                onBlur={() => setFocusKey(k => (k === cellKey ? null : k))}
+                                                onKeyDown={(e) => handleCellKeyDown(e, r.id, time)}
+                                                className="focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
                                                 onPointerDown={(e) => {
                                                     if (e.pointerType === 'mouse' && (e.target as HTMLElement).tagName.toLowerCase() === 'button') {
                                                         return;
                                                     }
                                                     e.preventDefault();
+                                                    // Прошедшее время: ни выбора, ни окна «следить» (G3-09).
+                                                    if (closed) return;
                                                     if (selected) {
                                                         handlePointerDown(r.id, time, 'move');
                                                     } else {
@@ -1408,35 +1404,19 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                     }
                                                 }}
                                                 onPointerEnter={() => handlePointerEnter(r.id, time)}
-                                                style={isGH ? {
+                                                style={{
                                                     width: '100%', height: '100%', display: 'flex', flexDirection: 'column' as const,
                                                     alignItems: 'center', justifyContent: 'center', fontSize: 12, position: 'relative' as const,
+                                                    fontFamily: GH_MONO,
                                                     userSelect: 'none' as const, touchAction: 'none' as const, transition: 'background 0.1s',
-                                                    background: isBlocked ? GH.cellDead
+                                                    background: closed ? GH.sunken
+                                                        : busy ? BUSY_BG
                                                         : selected ? GH.accent
-                                                        : isHovered ? `${GH.accent}14`
-                                                        : isPeakTime(time) ? `${STATUS.pending.bg}40` : 'transparent',
-                                                    color: isBlocked ? GH.ink60 : selected ? COLOR.onAccent : isHovered ? GH.ink : isPeakTime(time) ? STATUS.pending.fg : GH.ink60,
-                                                    cursor: isBlocked ? 'pointer' : selected ? 'grab' : 'pointer',
-                                                    borderRadius: isBlockStart && isBlockEnd ? 6
-                                                        : isBlockStart ? '6px 0 0 6px'
-                                                        : isBlockEnd ? '0 6px 6px 0' : 0,
-                                                } : undefined}
-                                                className={isGH ? '' : clsx(
-                                                    "w-full h-full transition-colors flex flex-col items-center justify-center text-[9px] relative select-none touch-none",
-                                                    isBlocked
-                                                        ? "bg-striped text-unbox-grey/50 cursor-pointer border-none hover:bg-amber-50/60"
-                                                        : selected
-                                                            ? dragModeRef.current === 'move' ? "bg-unbox-green text-white z-10 cursor-grabbing shadow-md" : "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
-                                                            : isHovered
-                                                                ? "bg-unbox-green/10 text-unbox-dark cursor-pointer slot-hover-lift font-bold"
-                                                                : isPeakTime(time)
-                                                                    ? "bg-amber-50/70 hover:bg-amber-100/60 text-amber-600/70 hover:text-amber-700 cursor-pointer transition-all"
-                                                                    : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer transition-all",
-                                                    selected && !isSingleBlock && !isBlockStart && "border-l border-white/20",
-                                                    isBlockStart && "rounded-l-lg",
-                                                    isBlockEnd && "rounded-r-lg"
-                                                )}
+                                                        : isHovered ? COLOR.accentSoft
+                                                        : peak ? STATUS.pending.bg : 'transparent',
+                                                    color: selected ? COLOR.onAccent : peak && !isBlocked ? STATUS.pending.fg : GH.ink60,
+                                                    cursor: closed ? 'default' : selected ? 'grab' : 'pointer',
+                                                }}
                                             >
                                                 {selected ? (
                                                     <>
@@ -1458,42 +1438,39 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                             in the same resource (and other resources) untouched. */}
                                                         {isBlockEnd && blockForThisCell && (
                                                             <button
+                                                                type="button"
+                                                                tabIndex={-1}
                                                                 onPointerDown={(e) => {
                                                                     e.stopPropagation(); e.preventDefault();
-                                                                    const blk = blockForThisCell;
-                                                                    const idsToRemove = new Set<string>();
-                                                                    for (let i = blk.start; i <= blk.end; i++) {
-                                                                        idsToRemove.add(`${r.id}|${timeSlots[i]}`);
-                                                                    }
-                                                                    useBookingStore.getState().replaceSlots(
-                                                                        useBookingStore.getState().selectedSlots.filter(s => !idsToRemove.has(s))
-                                                                    );
+                                                                    removeBlock(blockForThisCell);
                                                                 }}
                                                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                                                                className="absolute top-0.5 right-0.5 rounded-full w-4 h-4 flex items-center justify-center hover:brightness-90 transition-all z-50"
+                                                                className="absolute top-0.5 right-0.5 rounded-full w-6 h-6 flex items-center justify-center hover:brightness-90 transition-all z-50"
                                                                 style={{ background: STATUS.dangerSolid, color: COLOR.card }}
                                                                 title="Убрать этот период"
                                                                 aria-label="Убрать этот период"
                                                             >
-                                                                <X size={10} strokeWidth={3} aria-hidden="true" />
+                                                                <X size={14} strokeWidth={2.5} aria-hidden="true" />
                                                             </button>
                                                         )}
                                                     </>
                                                 ) : (
                                                     !isBlocked && <span>{time}</span>
                                                 )}
-                                                {isBlocked && (() => {
+                                                {busy && (() => {
                                                     const bookerName = getSlotBookerInfo(r.id, time);
                                                     return bookerName ? (
                                                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-0">
                                                             <span className="text-caption font-semibold text-ink-60 leading-none truncate max-w-[55px]">{bookerName}</span>
                                                         </div>
-                                                    ) : (
-                                                        <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300 gap-0.5">
+                                                    ) : (isHovered || isFocused) ? (
+                                                        // Подсказка «Следить» — при наведении и при фокусе с клавиатуры
+                                                        // (раньше только hover, и тот не срабатывал: X4-accessibility-M1).
+                                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5" style={{ background: STATUS.pending.bg }}>
                                                             <Clock size={12} style={{ color: STATUS.pending.fg }} aria-hidden="true" />
-                                                            <span className="text-caption font-semibold leading-none" style={{ color: STATUS.pending.fg }}>Следить</span>
+                                                            <span className="text-caption font-semibold leading-none" style={{ color: STATUS.pending.fg, fontFamily: GH_SANS }}>Следить</span>
                                                         </div>
-                                                    );
+                                                    ) : null;
                                                 })()}
                                             </div>
                                         </td>
@@ -1508,33 +1485,39 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             </div>
             )}
 
+            {/* Легенда: что значит каждый цвет. Прошедшее и занятое — разные. */}
+            {resources.length > 0 && (
+                <ul aria-label="Обозначения" style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '8px 20px', listStyle: 'none', margin: 0, padding: 0, fontSize: 14, color: GH.ink80 }}>
+                    {([
+                        { label: 'Свободно', bg: GH.card },
+                        { label: 'Выбрано', bg: GH.accent },
+                        { label: `Пиковый час · +${PEAK_SURCHARGE} ₾/ч`, bg: STATUS.pending.bg },
+                        { label: 'Занято — можно следить', bg: BUSY_BG },
+                        { label: 'Прошло', bg: GH.sunken },
+                    ]).map(item => (
+                        <li key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span aria-hidden="true" style={{ width: 16, height: 16, background: item.bg, border: `1px solid ${GH.ink10}` }} />
+                            {item.label}
+                        </li>
+                    ))}
+                    <li style={{ color: GH.ink60 }}>С клавиатуры: стрелки — по сетке, Enter — выбрать</li>
+                </ul>
+            )}
+
             {/* Overlap warning bar */}
             {hasTimeOverlap && (
-                <div className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: STATUS.pending.bg, color: STATUS.pending.fg }}>
+                <div className="flex items-center gap-3 px-4 py-3 text-sm" style={{ background: STATUS.pending.bg, color: STATUS.pending.fg }}>
                     <AlertTriangle size={18} className="shrink-0" aria-hidden="true" />
-                    <span>Выбранные блоки <strong>пересекаются по времени</strong>. Вы бронируете несколько кабинетов на одно время.</span>
+                    <span>Выбранные периоды <strong>пересекаются по времени</strong>. Вы бронируете несколько кабинетов на одно время.</span>
                 </div>
             )}
 
-            <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4">
-            <div className="max-w-[1920px] mx-auto">
-            <div
-                style={isGH ? {
-                    borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'center',
-                    background: GH.paper, borderTop: `1px solid ${GH.ink8}`,
-                    boxShadow: '0 -2px 12px rgba(0,0,0,0.04)',
-                } : {
-                    background: 'rgba(255,255,255,0.82)',
-                    backdropFilter: 'blur(24px) saturate(150%)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-                    border: '1px solid rgba(255,255,255,0.50)',
-                    boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
-                }}
-                className={isGH ? '' : "rounded-2xl p-4 flex justify-center"}
-            >
-                <div style={isGH ? { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' } : undefined}
-                     className={isGH ? '' : "w-full flex justify-between items-center gap-4 flex-wrap"}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: 1, minWidth: 0 }}>
+            {/* Нижняя панель — прилипает к низу, отделена линией (без тени и
+                скруглений: тень только у всплывающего). */}
+            <div className="fixed bottom-0 left-0 right-0 z-50" style={{ background: GH.paper, borderTop: `1px solid ${GH.ink10}` }}>
+            <div className="max-w-[1920px] mx-auto px-6 md:px-12" style={{ paddingTop: 12, paddingBottom: 12 }}>
+                <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: 1, minWidth: 0 }} aria-live="polite">
                         {(() => {
                             // Excel #24 — break the cart into contiguous chips
                             // per resource so each independent period shows
@@ -1570,19 +1553,19 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 const res = resources.find(r => r.id === ch.resId);
                                 const startT = timeSlots[ch.idxs[0]];
                                 const endIdx = ch.idxs[ch.idxs.length - 1];
-                                const endT = endIdx + 1 < timeSlots.length ? timeSlots[endIdx + 1] : '21:00';
+                                // Последний слот 21:30 заканчивается в 22:00 (было «21:00»).
+                                const endT = endIdx + 1 < timeSlots.length ? timeSlots[endIdx + 1] : '22:00';
                                 const mins = ch.idxs.length * 30;
                                 return (
                                     <div key={`${ch.resId}-${i}`}
                                          style={{
-                                             display: 'inline-flex', alignItems: 'center', gap: 6,
-                                             padding: '6px 8px 6px 12px', borderRadius: 6,
-                                             background: GH.ink5, fontFamily: GH_MONO, fontSize: 12,
-                                             letterSpacing: '0.04em',
+                                             display: 'inline-flex', alignItems: 'center', gap: 8,
+                                             padding: '4px 4px 4px 12px', border: `1px solid ${GH.ink10}`,
+                                             background: GH.card, fontSize: 14,
                                          }}>
-                                        <span style={{ color: GH.ink60 }}>{res?.name || ch.resId}</span>
-                                        <span style={{ fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>{startT}–{endT}</span>
-                                        <span style={{ color: GH.ink60 }}>· {mins >= 60 ? `${(mins/60).toString().replace(/\.0$/,'')}ч` : `${mins}м`}</span>
+                                        <span style={{ color: GH.ink80 }}>{res?.name || ch.resId}</span>
+                                        <span className="num" style={{ fontWeight: 600, color: GH.ink }}>{startT}–{endT}</span>
+                                        <span style={{ color: GH.ink60 }}>· {formatDurationMin(mins)}</span>
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -1592,14 +1575,14 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                 );
                                             }}
                                             title="Убрать этот период"
-                                            aria-label="Убрать этот период"
+                                            aria-label={`Убрать ${res?.name || ''} ${startT}–${endT}`}
                                             style={{
-                                                width: 18, height: 18, borderRadius: '50%', border: 'none',
-                                                background: GH.ink10, color: GH.ink60, cursor: 'pointer',
+                                                width: 32, height: 32, border: 'none',
+                                                background: 'transparent', color: GH.ink60, cursor: 'pointer',
                                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                             }}
                                         >
-                                            <X size={11} />
+                                            <X size={16} aria-hidden="true" />
                                         </button>
                                     </div>
                                 );
@@ -1607,40 +1590,15 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         })()}
                     </div>
                     {selectedSlots.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={() => useBookingStore.getState().clearCart()}
-                            style={{
-                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
-                                background: 'none', border: 'none', color: GH.ink60,
-                                cursor: 'pointer', textDecoration: 'underline',
-                            }}
-                        >
+                        <Button variant="quiet" size="touch" onClick={() => useBookingStore.getState().clearCart()}>
                             Очистить
-                        </button>
-                    )}
-                    {isGH ? (
-                        <button
-                            disabled={nextDisabled}
-                            onClick={handleNext}
-                            style={{
-                                padding: '12px 32px', borderRadius: 8, border: 'none',
-                                background: nextDisabled ? GH.ink10 : GH.accent,
-                                color: nextDisabled ? GH.ink30 : COLOR.onAccent,
-                                fontFamily: GH_SANS, fontSize: 16, fontWeight: 600,
-                                cursor: nextDisabled ? 'not-allowed' : 'pointer',
-                                display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-                            }}
-                        >
-                            Далее <ArrowRight size={16} />
-                        </button>
-                    ) : (
-                        <Button disabled={nextDisabled} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
-                            Далее <ArrowRight size={16} className="ml-2" />
                         </Button>
                     )}
+                    <Button size="touch" disabled={nextDisabled} onClick={handleNext} iconRight={<ArrowRight size={18} aria-hidden="true" />}>
+                        Далее
+                    </Button>
                 </div>
-            </div></div></div>
+            </div></div>
 
             {(() => {
                 const wlRes = waitlistData ? RESOURCES.find(r => r.id === waitlistData.resourceId) : null;

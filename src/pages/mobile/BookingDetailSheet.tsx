@@ -1,72 +1,67 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
-import { Clock, MapPin, X, Calendar, CalendarClock, Plus, AlertTriangle, Repeat, User as UserIcon, BellOff, Users, ArrowUpRight } from 'lucide-react';
+import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
-import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { prepareRepeat } from './repeatBooking';
-import { useScrollLock } from './useScrollLock';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import type { BookingHistoryItem } from '../../store/types';
-import { COLOR, STATUS, Z } from '../../design/tokens';
+import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatDateLabel, formatGel } from '../../utils/format';
+import { toastApiError } from '../../utils/errors';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { Sheet } from '../../components/ui/Sheet';
 import { Field as FormField, Input } from '../../components/ui/Field';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
+import { bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
+
+const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
 
 /**
- * Bottom-sheet with full booking detail + actions.
+ * Шторка брони: подробности и действия (волна 2 — на общем Sheet).
  *
- * Two-step UX: viewing detail vs. confirming cancel — second step is in
- * the same sheet (just swaps content) so users keep the spatial context.
+ * Общий Sheet даёт выезд снизу, свайп вниз, Esc, фокус внутри и крестик
+ * 44 px (G4-13, X5-15). Второй шаг «Точно отменить?» и выбор CRM-клиента —
+ * в той же шторке, контекст не теряется.
  *
- * Actions wired:
- *   - Cancel  : full implementation, calls bookingsApi.cancelBooking
- *   - Extend  : +30 min, only when booking is currently active and route
- *               accepts (server returns 400 if next slot is busy)
- *   - Reschedule / link CRM client : pointer to desktop for now (Phase 2)
+ * Правило 24 часов (X3-21, G4-client-mobile-M2) — как на сервере:
+ * клиент и специалист меньше чем за сутки до начала бронь не отменяют и не
+ * переносят (routes.py → 400). Поэтому им в этом случае показываем только
+ * «Пересдать» и «Написать администратору». Администраторам (owner /
+ * senior_admin / admin — те же роли, что ADMIN_ROLES на сервере) — всё, как
+ * раньше, включая «Всё равно отменить».
+ *
+ * Порядок действий у будущей брони (G4-14): Перенести → Пересдать →
+ * Отменить; «Повторить» — ниже, второстепенным.
  */
 export function BookingDetailSheet({ booking, onClose }: {
     booking: BookingHistoryItem;
     onClose: () => void;
 }) {
-    const { fetchBookings } = useUserStore();
+    const { fetchBookings, currentUser } = useUserStore();
     const navigate = useNavigate();
     const [mode, setMode] = useState<'view' | 'confirmCancel' | 'pickClient'>('view');
     const [trimming, setTrimming] = useState(false);
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
     const { confirm } = useConfirmDialog();
-    // «Продлить серию»: число сессий — полем в шторке (было window.prompt).
+    // «Продлить серию»: число броней — полем в шторке (было window.prompt).
     const [extendOpen, setExtendOpen] = useState(false);
     const [extendCount, setExtendCount] = useState('4');
     const [extendError, setExtendError] = useState<string | null>(null);
 
-    // Lock scroll while the sheet is open — ref-counted, не залипает.
-    useScrollLock();
-
-    // Esc закрывает карточку. Если поверх открыта общая шторка или окно
-    // подтверждения — Esc принадлежит им. «Сократить бронь» (TrimBookingModal) —
-    // старое окно без data-sheet, поэтому пока оно открыто, Esc тоже игнорируем:
-    // иначе закрылась бы карточка под ним.
-    const trimmingRef = useRef(trimming);
-    trimmingRef.current = trimming;
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key !== 'Escape' || trimmingRef.current || document.querySelector('[data-sheet]')) return;
-            onClose();
-        };
-        document.addEventListener('keydown', onKey);
-        return () => document.removeEventListener('keydown', onKey);
-    }, [onClose]);
+    // Поле «CRM-клиент» — только тем, у кого есть Psy-CRM (G4-14): клиент
+    // видел «Привязать CRM-клиента» и не понимал, что это.
+    const showCrm = canUsePsyCrm(currentUser);
+    const isAdmin = isBookingAdmin(currentUser);
 
     useEffect(() => {
         // Lazy-load CRM clients only when the user opens the picker. Avoids
@@ -84,21 +79,25 @@ export function BookingDetailSheet({ booking, onClose }: {
             toast.success(crmClientId ? 'Клиент привязан к броне' : 'Привязка клиента снята');
             setMode('view');
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось обновить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось обновить');
+            toastApiError(e, 'Не удалось обновить');
         } finally { setBusy(null); }
     }
 
     const dt = bookingStartDate(booking);
-    const endDt = dt ? new Date(dt.getTime() + (booking.duration ?? 60) * 60000) : null;
+    const endDt = dt ? bookingEndDate(booking, dt) : null;
     const now = new Date();
     const hoursToStart = dt ? (dt.getTime() - now.getTime()) / 3600000 : 999;
     const within24h = hoursToStart >= 0 && hoursToStart < 24;
     const isActive = dt && endDt && dt.getTime() <= now.getTime() && endDt.getTime() > now.getTime();
     const isPast = dt && endDt && endDt.getTime() <= now.getTime();
+    const isLive = !isPast && booking.status !== 'cancelled';
+    // Клиенту меньше чем за сутки сервер не даст ни отменить, ни перенести.
+    const lateForClient = within24h && !isAdmin;
+    // Пересдать можно только подтверждённую бронь (сервер: status == confirmed).
+    const canReRent = isLive && booking.status === 'confirmed';
 
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const location = LOCATIONS.find(l => l.id === resource?.locationId);
+    const place = bookingPlace(booking);
+    const route = mapsUrl(place.location);
 
     async function doCancel() {
         setBusy('cancel');
@@ -108,8 +107,7 @@ export function BookingDetailSheet({ booking, onClose }: {
             toast.success('Бронь отменена');
             onClose();
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось отменить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось отменить');
+            toastApiError(e, 'Не удалось отменить');
         } finally { setBusy(null); }
     }
 
@@ -118,10 +116,9 @@ export function BookingDetailSheet({ booking, onClose }: {
         try {
             await bookingsApi.extendBooking(booking.id, 30);
             await fetchBookings();
-            toast.success('Сессия продлена на 30 минут');
+            toast.success('Бронь продлена на 30 минут');
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось продлить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось продлить');
+            toastApiError(e, 'Не удалось продлить');
         } finally { setBusy(null); }
     }
 
@@ -161,8 +158,7 @@ export function BookingDetailSheet({ booking, onClose }: {
             toast.success(`Отменено ${res.cancelled} ${ruPlural(res.cancelled, ['бронь', 'брони', 'броней'])}`);
             onClose();
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось отменить серию';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось отменить серию');
+            toastApiError(e, 'Не удалось отменить серию');
         } finally { setBusy(null); }
     }
 
@@ -175,8 +171,7 @@ export function BookingDetailSheet({ booking, onClose }: {
             toast.success('Серия завершится в срок — больше не напомним');
             onClose();
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось сохранить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось сохранить');
+            toastApiError(e, 'Не удалось сохранить');
         } finally { setBusy(null); }
     }
 
@@ -199,11 +194,10 @@ export function BookingDetailSheet({ booking, onClose }: {
         try {
             const res = await bookingsApi.extendRecurringSeries(groupId, n);
             await fetchBookings();
-            toast.success(`Серия продлена на ${res.created} ${ruPlural(res.created, ['сессию', 'сессии', 'сессий'])} (${formatGel(res.totalCost, { sign: true, fraction: 0 })})`);
+            toast.success(`Серия продлена на ${res.created} ${ruPlural(res.created, ['бронь', 'брони', 'броней'])} (${formatGel(res.totalCost, { sign: true, fraction: 0 })})`);
             onClose();
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось продлить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось продлить');
+            toastApiError(e, 'Не удалось продлить');
         } finally { setBusy(null); }
     }
 
@@ -217,152 +211,156 @@ export function BookingDetailSheet({ booking, onClose }: {
                 : 'Снято с пересдачи');
             onClose();
         } catch (e: any) {
-            const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось обновить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось обновить');
+            toastApiError(e, 'Не удалось обновить');
         } finally { setBusy(null); }
     }
 
+    // Подсказка к «Отменить бронь» — от статуса оплаты (G4-14): раньше всегда
+    // «оплата ещё не списана», даже при бейдже «Оплачено».
+    const cancelHint = within24h
+        ? 'Меньше 24 ч до начала — отменяете как администратор'
+        : booking.paymentStatus === 'paid'
+            ? 'Бесплатно — оплату вернём полностью'
+            : 'Бесплатно — оплата ещё не списана';
+
+    const dateTitle = dt ? formatDateLabel(dt, { capitalize: true }) : 'Бронь';
+    const title = mode === 'pickClient'
+        ? 'Привязать клиента'
+        : mode === 'confirmCancel'
+            ? (within24h ? 'Отменить бронь меньше чем за сутки?' : 'Отменить бронь?')
+            : dateTitle;
+
+    const footer = mode === 'confirmCancel' ? (
+        <>
+            <Button
+                variant="danger"
+                block
+                onClick={doCancel}
+                disabled={busy !== null && busy !== 'cancel'}
+                loading={busy === 'cancel'}
+            >
+                {busy === 'cancel' ? 'Отменяем…' : within24h ? 'Всё равно отменить' : 'Отменить бронь'}
+            </Button>
+            <Button variant="secondary" block onClick={() => setMode('view')} disabled={busy === 'cancel'}>
+                Оставить
+            </Button>
+        </>
+    ) : mode === 'pickClient' ? (
+        <Button variant="secondary" block onClick={() => setMode('view')}>
+            Назад к брони
+        </Button>
+    ) : undefined;
+
     return (
         <>
-        <div
-            onClick={onClose}
-            style={{
-                position: 'fixed', inset: 0,
-                background: `${COLOR.ink}8C`,
-                zIndex: Z.sheet,
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'center',
-            }}
+        <Sheet
+            open
+            onClose={onClose}
+            title={title}
+            footer={footer}
+            // Пока открыто старое окно «Сократить бронь», Esc и свайп
+            // принадлежат ему — иначе закрылась бы карточка под ним.
+            dismissible={!trimming}
         >
-            <div
-                onClick={e => e.stopPropagation()}
-                role="dialog"
-                aria-modal="true"
-                aria-label="Бронь"
-                style={{
-                    width: '100%',
-                    maxWidth: 480,
-                    background: COLOR.card,
-                    borderRadius: '20px 20px 0 0',
-                    padding: 20,
-                    paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 14,
-                    maxHeight: '85vh',
-                    overflow: 'auto',
-                    overscrollBehavior: 'contain',
-                }}
-            >
-                {mode === 'pickClient' ? (
-                    /* Pick CRM client mode */
-                    <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <UserIcon size={18} /> Привязать клиента
-                            </h3>
-                            <button
-                                onClick={() => setMode('view')}
-                                aria-label="Закрыть"
-                                style={closeBtn}
-                            >
-                                <X size={22} />
-                            </button>
-                        </div>
-                        <div style={{ fontSize: 12, color: COLOR.ink60 }}>
-                            Из вашего CRM. Чтобы добавить нового клиента, откройте <a href="/crm/clients" style={{ color: COLOR.ink, textDecoration: 'underline' }}>десктопный CRM</a>.
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '50vh', overflow: 'auto' }}>
+            {mode === 'pickClient' ? (
+                /* Pick CRM client mode */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <p style={{ margin: 0, fontSize: TEXT.small, color: COLOR.ink60 }}>
+                        Клиенты из вашей CRM. Нового клиента можно добавить в разделе{' '}
+                        <button type="button" onClick={() => { onClose(); navigate('/m/crm/clients'); }} style={inlineLink}>
+                            «Клиенты» CRM
+                        </button>.
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <ClientPickRow
+                            active={!booking.crmClientId}
+                            disabled={busy === 'link'}
+                            onClick={() => doLinkClient(null)}
+                            title="Без привязки"
+                            sub="Снять текущую"
+                        />
+                        {crmClients.map(c => (
                             <ClientPickRow
-                                active={!booking.crmClientId}
+                                key={c.id}
+                                active={booking.crmClientId === c.id}
                                 disabled={busy === 'link'}
-                                onClick={() => doLinkClient(null)}
-                                title="Без привязки"
-                                sub="Снять текущую"
+                                onClick={() => doLinkClient(c.id)}
+                                title={c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
+                                sub={c.phone || c.email}
                             />
-                            {crmClients.map(c => (
-                                <ClientPickRow
-                                    key={c.id}
-                                    active={booking.crmClientId === c.id}
-                                    disabled={busy === 'link'}
-                                    onClick={() => doLinkClient(c.id)}
-                                    title={c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
-                                    sub={c.phone || c.email}
-                                />
-                            ))}
-                            {crmClients.length === 0 && (
-                                <div style={{ background: COLOR.sunken, borderRadius: 12, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: 13 }}>
-                                    Загружаем клиентов…
-                                </div>
-                            )}
-                        </div>
-                    </>
-                ) : mode === 'view' ? (
-                    <>
-                        {/* Header */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                            <div>
-                                <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
-                                    {dt && formatDateLabel(dt)}
-                                </div>
-                                <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <Clock size={18} /> {booking.startTime}{endDt && `–${formatHHMM(endDt)}`}
-                                </div>
+                        ))}
+                        {crmClients.length === 0 && (
+                            <div style={{ background: COLOR.sunken, borderRadius: 12, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: TEXT.small }}>
+                                Загружаем клиентов…
                             </div>
-                            <button
-                                onClick={onClose}
-                                aria-label="Закрыть"
-                                style={closeBtn}
-                            >
-                                <X size={22} />
-                            </button>
+                        )}
+                    </div>
+                </div>
+            ) : mode === 'view' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* Время крупно */}
+                    <div>
+                        <div className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.1 }}>
+                            {dt ? bookingTimeRange(booking, dt) : booking.startTime}
                         </div>
-
-                        {/* Status badges */}
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {/* Статусы брони и оплаты — слова из общего словаря (statuses.ts). */}
-                            {isActive && <Tag tone="active">Идёт сейчас</Tag>}
-                            {isPast && booking.status !== 'cancelled' && <StatusBadge kind="booking" status="completed" />}
-                            <PaymentBadge status={booking.paymentStatus} />
-                            {(booking as any).recurringGroupId && <Tag tone="muted">Серия</Tag>}
-                            {booking.isReRentListed && <Tag tone="warn">На пересдаче</Tag>}
-                            {booking.status === 'cancelled' && <StatusBadge kind="booking" status="cancelled" />}
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
+                            {formatLabel(booking.format)} · {formatBookingDuration(booking.duration ?? 60)}
                         </div>
+                    </div>
 
-                        {/* Place */}
-                        <Field icon={<MapPin size={16} />} label="Кабинет">
-                            {resource?.name ?? booking.resourceId}
-                            {location && <span style={{ color: COLOR.ink60 }}> · {location.name}, {location.address}</span>}
-                        </Field>
+                    {/* Статусы брони и оплаты — слова из общего словаря (statuses.ts). */}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {isActive && <Tag tone="active">Идёт сейчас</Tag>}
+                        {booking.status === 'pending_approval' && <StatusBadge kind="booking" status="pending_approval" />}
+                        {isPast && booking.status !== 'cancelled' && <StatusBadge kind="booking" status="completed" />}
+                        {booking.status === 'cancelled' && <StatusBadge kind="booking" status="cancelled" />}
+                        {booking.isReRentListed && <StatusBadge kind="booking" status="re-rent-listed" />}
+                        <PaymentBadge status={booking.paymentStatus} />
+                        {(booking as any).recurringGroupId && <Tag tone="muted">Серия</Tag>}
+                    </div>
 
-                        {/* Format + duration */}
-                        <Field icon={<Calendar size={16} />} label="Формат">
-                            {formatLabel(booking.format)}
-                            <span style={{ color: COLOR.ink60 }}> · {formatBookingDuration(booking.duration ?? 60)}</span>
-                        </Field>
+                    {booking.status === 'pending_approval' && (
+                        <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink80 }}>
+                            Бронь ждёт подтверждения администратора — пришлём уведомление, как только её подтвердят.
+                        </div>
+                    )}
 
-                        {/* Price */}
-                        <Field label="Цена" subtle>
-                            <span style={{ fontSize: 17, fontWeight: 600 }}>{priceLabel(booking)}</span>
-                            {booking.paymentMethod === 'balance' && booking.finalPrice != null && (
-                                <span style={{ color: COLOR.ink60, marginLeft: 8, fontSize: 13 }}>с баланса</span>
-                            )}
-                            {booking.paymentStatus === 'pending' && dt && (
-                                <div style={{ fontSize: 12, color: STATUS.pending.fg, marginTop: 4 }}>
-                                    Спишется {formatChargeAt(dt)}
-                                </div>
-                            )}
-                        </Field>
+                    {/* Место */}
+                    <Field icon={<MapPin size={16} aria-hidden="true" />} label="Где">
+                        {place.title}
+                        {place.address && <span style={{ color: COLOR.ink60 }}>, {place.address}</span>}
+                        {route && isLive && (
+                            <div>
+                                <a href={route} target="_blank" rel="noopener noreferrer" style={{ ...inlineLink, display: 'inline-flex', alignItems: 'center', minHeight: 44, gap: 4 }}>
+                                    Маршрут <ArrowUpRight size={14} aria-hidden="true" />
+                                </a>
+                            </div>
+                        )}
+                    </Field>
 
-                        {/* CRM client — show current link + button to change */}
-                        <Field label="CRM-клиент" subtle>
+                    {/* Цена */}
+                    <Field icon={<Wallet size={16} aria-hidden="true" />} label="Оплата">
+                        <span style={{ fontSize: TEXT.body, fontWeight: 600 }}>{priceLabel(booking)}</span>
+                        {booking.paymentMethod === 'balance' && booking.finalPrice != null && (
+                            <span style={{ color: COLOR.ink60, marginLeft: 8 }}>с баланса</span>
+                        )}
+                        {booking.paymentStatus === 'pending' && dt && (
+                            // Обычное состояние будущей брони — нейтрально, не янтарём (G4-08).
+                            <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
+                                Спишем {formatChargeAt(dt)} — за сутки до начала
+                            </div>
+                        )}
+                    </Field>
+
+                    {/* CRM-клиент — только специалистам (G4-14). */}
+                    {showCrm && (
+                        <Field label="Клиент из CRM" subtle>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                 {booking.crmClientId ? (
                                     <span style={{ color: COLOR.ink }}>
                                         {(() => {
                                             const c = crmClients.find(x => x.id === booking.crmClientId);
-                                            return c?.name ?? `ID ${booking.crmClientId.slice(0, 8)}…`;
+                                            return c?.name ?? 'Клиент привязан';
                                         })()}
                                     </span>
                                 ) : (
@@ -373,52 +371,37 @@ export function BookingDetailSheet({ booking, onClose }: {
                                 </Button>
                             </div>
                         </Field>
+                    )}
 
-                        {/* Cancellation reason */}
-                        {booking.cancellationReason && (
-                            <Field label="Причина отмены" subtle>
-                                <span style={{ color: COLOR.ink60 }}>{booking.cancellationReason}</span>
-                            </Field>
+                    {/* Cancellation reason */}
+                    {booking.cancellationReason && (
+                        <Field label="Причина отмены" subtle>
+                            <span style={{ color: COLOR.ink60 }}>{booking.cancellationReason}</span>
+                        </Field>
+                    )}
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                        {isLive && isActive && (
+                            <ActionRow
+                                primary
+                                icon={<Plus size={18} />}
+                                label="Продлить +30 минут"
+                                sub="Если следующий слот свободен"
+                                busy={busy === 'extend'}
+                                onClick={doExtend}
+                            />
                         )}
 
-                        {/* Actions */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                            {!isPast && booking.status !== 'cancelled' && isActive && (
-                                <ActionRow
-                                    primary
-                                    icon={<Plus size={18} />}
-                                    label="Продлить +30 минут"
-                                    sub="Если следующий слот свободен"
-                                    busy={busy === 'extend'}
-                                    onClick={doExtend}
-                                />
-                            )}
-
-                            {/* Repeat — works for past and future. Pre-fills the
-                                checkout with this booking's slot on the next
-                                same weekday. */}
-                            <ActionRow
-                                primary={!!isPast}
-                                icon={<Repeat size={18} />}
-                                label="Повторить"
-                                sub={`${nextWeekdayPhrase(dt)} в ${booking.startTime}`}
-                                onClick={doRepeat}
-                            />
-
-                            {!isPast && booking.status !== 'cancelled' && (
-                                <>
-                                    <ActionRow
-                                        icon={<CalendarClock size={18} />}
-                                        label="Перенести"
-                                        sub="Выберите новое время в «Свободно»"
-                                        onClick={() => {
-                                            onClose();
-                                            navigate(`/m/find?reschedule=${booking.id}`);
-                                        }}
-                                    />
-
-                                    {/* Пересдача — прямое действие в карточке (раньше
-                                        было спрятано только в экране отмены). */}
+                        {/* Меньше суток до начала — клиенту только пересдача и связь (X3-21). */}
+                        {isLive && !isActive && lateForClient && (
+                            <>
+                                <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink80, background: COLOR.sunken, borderRadius: 12, padding: 12 }}>
+                                    До начала меньше 24 часов — отменить или перенести уже нельзя.
+                                    {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50%.' : ''}
+                                    {' '}Или напишите администратору.
+                                </div>
+                                {canReRent && (
                                     <ActionRow
                                         icon={<Users size={18} />}
                                         label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
@@ -428,160 +411,154 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         busy={busy === 'rerent'}
                                         onClick={doToggleReRent}
                                     />
+                                )}
+                                <ActionLink
+                                    href={ADMIN_TG_URL}
+                                    icon={<MessageCircle size={18} />}
+                                    label="Написать администратору"
+                                    sub="Telegram · @UnboxCenter"
+                                />
+                            </>
+                        )}
 
+                        {isLive && !isActive && !lateForClient && (
+                            <>
+                                <ActionRow
+                                    icon={<CalendarClock size={18} />}
+                                    label="Перенести"
+                                    sub="Выберите новое время в «Свободно»"
+                                    onClick={() => {
+                                        onClose();
+                                        navigate(`/m/find?reschedule=${booking.id}`);
+                                    }}
+                                />
+
+                                {canReRent && (
+                                    <ActionRow
+                                        icon={<Users size={18} />}
+                                        label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
+                                        sub={booking.isReRentListed
+                                            ? 'Бронь снова станет только вашей'
+                                            : 'Если её займут — вернём 50% на баланс'}
+                                        busy={busy === 'rerent'}
+                                        onClick={doToggleReRent}
+                                    />
+                                )}
+
+                                <ActionRow
+                                    danger
+                                    icon={<AlertTriangle size={18} />}
+                                    label="Отменить бронь"
+                                    sub={cancelHint}
+                                    onClick={() => setMode('confirmCancel')}
+                                />
+
+                                {(booking.duration ?? 60) >= 120 && !booking.isReRentListed && (
                                     <ActionRow
                                         danger
-                                        icon={<AlertTriangle size={18} />}
-                                        label="Отменить бронь"
-                                        sub={within24h ? 'Меньше 24 ч до начала — без возврата (можно пересдать)' : 'Бесплатно, оплата ещё не списана'}
-                                        onClick={() => setMode('confirmCancel')}
+                                        icon={<Scissors size={18} />}
+                                        label="Отменить часть"
+                                        sub="Убрать часть брони, остальное оставить"
+                                        onClick={() => setTrimming(true)}
                                     />
+                                )}
+                            </>
+                        )}
 
-                                    {(booking.duration ?? 60) >= 120 && !booking.isReRentListed && (
+                        {/* Repeat — works for past and future. Pre-fills the
+                            checkout with this booking's slot on the next
+                            same weekday. Второстепенное действие. */}
+                        <ActionRow
+                            primary={!!isPast}
+                            icon={<Repeat size={18} />}
+                            label="Повторить"
+                            sub={`${nextWeekdayPhrase(dt)} в ${booking.startTime}`}
+                            onClick={doRepeat}
+                        />
+
+                        {/* Series actions — only when this booking is part of a recurring series. */}
+                        {(booking as any).recurringGroupId && isLive && (
+                            <>
+                                <h3 style={{
+                                    margin: '6px 0 0',
+                                    fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
+                                    textTransform: 'uppercase', color: COLOR.ink60,
+                                }}>
+                                    Серия
+                                </h3>
+                                <ActionRow
+                                    icon={<Plus size={18} />}
+                                    label="Продлить серию"
+                                    sub="Добавить ещё брони в конец серии"
+                                    busy={busy === 'extend_series'}
+                                    onClick={openExtendSeries}
+                                />
+                                <ActionRow
+                                    icon={<BellOff size={18} />}
+                                    label="Пусть завершится в срок"
+                                    sub="Не присылать больше напоминаний"
+                                    busy={busy === 'dismiss_series_reminder'}
+                                    onClick={doDismissSeriesReminder}
+                                />
+                                {/* Серию с бронью меньше чем за сутки сервер клиенту не отменит. */}
+                                {!lateForClient && (
+                                    <>
                                         <ActionRow
                                             danger
                                             icon={<AlertTriangle size={18} />}
-                                            label="Отменить часть"
-                                            sub="Убрать часть брони, остальное оставить"
-                                            onClick={() => setTrimming(true)}
+                                            label="Отменить эту и следующие"
+                                            sub="Прошедшие брони серии не трогаем"
+                                            busy={busy === 'cancel_tail'}
+                                            onClick={() => doCancelSeries('tail')}
                                         />
-                                    )}
-                                </>
-                            )}
-
-                            {/* Series actions — only when this booking is part of a recurring series. */}
-                            {(booking as any).recurringGroupId && !isPast && booking.status !== 'cancelled' && (
-                                <>
-                                    <div style={{
-                                        marginTop: 6,
-                                        fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-                                        textTransform: 'uppercase', color: COLOR.ink60,
-                                    }}>
-                                        Управление серией
-                                    </div>
-                                    <ActionRow
-                                        icon={<Plus size={18} />}
-                                        label="Продлить серию"
-                                        sub="Добавить N сессий после последней"
-                                        busy={busy === 'extend_series'}
-                                        onClick={openExtendSeries}
-                                    />
-                                    <ActionRow
-                                        icon={<BellOff size={18} />}
-                                        label="ОК, завершится в срок"
-                                        sub="Не присылать больше напоминаний"
-                                        busy={busy === 'dismiss_series_reminder'}
-                                        onClick={doDismissSeriesReminder}
-                                    />
-                                    <ActionRow
-                                        danger
-                                        icon={<AlertTriangle size={18} />}
-                                        label="Отменить эту и последующие"
-                                        sub="Прошедшие сессии серии не трогаем"
-                                        busy={busy === 'cancel_tail'}
-                                        onClick={() => doCancelSeries('tail')}
-                                    />
-                                    <ActionRow
-                                        danger
-                                        icon={<AlertTriangle size={18} />}
-                                        label="Отменить всю серию"
-                                        sub="Все будущие сессии"
-                                        busy={busy === 'cancel_all_future'}
-                                        onClick={() => doCancelSeries('all_future')}
-                                    />
-                                </>
-                            )}
-                        </div>
-                    </>
-                ) : (
-                    /* Confirm cancel mode */
-                    <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-                                {within24h ? 'Отмена брони' : 'Точно отменить?'}
-                            </h3>
-                            <button
-                                onClick={() => setMode('view')}
-                                aria-label="Закрыть"
-                                style={closeBtn}
-                            >
-                                <X size={22} />
-                            </button>
-                        </div>
-                        <div style={{ fontSize: 14, color: COLOR.ink80 }}>
-                            {dt && formatDateLabel(dt, { capitalize: true })} в {booking.startTime} — {resource?.name}
-                        </div>
-                        {within24h ? (
-                            <>
-                                <div style={{ fontSize: 13, background: STATUS.danger.bg, color: STATUS.danger.fg, padding: 12, borderRadius: 10 }}>
-                                    Сумма не подлежит возврату — до брони осталось менее 24 часов.
-                                </div>
-                                <div style={{ fontSize: 13, color: COLOR.ink80, padding: '0 2px' }}>
-                                    Можно <b>пересдать кабинет</b> — если его займёт другой специалист, вернём <b>50% на баланс</b>.
-                                </div>
-                                <div style={{ fontSize: 12, color: COLOR.ink60, padding: '0 2px' }}>
-                                    Если ситуация форс-мажорная — напишите администратору.
-                                </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                    <Button
-                                        variant={booking.isReRentListed ? 'secondary' : 'primary'}
-                                        block
-                                        onClick={doToggleReRent}
-                                        disabled={busy !== null && busy !== 'rerent'}
-                                        loading={busy === 'rerent'}
-                                    >
-                                        {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
-                                    </Button>
-                                    <div style={{ display: 'flex', gap: 10 }}>
-                                        <Button
-                                            variant="secondary"
-                                            block
-                                            onClick={() => setMode('view')}
-                                            disabled={busy !== null}
-                                        >
-                                            Оставить
-                                        </Button>
-                                        <Button
-                                            variant="danger"
-                                            block
-                                            onClick={doCancel}
-                                            disabled={busy !== null && busy !== 'cancel'}
-                                            loading={busy === 'cancel'}
-                                        >
-                                            {busy === 'cancel' ? 'Отменяем…' : 'Всё равно отменить'}
-                                        </Button>
-                                    </div>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div style={{ fontSize: 13, color: COLOR.ink60 }}>
-                                    Оплата ещё не списана — отмена бесплатна.
-                                </div>
-                                <div style={{ display: 'flex', gap: 10 }}>
-                                    <Button
-                                        variant="secondary"
-                                        block
-                                        onClick={() => setMode('view')}
-                                        disabled={busy === 'cancel'}
-                                    >
-                                        Оставить
-                                    </Button>
-                                    <Button
-                                        variant="danger"
-                                        block
-                                        onClick={doCancel}
-                                        loading={busy === 'cancel'}
-                                    >
-                                        {busy === 'cancel' ? 'Отменяем…' : 'Отменить бронь'}
-                                    </Button>
-                                </div>
+                                        <ActionRow
+                                            danger
+                                            icon={<AlertTriangle size={18} />}
+                                            label="Отменить всю серию"
+                                            sub="Все будущие брони серии"
+                                            busy={busy === 'cancel_all_future'}
+                                            onClick={() => doCancelSeries('all_future')}
+                                        />
+                                    </>
+                                )}
                             </>
                         )}
-                    </>
-                )}
-            </div>
-        </div>
+                    </div>
+                </div>
+            ) : (
+                /* Confirm cancel mode */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ fontSize: TEXT.small, color: COLOR.ink80 }}>
+                        {dateTitle}, <span className="num">{dt ? bookingTimeRange(booking, dt) : booking.startTime}</span> — {place.title}
+                    </div>
+                    {within24h ? (
+                        // Сюда попадает только администратор: клиенту кнопку не показываем.
+                        <>
+                            <div style={{ fontSize: TEXT.small, background: STATUS.danger.bg, color: STATUS.danger.fg, padding: 12, borderRadius: 12 }}>
+                                До начала меньше 24 часов. Клиент сам такую бронь отменить не может — вы отменяете как администратор.
+                            </div>
+                            {canReRent && (
+                                <Button
+                                    variant="secondary"
+                                    block
+                                    onClick={doToggleReRent}
+                                    disabled={busy !== null && busy !== 'rerent'}
+                                    loading={busy === 'rerent'}
+                                >
+                                    {booking.isReRentListed ? 'Снять с пересдачи' : 'Лучше пересдать'}
+                                </Button>
+                            )}
+                        </>
+                    ) : (
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                            {booking.paymentStatus === 'paid'
+                                ? 'Отмена бесплатная — оплату вернём полностью.'
+                                : 'Оплата ещё не списана — отмена бесплатная.'}
+                        </div>
+                    )}
+                </div>
+            )}
+        </Sheet>
         <Sheet
             open={extendOpen}
             onClose={() => setExtendOpen(false)}
@@ -600,7 +577,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                 </>
             }
         >
-            <FormField label="Сколько сессий добавить" hint="От 1 до 52" error={extendError ?? undefined}>
+            <FormField label="Сколько броней добавить" hint="От 1 до 52" error={extendError ?? undefined}>
                 <Input
                     kind="integer"
                     value={extendCount}
@@ -636,12 +613,14 @@ function ClientPickRow({ active, disabled, onClick, title, sub }: {
         <button
             onClick={onClick}
             disabled={disabled}
+            aria-pressed={active}
             style={{
                 width: '100%',
-                background: active ? COLOR.ink : COLOR.card,
-                color: active ? COLOR.onInk : COLOR.ink,
-                border: active ? 'none' : `1px solid ${COLOR.ink10}`,
-                borderRadius: 10,
+                minHeight: 48,
+                background: active ? COLOR.accentSoft : COLOR.card,
+                color: COLOR.ink,
+                border: `1px solid ${active ? COLOR.accent : COLOR.ink10}`,
+                borderRadius: RADIUS.control,
                 padding: '10px 12px',
                 display: 'flex',
                 alignItems: 'center',
@@ -653,8 +632,8 @@ function ClientPickRow({ active, disabled, onClick, title, sub }: {
             }}
         >
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
-                {sub && <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, opacity: active ? 0.8 : 1, marginTop: 1 }}>{sub}</div>}
+                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{title}</div>
+                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 1 }}>{sub}</div>}
             </div>
         </button>
     );
@@ -669,74 +648,87 @@ function Field({ icon, label, subtle, children }: {
     return (
         <div style={{
             background: subtle ? 'transparent' : COLOR.sunken,
-            borderRadius: 10,
+            borderRadius: 12,
             padding: subtle ? '4px 0' : 12,
         }}>
             <div style={{
-                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
                 textTransform: 'uppercase', color: COLOR.ink60,
                 display: 'flex', alignItems: 'center', gap: 6,
                 marginBottom: 4,
             }}>
                 {icon} {label}
             </div>
-            <div style={{ fontSize: 14, color: COLOR.ink }}>
+            <div style={{ fontSize: TEXT.small, color: COLOR.ink }}>
                 {children}
             </div>
         </div>
     );
 }
 
-function ActionRow({ icon, label, sub, primary, danger, external, busy, onClick }: {
+const actionRowStyle = (primary?: boolean, danger?: boolean): React.CSSProperties => ({
+    background: primary ? COLOR.ink : danger ? STATUS.danger.bg : COLOR.card,
+    color: primary ? COLOR.onInk : danger ? STATUS.danger.fg : COLOR.ink,
+    border: primary ? 'none' : `1px solid ${danger ? `${STATUS.danger.fg}33` : COLOR.ink10}`,
+    borderRadius: 12,
+    minHeight: 56,
+    padding: '10px 14px',
+    display: 'flex', alignItems: 'center', gap: 12,
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    textDecoration: 'none',
+});
+
+function ActionRow({ icon, label, sub, primary, danger, busy, onClick }: {
     icon: React.ReactNode;
     label: string;
     sub?: string;
     primary?: boolean;
     danger?: boolean;
-    external?: boolean;
     busy?: boolean;
     onClick: () => void;
 }) {
-    const bg = primary ? COLOR.ink : danger ? STATUS.danger.bg : COLOR.card;
-    const fg = primary ? COLOR.onInk : danger ? STATUS.danger.fg : COLOR.ink;
-    const border = primary ? 'none' : `1px solid ${danger ? `${STATUS.danger.fg}33` : COLOR.ink10}`;
     // Подпись без прозрачности: на красном фоне opacity .7 давала 3.2:1.
     const subColor = primary ? COLOR.onInk : danger ? STATUS.danger.fg : COLOR.ink60;
-
     return (
         <button
             onClick={onClick}
             disabled={busy}
-            style={{
-                background: bg, color: fg, border,
-                borderRadius: 12,
-                padding: '12px 14px',
-                display: 'flex', alignItems: 'center', gap: 12,
-                cursor: busy ? 'wait' : 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                opacity: busy ? 0.7 : 1,
-            }}
+            className="press"
+            style={{ ...actionRowStyle(primary, danger), cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}
         >
-            <span>{icon}</span>
+            <span aria-hidden="true">{icon}</span>
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{busy ? 'Секунду…' : label}</div>
-                {sub && <div style={{ fontSize: 12, color: subColor, opacity: primary ? 0.8 : 1, marginTop: 2 }}>{sub}</div>}
+                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{busy ? 'Секунду…' : label}</div>
+                {sub && <div style={{ fontSize: TEXT.caption, color: subColor, marginTop: 2 }}>{sub}</div>}
             </div>
-            {external && <ArrowUpRight size={16} aria-hidden="true" style={{ opacity: 0.7 }} />}
         </button>
     );
 }
 
-/** Статус оплаты — слова и цвета только из общего словаря (statuses.ts). */
+function ActionLink({ href, icon, label, sub }: { href: string; icon: React.ReactNode; label: string; sub?: string }) {
+    return (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="press" style={actionRowStyle()}>
+            <span aria-hidden="true">{icon}</span>
+            <div style={{ flex: 1 }}>
+                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{label}</div>
+                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
+            </div>
+            <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
+        </a>
+    );
+}
+
+/** Статус оплаты — слова и цвета только из общего словаря (statuses.ts).
+ *  «Ждёт списания» у будущей брони — обычное состояние: вместо янтарного
+ *  бейджа нейтральная строка «Спишем …» в блоке оплаты (G4-08). */
 function PaymentBadge({ status }: { status?: 'pending' | 'paid' | 'waived' | null }) {
-    if (!status) return null;
+    if (!status || status === 'pending') return null;
     return <StatusBadge kind="payment" status={status} />;
 }
 
-function Tag({ children, tone }: { children: React.ReactNode; tone: 'warn' | 'muted' | 'active' }) {
+function Tag({ children, tone }: { children: React.ReactNode; tone: 'muted' | 'active' }) {
     const colors: Record<string, { bg: string; fg: string }> = {
-        warn: { bg: STATUS.pending.bg, fg: STATUS.pending.fg },
         muted: { bg: STATUS.muted.bg, fg: STATUS.muted.fg },
         active: { bg: COLOR.ink, fg: COLOR.onInk },
     };
@@ -744,34 +736,19 @@ function Tag({ children, tone }: { children: React.ReactNode; tone: 'warn' | 'mu
     return (
         <span style={{
             background: c.bg, color: c.fg,
-            fontSize: 12, fontWeight: 600,
-            padding: '3px 8px', borderRadius: 999,
+            fontSize: TEXT.caption, fontWeight: 600,
+            minHeight: 24, padding: '0 8px', borderRadius: RADIUS.control,
+            display: 'inline-flex', alignItems: 'center',
             whiteSpace: 'nowrap',
         }}>{children}</span>
     );
 }
 
-/** Крестик 44×44 — цель касания; видимый значок прежний. */
-const closeBtn: React.CSSProperties = {
-    background: 'none', border: 'none', cursor: 'pointer', color: COLOR.ink60,
-    width: 44, height: 44, margin: -10, padding: 0, flexShrink: 0,
-    display: 'grid', placeItems: 'center',
+const inlineLink: React.CSSProperties = {
+    background: 'none', border: 'none', padding: 0,
+    color: COLOR.accentInk, fontWeight: 600, fontSize: 'inherit', fontFamily: 'inherit',
+    textDecoration: 'underline', cursor: 'pointer',
 };
-
-function bookingStartDate(b: BookingHistoryItem): Date | null {
-    try {
-        const d = b.date instanceof Date ? b.date : new Date(b.date as any);
-        if (isNaN(d.getTime()) || !b.startTime) return null;
-        const [h, m] = b.startTime.split(':').map(Number);
-        const out = new Date(d);
-        out.setHours(h, m, 0, 0);
-        return out;
-    } catch { return null; }
-}
-
-function formatHHMM(d: Date) {
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
 
 /** «В следующий вторник» / «В следующую среду» / «В следующее воскресенье».
  *  Раньше писали «На следующий среда» — без падежа и рода. */
@@ -789,5 +766,3 @@ function formatLabel(f: string | undefined): string {
     if (f === 'intervision') return 'Интервизия';
     return 'Индивидуальный';
 }
-
-/** "T-24h" — booking start minus 24 hours, formatted human-readably. */

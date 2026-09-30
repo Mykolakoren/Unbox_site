@@ -183,18 +183,26 @@ def test_waitlist_error_is_not_empty():
 
 def test_post_list_header_fits_narrow_screen():
     """Ревью 30.09: на 375–390 px подпись раздела в шапке /news и /articles
-    слипалась со ссылкой меню («новостиНОВОСТИ»). На узком экране подпись
-    прячется, меню переносится, ссылки — 44 px в высоту."""
+    слипалась со ссылкой меню («новостиНОВОСТИ»). Суть: на телефоне у логотипа
+    нет подписи раздела, меню не вылезает за экран, ссылки — 44 px.
+
+    Волна 2 (пакет C): своя шапка ленты заменена общей PublicHeader — на узком
+    экране она сама сворачивает меню в «Меню» (Sheet, строки 44 px) и не
+    рисует подписи раздела у логотипа. Поэтому проверяем: своей <header>
+    больше нет, шапка — PublicHeader, подпись {copy.label} не стоит рядом
+    с логотипом, строка разделов переносится и её ссылки — 44 px."""
     src = (ROOT / "src/pages/content/PostListPage.tsx").read_text(encoding="utf-8")
-    i, j = src.find("<header"), src.find("</header>")
-    assert i != -1 and j > i, "PostListPage: шапка не найдена"
+    assert "<PublicHeader" in src, "PostListPage: шапка не общая (PublicHeader)"
+    assert "<header" not in src, "PostListPage: снова своя шапка вместо PublicHeader"
+    i = src.find("<PublicHeader")
+    j = src.find("/>\n", i)
     header = src[i:j]
-    assert re.search(r"useState\(\(\) => typeof window !== 'undefined' && window\.innerWidth < \d+\)", src), \
-        "PostListPage: нет признака узкого экрана (narrow)"
-    assert re.search(r"\{!narrow && <span[^>]*>\{copy\.label\}</span>\}", header), \
-        "PostListPage: подпись раздела снова видна на телефоне рядом со ссылкой меню"
-    assert header.count("flexWrap: 'wrap'") >= 2, "PostListPage: шапка/меню не переносятся на узком экране"
-    assert "minHeight: 44" in src, "PostListPage: ссылки меню на телефоне ниже 44 px"
+    assert "{copy.label}" not in header, "PostListPage: подпись раздела снова в шапке рядом с меню"
+    assert "flexWrap: 'wrap'" in header, "PostListPage: строка разделов не переносится на узком экране"
+    assert "minHeight: 44" in src, "PostListPage: ссылки разделов на телефоне ниже 44 px"
+    ph = (ROOT / "src/components/public/PublicHeader.tsx").read_text(encoding="utf-8")
+    assert "minHeight: 44" in ph and ">\n                        Меню\n" in ph, \
+        "PublicHeader: на телефоне нет кнопки «Меню» или строки меню ниже 44 px"
 
 
 def _data_cabinets():

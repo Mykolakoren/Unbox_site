@@ -1,33 +1,53 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { getMyBookingsPath } from '../utils/userPaths';
-import { Bell, MapPin, Clock, Trash2, CheckCircle2, X, Calendar as CalendarIcon } from 'lucide-react';
+import { Bell, Clock, Trash2, CheckCircle2, X, Calendar as CalendarIcon } from 'lucide-react';
 import { parseISO } from 'date-fns';
-import { toast } from 'sonner';
 import { waitlistApi } from '../api/waitlist';
 import { RESOURCES, LOCATIONS } from '../utils/data';
 import type { WaitlistEntry } from '../store/types';
-import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
-import { COLOR, STATUS } from '../design/tokens';
+import { COLOR, RADIUS, STATUS, TEXT } from '../design/tokens';
 import { formatDateLabel, formatTimeRange } from '../utils/format';
+import { toastApiError } from '../utils/errors';
+import { useInMobileShell } from '../utils/catalogPath';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorBar } from '../components/ui/ErrorBar';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Button } from '../components/ui/Button';
+import { MobilePageHeader } from '../components/ui/PageHeader';
+import { undoToast } from '../components/ui/undoToast';
 
 // Цвета — статус-токены: «ждём» янтарный, «освободилось» зелёный, «отменена» серый.
 const STATUS_META: Record<WaitlistEntry['status'], { label: string; bg: string; fg: string }> = {
-    active:    { label: 'Активна',      bg: STATUS.pending.bg, fg: STATUS.pending.fg },
+    active:    { label: 'Ждём',         bg: STATUS.pending.bg, fg: STATUS.pending.fg },
     fulfilled: { label: 'Освободилось', bg: STATUS.ok.bg,      fg: STATUS.ok.fg },
     cancelled: { label: 'Отменена',     bg: STATUS.muted.bg,   fg: STATUS.muted.fg },
 };
 
+/** Сколько ждать «Вернуть», прежде чем удалить подписку на сервере. */
+const UNDO_MS = 5000;
+
+/**
+ * «Слежу за слотами» — /dashboard/waitlist, /crm/waitlist, /admin/my-waitlist
+ * и /m/waitlist (внутри мобильного приложения).
+ *
+ * Волна 2 (G3-19): удаление — сразу из списка и 5 секунд на «Вернуть»; на
+ * сервер запрос уходит, только если не вернули (восстановить подписку сервер
+ * не умеет, поэтому ждём). Заголовок строки — «Любой кабинет в Unbox One»:
+ * сервер сообщает об освобождении любого кабинета центра (waitlist_notify),
+ * ниже мелко — какой кабинет человек смотрел.
+ */
 export function MyWaitlistPage() {
+    const inShell = useInMobileShell();
+    const navigate = useNavigate();
     const [entries, setEntries] = useState<WaitlistEntry[]>([]);
     const [loading, setLoading] = useState(true);
     // Ошибка загрузки ≠ «подписок нет»: без этого флага сбой сети
     // показывал «Подписок пока нет».
     const [loadError, setLoadError] = useState(false);
-    const [removingId, setRemovingId] = useState<string | null>(null);
+    // Подписки, удаление которых ещё можно отменить: id → таймер.
+    const pendingRemovals = useRef(new Map<string, number>());
 
     const load = async () => {
         setLoading(true);
@@ -41,7 +61,7 @@ export function MyWaitlistPage() {
                 if (so !== 0) return so;
                 return (b.createdAt || '').localeCompare(a.createdAt || '');
             });
-            setEntries(list);
+            setEntries(list.filter(e => !pendingRemovals.current.has(e.id)));
         } catch {
             setLoadError(true);
         } finally {
@@ -51,17 +71,46 @@ export function MyWaitlistPage() {
 
     useEffect(() => { load(); }, []);
 
-    const remove = async (id: string) => {
-        setRemovingId(id);
-        try {
-            await waitlistApi.removeFromWaitlist(id);
-            setEntries(prev => prev.filter(e => e.id !== id));
-            toast.success('Подписка отменена');
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отменить');
-        } finally {
-            setRemovingId(null);
-        }
+    // Ушли со страницы — удаления, которые не вернули, отправляем сразу.
+    useEffect(() => {
+        const pending = pendingRemovals.current;
+        return () => {
+            pending.forEach((timer, id) => {
+                window.clearTimeout(timer);
+                waitlistApi.removeFromWaitlist(id).catch(() => {});
+            });
+            pending.clear();
+        };
+    }, []);
+
+    const remove = (entry: WaitlistEntry) => {
+        const index = entries.findIndex(e => e.id === entry.id);
+        setEntries(prev => prev.filter(e => e.id !== entry.id));
+        const timer = window.setTimeout(async () => {
+            pendingRemovals.current.delete(entry.id);
+            try {
+                await waitlistApi.removeFromWaitlist(entry.id);
+            } catch (e) {
+                // Не удалилось — возвращаем строку на место и говорим об этом.
+                setEntries(prev => {
+                    const next = [...prev];
+                    next.splice(Math.min(index, next.length), 0, entry);
+                    return next;
+                });
+                toastApiError(e, 'Не удалось отменить подписку');
+            }
+        }, UNDO_MS);
+        pendingRemovals.current.set(entry.id, timer);
+        undoToast('Больше не следим за этим временем', () => {
+            window.clearTimeout(timer);
+            pendingRemovals.current.delete(entry.id);
+            setEntries(prev => {
+                if (prev.some(e => e.id === entry.id)) return prev;
+                const next = [...prev];
+                next.splice(Math.min(index, next.length), 0, entry);
+                return next;
+            });
+        }, UNDO_MS);
     };
 
     const stats = useMemo(() => ({
@@ -70,29 +119,28 @@ export function MyWaitlistPage() {
         cancelled: entries.filter(e => e.status === 'cancelled').length,
     }), [entries]);
 
+    // Куда вести «найти время»: в приложении — «Свободно», на компьютере — шахматка.
+    const findPath = inShell ? '/m/find' : getMyBookingsPath(useUserStore.getState().currentUser);
+
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, paddingBottom: 80 }}>
-            <div style={{ padding: '24px 16px 0' }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
-                    МОИ ПОДПИСКИ НА СЛОТЫ
-                </div>
-                <div className="flex items-start justify-between gap-3 mb-4">
-                    <div>
-                        <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
-                            Слежу за слотами
-                        </h1>
-                        <p className="text-sm text-ink-60 mt-1">
-                            Уведомим в Telegram и в кабинете, когда любой кабинет в выбранном филиале освободится в это время.
-                        </p>
-                    </div>
-                </div>
+        <div style={{ color: COLOR.ink, paddingBottom: 80 }}>
+            {inShell && <MobilePageHeader title="Слежу за слотами" fallbackTo="/m/me" />}
+            <div style={{ padding: inShell ? '8px 16px 0' : '24px 16px 0' }}>
+                {!inShell && (
+                    <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: '0 0 4px' }}>
+                        Слежу за слотами
+                    </h1>
+                )}
+                <p style={{ fontSize: TEXT.small, color: COLOR.ink60, margin: '0 0 16px', lineHeight: 1.5 }}>
+                    Напишем в Telegram и в уведомлениях, когда в этом центре освободится любой кабинет в выбранное время.
+                </p>
 
                 {/* Счётчики — только после ответа сервера, не «0 активных» во время загрузки. */}
-                {!loading && !loadError && (
-                    <div className="flex gap-3 mb-5 text-sm" style={{ fontFamily: GH_MONO }}>
-                        <span style={{ color: GH.ink60 }}>{stats.active} активных</span>
-                        <span style={{ color: GH.ink60 }}>{stats.fulfilled} сработали</span>
-                        {stats.cancelled > 0 && <span style={{ color: GH.ink60 }}>{stats.cancelled} отменены</span>}
+                {!loading && !loadError && entries.length > 0 && (
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 16, fontSize: TEXT.small, color: COLOR.ink60 }}>
+                        <span>Ждём: <span className="num">{stats.active}</span></span>
+                        <span>Освободилось: <span className="num">{stats.fulfilled}</span></span>
+                        {stats.cancelled > 0 && <span>Отменены: <span className="num">{stats.cancelled}</span></span>}
                     </div>
                 )}
 
@@ -101,16 +149,18 @@ export function MyWaitlistPage() {
                 ) : loadError ? (
                     <ErrorBar message="Не удалось загрузить подписки" onRetry={load} />
                 ) : entries.length === 0 ? (
-                    <EmptyState />
+                    <EmptyState
+                        icon={<Bell size={28} />}
+                        title="Вы пока ни за чем не следите"
+                        hint={inShell
+                            ? 'Если нужное время занято, в «Свободно» нажмите «Сообщить, когда освободится».'
+                            : 'Откройте шахматку и нажмите на занятое время — мы сообщим, когда в этом центре что-то освободится.'}
+                        action={{ label: inShell ? 'Найти время' : 'Открыть шахматку', onClick: () => navigate(findPath) }}
+                    />
                 ) : (
-                    <ul className="space-y-2">
+                    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {entries.map(e => (
-                            <EntryCard
-                                key={e.id}
-                                entry={e}
-                                onRemove={remove}
-                                removing={removingId === e.id}
-                            />
+                            <EntryCard key={e.id} entry={e} inShell={inShell} onRemove={remove} />
                         ))}
                     </ul>
                 )}
@@ -119,33 +169,10 @@ export function MyWaitlistPage() {
     );
 }
 
-function EmptyState() {
-    return (
-        <div
-            className="rounded-2xl border border-dashed flex flex-col items-center text-center px-6 py-10"
-            style={{ borderColor: GH.ink10, background: GH.ink5 }}
-        >
-            <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: COLOR.sunken, color: COLOR.ink60 }}>
-                <Bell size={22} />
-            </div>
-            <h3 className="text-base font-bold text-unbox-dark mb-1">Подписок пока нет</h3>
-            <p className="text-sm text-ink-60 mb-4 max-w-sm">
-                Откройте шахматку и нажмите на занятый слот — мы пришлём уведомление, как только время в этом филиале освободится.
-            </p>
-            <Link
-                to={getMyBookingsPath(useUserStore.getState().currentUser)}
-                className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-unbox-green text-white"
-            >
-                <CalendarIcon size={14} /> Открыть шахматку
-            </Link>
-        </div>
-    );
-}
-
-function EntryCard({ entry, onRemove, removing }: {
+function EntryCard({ entry, inShell, onRemove }: {
     entry: WaitlistEntry;
-    onRemove: (id: string) => void;
-    removing: boolean;
+    inShell: boolean;
+    onRemove: (entry: WaitlistEntry) => void;
 }) {
     const navigate = useNavigate();
     const resource = RESOURCES.find(r => r.id === entry.resourceId);
@@ -162,7 +189,12 @@ function EntryCard({ entry, onRemove, removing }: {
         dateObj = null;
     }
 
-    const goToChess = () => {
+    const goToBook = () => {
+        if (inShell) {
+            // В приложении — «Свободно» на этот день.
+            navigate(`/m/find?date=${encodeURIComponent(entry.date)}`);
+            return;
+        }
         // Drop the user straight on the chessboard at the right date with the
         // location pre-filtered. Avoids the "now hunt for the cabinet" step
         // admin flagged after slot-freed alerts. focusResourceId lets the page
@@ -176,75 +208,69 @@ function EntryCard({ entry, onRemove, removing }: {
         });
     };
 
+    const title = location ? `Любой кабинет в ${location.name}` : (resource?.name || entry.resourceId);
+    const Icon = entry.status === 'fulfilled' ? CheckCircle2 : entry.status === 'cancelled' ? X : Bell;
+
     return (
-        <li
-            className="rounded-xl border bg-white p-3 sm:p-4"
-            style={{ borderColor: GH.ink10, opacity: entry.status === 'cancelled' ? 0.6 : 1 }}
-        >
-            <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-                    style={{ background: meta.bg, color: meta.fg }}
-                >
-                    {entry.status === 'fulfilled'
-                        ? <CheckCircle2 size={20} />
-                        : entry.status === 'cancelled'
-                            ? <X size={20} />
-                            : <Bell size={20} />}
+        <li style={{
+            background: COLOR.card,
+            border: `1px solid ${COLOR.ink10}`,
+            borderRadius: RADIUS.sheet,
+            padding: 16,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div aria-hidden="true" style={{
+                    width: 40, height: 40, borderRadius: 999, flexShrink: 0,
+                    display: 'grid', placeItems: 'center',
+                    background: meta.bg, color: meta.fg,
+                }}>
+                    <Icon size={20} />
                 </div>
 
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-unbox-dark text-[15px] truncate">
-                            {resource?.name || entry.resourceId}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: TEXT.body, fontWeight: 600, color: entry.status === 'cancelled' ? COLOR.ink60 : COLOR.ink }}>
+                            {title}
                         </span>
-                        <span
-                            className="text-caption uppercase font-bold tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap"
-                            style={{ background: meta.bg, color: meta.fg }}
-                        >
-                            {meta.label}
-                        </span>
+                        <span className="ui-badge" style={{ background: meta.bg, color: meta.fg }}>{meta.label}</span>
                     </div>
-                    {location && (
-                        <div className="flex items-center gap-1 text-xs text-ink-60 mt-0.5">
-                            <MapPin size={12} className="shrink-0" />
-                            <span className="truncate">{location.name}</span>
-                        </div>
-                    )}
-                    <div className="flex items-center gap-1 text-sm text-unbox-dark mt-2">
-                        <Clock size={14} className="shrink-0 text-ink-60" />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: TEXT.small, marginTop: 6 }}>
+                        <Clock size={14} aria-hidden="true" color={COLOR.ink60} style={{ flexShrink: 0 }} />
                         <span>{dayLabel}</span>
-                        <span className="text-ink-60" aria-hidden="true">·</span>
-                        <span className="font-semibold tabular-nums">
+                        <span aria-hidden="true" style={{ color: COLOR.ink60 }}>·</span>
+                        <span className="num" style={{ fontWeight: 600 }}>
                             {formatTimeRange(entry.startTime, entry.endTime)}
                         </span>
                     </div>
+                    {location && resource && (
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
+                            Вы смотрели {resource.name}
+                        </div>
+                    )}
                 </div>
 
                 {entry.status === 'active' && (
                     <button
-                        onClick={() => onRemove(entry.id)}
-                        disabled={removing}
-                        title="Отменить подписку"
-                        aria-label={`Перестать следить: ${resource?.name || entry.resourceId}, ${dayLabel}`}
-                        className="w-11 h-11 -m-2 inline-flex items-center justify-center text-ink-60 hover:text-[var(--status-danger-fg)] disabled:opacity-50 transition-colors shrink-0"
+                        type="button"
+                        onClick={() => onRemove(entry)}
+                        aria-label={`Перестать следить: ${title}, ${dayLabel}, ${formatTimeRange(entry.startTime, entry.endTime)}`}
+                        style={{
+                            width: 44, height: 44, margin: -8, flexShrink: 0,
+                            display: 'grid', placeItems: 'center',
+                            background: 'transparent', border: 'none', cursor: 'pointer', color: COLOR.ink60,
+                        }}
                     >
-                        <Trash2 size={18} />
+                        <Trash2 size={18} aria-hidden="true" />
                     </button>
                 )}
             </div>
 
-            {/* "Забронировать" — only on fulfilled rows. The slot has freed up
-                somewhere in the same branch; sending the user to /dashboard/bookings
-                with date + resource pre-filtered saves the manual hunt. */}
+            {/* «Забронировать» — только у сработавших: время освободилось. */}
             {entry.status === 'fulfilled' && (
-                <div className="mt-3 pt-3 border-t" style={{ borderColor: GH.ink10 }}>
-                    <button
-                        onClick={goToChess}
-                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold"
-                        style={{ background: GH.ink, color: GH.paper }}
-                    >
-                        <CalendarIcon size={14} /> Забронировать
-                    </button>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLOR.ink10}` }}>
+                    <Button block icon={<CalendarIcon size={16} aria-hidden="true" />} onClick={goToBook}>
+                        Забронировать
+                    </Button>
                 </div>
             )}
         </li>

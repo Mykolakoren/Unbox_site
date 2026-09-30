@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { COLOR } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { postsApi, type Post, type PostType } from '../../api/posts';
+import { PublicHeader } from '../../components/public/PublicHeader';
+import { Button } from '../../components/ui/Button';
+import { usePostsAvailability } from './usePostsAvailability';
 
 /**
  * PostListPage — публичная лента новостей или статей (один компонент,
@@ -51,18 +54,12 @@ export function PostListPage({ type }: { type: PostType }) {
             .finally(() => setLoading(false));
     };
 
-    // Узкий экран (телефон): подпись раздела в шапке прячем — она дублирует
-    // активную ссылку меню и слипалась с ней («новостиНОВОСТИ»); меню
-    // переносится на вторую строку, ссылки — по 44 px в высоту.
-    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
-    useEffect(() => {
-        const h = () => setNarrow(window.innerWidth < 640);
-        window.addEventListener('resize', h);
-        return () => window.removeEventListener('resize', h);
-    }, []);
-    const navLink: React.CSSProperties = {
-        ...ghMono, textDecoration: 'none',
-        ...(narrow ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
+    const navigate = useNavigate();
+    // Соседний раздел в строке под шапкой — только если там есть публикации
+    // (G1-20). Текущий раздел виден всегда: сюда могли прийти по ссылке.
+    const available = usePostsAvailability();
+    const subLink: React.CSSProperties = {
+        ...ghMono, textDecoration: 'none', minHeight: 44, display: 'inline-flex', alignItems: 'center', padding: '0 8px',
     };
 
     useEffect(() => {
@@ -73,29 +70,29 @@ export function PostListPage({ type }: { type: PostType }) {
 
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, fontFamily: GH_SANS, color: GH.ink, overflowX: 'hidden' }}>
-            {/* Masthead */}
-            <header style={{ borderBottom: `1px solid ${GH.ink10}`, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
-                <div style={{ maxWidth: 1100, margin: '0 auto', padding: narrow ? '8px 16px' : '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
-                        <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
-                        {!narrow && <span style={{ ...ghMono, color: GH.label, fontSize: 12 }}>{copy.label}</span>}
-                    </div>
-                    <nav style={{ display: 'flex', alignItems: 'center', gap: narrow ? 12 : 16, flexWrap: 'wrap' }}>
-                        <Link to="/news" aria-current={type === 'news' ? 'page' : undefined} style={{ ...navLink, color: type === 'news' ? GH.ink : GH.label }}>Новости</Link>
-                        <Link to="/articles" aria-current={type === 'article' ? 'page' : undefined} style={{ ...navLink, color: type === 'article' ? GH.ink : GH.label }}>Статьи</Link>
-                        <Link to="/specialists" style={{ ...navLink, color: GH.label }}>Специалисты</Link>
+            {/* G1-20 / G1-21: общая шапка сайта (на телефоне «Меню»), разделы —
+                второй строкой, ссылки по 44 px. Метку «НОВОСТИ» у логотипа убрали:
+                на телефоне слово повторялось трижды. */}
+            <PublicHeader
+                subnav={
+                    <nav aria-label="Публикации" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {(type === 'news' || available.news) && (
+                            <Link to="/news" aria-current={type === 'news' ? 'page' : undefined} style={{ ...subLink, color: type === 'news' ? GH.ink : GH.ink60 }}>Новости</Link>
+                        )}
+                        {(type === 'article' || available.article) && (
+                            <Link to="/articles" aria-current={type === 'article' ? 'page' : undefined} style={{ ...subLink, color: type === 'article' ? GH.ink : GH.ink60 }}>Статьи</Link>
+                        )}
                     </nav>
-                </div>
-            </header>
+                }
+            />
 
             <div style={{ maxWidth: 1100, margin: '0 auto', padding: '48px clamp(16px, 4vw, 24px) 80px' }}>
                 {/* Header */}
                 <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
-                    <div style={{ ...ghMono, color: GH.label, marginBottom: 8 }}>{copy.label}</div>
-                    <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
+                    <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
                         {copy.title}
                     </h1>
-                    <p style={{ fontSize: 15, color: GH.ink60, maxWidth: 560, margin: 0 }}>{copy.sub}</p>
+                    <p style={{ fontSize: 16, color: GH.ink60, maxWidth: 560, margin: 0 }}>{copy.sub}</p>
                 </div>
 
                 {loading ? (
@@ -106,7 +103,16 @@ export function PostListPage({ type }: { type: PostType }) {
                 ) : error ? (
                     <ErrorBar message={error} onRetry={load} />
                 ) : posts.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink60, fontSize: 14 }}>{copy.empty}</div>
+                    // G1-20: пустое состояние — читаемым цветом и с тем, куда пойти дальше.
+                    <div style={{ textAlign: 'center', padding: '60px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                        <p style={{ margin: 0, color: GH.ink60, fontSize: 16, lineHeight: 1.5 }}>{copy.empty}</p>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <a className="ui-btn ui-btn--secondary" href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                                Анонсы — в нашем Telegram →
+                            </a>
+                            <Button variant="quiet" onClick={() => navigate('/specialists')}>Смотреть специалистов</Button>
+                        </div>
+                    </div>
                 ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 24 }}>
                         {posts.map(p => (
@@ -129,7 +135,7 @@ export function PostListPage({ type }: { type: PostType }) {
                                         {safeDate(p.publishedAt || p.createdAt)}
                                         {type === 'article' && p.authorName ? ` · ${p.authorName}` : ''}
                                     </div>
-                                    <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.25 }}>{p.title}</div>
+                                    <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.25 }}>{p.title}</div>
                                     {p.excerpt && (
                                         <div style={{ fontSize: 14, color: GH.ink60, lineHeight: 1.5 }}>{p.excerpt}</div>
                                     )}

@@ -3,6 +3,7 @@ import { ArrowRight, ClipboardCheck, Clock } from 'lucide-react';
 import { GH, GH_MONO, GH_SANS } from '../hooks/useDesignFlag';
 import { COLOR, STATUS } from '../design/tokens';
 import type { SpecialistApplicationStatus } from '../hooks/useSpecialistApplication';
+import { catalogPath, useInMobileShell } from '../utils/catalogPath';
 
 /**
  * Карточка «сначала анкета специалиста» для тех, кому сервер не даёт
@@ -11,6 +12,10 @@ import type { SpecialistApplicationStatus } from '../hooks/useSpecialistApplicat
  *
  * Два варианта текста (в /m — «здесь откроется»), оба на «вы» — решение
  * владельца 30.09: обращение на «вы» везде, включая /m.
+ *
+ * Волна 2 (E): внутри /m карточка ведёт на /m/become-specialist — анкета
+ * открывается в мобильной оболочке с нижним меню, а не компьютерной
+ * страницей. Срок проверки — решение владельца: «1 рабочий день».
  */
 
 export const SPECIALIST_APPLICATION_PATH = '/become-specialist';
@@ -21,12 +26,12 @@ type Copy = { title: string; text: string; cta: string };
 const MOBILE_COPY: Record<SpecialistApplicationStatus, Copy> = {
     none: {
         title: 'Чтобы бронировать кабинеты, заполните анкету специалиста',
-        text: 'Админ проверит анкету — после этого здесь откроется бронирование.',
+        text: 'Администратор проверит анкету за 1 рабочий день — после этого здесь откроется бронирование.',
         cta: 'Заполнить анкету',
     },
     pending: {
         title: 'Анкета на проверке',
-        text: 'Как только админ её одобрит, здесь откроется бронирование.',
+        text: 'Проверим её за 1 рабочий день. Как только одобрим, здесь откроется бронирование.',
         cta: 'Посмотреть анкету',
     },
     rejected: {
@@ -44,12 +49,12 @@ const MOBILE_COPY: Record<SpecialistApplicationStatus, Copy> = {
 const DESKTOP_COPY: Record<SpecialistApplicationStatus, Copy> = {
     none: {
         title: 'Чтобы бронировать кабинеты, заполните анкету специалиста',
-        text: 'Админ проверит анкету — после этого откроется бронирование.',
+        text: 'Администратор проверит анкету за 1 рабочий день — после этого откроется бронирование.',
         cta: 'Заполнить анкету',
     },
     pending: {
         title: 'Анкета на проверке',
-        text: 'Как только админ её одобрит, откроется бронирование.',
+        text: 'Проверим её за 1 рабочий день. Как только одобрим, откроется бронирование.',
         cta: 'Посмотреть анкету',
     },
     rejected: {
@@ -69,6 +74,7 @@ export function SpecialistGateCard({ variant, status }: {
     status: SpecialistApplicationStatus;
 }) {
     const navigate = useNavigate();
+    const inShell = useInMobileShell();
     const copy = (variant === 'mobile' ? MOBILE_COPY : DESKTOP_COPY)[status];
     const waiting = status === 'pending' || status === 'approved';
     const onCta = () => {
@@ -76,7 +82,8 @@ export function SpecialistGateCard({ variant, status }: {
             window.open(ADMIN_TG_URL, '_blank', 'noopener,noreferrer');
             return;
         }
-        navigate(SPECIALIST_APPLICATION_PATH);
+        // В /m — мобильный двойник анкеты, на компьютере — /become-specialist.
+        navigate(catalogPath(SPECIALIST_APPLICATION_PATH, inShell));
     };
     const Icon = waiting ? Clock : ClipboardCheck;
 
@@ -87,8 +94,9 @@ export function SpecialistGateCard({ variant, status }: {
                 style={{
                     background: waiting ? STATUS.pending.bg : COLOR.sunken,
                     // Рамка «ждём» — янтарём на 35 % (0x59): цветом фона её не было видно.
-                    border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : COLOR.ink08}`,
-                    borderRadius: 14,
+                    // Серая — ink-20: ink-08 на сером фоне карточки сливалась с экраном.
+                    border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : COLOR.ink20}`,
+                    borderRadius: 16,
                     padding: 16,
                     display: 'flex',
                     flexDirection: 'column',
@@ -107,14 +115,16 @@ export function SpecialistGateCard({ variant, status }: {
                     </div>
                 </div>
                 <button
+                    type="button"
                     onClick={onCta}
                     className="press"
                     style={{
                         width: '100%',
+                        minHeight: 44,
                         background: waiting ? COLOR.card : COLOR.ink,
                         color: waiting ? COLOR.ink : COLOR.onInk,
                         border: waiting ? `1px solid ${COLOR.ink}` : 'none',
-                        borderRadius: 12,
+                        borderRadius: 8,
                         padding: '13px 16px',
                         display: 'flex',
                         alignItems: 'center',
@@ -141,6 +151,8 @@ export function SpecialistGateCard({ variant, status }: {
                 gap: 16, padding: '16px 20px', flexWrap: 'wrap',
                 background: waiting ? STATUS.pending.bg : GH.ink,
                 color: waiting ? STATUS.pending.fg : GH.paper,
+                // Янтарная карточка без рамки сливалась с бумагой страницы.
+                border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : GH.ink}`,
                 fontFamily: GH_SANS,
             }}
         >
@@ -149,9 +161,11 @@ export function SpecialistGateCard({ variant, status }: {
                 <div style={{ fontSize: 14, lineHeight: 1.5, marginTop: 4 }}>{copy.text}</div>
             </div>
             <button
+                type="button"
                 onClick={onCta}
                 style={{
-                    padding: '9px 16px',
+                    minHeight: 44,
+                    padding: '0 16px',
                     background: waiting ? 'transparent' : GH.paper,
                     color: waiting ? STATUS.pending.fg : GH.ink,
                     border: waiting ? `1px solid ${STATUS.pending.fg}` : 'none',

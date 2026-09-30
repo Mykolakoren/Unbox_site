@@ -147,7 +147,11 @@ def test_mobile_has_way_to_application():
     assert "Чтобы бронировать кабинеты, заполните анкету специалиста" in gate
     assert "Анкета на проверке" in gate
     profile = _read("src/pages/mobile/MobileProfile.tsx")
-    assert "navigate('/become-specialist')" in profile, "в /m/me пропала строка «Анкета специалиста»"
+    # Волна 2: анкета открывается внутри /m (/m/become-specialist), без
+    # компьютерной шапки — строка «Анкета специалиста» ведёт туда.
+    assert ("navigate('/become-specialist')" in profile
+            or "navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true))" in profile), \
+        "в /m/me пропала строка «Анкета специалиста»"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -173,8 +177,15 @@ def test_mobile_screens_gate_booking():
     assert "canBookCabinets(currentUser)" in today and "<SpecialistGateCard" in today, \
         "/m/today снова без карточки анкеты для новичка"
     assert "{canBook && regularSlot" in today, "«постоянный слот» снова ведёт новичка в оформление"
-    sticky = _fn_body(today, "{/* Sticky CTA above tab bar", "Найти свободный кабинет")
-    assert "{canBook && (" in sticky, "закреплённая «Найти свободный кабинет» снова видна новичку"
+    # Волна 2 (решение владельца, «Сегодня» V1): закреплённую «Найти свободный
+    # кабинет» убрали совсем — осталась одна кнопка «Забронировать кабинет».
+    # Суть та же: новичку кнопку брони не показываем.
+    assert "Найти свободный кабинет" not in today, "вернулась закреплённая «Найти свободный кабинет»"
+    m_btn = re.search(r">\s*Забронировать кабинет\s*<", today)
+    i_btn = m_btn.start() if m_btn else -1
+    assert i_btn != -1, "на «Сегодня» пропала кнопка «Забронировать кабинет»"
+    gate = today.rfind("{canBook && (", 0, i_btn)
+    assert gate != -1 and i_btn - gate < 600, "кнопка «Забронировать кабинет» снова видна новичку"
 
     find = _read("src/pages/mobile/MobileFind.tsx")
     assert "<SpecialistGateCard" in find, "/m/find снова без карточки анкеты наверху"
@@ -188,13 +199,20 @@ def test_mobile_screens_gate_booking():
     assert checkout.count("isSpecialistOnlyRefusal(e)") >= 2, \
         "403 «только специалистам» при оформлении/серии снова показывается тостом"
     assert "<SpecialistGateCard" in checkout
-    assert "needsApplication ? () => navigate(SPECIALIST_APPLICATION_PATH) : submit" in checkout, \
+    # Волна 2: анкета — внутри /m (catalogPath → /m/become-specialist).
+    assert ("needsApplication ? () => navigate(SPECIALIST_APPLICATION_PATH) : submit" in checkout
+            or "needsApplication ? () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) : submit" in checkout), \
         "кнопка оформления снова отправляет заведомо отказную бронь"
 
 
 def test_desktop_wizard_gates_before_payment():
+    # Волна 2, шаг 0: мастер вынесен из App.tsx в свой файл, App только
+    # подключает его на /checkout.
     app = _read("src/App.tsx")
-    wizard = _fn_body(app, "function BookingWizard()", "\nimport { Toaster }")
+    assert "<BookingWizard />" in app and "components/Wizard/BookingWizard" in app, \
+        "/checkout больше не открывает мастер BookingWizard"
+    wizard = _fn_body(_read("src/components/Wizard/BookingWizard.tsx"),
+                      "function BookingWizard()", "\n}\n")
     i_gate = wizard.find("if (needsApplication)")
     i_board = wizard.find("<ChessboardStep")
     assert i_gate != -1 and i_board != -1 and i_gate < i_board, \

@@ -1,5 +1,5 @@
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CalendarDays, Home, Search, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { OnboardingTour, hasCompletedTour } from './OnboardingTour';
@@ -50,12 +50,36 @@ export function MobileLayout() {
     // Без входа — на /login с возвратом сюда же (?redirect=): после входа
     // человек попадает туда, куда шёл (например, /m/find?cab=… с выбранным
     // кабинетом), а не на пустое «Сегодня».
+    // Волна 2 (X2-10): каталог (анкета специалиста, кабинет, тарифы, правила)
+    // открывается и без входа — гостя по такой ссылке ведём на публичную
+    // версию страницы, а не на форму входа.
     useEffect(() => {
         const token = localStorage.getItem('token');
-        const toLogin = () => navigate(loginPathWithRedirect(location.pathname + location.search));
+        const toLogin = () => {
+            const pub = publicTwin(location.pathname);
+            // Строка запроса — перед якорем (/#cabinets).
+            if (pub) navigate(pub.includes('#') ? pub.replace('#', `${location.search}#`) : pub + location.search, { replace: true });
+            else navigate(loginPathWithRedirect(location.pathname + location.search));
+        };
         if (!token) { toLogin(); return; }
         if (!currentUser) fetchCurrentUser().catch(toLogin);
     }, [currentUser, fetchCurrentUser, navigate, location.pathname, location.search]);
+
+    // X5-08: при переходе на другой экран — наверх (раньше «Свободно»
+    // открывалось прокрученным до середины, фильтры уходили за край).
+    // «Назад» (POP) возвращает туда, где человек был.
+    const navType = useNavigationType();
+    const scrollPositions = useRef(new Map<string, number>());
+    const lastKey = useRef(location.key);
+    useLayoutEffect(() => {
+        const prevKey = lastKey.current;
+        if (prevKey === location.key) return;
+        scrollPositions.current.set(prevKey, window.scrollY || mainRef.current?.scrollTop || 0);
+        lastKey.current = location.key;
+        const y = navType === 'POP' ? (scrollPositions.current.get(location.key) ?? 0) : 0;
+        window.scrollTo(0, y);
+        if (mainRef.current) mainRef.current.scrollTop = y;
+    }, [location.key, navType]);
 
     // First-visit tour trigger. Two entry points:
     //  1. `?tour=1` query — force open (used for previewing without resetting
@@ -136,7 +160,9 @@ export function MobileLayout() {
                     «Открыть десктопную версию» (escape hatch для случая
                     когда мобильная страница не покрывает функционал). */}
                 <main ref={mainRef} data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>
-                    <InstallBanner />
+                    {/* G4-11: баннер «на главный экран» — не одновременно с туром,
+                        а после него (тур первого входа ещё не пройден — молчим). */}
+                    {!tourOpen && hasCompletedTour(currentUser.id) && <InstallBanner />}
                     {/* key=pathname → ремоунт + одноразовый enter-переход при
                         смене экрана. Тонко и быстро (нав частая, Emil: «reduce»). */}
                     <div key={location.pathname} className="mobile-page">
@@ -178,6 +204,8 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
         <NavLink
             to={to}
             data-tour={tourId}
+            // X5-06: отклик на касание сразу, пока грузится экран вкладки.
+            className="press"
             style={({ isActive }) => ({
                 display: 'flex',
                 flexDirection: 'column',
@@ -185,6 +213,7 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
                 justifyContent: 'center',
                 gap: 4,
                 padding: '10px 0 12px',
+                minHeight: 56,
                 color: isActive ? COLOR.accentInk : COLOR.ink60,
                 textDecoration: 'none',
                 fontSize: TEXT.caption,
@@ -196,4 +225,25 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
             <span>{label}</span>
         </NavLink>
     );
+}
+
+/** Публичная версия каталожной страницы /m для гостя (X2-10) или null,
+ *  если экран личный (сегодня, брони, оплата, «Я») — тогда нужен вход. */
+function publicTwin(pathname: string): string | null {
+    const p = pathname.replace(/\/+$/, '');
+    const rules: Array<[RegExp, string]> = [
+        [/^\/m\/specialists$/, '/specialists'],
+        [/^\/m\/specialists\/([^/]+)$/, '/specialists/$1'],
+        [/^\/m\/location\/([^/]+)$/, '/location/$1'],
+        [/^\/m\/cabinet\/([^/]+)$/, '/cabinet/$1'],
+        [/^\/m\/places$/, '/#cabinets'],
+        [/^\/m\/tariffs$/, '/subscriptions'],
+        [/^\/m\/booking-rules$/, '/booking-rules'],
+        [/^\/m\/become-specialist$/, '/become-specialist'],
+    ];
+    for (const [re, target] of rules) {
+        const m = re.exec(p);
+        if (m) return target.replace(/\$(\d+)/g, (_, n) => m[Number(n)] ?? '');
+    }
+    return null;
 }

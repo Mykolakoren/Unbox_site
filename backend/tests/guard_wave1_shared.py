@@ -31,7 +31,9 @@ def _files():
         rel = str(p.relative_to(ROOT))
         if p.suffix in (".ts", ".tsx") and not OTHER_AREAS.match(rel):
             out.append(p)
-    assert len(out) >= 25, f"нашли только {len(out)} файлов области — структура поменялась, обнови сторожа"
+    # Было ≥ 25. Волна 2, пакет D удалила три мёртвых шага мастера
+    # (OptionsStep, FormatDateStep, LocationStep — их никто не импортировал).
+    assert len(out) >= 22, f"нашли только {len(out)} файлов области — структура поменялась, обнови сторожа"
     return out
 
 

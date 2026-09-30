@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Repeat } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { RESOURCES, LOCATIONS } from '../../utils/data';
+import { RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
@@ -17,12 +17,14 @@ import { useLongPress } from './useLongPress';
 import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import type { BookingHistoryItem } from '../../store/types';
-import { COLOR, STATUS } from '../../design/tokens';
+import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
+import { toastApiError } from '../../utils/errors';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Segmented } from '../../components/ui/Chip';
 import { Button } from '../../components/ui/Button';
+import { bookingPlace, bookingStartDate, bookingTimeRange, isLiveBooking } from './bookingView';
 
 type Tab = 'upcoming' | 'series' | 'past';
 
@@ -54,7 +56,7 @@ export function MobileMyBookings() {
                     ? 'Выставлено на пересдачу'
                     : 'Снято с пересдачи');
             })
-            .catch(() => toast.error('Не удалось обновить'));
+            .catch(e => toastApiError(e, 'Не удалось обновить'));
     };
     const askReRent = async (b: BookingHistoryItem) => {
         const ok = await confirm({
@@ -76,7 +78,7 @@ export function MobileMyBookings() {
     // Telegram series-end reminder deep-link: /m/bookings?series=<group_id>.
     // Auto-jump to the Series tab and open the next-upcoming booking of
     // that series in BookingDetailSheet, where the user gets the
-    // "Продлить серию" / "ОК завершится в срок" actions.
+    // "Продлить серию" / "Пусть завершится в срок" actions.
     const [searchParams, setSearchParams] = useSearchParams();
     const seriesParam = searchParams.get('series');
     useEffect(() => {
@@ -104,12 +106,17 @@ export function MobileMyBookings() {
     }, [bookings, currentUser]);
 
     const now = new Date();
+    // Волна 2 (G3-02): будущие — подтверждённые И ждущие одобрения
+    // администратора. Раньше «горячая» бронь пропадала из списка целиком.
     const upcoming = useMemo(() => {
         return myBookings
             .map(b => ({ b, dt: bookingStartDate(b) }))
-            .filter(x => x.b.status === 'confirmed' && x.dt && x.dt.getTime() + (x.b.duration ?? 60) * 60000 > now.getTime())
+            .filter(x => isLiveBooking(x.b) && x.dt && x.dt.getTime() + (x.b.duration ?? 60) * 60000 > now.getTime())
             .sort((a, b) => a.dt!.getTime() - b.dt!.getTime());
     }, [myBookings, now]);
+
+    // G4-18: группы «Сегодня / Завтра / На этой неделе / Позже».
+    const upcomingGroups = useMemo(() => groupByDay(upcoming, now), [upcoming, now]);
 
     const past = useMemo(() => {
         return myBookings
@@ -142,11 +149,11 @@ export function MobileMyBookings() {
     }, [myBookings, now]);
 
     return (
-        <div style={{ paddingTop: 8, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
 
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: 0 }}>
                     Мои брони
                 </h1>
             </div>
@@ -168,7 +175,7 @@ export function MobileMyBookings() {
             {/* Wave 1: без «лесенки» появления — экран открывают слишком часто. */}
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
-                {!loaded && bookingsStatus !== 'error' && <SkeletonRows height={118} />}
+                {!loaded && bookingsStatus !== 'error' && <SkeletonRows height={72} />}
                 {!loaded && bookingsStatus === 'error' && (
                     <LoadErrorCard
                         title="Не удалось загрузить брони"
@@ -185,50 +192,67 @@ export function MobileMyBookings() {
                                 action={{ label: 'Найти время', onClick: () => navigate('/m/find') }}
                             />
                         )
-                        : upcoming.map(({ b, dt }) => {
-                            const hoursToStart = (dt!.getTime() - Date.now()) / 3600000;
-                            const within24h = hoursToStart >= 0 && hoursToStart < 24;
-                            // Within 24h, swiping cancel doesn't refund — surface
-                            // the "Re-rent" action as the primary instead.
-                            const primary = within24h
-                                ? {
-                                    label: 'Пересдать',
-                                    color: COLOR.ink,
-                                    onAction: () => {
-                                        // На пересдачу — только через подтверждение
-                                        // (денежное действие). Снятие — сразу.
-                                        if ((b as any).isReRentListed) doToggleReRent(b);
-                                        else void askReRent(b);
-                                    },
-                                }
-                                : {
-                                    label: 'Отменить',
-                                    color: STATUS.danger.fg,
-                                    onAction: () => setOpenBooking(b),
-                                };
-                            const secondary = {
-                                label: 'Детали',
-                                color: COLOR.ink60,
-                                onAction: () => setOpenBooking(b),
-                            };
-                            return (
-                                <SwipeRow key={b.id} primary={primary} secondary={secondary}>
-                                    <Row booking={b} dt={dt!} onTap={() => setOpenBooking(b)} />
-                                </SwipeRow>
-                            );
-                        })
+                        : upcomingGroups.map(group => (
+                            <section key={group.key} aria-label={group.label} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                <h2 style={groupTitle}>{group.label}</h2>
+                                <div style={listCard}>
+                                    {group.items.map(({ b, dt }, idx) => {
+                                        const hoursToStart = (dt!.getTime() - Date.now()) / 3600000;
+                                        const within24h = hoursToStart >= 0 && hoursToStart < 24;
+                                        // Бронь на одобрении: ни отменить (меньше суток),
+                                        // ни пересдать (только подтверждённую) — без свайпа.
+                                        const pendingApproval = b.status === 'pending_approval';
+                                        // Within 24h, swiping cancel doesn't refund — surface
+                                        // the "Re-rent" action as the primary instead.
+                                        const primary = within24h
+                                            ? {
+                                                label: 'Пересдать',
+                                                color: COLOR.ink,
+                                                onAction: () => {
+                                                    // На пересдачу — только через подтверждение
+                                                    // (денежное действие). Снятие — сразу.
+                                                    if ((b as any).isReRentListed) doToggleReRent(b);
+                                                    else void askReRent(b);
+                                                },
+                                            }
+                                            : {
+                                                label: 'Отменить',
+                                                color: STATUS.danger.fg,
+                                                onAction: () => setOpenBooking(b),
+                                            };
+                                        const secondary = {
+                                            label: 'Детали',
+                                            color: COLOR.ink60,
+                                            onAction: () => setOpenBooking(b),
+                                        };
+                                        return (
+                                            <SwipeRow key={b.id} primary={primary} secondary={secondary} disabled={pendingApproval}>
+                                                <Row
+                                                    booking={b}
+                                                    dt={dt!}
+                                                    withDate={group.withDate}
+                                                    first={idx === 0}
+                                                    today={group.key === 'today'}
+                                                    onTap={() => setOpenBooking(b)}
+                                                />
+                                            </SwipeRow>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+                        ))
                 )}
                 {loaded && tab === 'series' && (
                     series.length === 0
-                        ? <EmptyState title="Активных серий нет" />
+                        ? <EmptyState title="Активных серий нет" hint="Серия — одна и та же бронь каждую неделю. Её можно создать при оформлении: «Повторять каждую неделю»." />
                         : series.map(s => (
                             <SeriesRow
                                 key={s.id}
                                 items={s.items}
                                 onTap={() => {
                                     // Open the next upcoming booking in the
-                                    // series — that's where the "Управление
-                                    // серией" actions live in the detail sheet.
+                                    // series — that's where the "Серия"
+                                    // actions live in the detail sheet.
                                     const nextUpcoming = s.items
                                         .map(b => ({ b, dt: bookingStartDate(b) }))
                                         .filter(x => x.dt && x.dt.getTime() > Date.now())
@@ -241,18 +265,24 @@ export function MobileMyBookings() {
                 {loaded && tab === 'past' && (
                     past.length === 0
                         ? <EmptyState title="Прошедших броней пока нет" />
-                        : past.map(({ b, dt }) => (
-                            <Row
-                                key={b.id}
-                                booking={b}
-                                dt={dt!}
-                                dimmed
-                                onTap={() => setOpenBooking(b)}
-                                onRepeat={() => {
-                                    if (prepareRepeat(b)) navigate('/m/checkout');
-                                }}
-                            />
-                        ))
+                        : (
+                            <div style={listCard}>
+                                {past.map(({ b, dt }, idx) => (
+                                    <Row
+                                        key={b.id}
+                                        booking={b}
+                                        dt={dt!}
+                                        dimmed
+                                        withDate
+                                        first={idx === 0}
+                                        onTap={() => setOpenBooking(b)}
+                                        onRepeat={() => {
+                                            if (prepareRepeat(b)) navigate('/m/checkout');
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        )
                 )}
             </div>
 
@@ -267,31 +297,37 @@ export function MobileMyBookings() {
     );
 }
 
-function Row({ booking, dt, dimmed, onTap, onRepeat }: {
+function Row({ booking, dt, dimmed, withDate, first, today, onTap, onRepeat }: {
     booking: BookingHistoryItem;
     dt: Date;
     dimmed?: boolean;
+    /** День в строке — в группах «На этой неделе», «Позже» и в «Прошедших». */
+    withDate?: boolean;
+    first?: boolean;
+    /** Сегодняшняя бронь — тонкая полоса слева. */
+    today?: boolean;
     onTap: () => void;
     onRepeat?: () => void;
 }) {
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const location = LOCATIONS.find(l => l.id === resource?.locationId);
-    // Lead with date — "Вс, 10 мая" — large + bold so the eye finds the day
-    // first. Time follows in a second row, slightly smaller.
-    const dateLabel = formatDateLabel(dt);
-    const endStr = formatHHMM(new Date(dt.getTime() + (booking.duration ?? 60) * 60000));
+    const place = bookingPlace(booking);
     // Long-press → repeat (on past tab where onRepeat is set). For upcoming
     // tab onRepeat is undefined, so long-press is a no-op there.
     const longPressProps = useLongPress(() => onRepeat?.());
+    // G4-18: строка около 72 px вместо карточки на 190 — неделя видна на одном экране.
+    const badges = rowBadges(booking, !!dimmed);
 
     return (
         <div
             className="press"
             style={{
                 background: COLOR.card,
-                border: `1px solid ${COLOR.ink08}`,
-                borderRadius: 14,
-                padding: 14,
+                borderTop: first ? 'none' : `1px solid ${COLOR.ink10}`,
+                boxShadow: today ? `inset 3px 0 0 ${COLOR.ink}` : undefined,
+                minHeight: 72,
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
                 cursor: 'pointer',
             }}
             onClick={onTap}
@@ -302,44 +338,75 @@ function Row({ booking, dt, dimmed, onTap, onRepeat }: {
         >
             {/* Прошедшие приглушаем цветом, а не прозрачностью: opacity .6
                 роняла вторичный текст ниже читаемого (3:1). */}
-            <div style={{
-                fontSize: 22,
-                fontWeight: 600,
-                letterSpacing: '-0.01em',
-                lineHeight: 1.1,
-                color: dimmed ? COLOR.ink60 : COLOR.ink,
-            }}>
-                {dateLabel}
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: TEXT.body, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink }}>
+                    {withDate && <>{formatDateLabel(dt)} · </>}
+                    <span className="num">{bookingTimeRange(booking, dt)}</span>
+                </div>
+                <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
+                    {place.title} · {formatBookingDuration(booking.duration ?? 60)}
+                    {(booking as any).recurringGroupId && <> · серия</>}
+                </div>
+                {badges && <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>{badges}</div>}
             </div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink80, marginTop: 4 }}>
-                {booking.startTime}–{endStr}
-            </div>
-            <div style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
-                {resource?.name ?? booking.resourceId}
-                {location && <span style={{ color: COLOR.ink60 }}> · {location.name}</span>}
-                <span style={{ color: COLOR.ink60 }}> · {formatBookingDuration(booking.duration ?? 60)}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{priceLabel(booking)}</span>
-                <PaymentBadge status={booking.paymentStatus} />
-                {(booking as any).recurringGroupId && <Tag>Серия</Tag>}
-                {booking.isReRentListed && <Tag tone="warn">На пересдаче</Tag>}
-                {onRepeat ? (
-                    <Button
-                        variant="secondary"
-                        icon={<Repeat size={16} aria-hidden="true" />}
-                        onClick={(e) => { e.stopPropagation(); onRepeat(); }}
-                        style={{ marginLeft: 'auto' }}
-                    >
-                        Повторить
-                    </Button>
-                ) : (
-                    // Карточка и так нажимается — хватит шеврона (было «тапни →»).
-                    <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" style={{ marginLeft: 'auto' }} />
-                )}
-            </div>
+            {onRepeat ? (
+                <Button
+                    variant="secondary"
+                    icon={<Repeat size={16} aria-hidden="true" />}
+                    onClick={(e) => { e.stopPropagation(); onRepeat(); }}
+                    aria-label={`Повторить: ${place.title}, ${booking.startTime}`}
+                >
+                    Повторить
+                </Button>
+            ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {priceLabel(booking)}
+                    </span>
+                    {/* Строка и так нажимается — хватит шеврона (было «тапни →»). */}
+                    <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
+                </div>
+            )}
         </div>
     );
+}
+
+/** Бейджи строки — слова только из общего словаря. Янтарь — там, где ждём
+ *  чего-то важного (одобрение, пересдача). «Ждёт списания» у будущей
+ *  брони — обычное дело, его не красим (G4-08): сумма и так стоит справа. */
+function rowBadges(booking: BookingHistoryItem, past: boolean): React.ReactNode {
+    const out: React.ReactNode[] = [];
+    if (booking.status === 'pending_approval') {
+        out.push(<StatusBadge key="b" kind="booking" status="pending_approval" />);
+    } else if (past && booking.status !== 'confirmed' && booking.status !== 'completed') {
+        out.push(<StatusBadge key="b" kind="booking" status={booking.status} />);
+    }
+    if (booking.isReRentListed) out.push(<StatusBadge key="r" kind="booking" status="re-rent-listed" />);
+    if (booking.status !== 'cancelled') {
+        const pay = <PaymentBadge key="p" status={booking.paymentStatus} />;
+        if (booking.paymentStatus && booking.paymentStatus !== 'pending') out.push(pay);
+    }
+    return out.length ? out : null;
+}
+
+/** Группы будущих броней по дням (G4-18). Неделя — с понедельника. */
+function groupByDay(items: { b: BookingHistoryItem; dt: Date | null }[], now: Date) {
+    const DAY = 86400000;
+    const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+    const today = startOfDay(now);
+    const weekEnd = today + (7 - ((now.getDay() + 6) % 7)) * DAY; // начало следующего понедельника
+    const defs = [
+        { key: 'today', label: 'Сегодня', withDate: false, test: (t: number) => t < today + DAY },
+        { key: 'tomorrow', label: 'Завтра', withDate: false, test: (t: number) => t < today + 2 * DAY },
+        { key: 'week', label: 'На этой неделе', withDate: true, test: (t: number) => t < weekEnd },
+        { key: 'later', label: 'Позже', withDate: true, test: () => true },
+    ];
+    const groups = defs.map(d => ({ key: d.key, label: d.label, withDate: d.withDate, items: [] as { b: BookingHistoryItem; dt: Date | null }[] }));
+    for (const x of items) {
+        const t = x.dt ? startOfDay(x.dt) : Infinity;
+        groups[defs.findIndex(d => d.test(t))].items.push(x);
+    }
+    return groups.filter(g => g.items.length > 0);
 }
 
 /** «Вт, 29 сентября». Wave 1: месяц брался отдельно (month:'long') — это
@@ -366,31 +433,34 @@ function SeriesRow({ items, onTap }: { items: BookingHistoryItem[]; onTap?: () =
     return (
         <button
             onClick={onTap}
+            className="press"
             style={{
                 width: '100%',
                 background: COLOR.card,
-                border: `1px solid ${COLOR.ink08}`,
-                borderRadius: 14,
-                padding: 14,
+                border: `1px solid ${COLOR.ink10}`,
+                borderRadius: RADIUS.sheet,
+                padding: '12px 16px',
                 cursor: onTap ? 'pointer' : 'default',
                 fontFamily: 'inherit',
                 textAlign: 'left',
                 color: COLOR.ink,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
             }}
         >
-            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
-                Серия · {sorted.length} {ruPlural(sorted.length, ['сессия', 'сессии', 'сессий'])}
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-                {resource?.name} · {first?.startTime}
-            </div>
-            <div style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
-                {fmt(dt0)} → {fmt(dtN)}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 12, color: COLOR.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
-                Нажмите, чтобы продлить или отменить серию
-                <ChevronRight size={14} />
-            </div>
+            <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
+                    Серия · {sorted.length} {ruPlural(sorted.length, ['бронь', 'брони', 'броней'])}
+                </span>
+                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600, marginTop: 2 }}>
+                    {resource?.name} · <span className="num">{first?.startTime}</span>
+                </span>
+                <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
+                    {fmt(dt0)} → {fmt(dtN)} · продлить или отменить
+                </span>
+            </span>
+            <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
         </button>
     );
 }
@@ -401,34 +471,18 @@ function PaymentBadge({ status }: { status?: 'pending' | 'paid' | 'waived' | nul
     return <StatusBadge kind="payment" status={status} />;
 }
 
-function Tag({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'ok' | 'warn' | 'muted' }) {
-    const colors: Record<string, { bg: string; fg: string }> = {
-        ok: { bg: STATUS.ok.bg, fg: STATUS.ok.fg },
-        warn: { bg: STATUS.pending.bg, fg: STATUS.pending.fg },
-        muted: { bg: STATUS.muted.bg, fg: STATUS.muted.fg },
-    };
-    const c = colors[tone];
-    return (
-        <span style={{
-            background: c.bg, color: c.fg,
-            fontSize: 12, fontWeight: 600,
-            padding: '2px 7px', borderRadius: 999,
-            whiteSpace: 'nowrap',
-        }}>{children}</span>
-    );
-}
+const listCard: React.CSSProperties = {
+    background: COLOR.card,
+    border: `1px solid ${COLOR.ink10}`,
+    borderRadius: RADIUS.sheet,
+    overflow: 'hidden',
+};
 
-function bookingStartDate(b: BookingHistoryItem): Date | null {
-    try {
-        const d = b.date instanceof Date ? b.date : new Date(b.date as any);
-        if (isNaN(d.getTime()) || !b.startTime) return null;
-        const [h, m] = b.startTime.split(':').map(Number);
-        const out = new Date(d);
-        out.setHours(h, m, 0, 0);
-        return out;
-    } catch { return null; }
-}
-
-function formatHHMM(d: Date) {
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
+const groupTitle: React.CSSProperties = {
+    margin: '8px 0 0',
+    fontSize: TEXT.caption,
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: COLOR.ink60,
+};

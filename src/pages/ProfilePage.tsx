@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useUserStore } from '../store/userStore';
-import { LegacyButton as Button } from '../components/ui/LegacyButton';
+import { Button as UiButton } from '../components/ui/Button';
 import { PhoneInput } from '../components/ui/PhoneInput';
 import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -130,72 +130,81 @@ function ChangePasswordSection() {
         }
     };
 
+    const field = 'w-full min-h-11 pl-10 pr-11 rounded-lg border border-ink-20 bg-card text-body text-ink focus:outline-none focus:ring-2 focus:ring-accent';
+    const eyeBtn = 'absolute right-0 top-0 h-11 w-11 flex items-center justify-center text-ink-60 hover:text-ink';
     return (
-        <div className="bg-white p-6 rounded-2xl border border-unbox-light">
-            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <Lock className="text-unbox-green" size={20} />
-                Смена пароля
-            </h3>
-            <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
+        // Раскрывающийся раздел «Сменить пароль» (G3-18): один стиль полей, одна кнопка.
+        <details className="group">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-body font-semibold text-ink">
+                <Lock size={18} className="text-ink-60" aria-hidden="true" />
+                Сменить пароль
+                <span className="ml-auto text-small font-normal text-ink-60 group-open:hidden">Открыть</span>
+                <span className="ml-auto hidden text-small font-normal text-ink-60 group-open:inline">Свернуть</span>
+            </summary>
+            <form onSubmit={handleSubmit} className="mt-4 space-y-4 max-w-md">
                 <div>
-                    <label className="block text-sm font-medium mb-2">Текущий пароль</label>
+                    <label htmlFor="pw-current" className="block text-small text-ink-60 mb-1">Текущий пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                         <input
+                            id="pw-current"
                             type={showCurrent ? 'text' : 'password'}
-                            className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            autoComplete="current-password"
+                            className={field}
                             value={currentPassword}
                             onChange={(e) => setCurrentPassword(e.target.value)}
                             required
-                            placeholder="Введите текущий пароль"
                         />
-                        <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
-                            {showCurrent ? <EyeOff size={18} /> : <Eye size={18} />}
+                        <button type="button" onClick={() => setShowCurrent(!showCurrent)} className={eyeBtn}
+                            aria-label={showCurrent ? 'Скрыть пароль' : 'Показать пароль'}>
+                            {showCurrent ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                         </button>
                     </div>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium mb-2">Новый пароль</label>
+                    <label htmlFor="pw-new" className="block text-small text-ink-60 mb-1">Новый пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                         <input
+                            id="pw-new"
                             type={showNew ? 'text' : 'password'}
-                            className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            autoComplete="new-password"
+                            className={field}
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             required
                             minLength={6}
                             placeholder="Минимум 6 символов"
                         />
-                        <button type="button" onClick={() => setShowNew(!showNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
-                            {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
+                        <button type="button" onClick={() => setShowNew(!showNew)} className={eyeBtn}
+                            aria-label={showNew ? 'Скрыть пароль' : 'Показать пароль'}>
+                            {showNew ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                         </button>
                     </div>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium mb-2">Подтвердите пароль</label>
+                    <label htmlFor="pw-repeat" className="block text-small text-ink-60 mb-1">Повторите новый пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                         <input
+                            id="pw-repeat"
                             type="password"
-                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            autoComplete="new-password"
+                            className={field}
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
                             required
-                            placeholder="Повторите новый пароль"
                         />
                     </div>
                     {confirmPassword && newPassword !== confirmPassword && (
-                        <p className="text-xs mt-1" style={{ color: STATUS.danger.fg }}>Пароли не совпадают</p>
+                        <p className="text-small mt-1" style={{ color: STATUS.danger.fg }}>Пароли не совпадают</p>
                     )}
                 </div>
-                <div className="pt-2">
-                    <Button type="submit" disabled={saving || !currentPassword || !newPassword || newPassword !== confirmPassword}>
-                        {saving ? 'Сохранение...' : 'Изменить пароль'}
-                    </Button>
-                </div>
+                <UiButton type="submit" size="touch" loading={saving} disabled={!currentPassword || !newPassword || newPassword !== confirmPassword}>
+                    {saving ? 'Сохраняем…' : 'Сменить пароль'}
+                </UiButton>
             </form>
-        </div>
+        </details>
     );
 }
 
@@ -209,25 +218,25 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
     const [showPw, setShowPw] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    const field = 'w-full min-h-11 pl-10 pr-3 rounded-lg border border-ink-20 bg-card text-body text-ink focus:outline-none focus:ring-2 focus:ring-accent';
+
     if (!editing) {
         return (
             <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                     <input
+                        id="profile-email"
                         type="email"
-                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light bg-gray-50 text-unbox-dark"
+                        className={`${field} bg-sunken`}
                         value={currentEmail}
                         readOnly
                     />
                 </div>
-                <button
-                    onClick={() => { setNewEmail(currentEmail); setEditing(true); }}
-                    className="shrink-0 p-3 rounded-xl border border-unbox-light hover:bg-unbox-light/50 transition-colors"
-                    title="Изменить email"
-                >
-                    <Pencil size={16} className="text-ink-60" />
-                </button>
+                <UiButton variant="secondary" size="touch" icon={<Pencil size={16} aria-hidden="true" />}
+                    onClick={() => { setNewEmail(currentEmail); setEditing(true); }}>
+                    Изменить
+                </UiButton>
             </div>
         );
     }
@@ -259,18 +268,15 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
     };
 
     return (
-        <div className="space-y-3 p-4 rounded-xl border-2 border-unbox-green/30 bg-unbox-light/20">
-            <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-unbox-dark">Смена email</span>
-                <button onClick={() => { setEditing(false); setPassword(''); }} className="p-1 hover:bg-gray-100 rounded-lg">
-                    <X size={16} className="text-ink-60" />
-                </button>
-            </div>
+        <div className="space-y-3 border border-ink-10 bg-sunken p-4">
+            <div className="text-body font-semibold text-ink">Смена email</div>
             <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                 <input
                     type="email"
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                    aria-label="Новый email"
+                    autoComplete="email"
+                    className={field}
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
                     placeholder="Новый email"
@@ -278,33 +284,29 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
                 />
             </div>
             <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} aria-hidden="true" />
                 <input
                     type={showPw ? 'text' : 'password'}
-                    className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                    aria-label="Текущий пароль для подтверждения"
+                    autoComplete="current-password"
+                    className={`${field} pr-11`}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Текущий пароль для подтверждения"
                 />
-                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
-                    {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                <button type="button" onClick={() => setShowPw(!showPw)}
+                    aria-label={showPw ? 'Скрыть пароль' : 'Показать пароль'}
+                    className="absolute right-0 top-0 h-11 w-11 flex items-center justify-center text-ink-60 hover:text-ink">
+                    {showPw ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                 </button>
             </div>
             <div className="flex gap-2">
-                <button
-                    onClick={() => { setEditing(false); setPassword(''); }}
-                    className="flex-1 py-2.5 rounded-xl border border-unbox-light text-sm font-medium hover:bg-gray-50 transition"
-                >
-                    Отмена
-                </button>
-                <button
-                    onClick={handleSave}
-                    disabled={saving || !newEmail || !password}
-                    className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-bold hover:bg-unbox-dark disabled:opacity-50 transition flex items-center justify-center gap-2"
-                >
-                    {saving && <Loader2 size={14} className="animate-spin" />}
-                    Сохранить
-                </button>
+                <UiButton size="touch" className="flex-1" loading={saving} disabled={!newEmail || !password} onClick={handleSave}>
+                    Сохранить email
+                </UiButton>
+                <UiButton variant="secondary" size="touch" className="flex-1" onClick={() => { setEditing(false); setPassword(''); }}>
+                    Не менять
+                </UiButton>
             </div>
         </div>
     );
@@ -314,13 +316,14 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
    Grid House — ProfilePage
    ═══════════════════════════════════════════════════════════════ */
 
-const ghpMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghpHairline = `1px solid ${GH.ink10}`;
+// Одно поле на всю страницу (G3-18): рамка, 44 px, подпись сверху.
 const ghpInput: React.CSSProperties = {
-    width: '100%', padding: '12px 0', fontSize: 14, fontFamily: GH_SANS,
-    border: 'none', borderBottom: ghpHairline, background: 'transparent',
-    color: GH.ink, outline: 'none',
+    width: '100%', minHeight: 44, padding: '0 12px', fontSize: 16, fontFamily: GH_SANS,
+    border: `1px solid ${GH.ink20}`, borderRadius: 8, background: COLOR.card,
+    color: GH.ink,
 };
+const ghpLabel: React.CSSProperties = { display: 'block', fontSize: 14, color: GH.ink60, marginBottom: 6 };
 
 // ── Design Switcher ─────────────────────────────────────────────────────────
 
@@ -414,8 +417,8 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                     background: STATUS.pending.bg,
                     border: `1px solid ${STATUS.pending.fg}33`,
                 }}>
-                    <div style={{ ...ghpMono, fontSize: 12, color: STATUS.pending.fg, marginBottom: 6 }}>
-                        НЕ СРАБОТАЛО? SAFARI-ОБХОД
+                    <div style={{ fontSize: 14, fontWeight: 600, color: STATUS.pending.fg, marginBottom: 6 }}>
+                        Не сработало? Отправьте боту команду вручную
                     </div>
                     <div style={{ fontSize: 12, color: GH.ink, lineHeight: 1.55, marginBottom: 10 }}>
                         Откройте бота{' '}
@@ -478,14 +481,15 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
             )}
 
             <div style={{ marginTop: 12 }}>
-                <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 4, fontSize: 12 }}>
-                    ИЛИ ВРУЧНУЮ — ЧИСЛОВОЙ CHAT_ID
+                <label htmlFor="profile-tg-id" style={ghpLabel}>
+                    Или вручную — числовой chat_id
                 </label>
                 <input
+                    id="profile-tg-id"
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    style={{ ...ghpInput, fontSize: 13 }}
+                    style={ghpInput}
                     placeholder="142420406"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -597,139 +601,121 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
-            {/* Header */}
-            <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
-                <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 8 }}>ПРОФИЛЬ</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                    <div style={{
-                        width: 56, height: 56, borderRadius: '50%', overflow: 'hidden',
-                        background: GH.ink, color: GH.paper, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 22, fontWeight: 800,
-                    }}>
-                        {currentUser.avatarUrl ? (
-                            <img src={currentUser.avatarUrl} alt={currentUser.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                            currentUser.name?.[0]?.toUpperCase()
-                        )}
+            {/* Шапка: имя и email обычным регистром (раньше email кричал капсом). */}
+            <header className="mb-8 flex items-center gap-4 border-b border-ink-10 pb-4">
+                <div style={{
+                    width: 56, height: 56, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+                    background: GH.ink, color: GH.paper, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 20, fontWeight: 600,
+                }}>
+                    {currentUser.avatarUrl ? (
+                        <img src={currentUser.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                        currentUser.name?.[0]?.toUpperCase()
+                    )}
+                </div>
+                <div className="min-w-0">
+                    <h1 className="m-0 text-heading font-semibold">{currentUser.name}</h1>
+                    <div className="mt-1 text-small text-ink-60">{currentUser.email}</div>
+                </div>
+            </header>
+
+            <div className="grid gap-10 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)] lg:items-start">
+                {/* Форма */}
+                <div>
+                    <h2 className="m-0 mb-5 text-title font-semibold">Личные данные</h2>
+
+                    <div style={{ marginBottom: 20 }}>
+                        <label htmlFor="profile-name" style={ghpLabel}>Имя</label>
+                        <input
+                            id="profile-name"
+                            type="text"
+                            style={ghpInput}
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            onKeyDown={onFieldKeyDown}
+                            disabled={saving}
+                            autoComplete="name"
+                        />
                     </div>
-                    <div>
-                        <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
-                            {currentUser.name}
-                        </h1>
-                        <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
-                            <span style={{ ...ghpMono, color: GH.ink60, fontSize: 12 }}>
-                                {currentUser.email}
-                            </span>
-                            <span style={{ ...ghpMono, color: GH.ink60, fontSize: 12 }}>
-                                БАЛАНС: {formatGel(currentUser.balance ?? 0)}
-                            </span>
+
+                    <div style={{ marginBottom: 20 }}>
+                        <label htmlFor="profile-phone" style={ghpLabel}>Телефон</label>
+                        <PhoneInput
+                            id="profile-phone"
+                            style={ghpInput}
+                            value={phone}
+                            onChange={setPhone}
+                            onKeyDown={onFieldKeyDown}
+                            disabled={saving}
+                        />
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={saving || !isDirty}
+                        className="ui-btn ui-btn--primary ui-btn--touch"
+                        aria-busy={saving || undefined}
+                        style={{ marginBottom: 32 }}
+                    >
+                        {saving && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                        {saving ? 'Сохраняем…' : 'Сохранить изменения'}
+                    </button>
+
+                    <div style={{ marginBottom: 24, borderTop: ghpHairline, paddingTop: 24 }}>
+                        <label htmlFor="profile-email" style={ghpLabel}>Email</label>
+                        <ChangeEmailInline currentEmail={currentUser.email} />
+                    </div>
+
+                    <div style={{ marginBottom: 24, borderTop: ghpHairline, paddingTop: 24 }}>
+                        <h2 className="m-0 mb-1 text-title font-semibold">Уведомления в Telegram</h2>
+                        <p className="m-0 mb-3 text-small text-ink-60">
+                            Напоминания о бронях и ответы администратора приходят в Telegram.
+                        </p>
+                        <GridHouseTelegramConnect
+                            value={currentUser.telegramId || ''}
+                            onChange={saveTelegram}
+                        />
+                    </div>
+
+                    {/* Password section */}
+                    <div style={{ borderTop: ghpHairline, paddingTop: 16, marginBottom: 32 }}>
+                        <ChangePasswordSection />
+                    </div>
+                </div>
+
+                {/* Сводка аккаунта */}
+                <aside aria-label="Аккаунт" className="flex flex-col gap-6">
+                    <div className="border border-ink-10 bg-card px-5 py-4">
+                        <div className="text-small text-ink-60">Баланс</div>
+                        <div className="num mt-1 text-title font-semibold" style={{ color: (currentUser.balance ?? 0) < 0 ? STATUS.danger.fg : GH.ink }}>
+                            {formatGel(currentUser.balance ?? 0)}
                         </div>
                     </div>
-                </div>
+                    {currentUser.subscription ? (
+                        <SubscriptionCard user={currentUser} />
+                    ) : (
+                        <div className="border border-ink-10 bg-card px-5 py-4 text-small text-ink-60">
+                            Абонемента нет.{' '}
+                            <Link to="/subscriptions" className="font-medium text-ink underline underline-offset-2">Посмотреть абонементы</Link>
+                        </div>
+                    )}
+
+                    {/* Admin access */}
+                    {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
+                        <div className="border border-ink-10 bg-card px-5 py-4">
+                            <h2 className="m-0 mb-1 text-body font-semibold">Администрирование</h2>
+                            <p className="m-0 mb-3 text-small text-ink-60">
+                                Вам доступна панель администратора: брони и клиенты.
+                            </p>
+                            <Link to="/admin" className="ui-btn ui-btn--secondary ui-btn--touch">
+                                Панель администратора
+                            </Link>
+                        </div>
+                    )}
+                </aside>
             </div>
-
-            {/* Subscription */}
-            {currentUser.subscription ? (
-                <div style={{ marginBottom: 32, paddingBottom: 24, borderBottom: ghpHairline }}>
-                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АБОНЕМЕНТ</div>
-                    <SubscriptionCard user={currentUser} />
-                </div>
-            ) : (
-                <div style={{ marginBottom: 32, paddingBottom: 24, borderBottom: ghpHairline }}>
-                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АБОНЕМЕНТ</div>
-                    <div style={{ padding: 16, border: ghpHairline, color: GH.ink60, fontSize: 13, textAlign: 'center' }}>
-                        Нет активного абонемента
-                    </div>
-                </div>
-            )}
-
-            {/* Edit fields */}
-            <div style={{ maxWidth: 480, marginBottom: 32 }}>
-                <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 20 }}>ЛИЧНЫЕ ДАННЫЕ</div>
-
-                <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>ИМЯ</label>
-                    <input
-                        type="text"
-                        style={ghpInput}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        onKeyDown={onFieldKeyDown}
-                        disabled={saving}
-                        autoComplete="name"
-                    />
-                </div>
-
-                <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>EMAIL</label>
-                    <ChangeEmailInline currentEmail={currentUser.email} />
-                </div>
-
-                <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>ТЕЛЕФОН</label>
-                    <PhoneInput
-                        style={ghpInput}
-                        value={phone}
-                        onChange={setPhone}
-                        onKeyDown={onFieldKeyDown}
-                        disabled={saving}
-                    />
-                </div>
-
-                <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>TELEGRAM</label>
-                    <GridHouseTelegramConnect
-                        value={currentUser.telegramId || ''}
-                        onChange={saveTelegram}
-                    />
-                </div>
-
-                <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saving || !isDirty}
-                    style={{
-                        padding: '10px 24px', background: GH.ink, color: GH.paper, fontWeight: 700,
-                        fontSize: 13, fontFamily: GH_SANS, border: 'none', marginTop: 8,
-                        cursor: saving ? 'wait' : isDirty ? 'pointer' : 'default',
-                        opacity: saving || !isDirty ? 0.5 : 1,
-                        display: 'inline-flex', alignItems: 'center', gap: 8,
-                    }}
-                >
-                    {saving && <Loader2 size={14} className="animate-spin" />}
-                    {saving ? 'Сохраняем…' : 'Сохранить изменения'}
-                </button>
-            </div>
-
-            {/* Password section */}
-            <div style={{ borderTop: ghpHairline, paddingTop: 24, marginBottom: 32, maxWidth: 480 }}>
-                <ChangePasswordSection />
-            </div>
-
-            {/* Admin access */}
-            {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
-                <div style={{ borderTop: ghpHairline, paddingTop: 24, marginBottom: 32 }}>
-                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АДМИНИСТРИРОВАНИЕ</div>
-                    <p style={{ fontSize: 14, color: GH.ink60, marginBottom: 16 }}>
-                        Вам доступна панель администратора для управления бронированиями и клиентами.
-                    </p>
-                    <Link
-                        to="/admin"
-                        style={{
-                            display: 'inline-block', padding: '10px 24px', background: GH.ink, color: GH.paper,
-                            fontWeight: 700, fontSize: 13, fontFamily: GH_SANS, textDecoration: 'none',
-                        }}
-                    >
-                        Панель администратора →
-                    </Link>
-                </div>
-            )}
-
-            {/* Footer */}
-            <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghpMono, color: GH.ink60 }}>UNBOX · 2026</span>
-                <span style={{ ...ghpMono, color: GH.ink60 }}>Батуми · Грузия</span>
-            </footer>
         </div>
     );
 }

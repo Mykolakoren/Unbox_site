@@ -1,27 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Snowflake, ArrowLeft, Calendar, Clock, RefreshCw, Ticket } from 'lucide-react';
-import { toast } from 'sonner';
+import { Loader2, Snowflake, Ticket, Plus, MessageCircle } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { api } from '../../api/client';
-import { fmtHours, reservedSubscriptionHours } from '../../utils/paymentPriority';
-import { COLOR, STATUS } from '../../design/tokens';
+import { fmtHours, reservedSubscriptionHours, subscriptionHours } from '../../utils/paymentPriority';
+import { canBookCabinets } from '../../utils/permissions';
+import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
-import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
+
+const ADMIN_TG = 'UnboxCenter';
+
+/** Заморозка по правилам (src/config/pricing_policy.yaml → subscriptions.freeze):
+ *  один раз за абонемент, до 7 дней. На сервере freeze_count — сколько раз
+ *  УЖЕ замораживали (0 у нового абонемента). Раньше экран выводил его как
+ *  «Заморозок осталось: 0» и прятал кнопку, когда заморозка была доступна. */
+const MAX_FREEZES = 1;
+const MAX_FREEZE_DAYS = 7;
+
+function adminTgLink(text: string): string {
+    return `https://t.me/${ADMIN_TG}?text=${encodeURIComponent(text)}`;
+}
 
 /**
- * Mobile cabinet: Абонемент — full subscription view with hours remaining,
- * freeze button, expiry, plan comparison link. Replaces the cramped sub
- * row inside MobileProfile when the user needs the full picture before
- * deciding to freeze or top up.
+ * /m/subscription — «Мой абонемент» (волна 2).
+ *
+ * Сверху — сколько часов свободно для новых броней (часы будущих броней уже
+ * обещаны, G4-19), ниже срок, переносы, заморозка. Главное действие —
+ * «Забронировать кабинет»: потратить часы, пока абонемент не сгорел.
+ *
+ * Заморозка и оформление — через администратора в Telegram с готовым
+ * текстом (решение владельца 30.09): сервер /subscriptions/toggle-freeze
+ * отсюда не вызываем.
  */
 export function MobileSubscription() {
     const navigate = useNavigate();
     const { currentUser, fetchCurrentUser, bookings, fetchBookings } = useUserStore();
-    const [busy, setBusy] = useState(false);
-    const { confirm } = useConfirmDialog();
 
     const sub = currentUser?.subscription;
 
@@ -37,195 +52,186 @@ export function MobileSubscription() {
     }, [currentUser?.id]);
     const reserved = reservedSubscriptionHours(sub, bookings, currentUser?.email);
 
-    const handleFreeze = async () => {
-        if (!sub) return;
-        // Wave 1: общее окно подтверждения вместо системного confirm().
-        const ok = await confirm(sub.isFrozen
-            ? {
-                title: 'Возобновить абонемент?',
-                body: 'Часы и срок абонемента снова начнут тратиться.',
-                confirmLabel: 'Возобновить',
-                cancelLabel: 'Не сейчас',
-            }
-            : {
-                title: 'Заморозить абонемент?',
-                body: `Пока абонемент заморожен, часы и срок не тратятся. Заморозок осталось: ${sub.freezeCount}.`,
-                confirmLabel: 'Заморозить',
-                cancelLabel: 'Не сейчас',
-            });
-        if (!ok) return;
-        setBusy(true);
-        try {
-            await api.post('/subscriptions/toggle-freeze');
-            await fetchCurrentUser();
-            toast.success(sub.isFrozen ? 'Возобновлено' : 'Заморожено');
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить заморозку');
-        } finally {
-            setBusy(false);
-        }
-    };
-
     if (!currentUser) {
         return (
             <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
-                <Loader2 size={20} className="animate-spin" style={{ color: COLOR.ink60 }} />
+                <Loader2 size={20} className="animate-spin" style={{ color: COLOR.ink60 }} aria-label="Загружаем" />
             </div>
         );
     }
 
+    const who = currentUser.email ? ` (${currentUser.email})` : '';
+
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
-            <button
-                onClick={() => navigate(-1)}
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'none', border: 'none', color: COLOR.ink60,
-                    minHeight: 44, padding: 0, cursor: 'pointer', fontSize: 13,
-                    fontFamily: 'inherit',
-                }}
-            >
-                <ArrowLeft size={14} /> Назад
-            </button>
+        <div style={{ paddingBottom: 24 }}>
+            <MobilePageHeader title="Абонемент" fallbackTo="/m/me" />
 
-            <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, marginBottom: 14 }}>
-                Абонемент
-            </h1>
+            <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {!sub ? (
+                    <EmptyState
+                        icon={<Ticket size={28} />}
+                        title="Абонемента пока нет"
+                        hint="Час по абонементу дешевле обычного. Подберите тариф под то, как часто вы бронируете."
+                        action={{ label: 'Выбрать тариф', onClick: () => navigate('/m/tariffs') }}
+                    />
+                ) : (() => {
+                    // Пул сервера = часы тарифа + бонусные (у Профи+ 40 + 2).
+                    // Раньше знаменатель был только totalHours — «Свободно 42 ч из 40».
+                    const poolTotal = (Number(sub.totalHours) || 0) + (Number(sub.bonusHours) || 0);
+                    // «Свободно» — та же функция, что в оформлении (subscriptionHours →
+                    // subscriptionHoursLabel), чтобы цифры совпадали.
+                    const h = subscriptionHours(sub, {
+                        format: 'individual', bookingDate: new Date(), bookings, ownerEmail: currentUser.email,
+                    });
+                    const free = h.ok ? h.free : Math.max(0, sub.remainingHours - reserved);
+                    const usedRaw = Number((sub as any).usedHours);
+                    const usedHours = Number.isFinite(usedRaw) && (sub as any).usedHours != null
+                        ? usedRaw
+                        : Math.max(0, poolTotal - sub.remainingHours);
+                    const used = Math.min(MAX_FREEZES, Math.max(0, sub.freezeCount || 0));
+                    const freezesLeft = MAX_FREEZES - used;
+                    return (
+                        <>
+                            {/* Hero: свободно для брони X ч из Y. */}
+                            <section
+                                aria-label="Остаток абонемента"
+                                style={{
+                                    // Заморожен — статус «инфо», а не декоративный голубой.
+                                    background: sub.isFrozen ? STATUS.info.bg : COLOR.ink,
+                                    color: sub.isFrozen ? STATUS.info.fg : COLOR.onInk,
+                                    borderRadius: RADIUS.sheet,
+                                    padding: 20,
+                                    display: 'flex', flexDirection: 'column', gap: 8,
+                                }}
+                            >
+                                <div style={{
+                                    fontSize: TEXT.caption, fontWeight: 600,
+                                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                }}>
+                                    {sub.isFrozen && <Snowflake size={14} aria-hidden="true" />}
+                                    {sub.isFrozen ? 'Заморожен' : 'Активный'} · {sub.name}
+                                </div>
+                                <div style={{ fontSize: TEXT.small }}>Свободно для брони</div>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                    <span className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1 }}>
+                                        {fmtHours(free)}
+                                    </span>
+                                    <span className="num" style={{ fontSize: TEXT.small }}>
+                                        из {fmtHours(poolTotal)}
+                                    </span>
+                                </div>
+                                {reserved > 0.01 && (
+                                    <div style={{ fontSize: TEXT.small, lineHeight: 1.45 }}>
+                                        {fmtHours(reserved)} уже забронировано — спишутся за сутки до встреч.
+                                    </div>
+                                )}
+                                {!!sub.bonusHours && (
+                                    <div style={{ fontSize: TEXT.small }}>
+                                        Из них {fmtHours(sub.bonusHours)} — бонусные
+                                    </div>
+                                )}
+                            </section>
 
-            {!sub ? (
-                <NoSubscription onChoose={() => navigate('/m/tariffs')} />
-            ) : (
-                <>
-                    {/* Hero card with remaining hours */}
-                    <div style={{
-                        // Заморожен — статус «инфо», а не декоративный голубой.
-                        background: sub.isFrozen ? STATUS.info.bg : COLOR.ink,
-                        color: sub.isFrozen ? COLOR.ink : COLOR.onInk,
-                        borderRadius: 16,
-                        padding: '20px 20px 22px',
-                        marginBottom: 14,
-                    }}>
-                        <div style={{
-                            fontSize: 12, fontWeight: 600,
-                            letterSpacing: '0.06em', textTransform: 'uppercase',
-                            opacity: 0.8, marginBottom: 8,
-                            display: 'flex', alignItems: 'center', gap: 6,
-                        }}>
-                            {sub.isFrozen && <Snowflake size={14} aria-hidden="true" />}
-                            {sub.isFrozen ? 'Заморожен' : 'Активный'}
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
-                            {sub.name}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                            <span className="num" style={{
-                                fontSize: 40, fontWeight: 600, letterSpacing: '-0.02em',
-                                lineHeight: 1,
+                            {/* Подробности — строками, без плиток с нулями. */}
+                            <dl style={{
+                                margin: 0,
+                                background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet,
+                                overflow: 'hidden',
                             }}>
-                                {sub.remainingHours.toFixed(1)}
-                            </span>
-                            <span style={{ fontSize: 14, opacity: 0.7 }}>
-                                / {sub.totalHours} ч
-                            </span>
-                        </div>
-                        {!!sub.bonusHours && (
-                            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                                Из них {sub.bonusHours} ч — бонусные
+                                <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
+                                <InfoRow label="Осталось по абонементу" value={fmtHours(sub.remainingHours)} />
+                                <InfoRow label="Использовано" value={fmtHours(usedHours)} />
+                                {sub.freeReschedules > 0 && (
+                                    <InfoRow label="Бесплатных переносов" value={String(sub.freeReschedules)} />
+                                )}
+                                <InfoRow
+                                    label="Заморозка"
+                                    value={sub.isFrozen
+                                        ? (sub.frozenUntil ? `до ${formatDayMonth(sub.frozenUntil)}` : 'сейчас')
+                                        : freezesLeft > 0
+                                            ? `можно 1 раз, до ${MAX_FREEZE_DAYS} дней`
+                                            : 'уже использована'}
+                                />
+                            </dl>
+
+                            {sub.isFrozen && (
+                                <div role="status" style={{
+                                    background: STATUS.info.bg, color: STATUS.info.fg,
+                                    borderRadius: 12, padding: '12px 14px',
+                                    fontSize: TEXT.small, lineHeight: 1.45,
+                                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                                }}>
+                                    <Snowflake size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                                    <span>
+                                        {sub.frozenUntil ? `Заморожен до ${formatDayMonth(sub.frozenUntil)}. ` : 'Абонемент заморожен. '}
+                                        Часы и срок не тратятся.
+                                    </span>
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {/* Главное — потратить часы, пока абонемент не сгорел. */}
+                                {!sub.isFrozen && free > 0 && canBookCabinets(currentUser) && (
+                                    <Button block size="touch" icon={<Plus size={18} aria-hidden="true" />} onClick={() => navigate('/m/find')}>
+                                        Забронировать кабинет
+                                    </Button>
+                                )}
+                                {sub.isFrozen ? (
+                                    <TgButton
+                                        href={adminTgLink(`Здравствуйте! Хочу разморозить абонемент «${sub.name}»${who}.`)}
+                                        label="Попросить разморозить"
+                                    />
+                                ) : freezesLeft > 0 ? (
+                                    <TgButton
+                                        href={adminTgLink(`Здравствуйте! Хочу заморозить абонемент «${sub.name}»${who}. С какого числа и на сколько дней (до ${MAX_FREEZE_DAYS}): `)}
+                                        label="Попросить заморозку"
+                                        icon={<Snowflake size={16} aria-hidden="true" />}
+                                    />
+                                ) : null}
+                                <TgButton
+                                    href={adminTgLink(`Хочу оформить абонемент «${sub.name}»`)}
+                                    label="Продлить абонемент"
+                                />
+                                <Button block variant="quiet" onClick={() => navigate('/m/tariffs')}>
+                                    Сравнить тарифы
+                                </Button>
                             </div>
-                        )}
-                        {reserved > 0.01 && (
-                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6, lineHeight: 1.4 }}>
-                                {fmtHours(reserved)} уже в будущих бронях — спишутся за сутки до встреч.
-                                {' '}Свободно для новых: {fmtHours(Math.max(0, sub.remainingHours - reserved))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Stats grid */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                        <StatBox
-                            icon={<Calendar size={13} />}
-                            label="Истекает"
-                            value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })}
-                        />
-                        <StatBox
-                            icon={<RefreshCw size={13} />}
-                            label="Бесплатных переносов"
-                            value={String(sub.freeReschedules)}
-                        />
-                        <StatBox
-                            icon={<Snowflake size={13} />}
-                            label="Заморозок осталось"
-                            value={String(sub.freezeCount)}
-                        />
-                        <StatBox
-                            icon={<Clock size={13} />}
-                            label="Использовано"
-                            value={`${(sub.totalHours - sub.remainingHours).toFixed(1)} ч`}
-                        />
-                    </div>
-
-                    {sub.isFrozen && sub.frozenUntil && (
-                        <div style={{
-                            background: STATUS.info.bg,
-                            border: `1px solid ${STATUS.info.fg}33`,
-                            borderRadius: 10, padding: '10px 12px',
-                            fontSize: 12, color: STATUS.info.fg,
-                            marginBottom: 14,
-                            display: 'flex', alignItems: 'flex-start', gap: 6,
-                        }}>
-                            <Snowflake size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
-                            <span>Заморожен до {formatDayMonth(sub.frozenUntil)}. Часы и срок не тратятся.</span>
-                        </div>
-                    )}
-
-                    {/* Action: freeze / unfreeze */}
-                    {sub.freezeCount > 0 && (
-                        <Button
-                            block
-                            variant={sub.isFrozen ? 'primary' : 'secondary'}
-                            onClick={handleFreeze}
-                            loading={busy}
-                            icon={<Snowflake size={16} aria-hidden="true" />}
-                            style={{ marginBottom: 10 }}
-                        >
-                            {sub.isFrozen ? 'Возобновить' : 'Заморозить абонемент'}
-                        </Button>
-                    )}
-
-                    <Button block variant="quiet" onClick={() => navigate('/m/tariffs')}>
-                        Сравнить тарифы →
-                    </Button>
-                </>
-            )}
+                            <p style={{ margin: 0, fontSize: TEXT.small, color: COLOR.ink60, lineHeight: 1.45 }}>
+                                Заморозку и продление оформляет администратор — откроется Telegram с готовым сообщением.
+                            </p>
+                        </>
+                    );
+                })()}
+            </div>
         </div>
     );
 }
 
-function StatBox({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: string }) {
     return (
         <div style={{
-            background: COLOR.card,
-            border: `1px solid ${COLOR.ink05}`,
-            borderRadius: 10,
-            padding: '10px 12px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12,
+            minHeight: 48, padding: '12px 16px', borderTop: `1px solid ${COLOR.ink10}`, marginTop: -1,
         }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: COLOR.ink60, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                {icon} {label}
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{value}</div>
+            <dt style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>{label}</dt>
+            <dd style={{ margin: 0, fontSize: TEXT.small, fontWeight: 600, color: COLOR.ink, textAlign: 'right' }}>{value}</dd>
         </div>
     );
 }
 
-/** Абонемента нет — общий EmptyState: что видим + что сделать. */
-function NoSubscription({ onChoose }: { onChoose: () => void }) {
+/** Кнопка-ссылка в Telegram администратора (вторичная). */
+function TgButton({ href, label, icon }: { href: string; label: string; icon?: React.ReactNode }) {
     return (
-        <EmptyState
-            icon={<Ticket size={28} />}
-            title="Абонемента пока нет"
-            hint="Подберите тариф под вашу частоту брони — от 10 ч в месяц. Скидка к стандартному часу — от 22% до 50%."
-            action={{ label: 'Выбрать абонемент', onClick: onChoose }}
-        />
+        <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ui-btn ui-btn--secondary ui-btn--touch ui-btn--block"
+            style={{ textDecoration: 'none' }}
+        >
+            {icon ?? <MessageCircle size={16} aria-hidden="true" />}
+            {label}
+        </a>
     );
 }

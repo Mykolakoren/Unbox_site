@@ -11,18 +11,24 @@
  * One move: typography and grid carry everything. Images are evidence.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { useLocations } from '../../hooks/useLocations';
 import { useUserStore } from '../../store/userStore';
-import { getMyBookingsPath, getHomePath } from '../../utils/userPaths';
 import { canBookCabinets } from '../../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { Specialist } from '../Specialists/SpecialistCard';
 import { getBadge } from '../../utils/specialistBadges';
 import type { Location } from '../../types/index';
 import { formatGel } from '../../utils/format';
+import { ruCountWord, ruPlural } from '../../utils/plural';
+import { hasOnlineFormat, hasOfflineFormat } from '../../utils/specialistFormat';
+import { PublicHeader } from '../public/PublicHeader';
+import { Skeleton } from '../ui/Skeleton';
+import { ErrorBar } from '../ui/ErrorBar';
+import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
+import { usePostsAvailability } from '../../pages/content/usePostsAvailability';
 
 type VisitorMode = 'client' | 'specialist' | null;
 
@@ -90,21 +96,39 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
 
     return (
         <div style={{ ...PAGE_BG, display: 'flex', flexDirection: 'column' }}>
-            {/* Masthead — minimal */}
+            {/* G1-13: у страницы не было h1 — для экранного диктора и поиска. */}
+            <h1 className="sr-only">Unbox — кабинеты и специалисты в Батуми</h1>
+            {/* Masthead — minimal. G1-03: справа «Войти» — экран выбора только
+                выбирает, что показать, а вход был спрятан на следующем экране. */}
             <div
                 style={{
                     borderBottom: HAIRLINE,
-                    padding: '20px clamp(16px, 4vw, 32px)',
+                    padding: '12px clamp(16px, 4vw, 32px)',
                     display: 'flex',
-                    alignItems: 'baseline',
+                    alignItems: 'center',
                     gap: 16,
                     justifyContent: 'space-between',
                 }}
             >
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
-                    <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' }}>Unbox</div>
-                    <div style={MONO_LABEL}>Батуми · Пространство для практики</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap', minWidth: 0 }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em' }}>Unbox</div>
+                    {!narrow && <div style={MONO_LABEL}>Батуми · Пространство для практики</div>}
                 </div>
+                <Link
+                    to="/login"
+                    style={{
+                        ...MONO_LABEL,
+                        color: GH.ink,
+                        fontWeight: 600,
+                        textDecoration: 'none',
+                        minHeight: 44,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '0 4px',
+                    }}
+                >
+                    Войти
+                </Link>
             </div>
 
             {/* Two columns */}
@@ -116,26 +140,25 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
                 }}
             >
                 <GateColumn
-                    num="01"
                     title="Я клиент"
                     tag="Ищу специалиста"
                     body="Психологи, терапевты, коучи и педагоги. Подобрать специалиста, посмотреть расписание, записаться на сессию очно в Батуми или онлайн."
-                    cta="Войти как клиент"
+                    cta="Найти специалиста"
                     onClick={() => onSelect('client')}
                     borderRight={!narrow}
                     borderBottom={narrow}
                 />
                 <GateColumn
-                    num="02"
                     title="Я специалист"
                     tag="Принимаю клиентов"
                     body="Аренда кабинетов, приём клиентов, CRM для ведения практики. Для специалистов, которые принимают в пространствах Unbox."
-                    cta="Войти как специалист"
+                    cta="Арендовать кабинет"
                     onClick={() => onSelect('specialist')}
                 />
             </div>
 
-            {/* Footer strip */}
+            {/* Footer strip. X2-12: строку «Выберите режим, чтобы продолжить»
+                убрали — кнопки сами говорят, что делают. */}
             <div
                 style={{
                     borderTop: HAIRLINE,
@@ -143,10 +166,12 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: 16,
+                    flexWrap: 'wrap',
                     ...MONO_LABEL,
                 }}
             >
-                <span>Выберите режим, чтобы продолжить</span>
+                <span>Батуми · Грузия</span>
                 <span>unbox.com.ge</span>
             </div>
         </div>
@@ -154,7 +179,6 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
 }
 
 function GateColumn({
-    num,
     title,
     tag,
     body,
@@ -163,7 +187,6 @@ function GateColumn({
     borderRight,
     borderBottom,
 }: {
-    num: string;
     title: string;
     tag: string;
     body: string;
@@ -173,12 +196,23 @@ function GateColumn({
     borderBottom?: boolean;
 }) {
     const [hover, setHover] = useState(false);
+    // G1-13 / X4-13: раньше outline:'none' прятал фокус, а инверсия была
+    // только от мыши. Теперь та же инверсия и при фокусе с клавиатуры.
+    const [focusVisible, setFocusVisible] = useState(false);
+    const inverted = hover || focusVisible;
     return (
         <button
             type="button"
             onClick={onClick}
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
+            onFocus={(e) => {
+                // Старый Safari не знает :focus-visible — там считаем любой фокус видимым.
+                let visible = true;
+                try { visible = e.currentTarget.matches(':focus-visible'); } catch { /* нет поддержки */ }
+                setFocusVisible(visible);
+            }}
+            onBlur={() => setFocusVisible(false)}
             style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -186,39 +220,25 @@ function GateColumn({
                 padding: 'clamp(40px, 6vw, 72px) clamp(16px, 5vw, 56px)',
                 borderRight: borderRight ? HAIRLINE : undefined,
                 borderBottom: borderBottom ? HAIRLINE : undefined,
-                background: hover ? GH.ink : GH.paper,
-                color: hover ? GH.paper : GH.ink,
+                background: inverted ? GH.ink : GH.paper,
+                color: inverted ? GH.paper : GH.ink,
                 cursor: 'pointer',
                 textAlign: 'left',
-                minHeight: 440,
+                // G1-12: было 440 px — между текстом и кнопкой зияла пустота.
+                minHeight: 360,
                 fontFamily: GH_SANS,
                 transition: 'background 0.15s ease, color 0.15s ease',
                 border: 'none',
-                outline: 'none',
                 width: '100%',
             }}
         >
             <div>
                 {/* Excel #42 — admins wanted "small caption UNDER the big title"
-                    ("Я клиент" + "Ищу специалиста" below). Previously the tag
-                    sat above the title as a header; we now put it right below
-                    the big type so it reads like an actual subtitle. */}
-                <div
-                    style={{
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        opacity: 0.6,
-                        marginBottom: 24,
-                    }}
-                >
-                    {num}
-                </div>
+                    ("Я клиент" + "Ищу специалиста" below). */}
                 <div
                     style={{
                         fontSize: 'clamp(56px, 6.5vw, 92px)',
-                        fontWeight: 800,
+                        fontWeight: 600,
                         lineHeight: 0.95,
                         letterSpacing: '-0.02em',
                         marginBottom: 12,
@@ -230,36 +250,39 @@ function GateColumn({
                     style={{
                         fontFamily: GH_MONO,
                         fontSize: 12,
-                        letterSpacing: '0.16em',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
-                        opacity: 0.72,
+                        opacity: 0.8,
                         marginBottom: 24,
                     }}
                 >
                     {tag}
                 </div>
-                <div style={{ fontSize: 17, lineHeight: 1.5, maxWidth: 420, opacity: 0.78 }}>{body}</div>
+                <div style={{ fontSize: 17, lineHeight: 1.5, maxWidth: 420, opacity: 0.8 }}>{body}</div>
             </div>
             <div
                 style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 12,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    marginTop: 48,
-                    borderTop: `1px solid ${hover ? 'rgba(250,250,247,0.25)' : GH.ink10}`,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    marginTop: 40,
+                    borderTop: `1px solid ${inverted ? 'rgba(250,250,247,0.25)' : GH.ink10}`,
                     paddingTop: 20,
                 }}
             >
-                → {cta}
+                {cta} →
             </div>
         </button>
     );
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// MASTHEAD — shared across client and specialist routes
+// MASTHEAD — общая шапка сайта + строка режима (волна 2: G1-08, G1-21, X2-11)
 // ──────────────────────────────────────────────────────────────────────────
+// Раньше у лендинга была своя шапка, и на телефоне в ней оставалось только
+// «Войти»: ни специалистов, ни кабинетов, ни тарифов. Теперь — PublicHeader
+// (на телефоне «Меню» со Специалистами, Кабинетами и Тарифами), а второй
+// строкой — переключатель режима и «Статьи» / «Новости», если в них есть
+// публикации (G1-20: пустые разделы из меню убраны).
 function Masthead({
     mode,
     onReset,
@@ -267,43 +290,22 @@ function Masthead({
     mode: 'client' | 'specialist';
     onReset: () => void;
 }) {
-    const { currentUser, logout } = useUserStore();
-    const navigate = useNavigate();
-    const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
-    const narrow = useNarrow(760);
-
-    const modeLabel = mode === 'client' ? 'Клиент' : 'Специалист';
-
+    const posts = usePostsAvailability();
+    const modeLabel = mode === 'client' ? 'клиент' : 'специалист';
+    const subLink: React.CSSProperties = {
+        ...MONO_LABEL,
+        color: GH.ink60,
+        textDecoration: 'none',
+        minHeight: 44,
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '0 8px',
+    };
     return (
-        <header
-            style={{
-                borderBottom: HAIRLINE,
-                background: GH.paper,
-                position: 'sticky',
-                top: 0,
-                zIndex: 40,
-            }}
-        >
-            <div
-                style={{
-                    maxWidth: 1280,
-                    margin: '0 auto',
-                    padding: '18px clamp(16px, 4vw, 32px)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 20,
-                    justifyContent: 'space-between',
-                }}
-            >
-                {/* Left: wordmark + mode switch */}
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 20, flexWrap: 'wrap' }}>
-                    <Link to="/" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>
-                        Unbox
-                    </Link>
-                    {/* Excel #42 — mode-switch indicator is now shown on every
-                        width (was hidden on narrow) so visitors on phones can
-                        actually flip between "Клиент" and "Специалист"
-                        instead of getting stuck in whichever they picked once. */}
+        <PublicHeader
+            subnav={
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {/* Excel #42 — переключатель режима виден на любой ширине. */}
                     <button
                         type="button"
                         onClick={onReset}
@@ -312,138 +314,22 @@ function Masthead({
                             ...MONO_LABEL,
                             background: 'transparent',
                             border: `1px solid ${GH.ink10}`,
-                            padding: narrow ? '4px 8px' : '3px 10px',
+                            padding: '0 12px',
                             cursor: 'pointer',
                             color: GH.ink60,
-                            // На телефоне — палец должен попадать: 44 px в высоту.
-                            ...(narrow ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
+                            minHeight: 44,
+                            display: 'inline-flex',
+                            alignItems: 'center',
                         }}
                     >
-                        Режим: {modeLabel.toLowerCase()} ↔
+                        Режим: {modeLabel} ↔
                     </button>
+                    {posts.article && <Link to="/articles" style={subLink}>Статьи</Link>}
+                    {posts.news && <Link to="/news" style={subLink}>Новости</Link>}
                 </div>
-
-                {/* Right: nav. On <760 we hide "Специалисты" and
-                    "Кабинеты" too — both are reachable from the hero CTAs
-                    one screen down, and the row was overflowing 375 px on
-                    iPhone-class viewports. Mobile keeps only login / user
-                    menu so the masthead stays on a single line. */}
-                <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-                    <NavLink to="/specialists" label="Специалисты" hideOnNarrow={narrow} />
-                    <NavDivider hideOnNarrow={narrow} />
-                    <NavLink to="/#cabinets" label="Кабинеты" hideOnNarrow={narrow} />
-                    <NavDivider hideOnNarrow={narrow} />
-                    <NavLink to="/subscriptions" label="Тарифы" hideOnNarrow={narrow} />
-                    <NavDivider hideOnNarrow={narrow} />
-                    <NavLink to="/articles" label="Статьи" hideOnNarrow={narrow} />
-                    <NavDivider hideOnNarrow={narrow} />
-                    <NavLink to="/news" label="Новости" hideOnNarrow={narrow} />
-                    {currentUser && (
-                        <>
-                            <NavDivider hideOnNarrow={narrow} />
-                            <NavLink to={getMyBookingsPath(currentUser)} label="Бронирования" hideOnNarrow={narrow} />
-                        </>
-                    )}
-                    {isAdmin && (
-                        <>
-                            <NavDivider hideOnNarrow={narrow} />
-                            <NavLink to="/admin" label="Админ" hideOnNarrow={narrow} />
-                        </>
-                    )}
-                    <NavDivider hideOnNarrow={narrow} />
-                    {currentUser ? (
-                        <>
-                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} touch={narrow} truncate={narrow} />
-                            <NavDivider />
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    logout();
-                                    navigate('/');
-                                }}
-                                style={{
-                                    ...MONO_LABEL,
-                                    color: GH.danger,
-                                    background: 'transparent',
-                                    border: 'none',
-                                    padding: '4px 0',
-                                    cursor: 'pointer',
-                                    ...(narrow ? { minHeight: 44 } : {}),
-                                }}
-                            >
-                                Выйти
-                            </button>
-                        </>
-                    ) : (
-                        <NavLink to="/login" label="Войти" accent touch={narrow} />
-                    )}
-                </nav>
-            </div>
-        </header>
-    );
-}
-
-function NavLink({
-    to,
-    label,
-    accent,
-    hideOnNarrow,
-    touch,
-    truncate,
-}: {
-    to: string;
-    label: string;
-    accent?: boolean;
-    hideOnNarrow?: boolean;
-    /** На телефоне — высота 44 px, чтобы палец попадал. */
-    touch?: boolean;
-    /** Обрезать длинную подпись многоточием (имя пользователя). */
-    truncate?: boolean;
-}) {
-    if (hideOnNarrow) return null;
-    const isHash = to.startsWith('#') || to.includes('#');
-    const baseStyle: React.CSSProperties = {
-        ...MONO_LABEL,
-        color: accent ? GH.ink : GH.ink60,
-        fontWeight: accent ? 600 : 400,
-        padding: '4px 12px',
-        textDecoration: 'none',
-        whiteSpace: 'nowrap',
-        cursor: 'pointer',
-        ...(touch ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
-        // Длинное имя пользователя не выталкивает «Выйти» за экран.
-        ...(truncate ? { maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', display: touch ? 'inline-block' : undefined, lineHeight: touch ? '36px' : undefined } : {}),
-    };
-    if (isHash) {
-        const handleClick = (e: React.MouseEvent) => {
-            const hash = to.includes('#') ? '#' + to.split('#')[1] : to;
-            const el = document.getElementById(hash.slice(1));
-            if (el) {
-                e.preventDefault();
-                el.scrollIntoView({ behavior: 'smooth' });
-            } else {
-                // Section not on this page — reset visitor mode & force full navigation
-                e.preventDefault();
-                localStorage.setItem('unbox_visitor_mode', 'client');
-                window.location.href = to;
             }
-        };
-        return (
-            <a href={to} style={baseStyle} onClick={handleClick}>
-                {label}
-            </a>
-        );
-    }
-    return (
-        <Link to={to} style={baseStyle}>
-            {label}
-        </Link>
+        />
     );
-}
-
-function NavDivider({ hideOnNarrow }: { hideOnNarrow?: boolean }) {
-    if (hideOnNarrow) return null;
-    return <span aria-hidden style={{ color: GH.ink30 /* декор: разделитель */, fontFamily: GH_MONO, fontSize: 12 }}>·</span>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -457,32 +343,54 @@ const CATEGORIES = [
     { value: 'education', label: 'Педагоги' },
 ] as const;
 
+const SPECIALIST_FORMS: [string, string, string] = ['специалист', 'специалиста', 'специалистов'];
+
 function ClientLanding({ onReset }: { onReset: () => void }) {
     const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-    const [specialists, setSpecialists] = useState<Specialist[]>([]);
-    const [loading, setLoading] = useState(true);
+    // Волна 2 (G1-06): список грузим один раз целиком и фильтруем здесь.
+    // Раньше каждый фильтр был отдельным запросом, и число в заголовке
+    // бралось из отфильтрованного списка («1 специалистов»), а до ответа —
+    // из запасного «17». null — ещё не загрузили.
+    const [specialists, setSpecialists] = useState<Specialist[] | null>(null);
+    const [loadFailed, setLoadFailed] = useState(false);
     const { data: locations = [] } = useLocations();
 
-    useEffect(() => {
-        setLoading(true);
-        const params = categoryFilter ? `?category=${categoryFilter}` : '';
+    const load = () => {
+        setLoadFailed(false);
         api
-            .get(`/specialists${params}`)
+            .get<Specialist[]>('/specialists')
             .then((r) => setSpecialists(r.data))
-            .catch(() => setSpecialists([]))
-            .finally(() => setLoading(false));
-    }, [categoryFilter]);
+            .catch(() => setLoadFailed(true));
+    };
+    useEffect(load, []);
 
-    const totalSpecialists = specialists.length;
+    // Категории без специалистов в фильтре не показываем («Наркология · 0»).
+    const categories = useMemo(
+        () => CATEGORIES.filter((c) => (specialists ?? []).some((s) => s.category === c.value)),
+        [specialists],
+    );
+    const shown = useMemo(
+        () => (specialists ?? []).filter((s) => !categoryFilter || s.category === categoryFilter),
+        [specialists, categoryFilter],
+    );
 
     return (
         <div style={PAGE_BG}>
             <Masthead mode="client" onReset={onReset} />
             <main>
-                <Hero totalSpecialists={totalSpecialists} locations={locations} />
-                <StatStrip totalSpecialists={totalSpecialists} totalLocations={locations.length} />
-                <CategoryStrip active={categoryFilter} onChange={setCategoryFilter} />
-                <SpecialistIndex specialists={specialists} loading={loading} categoryFilter={categoryFilter} />
+                <Hero totalSpecialists={specialists ? specialists.length : null} locations={locations} />
+                {/* G1-07 / X3-20: полоса «08 специалистов · 02 кабинета · 05 категорий · ∞»
+                    убрана — KPI-плашки под героем, да ещё «2 кабинета» вместо двух центров. */}
+                {categories.length > 1 && (
+                    <CategoryStrip categories={categories} active={categoryFilter} onChange={setCategoryFilter} />
+                )}
+                <SpecialistIndex
+                    specialists={shown}
+                    loading={specialists === null && !loadFailed}
+                    failed={specialists === null && loadFailed}
+                    onRetry={load}
+                    categoryFilter={categoryFilter}
+                />
                 <CabinetsBlock locations={locations} />
                 <ContactFooter />
             </main>
@@ -491,13 +399,14 @@ function ClientLanding({ onReset }: { onReset: () => void }) {
 }
 
 // ────── Hero ──────
-function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locations: Location[] }) {
+function Hero({ totalSpecialists, locations }: { totalSpecialists: number | null; locations: Location[] }) {
+    const centers = locations.filter((l) => l.isActive !== false).length;
     return (
         <section
             style={{
                 maxWidth: 1280,
                 margin: '0 auto',
-                padding: 'clamp(56px, 9vw, 120px) clamp(16px, 4vw, 32px) clamp(40px, 6vw, 80px)',
+                padding: 'clamp(40px, 9vw, 120px) clamp(16px, 4vw, 32px) clamp(40px, 6vw, 80px)',
                 borderBottom: HAIRLINE,
             }}
         >
@@ -507,7 +416,7 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
             <h1
                 style={{
                     fontSize: 'clamp(36px, 8vw, 124px)',
-                    fontWeight: 800,
+                    fontWeight: 600,
                     lineHeight: 0.92,
                     letterSpacing: '-0.025em',
                     margin: 0,
@@ -517,7 +426,8 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
                     wordBreak: 'break-word',
                 }}
             >
-                {totalSpecialists || 17} специалистов
+                {/* Число — только настоящее, после ответа сервера (без запасного «17»). */}
+                {totalSpecialists ? ruCountWord(totalSpecialists, SPECIALIST_FORMS) : 'Специалисты'}
                 <br />
                 в&nbsp;Батуми и&nbsp;онлайн.
             </h1>
@@ -531,8 +441,12 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
                     marginBottom: 44,
                 }}
             >
-                Психологи, терапевты, коучи и педагоги принимают в&nbsp;{locations.length || 2}&nbsp;кабинетах
-                в&nbsp;центре города или онлайн из&nbsp;любой точки мира. Выбор специалиста, запись на&nbsp;сессию
+                {/* G1-07: locations — это центры (Unbox One, Unbox Uni), не кабинеты. */}
+                Психологи, терапевты, коучи и педагоги принимают{' '}
+                {centers > 0
+                    ? <>в&nbsp;{centers}&nbsp;{ruPlural(centers, ['центре', 'центрах', 'центрах'])} Unbox</>
+                    : <>в&nbsp;центрах Unbox</>}{' '}
+                в&nbsp;Батуми или онлайн из&nbsp;любой точки мира. Выбор специалиста, запись на&nbsp;сессию
                 и&nbsp;личная история — всё в&nbsp;одном месте.
             </p>
 
@@ -547,23 +461,30 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
     );
 }
 
+// G1-12: главные кнопки были 12 px моно-капсом с разрядкой 0.18em —
+// самый слабый элемент экрана. Теперь 16 px, обычный регистр, 48 px высотой.
+const HERO_CTA_BASE: React.CSSProperties = {
+    fontFamily: GH_SANS,
+    fontSize: 16,
+    letterSpacing: 0,
+    textDecoration: 'none',
+    padding: '0 24px',
+    minHeight: 48,
+    border: `1px solid ${GH.ink}`,
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+};
+
 function HeroCta({ to, primary, children }: { to: string; primary?: boolean; children: React.ReactNode }) {
     const [hover, setHover] = useState(false);
     const style: React.CSSProperties = {
-        fontFamily: GH_MONO,
-        fontSize: 12,
-        letterSpacing: '0.18em',
-        textTransform: 'uppercase',
-        textDecoration: 'none',
-        padding: '18px 28px',
-        border: `1px solid ${GH.ink}`,
+        ...HERO_CTA_BASE,
         background: primary ? (hover ? GH.accent : GH.ink) : hover ? GH.ink : 'transparent',
         color: primary ? GH.paper : hover ? GH.paper : GH.ink,
-        fontWeight: 600,
         transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
         borderColor: primary && hover ? GH.accent : GH.ink,
-        cursor: 'pointer',
-        display: 'inline-block',
     };
     const isHash = to.startsWith('#') || to.includes('#');
     if (isHash) {
@@ -580,71 +501,18 @@ function HeroCta({ to, primary, children }: { to: string; primary?: boolean; chi
     );
 }
 
-// ────── Stat strip ──────
-function StatStrip({ totalSpecialists, totalLocations }: { totalSpecialists: number; totalLocations: number }) {
-    const narrow = useNarrow(760);
-    const cells = [
-        { num: String(totalSpecialists || 17).padStart(2, '0'), label: 'Специалистов', sub: 'В активной практике' },
-        { num: String(totalLocations || 2).padStart(2, '0'), label: 'Кабинета', sub: 'Unbox Uni · Unbox One' },
-        { num: '05', label: 'Категорий', sub: 'Терапия · Психиатрия · Коучинг' },
-        { num: '∞', label: 'Онлайн', sub: 'Из любой точки мира' },
-    ];
-    return (
-        <section
-            style={{
-                maxWidth: 1280,
-                margin: '0 auto',
-                padding: '0 clamp(16px, 4vw, 32px)',
-                borderBottom: HAIRLINE,
-            }}
-        >
-            <div
-                style={{
-                    display: 'grid',
-                    gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(4, 1fr)',
-                }}
-            >
-                {cells.map((c, i) => (
-                    <div
-                        key={c.label}
-                        style={{
-                            padding: '32px 24px 36px',
-                            borderRight: !narrow && i < cells.length - 1 ? HAIRLINE : undefined,
-                            borderRight_NARROW: undefined,
-                            ...(narrow && i % 2 === 0 ? { borderRight: HAIRLINE } : {}),
-                            ...(narrow && i < 2 ? { borderBottom: HAIRLINE } : {}),
-                        } as React.CSSProperties}
-                    >
-                        <div style={{ ...MONO_LABEL, marginBottom: 12 }}>{c.label}</div>
-                        <div
-                            style={{
-                                fontSize: 'clamp(44px, 5vw, 68px)',
-                                fontWeight: 800,
-                                lineHeight: 1,
-                                letterSpacing: '-0.02em',
-                                fontVariantNumeric: 'tabular-nums',
-                                marginBottom: 12,
-                            }}
-                        >
-                            {c.num}
-                        </div>
-                        <div style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.4 }}>{c.sub}</div>
-                    </div>
-                ))}
-            </div>
-        </section>
-    );
-}
-
 // ────── Category strip ──────
 function CategoryStrip({
+    categories,
     active,
     onChange,
 }: {
+    categories: ReadonlyArray<{ value: string; label: string }>;
     active: string | null;
     onChange: (v: string | null) => void;
 }) {
     const narrow = useNarrow(760);
+    const total = categories.length + 1;
 
     return (
         <section
@@ -655,35 +523,33 @@ function CategoryStrip({
                 padding: '56px clamp(16px, 4vw, 32px) 0',
             }}
         >
-            <div style={{ ...MONO_LABEL, marginBottom: 20 }}>Фильтр · Категория</div>
+            <div style={{ ...MONO_LABEL, marginBottom: 20 }} id="landing-category-label">Категория</div>
             <div
+                role="group"
+                aria-labelledby="landing-category-label"
                 style={{
                     border: HAIRLINE,
                     display: 'grid',
-                    gridTemplateColumns: narrow ? '1fr 1fr' : `repeat(${CATEGORIES.length + 1}, 1fr)`,
+                    gridTemplateColumns: narrow ? '1fr 1fr' : `repeat(${total}, 1fr)`,
                 }}
             >
                 <CategoryCell
-                    num="00"
                     label="Все"
                     isActive={active === null}
                     onClick={() => onChange(null)}
-                    isLast={false}
                     narrow={narrow}
                     index={0}
-                    total={CATEGORIES.length + 1}
+                    total={total}
                 />
-                {CATEGORIES.map((c, i) => (
+                {categories.map((c, i) => (
                     <CategoryCell
                         key={c.value}
-                        num={String(i + 1).padStart(2, '0')}
                         label={c.label}
                         isActive={active === c.value}
                         onClick={() => onChange(c.value === active ? null : c.value)}
-                        isLast={i === CATEGORIES.length - 1}
                         narrow={narrow}
                         index={i + 1}
-                        total={CATEGORIES.length + 1}
+                        total={total}
                     />
                 ))}
             </div>
@@ -692,7 +558,6 @@ function CategoryStrip({
 }
 
 function CategoryCell({
-    num,
     label,
     isActive,
     onClick,
@@ -700,11 +565,9 @@ function CategoryCell({
     index,
     total,
 }: {
-    num: string;
     label: string;
     isActive: boolean;
     onClick: () => void;
-    isLast: boolean;
     narrow: boolean;
     index: number;
     total: number;
@@ -718,10 +581,12 @@ function CategoryCell({
         <button
             type="button"
             onClick={onClick}
+            aria-pressed={isActive}
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
             style={{
-                padding: '20px 18px',
+                padding: '14px 18px',
+                minHeight: 56,
                 borderRight: rightBorder ? HAIRLINE : undefined,
                 borderBottom: bottomBorder ? HAIRLINE : undefined,
                 background: isActive ? GH.ink : hover ? GH.ink5 : 'transparent',
@@ -730,25 +595,16 @@ function CategoryCell({
                 textAlign: 'left',
                 cursor: 'pointer',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
+                alignItems: 'center',
                 transition: 'background 0.15s ease, color 0.15s ease',
                 width: '100%',
                 fontFamily: GH_SANS,
+                fontSize: 16,
+                fontWeight: 600,
+                letterSpacing: '-0.005em',
             }}
         >
-            <div
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 12,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    opacity: isActive ? 0.7 : 0.6,
-                }}
-            >
-                {num}
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>{label}</div>
+            {label}
         </button>
     );
 }
@@ -757,10 +613,14 @@ function CategoryCell({
 function SpecialistIndex({
     specialists,
     loading,
+    failed,
+    onRetry,
     categoryFilter,
 }: {
     specialists: Specialist[];
     loading: boolean;
+    failed: boolean;
+    onRetry: () => void;
     categoryFilter: string | null;
 }) {
     const narrow = useNarrow(760);
@@ -778,11 +638,11 @@ function SpecialistIndex({
                 }}
             >
                 <div>
-                    <div style={{ ...MONO_LABEL, marginBottom: 12 }}>Индекс · Специалисты Unbox</div>
+                    <div style={{ ...MONO_LABEL, marginBottom: 12 }}>Специалисты Unbox</div>
                     <h2
                         style={{
                             fontSize: 'clamp(36px, 4.5vw, 64px)',
-                            fontWeight: 800,
+                            fontWeight: 600,
                             lineHeight: 0.95,
                             letterSpacing: '-0.02em',
                             margin: 0,
@@ -793,80 +653,84 @@ function SpecialistIndex({
                             : 'Специалисты Unbox'}
                     </h2>
                 </div>
-                <div style={{ ...MONO_LABEL_INK, fontVariantNumeric: 'tabular-nums' }}>
-                    Всего: {String(specialists.length).padStart(2, '0')}
+                {!loading && !failed && (
+                    <div style={{ ...MONO_LABEL_INK, fontVariantNumeric: 'tabular-nums' }}>
+                        {ruCountWord(specialists.length, SPECIALIST_FORMS)}
+                    </div>
+                )}
+            </div>
+
+            {failed ? (
+                <ErrorBar message="Не удалось загрузить специалистов" onRetry={onRetry} />
+            ) : (
+                <div style={{ border: HAIRLINE, borderBottom: 'none' }}>
+                    {/* Header row */}
+                    {!narrow && (
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '104px 1fr 180px 140px',
+                                alignItems: 'center',
+                                padding: '14px 20px',
+                                borderBottom: HAIRLINE,
+                                background: GH.ink5,
+                                ...MONO_LABEL,
+                            }}
+                        >
+                            <div>Фото</div>
+                            <div>Имя · Специализация</div>
+                            <div>Формат</div>
+                            <div style={{ textAlign: 'right' }}>Сессия</div>
+                        </div>
+                    )}
+
+                    {loading && (
+                        <div role="status" aria-busy="true">
+                            <span className="sr-only">Загружаем специалистов…</span>
+                            {Array.from({ length: 4 }, (_, i) => (
+                                <div key={i} style={{ padding: narrow ? 16 : '18px 20px', borderBottom: HAIRLINE }}>
+                                    <Skeleton height={narrow ? 76 : 112} radius={0} />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {!loading && specialists.length === 0 && (
+                        <div
+                            style={{
+                                padding: '48px 20px',
+                                textAlign: 'center',
+                                borderBottom: HAIRLINE,
+                                fontSize: 16,
+                                color: GH.ink60,
+                            }}
+                        >
+                            {categoryFilter ? 'В этой категории пока никого нет' : 'Список специалистов скоро появится'}
+                        </div>
+                    )}
+
+                    {!loading &&
+                        specialists.map((s) => (
+                            <SpecialistRow key={s.id} specialist={s} narrow={narrow} />
+                        ))}
                 </div>
-            </div>
-
-            <div style={{ border: HAIRLINE, borderBottom: 'none' }}>
-                {/* Header row */}
-                {!narrow && (
-                    <div
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: '64px 104px 1fr 180px 120px',
-                            alignItems: 'center',
-                            padding: '14px 20px',
-                            borderBottom: HAIRLINE,
-                            background: GH.ink5,
-                            ...MONO_LABEL,
-                        }}
-                    >
-                        <div>№</div>
-                        <div>Фото</div>
-                        <div>Имя · Специализация</div>
-                        <div>Формат</div>
-                        <div style={{ textAlign: 'right' }}>От, ₾</div>
-                    </div>
-                )}
-
-                {loading && (
-                    <div
-                        style={{
-                            padding: '48px 20px',
-                            textAlign: 'center',
-                            borderBottom: HAIRLINE,
-                            color: GH.ink60,
-                            ...MONO_LABEL,
-                        }}
-                    >
-                        Загрузка специалистов…
-                    </div>
-                )}
-
-                {!loading && specialists.length === 0 && (
-                    <div
-                        style={{
-                            padding: '48px 20px',
-                            textAlign: 'center',
-                            borderBottom: HAIRLINE,
-                            color: GH.ink60,
-                            ...MONO_LABEL,
-                        }}
-                    >
-                        Нет специалистов в этой категории
-                    </div>
-                )}
-
-                {!loading &&
-                    specialists.map((s, i) => (
-                        <SpecialistRow key={s.id} specialist={s} num={i + 1} narrow={narrow} />
-                    ))}
-            </div>
+            )}
         </section>
     );
 }
 
-function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; num: number; narrow: boolean }) {
+function SpecialistRow({ specialist, narrow }: { specialist: Specialist; narrow: boolean }) {
     const [hover, setHover] = useState(false);
     const formats = specialist.formats ?? [];
-    const hasOnline = formats.includes('ONLINE');
-    const hasOffline = formats.includes('OFFLINE_ROOM') || formats.includes('OFFLINE_CAPSULE');
+    // Любой OFFLINE-код — очно (раньше проверялись только два кода из десятка).
+    const hasOnline = hasOnlineFormat(formats);
+    const hasOffline = hasOfflineFormat(formats);
     const formatLabel = [hasOffline && 'Очно', hasOnline && 'Онлайн'].filter(Boolean).join(' · ') || '—';
+    const price = specialist.basePriceGel > 0 ? specialist.basePriceGel : null;
 
     const rowStyle: React.CSSProperties = {
         display: 'grid',
-        gridTemplateColumns: narrow ? '52px 72px 1fr 90px' : '64px 104px 1fr 180px 120px',
+        gridTemplateColumns: narrow ? '72px 1fr auto' : '104px 1fr 180px 140px',
         alignItems: 'center',
         padding: narrow ? '16px 16px' : '18px 20px',
         borderBottom: HAIRLINE,
@@ -884,18 +748,6 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
         >
-            {/* Number */}
-            <div
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 13,
-                    color: GH.ink60,
-                    fontVariantNumeric: 'tabular-nums',
-                }}
-            >
-                {String(num).padStart(2, '0')}
-            </div>
-
             {/* Photo in hairline frame */}
             <div
                 style={{
@@ -909,11 +761,13 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                 {specialist.photoUrl ? (
                     <img
                         src={specialist.photoUrl}
-                        alt={`${specialist.firstName} ${specialist.lastName}`}
+                        alt=""
+                        loading="lazy"
                         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     />
                 ) : (
                     <div
+                        aria-hidden="true"
                         style={{
                             width: '100%',
                             height: '100%',
@@ -921,21 +775,21 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            color: GH.ink30, /* декор: заглушка без фото */
+                            fontSize: 20,
+                            fontWeight: 600,
+                            color: GH.ink60,
                         }}
                     >
-                        —
+                        {(specialist.firstName?.[0] || '').toUpperCase()}
                     </div>
                 )}
             </div>
 
             {/* Name + tagline */}
             <div style={{ paddingLeft: narrow ? 14 : 20, minWidth: 0 }}>
-                {((specialist as any).badges || []).length > 0 && (
+                {(specialist.badges || []).length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                        {((specialist as any).badges as string[]).map(code => {
+                        {(specialist.badges || []).map(code => {
                             const b = getBadge(code);
                             if (!b) return null;
                             return (
@@ -952,7 +806,7 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                 <div
                     style={{
                         fontSize: narrow ? 17 : 22,
-                        fontWeight: 700,
+                        fontWeight: 600,
                         letterSpacing: '-0.01em',
                         lineHeight: 1.15,
                         marginBottom: 6,
@@ -962,7 +816,7 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                 </div>
                 <div
                     style={{
-                        fontSize: narrow ? 12 : 14,
+                        fontSize: 14,
                         color: GH.ink60,
                         lineHeight: 1.45,
                         display: '-webkit-box',
@@ -973,24 +827,35 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                 >
                     {specialist.tagline}
                 </div>
+                {narrow && formatLabel !== '—' && (
+                    <div style={{ ...MONO_LABEL, color: GH.ink60, marginTop: 6 }}>{formatLabel}</div>
+                )}
             </div>
 
-            {/* Format (hidden on narrow) */}
+            {/* Format (desktop) */}
             {!narrow && (
                 <div style={MONO_LABEL_INK}>{formatLabel}</div>
             )}
 
-            {/* Price */}
-            <div
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: narrow ? 14 : 16,
-                    fontWeight: 600,
-                    textAlign: 'right',
-                    fontVariantNumeric: 'tabular-nums',
-                }}
-            >
-                {formatGel(specialist.basePriceGel)}
+            {/* Price. G1-24: «от 140 ₾ · за сессию» — иначе непонятно, за что
+                цена; без цены (0) — не показываем, как в /m/specialists. */}
+            <div style={{ textAlign: 'right', paddingLeft: 8 }}>
+                {price !== null && (
+                    <>
+                        <div
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: narrow ? 14 : 16,
+                                fontWeight: 600,
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            от {formatGel(price)}
+                        </div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>за сессию</div>
+                    </>
+                )}
             </div>
         </Link>
     );
@@ -1009,7 +874,7 @@ function CabinetsBlock({ locations }: { locations: Location[] }) {
             <h2
                 style={{
                     fontSize: 'clamp(36px, 4.5vw, 64px)',
-                    fontWeight: 800,
+                    fontWeight: 600,
                     lineHeight: 0.95,
                     letterSpacing: '-0.02em',
                     margin: 0,
@@ -1064,8 +929,8 @@ function CabinetCell({
                 fontFamily: GH_SANS,
             }}
         >
-            <div style={{ ...MONO_LABEL, marginBottom: 16, fontVariantNumeric: 'tabular-nums' }}>
-                {String(num).padStart(2, '0')} · Филиал
+            <div style={{ ...MONO_LABEL, marginBottom: 16 }}>
+                Филиал
             </div>
             {/* Number / photo frame — typography-first, Vignelli-style */}
             <div
@@ -1095,7 +960,7 @@ function CabinetCell({
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 fontFamily: GH_SANS,
-                                fontWeight: 800,
+                                fontWeight: 600,
                                 fontSize: 'clamp(140px, 22vw, 280px)',
                                 lineHeight: 0.8,
                                 letterSpacing: '-0.04em',
@@ -1135,7 +1000,7 @@ function CabinetCell({
             <div
                 style={{
                     fontSize: 26,
-                    fontWeight: 800,
+                    fontWeight: 600,
                     letterSpacing: '-0.01em',
                     lineHeight: 1.1,
                     marginBottom: 8,
@@ -1171,6 +1036,14 @@ function CabinetCell({
 
 // ────── Contact footer ──────
 function ContactFooter() {
+    const posts = usePostsAvailability();
+    const navLink: React.CSSProperties = {
+        color: GH.ink60,
+        textDecoration: 'none',
+        minHeight: 44,
+        display: 'inline-flex',
+        alignItems: 'center',
+    };
     return (
         <footer
             style={{
@@ -1183,31 +1056,33 @@ function ContactFooter() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 32, marginBottom: 40 }}>
                 <ContactBlock label="Unbox One" value={<>ул. Палиашвили, 4<br/>Батуми, Грузия</>} />
                 <ContactBlock label="Unbox Uni" value={<>ул. Тбел Абусеридзе, 38<br/>Батуми, Грузия</>} />
-                <ContactBlock label="Телефон" value={<>+995 599 324 668<br/><span style={{ fontSize: 13, color: GH.ink60 }}>Telegram · WhatsApp</span></>} />
+                <ContactBlock label="Телефон" value={<>+995 599 324 668<br/><span style={{ fontSize: 14, color: GH.ink60 }}>Telegram · WhatsApp</span></>} />
                 <ContactBlock label="Почта" value="unbox.psy@gmail.com" />
                 <ContactBlock label="Часы" value={<>Пн—Вс<br/>09:00 — 22:00</>} />
             </div>
-            {/* Social links + public-offer link, mirrored across the row.
-                Telegram anchors the left, "Правила бронирования" anchors the
-                right — both stay above the © divider so the legal link
-                lives with the navigation, not with the city tag. */}
+            {/* X2-11: все разделы сайта — и в подвале, чтобы с телефона до них
+                было дойти без меню. «Статьи» и «Новости» — только если там есть
+                публикации (G1-20). */}
+            <nav aria-label="Разделы сайта" style={{ display: 'flex', gap: '0 24px', flexWrap: 'wrap', marginBottom: 16, ...MONO_LABEL }}>
+                <Link to="/specialists" style={navLink}>Специалисты</Link>
+                <a href="#cabinets" style={navLink}>Кабинеты</a>
+                <Link to="/subscriptions" style={navLink}>Тарифы</Link>
+                {posts.article && <Link to="/articles" style={navLink}>Статьи</Link>}
+                {posts.news && <Link to="/news" style={navLink}>Новости</Link>}
+                <Link to="/booking-rules" style={navLink}>Правила бронирования</Link>
+            </nav>
             <div
                 style={{
                     display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 24,
+                    gap: '0 24px',
                     flexWrap: 'wrap',
                     marginBottom: 32,
                     ...MONO_LABEL,
                 }}
             >
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                    <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Telegram ↗</a>
-                    <a href="https://www.instagram.com/unbox.center/" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Instagram ↗</a>
-                    <a href="https://www.facebook.com/UnboxYourself1" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Facebook ↗</a>
-                </div>
-                <a href="/booking-rules" style={{ color: GH.ink60, textDecoration: 'none' }}>Правила бронирования ↗</a>
+                <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={navLink}>Telegram ↗</a>
+                <a href="https://www.instagram.com/unbox.center/" target="_blank" rel="noopener noreferrer" style={navLink}>Instagram ↗</a>
+                <a href="https://www.facebook.com/UnboxYourself1" target="_blank" rel="noopener noreferrer" style={navLink}>Facebook ↗</a>
             </div>
             <div
                 style={{
@@ -1244,19 +1119,33 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
     const navigate = useNavigate();
     const { data: locations = [] } = useLocations();
     const isSpecialist = Boolean(currentUser && ['specialist', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
+    // G1-landing-entry-M3: вошедший без одобренной анкеты (роль user) раньше
+    // видел «Выберите кабинет» — а бронь ему не дадут. Теперь — анкета.
+    const canBook = canBookCabinets(currentUser);
+    const application = useSpecialistApplicationStatus(currentUser, !!currentUser && !canBook);
+    const needsApplication = !!currentUser && !canBook;
+    const applicationPending = needsApplication && application === 'pending';
+
+    const lead = !currentUser
+        ? 'Аренда кабинетов по часам, собственная страница на сайте Unbox, CRM для ведения практики. Подайте заявку, чтобы начать.'
+        : applicationPending
+            ? 'Анкета на проверке. Как только администратор её одобрит, здесь откроется бронирование кабинетов.'
+            : needsApplication
+                ? 'Чтобы бронировать кабинеты, заполните анкету специалиста — после одобрения откроется бронирование.'
+                : 'Аренда кабинетов, собственная страница, CRM для ведения практики. Выберите кабинет или перейдите в CRM.';
 
     return (
         <div style={PAGE_BG}>
             <Masthead mode="specialist" onReset={onReset} />
             <main>
-                <section style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(56px, 8vw, 112px) clamp(16px, 4vw, 32px)' }}>
+                <section style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(40px, 8vw, 112px) clamp(16px, 4vw, 32px)' }}>
                     <div style={{ ...MONO_LABEL, marginBottom: 32 }}>
                         Портал специалиста
                     </div>
                     <h1
                         style={{
                             fontSize: 'clamp(48px, 7vw, 104px)',
-                            fontWeight: 800,
+                            fontWeight: 600,
                             lineHeight: 0.92,
                             letterSpacing: '-0.025em',
                             margin: 0,
@@ -1288,50 +1177,47 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
                             marginBottom: 44,
                         }}
                     >
-                        {currentUser
-                            ? 'Аренда кабинетов, собственная страница, CRM для ведения практики. Выберите кабинет или перейдите в CRM.'
-                            : 'Аренда кабинетов по часам, собственная страница на сайте Unbox, CRM для ведения практики. Подайте заявку, чтобы начать.'}
+                        {lead}
                     </p>
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                         {currentUser ? (
-                            <>
-                                <HeroCta to="#cabinets" primary>
-                                    Кабинеты Unbox →
-                                </HeroCta>
-                                {isSpecialist && (
-                                    <HeroCta to="/crm">
-                                        → В кабинет CRM
+                            needsApplication ? (
+                                <>
+                                    <HeroCta to="/become-specialist" primary>
+                                        {applicationPending ? 'Статус анкеты →' : 'Заполнить анкету →'}
                                     </HeroCta>
-                                )}
-                                {!canBookCabinets(currentUser) && (
-                                    <HeroCta to="/become-specialist">Подать заявку →</HeroCta>
-                                )}
-                            </>
+                                    <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
+                                    <HeroCta to="/subscriptions">Тарифы и цены →</HeroCta>
+                                </>
+                            ) : (
+                                <>
+                                    <HeroCta to="#cabinets" primary>
+                                        Кабинеты Unbox →
+                                    </HeroCta>
+                                    {isSpecialist && (
+                                        <HeroCta to="/crm">
+                                            В кабинет CRM →
+                                        </HeroCta>
+                                    )}
+                                    <HeroCta to="/subscriptions">Тарифы и цены →</HeroCta>
+                                </>
+                            )
                         ) : (
                             <>
                                 <button
                                     type="button"
                                     onClick={() => navigate('/login')}
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.18em',
-                                        textTransform: 'uppercase',
-                                        padding: '18px 28px',
-                                        border: `1px solid ${GH.ink}`,
-                                        background: GH.ink,
-                                        color: GH.paper,
-                                        cursor: 'pointer',
-                                        fontWeight: 600,
-                                    }}
+                                    style={{ ...HERO_CTA_BASE, background: GH.ink, color: GH.paper }}
                                 >
-                                    → Войти
+                                    Войти →
                                 </button>
-                                <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
                                 {/* Регистрация, а после неё — сразу анкета специалиста
                                     (раньше после регистрации человек попадал в кабинет
                                     клиента, и с телефона анкету было не найти). */}
                                 <HeroCta to={`/login?register=1&redirect=${encodeURIComponent('/become-specialist')}`}>Подать заявку →</HeroCta>
+                                {/* X2-11: цены аренды — отсюда, с телефона тоже. */}
+                                <HeroCta to="/subscriptions">Тарифы и цены →</HeroCta>
+                                <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
                             </>
                         )}
                     </div>
@@ -1346,21 +1232,21 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
                         }}
                     >
                         {[
-                            { num: '01', label: 'Кабинеты', body: '2 локации в центре Батуми, почасовая аренда, полная комплектация.' },
-                            { num: '02', label: 'Практика', body: 'Собственная страница, расписание, запись клиентов через сайт.' },
-                            { num: '03', label: 'CRM', body: 'Клиенты, сессии, заметки, финансы — в одном рабочем пространстве.' },
+                            { label: 'Кабинеты', body: '2 центра в Батуми, почасовая аренда, полная комплектация. Цены — на странице «Тарифы».' },
+                            { label: 'Практика', body: 'Собственная страница, расписание, запись клиентов через сайт.' },
+                            { label: 'CRM', body: 'Клиенты, сессии, заметки, финансы — в одном рабочем пространстве.' },
                         ].map((cell, i, arr) => (
                             <div
-                                key={cell.num}
+                                key={cell.label}
                                 style={{
                                     padding: '28px 24px',
                                     borderRight: i < arr.length - 1 ? HAIRLINE : undefined,
                                 }}
                             >
                                 <div style={{ ...MONO_LABEL, marginBottom: 14 }}>
-                                    {cell.num} · {cell.label}
+                                    {cell.label}
                                 </div>
-                                <div style={{ fontSize: 15, lineHeight: 1.5, color: GH.ink }}>{cell.body}</div>
+                                <div style={{ fontSize: 16, lineHeight: 1.5, color: GH.ink }}>{cell.body}</div>
                             </div>
                         ))}
                     </div>

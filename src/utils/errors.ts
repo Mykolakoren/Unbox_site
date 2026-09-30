@@ -1,3 +1,5 @@
+import { toast } from 'sonner';
+
 /**
  * Extract a human-readable string from any axios error / API response.
  *
@@ -10,14 +12,58 @@
  *   try { ... } catch (e) {
  *     toast.error(apiErrorMessage(e, 'Не удалось сохранить'));
  *   }
+ *
+ * Волна 2, шаг 0 (X5-04): английский технический текст наружу не отдаём.
+ * Нет ответа сервера → «Нет соединения с сервером…», таймаут → «Сервер долго
+ * не отвечает…», 429 → «Слишком много запросов…». err.message и английские
+ * detail («Not found», «Network Error») заменяются на fallback — в нём
+ * вызывающий код и так пишет, что не получилось («Не удалось забронировать»).
+ *
+ * Второе уведомление. Интерцептор в api/client.ts сам показывает тост на
+ * сетевой сбой, таймаут и ошибку сервера у запросов записи — и помечает
+ * ошибку markErrorToastShown(). Экран должен показывать свой тост через
+ * toastApiError(e, 'Не удалось …') — он промолчит, если тост уже был.
  */
+
+export const NETWORK_ERROR_TEXT = 'Нет соединения с сервером. Проверьте интернет и повторите';
+export const TIMEOUT_ERROR_TEXT = 'Сервер долго не отвечает. Попробуйте ещё раз';
+export const RATE_LIMIT_TEXT = 'Слишком много запросов. Подождите минуту и повторите';
+export const SERVER_ERROR_TEXT = 'Ошибка сервера. Попробуйте позже';
+
+/** Есть кириллица — значит, текст писали для людей (наш detail или наш throw). */
+const CYRILLIC_RE = /[а-яё]/i;
+
+function humanText(text: unknown): string | null {
+    if (typeof text !== 'string') return null;
+    const t = text.trim();
+    return t && CYRILLIC_RE.test(t) ? t : null;
+}
+
+/** Таймаут запроса (axios: ECONNABORTED / ETIMEDOUT). */
+export function isTimeoutError(err: any): boolean {
+    return !!err && !err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT');
+}
+
+/** Сервер не ответил вовсе: нет сети, сервер лежит, CORS (axios: «Network Error»). */
+export function isNetworkError(err: any): boolean {
+    if (!err || err.response || isTimeoutError(err)) return false;
+    // Запрос отменили мы сами (AbortController, уход со страницы) — не сбой.
+    if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') return false;
+    return err.code === 'ERR_NETWORK' || err.message === 'Network Error' || !!err.request || !!err.isAxiosError;
+}
+
 export function apiErrorMessage(err: any, fallback = 'Что-то пошло не так'): string {
     if (!err) return fallback;
+
+    // Ответа нет — сервер не виноват в тексте, говорим про связь.
+    if (isTimeoutError(err)) return TIMEOUT_ERROR_TEXT;
+    if (isNetworkError(err)) return NETWORK_ERROR_TEXT;
+    if (err?.response?.status === 429) return RATE_LIMIT_TEXT;
 
     // Axios path: err.response.data.detail
     const detail = err?.response?.data?.detail;
 
-    if (typeof detail === 'string') return detail;
+    if (typeof detail === 'string') return humanText(detail) ?? fallback;
     if (detail && typeof detail === 'object') {
         const msg = (detail as any).message;
         if (typeof msg === 'string') {
@@ -34,16 +80,43 @@ export function apiErrorMessage(err: any, fallback = 'Что-то пошло н�
                 const more = conflicts.length > sample.length ? ` (+${conflicts.length - sample.length} ещё)` : '';
                 return `${msg}: ${sample.join('; ')}${more}`;
             }
-            return msg;
+            return humanText(msg) ?? fallback;
         }
         // Pydantic-style validation list
         if (Array.isArray(detail)) {
-            return detail.map((d: any) => d?.msg || d?.message || JSON.stringify(d)).join('; ');
+            const texts = detail.map((d: any) => humanText(d?.msg) ?? humanText(d?.message)).filter(Boolean);
+            return texts.length ? texts.join('; ') : fallback;
         }
-        // Last resort — show keys so we know what shape came back
-        try { return JSON.stringify(detail); } catch { return fallback; }
+        return fallback;
     }
 
-    if (typeof err.message === 'string') return err.message;
-    return fallback;
+    // Свой throw new Error('…') по-русски — показываем; английское — нет.
+    return humanText(err?.message) ?? fallback;
+}
+
+// ── «Уведомление уже показано» ─────────────────────────────────────────
+
+const TOAST_SHOWN = '__unboxToastShown';
+
+/** Пометить ошибку: тост о ней уже на экране (ставит интерцептор api/client.ts). */
+export function markErrorToastShown(err: unknown): void {
+    if (err && typeof err === 'object') {
+        try { (err as any)[TOAST_SHOWN] = true; } catch { /* замороженный объект — не страшно */ }
+    }
+}
+
+/** true — тост об этой ошибке уже показан, второй не нужен. */
+export function wasErrorToastShown(err: unknown): boolean {
+    return !!(err && typeof err === 'object' && (err as any)[TOAST_SHOWN]);
+}
+
+/**
+ * Показать ошибку действия одним тостом:
+ *   catch (e) { toastApiError(e, 'Не удалось забронировать'); }
+ * Если интерцептор уже сказал «Нет соединения с сервером…» — промолчит.
+ */
+export function toastApiError(err: unknown, fallback = 'Что-то пошло не так', opts?: Parameters<typeof toast.error>[1]): void {
+    if (wasErrorToastShown(err)) return;
+    toast.error(apiErrorMessage(err, fallback), opts);
+    markErrorToastShown(err);
 }

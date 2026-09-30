@@ -1,5 +1,6 @@
-import { Link } from 'react-router-dom';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { PublicHeader } from '../components/public/PublicHeader';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 /** Booking-rules / public offer page.
  *  Linked from the landing footer, the SubscriptionsPage CTA, the
@@ -7,22 +8,13 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
  *  no heavy chrome, the goal is comfortable reading.
  */
 export function BookingRulesPage() {
+    useDocumentTitle('Правила бронирования');
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-            <header style={{
-                maxWidth: 920,
-                margin: '0 auto',
-                padding: '32px clamp(16px, 4vw, 32px) 16px',
-                borderBottom: `1px solid ${GH.ink10}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-            }}>
-                <Link to="/" style={{ ...mono, color: GH.ink60, textDecoration: 'none' }}>← НА ГЛАВНУЮ</Link>
-                <Link to="/subscriptions" style={{ ...mono, color: GH.ink60, textDecoration: 'none' }}>ТАРИФЫ →</Link>
-            </header>
+            {/* G1-21: общая шапка сайта вместо «← На главную / Тарифы →»
+                (в /m её рисует оболочка, PublicHeader там сам не рисуется).
+                Текст оферты не менялся — выжимка ждёт решения владельца (G1-22). */}
+            <PublicHeader />
 
             <main style={{ maxWidth: 920, margin: '0 auto', padding: 'clamp(24px, 5vw, 48px) clamp(16px, 4vw, 32px)' }}>
                 <div style={mono}>ПУБЛИЧНАЯ ОФЕРТА</div>

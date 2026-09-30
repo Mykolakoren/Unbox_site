@@ -113,10 +113,6 @@ export function Summary() {
 
     }, [state.selectedSlots, state.date, state.format, state.extras, state.paymentMethod, currentUser, bookings, accumulatedWeeklyHours]);
 
-    const handleBack = () => {
-        state.setStep(state.step - 1);
-    };
-
     return (
         <div className="p-6 max-h-[calc(100vh-180px)] overflow-y-auto">
             <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
@@ -138,7 +134,7 @@ export function Summary() {
                             .some(next => next.resourceId === b.resourceId);
                         const resourceLabel = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
                         return (
-                            <div key={idx} className="rounded-xl p-3 text-sm relative group"
+                            <div key={idx} className="p-3 text-sm relative group"
                                 style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
                                 <div className="flex justify-between font-medium">
                                     <span>{resourceLabel}</span>
@@ -168,10 +164,10 @@ export function Summary() {
                                             state.startAddMoreSlots(b.resourceId);
                                             state.setStep(2);
                                         }}
-                                        className="mt-2 flex items-center gap-1.5 text-caption font-medium text-ink-80 hover:text-ink hover:underline transition-colors"
+                                        className="mt-2 min-h-11 flex items-center gap-1.5 text-small font-medium text-ink-80 hover:text-ink hover:underline transition-colors"
                                         title={`Добавить второй период в ${resourceLabel}`}
                                     >
-                                        <Plus size={12} aria-hidden="true" />
+                                        <Plus size={14} aria-hidden="true" />
                                         Ещё период в этом кабинете
                                     </button>
                                 )}
@@ -211,8 +207,8 @@ export function Summary() {
                         <div>
                             <div className="text-ink-60">Оплата</div>
                             <div>{
-                                state.paymentMethod === 'bonus' ? 'Бонусные часы' :
-                                state.paymentMethod === 'subscription' ? 'Абонемент' : 'Баланс'
+                                state.paymentMethod === 'bonus' ? 'Бонус' :
+                                state.paymentMethod === 'subscription' ? 'Абонемент' : 'С баланса'
                             }</div>
                         </div>
                     </div>
@@ -289,21 +285,7 @@ export function Summary() {
                 </div>
             </div>
 
-            {/* Navigation buttons are now handled within each Step component to avoid duplication.
-                Step 1: ContextStep has 'Show Schedule'
-                Step 2: ChessboardStep has 'Next'
-                Step 3: OptionsStep has 'Continue'
-                Step 4: ConfirmationStep has 'Pay'
-            */}
-
-            {state.step > 1 && (
-                <button
-                    onClick={handleBack}
-                    className="w-full mt-3 text-sm text-ink-60 hover:text-ink"
-                >
-                    Назад
-                </button>
-            )}
+            {/* «Назад» здесь больше нет — одна кнопка на шаг, в шапке мастера (G3-11). */}
         </div>
     );
 }
