@@ -376,13 +376,13 @@ export function MobileCheckout() {
     // При абонементе деньгами идут только пиковая надбавка и допуслуги.
     const subMoney = peakTotal + extrasTotal;
     const subMoneyNote = subMoney > 0
-        ? ` (+${formatGel(subMoney, { fraction: 0 })} ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
+        ? ` (+${formatGel(subMoney)} ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
         : '';
     const payLabel = payMethod === 'bonus'
         ? `${fmtHours(totalDurationHours)} из бонусов`
         : payMethod === 'subscription'
-            ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`
-            : formatGel(priced.total, { fraction: 0 });
+            ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
+            : formatGel(priced.total);
     const payName = payMethod === 'bonus' ? 'бонусные часы' : payMethod === 'subscription' ? 'абонемент' : 'баланс';
     const payChoices = (['bonus', 'subscription', 'balance'] as PayMethod[])
         .filter(m => isSelectable(m, plan, isSeries)).length;
@@ -420,7 +420,7 @@ export function MobileCheckout() {
                 ? ` · пропущено занятых: ${result.skipped.length}`
                 : '';
             toast.success(
-                `Серия создана: ${result.created} ${ruPlural(result.created, ['бронь', 'брони', 'броней'])} · ${formatGel(result.totalCost, { fraction: 0 })}${skippedNote}`,
+                `Серия создана: ${result.created} ${ruPlural(result.created, ['бронь', 'брони', 'броней'])} · ${formatGel(result.totalCost)}${skippedNote}`,
                 { duration: 6000 },
             );
             // Navigate immediately — the toast container lives at app
@@ -582,7 +582,7 @@ export function MobileCheckout() {
                 ? 'Сначала часы абонемента, остальное — с баланса'
                 : isSeries
                     ? (seriesQuote && seriesQuote.occurrences === effectiveOccurrences
-                        ? `С баланса · ${formatGel(seriesQuote.totalMoney, { fraction: 0 })} за серию`
+                        ? `С баланса · ${formatGel(seriesQuote.totalMoney)} за серию`
                         : `С баланса · ${payLabel} за встречу`)
                     : `С баланса · ${payLabel}`;
     // На одобрение сервер отправляет только одиночную бронь не-админа
@@ -713,23 +713,23 @@ export function MobileCheckout() {
                             <Row
                                 key={`${i.resourceId}-${i.startTime}-${idx}`}
                                 label={`${RESOURCES.find(r => r.id === i.resourceId)?.name ?? i.resourceId}${priced.items.length > 1 ? `, ${i.startTime}` : ''} · ${formatBookingDuration(i.duration)}`}
-                                value={formatGel(i.price.basePrice, { fraction: 0 })}
+                                value={formatGel(i.price.basePrice)}
                             />
                         ))}
                         {priced.items.some(i => (i.price.peakSurcharge ?? 0) > 0) && (
                             <Row
                                 label="в т.ч. пиковые часы"
-                                value={`+${formatGel(priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0), { fraction: 0 })}`}
+                                value={`+${formatGel(priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0))}`}
                                 muted
                             />
                         )}
                         {priced.items.some(i => i.price.extrasPrice > 0) && (
-                            <Row label="Допуслуги" value={formatGel(priced.items.reduce((s, i) => s + i.price.extrasPrice, 0), { fraction: 0 })} />
+                            <Row label="Допуслуги" value={formatGel(priced.items.reduce((s, i) => s + i.price.extrasPrice, 0))} />
                         )}
                         {priced.items.some(i => i.price.discountAmount > 0) && (
                             <Row
                                 label="Скидка"
-                                value={`−${formatGel(priced.items.reduce((s, i) => s + i.price.discountAmount, 0), { fraction: 0 })}`}
+                                value={`−${formatGel(priced.items.reduce((s, i) => s + i.price.discountAmount, 0))}`}
                                 tone="ok"
                             />
                         )}
@@ -737,10 +737,10 @@ export function MobileCheckout() {
                             <Row
                                 label="Итого"
                                 value={isSeries || payMethod === 'balance'
-                                    ? formatGel(priced.total, { fraction: 0 })
+                                    ? formatGel(priced.total)
                                     : payMethod === 'bonus'
                                         ? formatGel(0)
-                                        : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`}
+                                        : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`}
                                 bold
                             />
                         </div>
@@ -980,26 +980,26 @@ export function MobileCheckout() {
                             if (deferred) {
                                 return (
                                     <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
-                                        Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {formatGel(priced.total, { fraction: 0 })}.
-                                        {' '}Сейчас на балансе {formatGel(bal, { fraction: 0 })}
-                                        {debt > 0 ? ` — не хватает ${formatGel(debt, { fraction: 0 })}, уйдёт в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })}), если не пополнить.` : '.'}
+                                        Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {formatGel(priced.total)}.
+                                        {' '}Сейчас на балансе {formatGel(bal)}
+                                        {debt > 0 ? ` — не хватает ${formatGel(debt)}, уйдёт в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0)}), если не пополнить.` : '.'}
                                     </li>
                                 );
                             }
                             return (
                                 <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
                                     {debt > 0
-                                        ? `${expectApproval ? 'Спишем после одобрения' : 'Спишется сразу'} ${formatGel(priced.total, { fraction: 0 })}, из них ${formatGel(debt, { fraction: 0 })} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })})`
+                                        ? `${expectApproval ? 'Спишем после одобрения' : 'Спишется сразу'} ${formatGel(priced.total)}, из них ${formatGel(debt)} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0)})`
                                         : expectApproval
-                                            ? `Спишем после одобрения: ${formatGel(priced.total, { fraction: 0 })} с баланса`
-                                            : `Спишется сразу ${formatGel(priced.total, { fraction: 0 })} с баланса, останется ${formatGel(after, { fraction: 0 })}`}
+                                            ? `Спишем после одобрения: ${formatGel(priced.total)} с баланса`
+                                            : `Спишется сразу ${formatGel(priced.total)} с баланса, останется ${formatGel(after)}`}
                                 </li>
                             );
                         })()}
                         {recurPattern !== 'once' && effectiveOccurrences > 1 && (
                             seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? (
                                 <li>
-                                    Серия из {seriesQuote.occurrences}: точно {formatGel(seriesQuote.totalMoney, { fraction: 0 })}
+                                    Серия из {seriesQuote.occurrences}: точно {formatGel(seriesQuote.totalMoney)}
                                     {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
                                     {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
                                     {'. '}Каждая бронь спишется за сутки до своего начала.
@@ -1049,7 +1049,8 @@ export function MobileCheckout() {
                     onClick={needsApplication ? () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) : submit}
                     disabled={submitting || confirmed}
                     loading={submitting}
-                    style={{ minHeight: 52, fontSize: TEXT.body }}
+                    // Длинная подпись («Отправить на одобрение · 1 ч абонемента + 5 ₾») переносится, а не режется.
+                    style={{ minHeight: 52, fontSize: TEXT.body, whiteSpace: 'normal', lineHeight: 1.25, textAlign: 'center', paddingBlock: 8 }}
                 >
                     {confirmed
                         ? 'Готово'
@@ -1059,7 +1060,7 @@ export function MobileCheckout() {
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'
                                 ? (effectiveOccurrences > 0
-                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences, { fraction: 0 })}`
+                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences)}`
                                     : 'Выберите число повторов или дату')
                                 : expectApproval
                                     ? `Отправить на одобрение · ${payLabel}`
@@ -1137,7 +1138,7 @@ export function MobileCheckout() {
                 open={payOpen}
                 onClose={() => setPayOpen(false)}
                 title="Чем платите"
-                description={`Сейчас выбрано: ${payName}. Порядок как на сервере: бонусные часы → абонемент → баланс.`}
+                description={`Сейчас выбрано: ${payName}. Сначала тратятся бонусные часы, потом абонемент, потом баланс.`}
                 footer={<Button block onClick={() => setPayOpen(false)}>Готово</Button>}
             >
                 <div role="radiogroup" aria-label="Способ оплаты" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1173,7 +1174,7 @@ export function MobileCheckout() {
                         // или абонемент, сервер деньги не возьмёт — вариант
                         // недоступен, и мы говорим почему.
                         sub={(() => {
-                            const bal = effectiveUser ? formatGel(effectiveUser.balance ?? 0, { fraction: 0 }) : '';
+                            const bal = effectiveUser ? formatGel(effectiveUser.balance ?? 0) : '';
                             if (!isSelectable('balance', plan, isSeries)) {
                                 return `${bal} · ${balanceLockedReason(plan).toLowerCase()}`;
                             }
