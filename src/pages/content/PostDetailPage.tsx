@@ -7,6 +7,7 @@ import { formatDayMonth } from '../../utils/format';
 import { Skeleton, SkeletonText } from '../../components/ui/Skeleton';
 import { StructuredText } from '../../components/StructuredText';
 import { postsApi, type Post } from '../../api/posts';
+import { PublicHeader } from '../../components/public/PublicHeader';
 
 /**
  * PostDetailPage — публичная страница новости/статьи по slug.
@@ -47,14 +48,14 @@ export function PostDetailPage() {
 
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, fontFamily: GH_SANS, color: GH.ink, overflowX: 'hidden' }}>
-            <header style={{ borderBottom: `1px solid ${GH.ink10}`, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
-                <div style={{ maxWidth: 760, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
-                    <Link to={backTo} style={{ ...ghMono, color: GH.label, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <ArrowLeft size={12} /> {backLabel}
+            {/* G1-21: общая шапка сайта; «← Все статьи» — второй строкой, 44 px. */}
+            <PublicHeader
+                subnav={
+                    <Link to={backTo} style={{ ...ghMono, color: GH.ink, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44 }}>
+                        <ArrowLeft size={14} aria-hidden="true" /> {backLabel}
                     </Link>
-                </div>
-            </header>
+                }
+            />
 
             <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px clamp(16px, 4vw, 24px) 80px' }}>
                 {loading ? (
@@ -66,15 +67,15 @@ export function PostDetailPage() {
                     </div>
                 ) : error || !post ? (
                     <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink60 }}>
-                        <p style={{ fontSize: 15, fontWeight: 600 }}>{error || 'Пост не найден'}</p>
-                        <Link to={backTo} style={{ color: GH.accent, fontSize: 14 }}>← {backLabel}</Link>
+                        <p style={{ fontSize: 16, fontWeight: 600, color: GH.ink }}>{error || 'Пост не найден'}</p>
+                        <Link to={backTo} style={{ color: GH.label, fontSize: 16, display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>← {backLabel}</Link>
                     </div>
                 ) : (
                     <article>
                         <div style={{ ...ghMono, color: GH.label, marginBottom: 12 }}>
                             {isArticle ? 'СТАТЬЯ' : 'НОВОСТЬ'} · {safeDate(post.publishedAt || post.createdAt)}
                         </div>
-                        <h1 style={{ fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15, margin: '0 0 20px' }}>
+                        <h1 style={{ fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.15, margin: '0 0 20px' }}>
                             {post.title}
                         </h1>
 
@@ -101,8 +102,8 @@ export function PostDetailPage() {
                                 )}
                                 <div>
                                     <div style={{ ...ghMono, color: GH.ink60, fontSize: 12, marginBottom: 2 }}>АВТОР</div>
-                                    <div style={{ fontWeight: 700, fontSize: 15 }}>{post.authorName || 'Специалист Unbox'}</div>
-                                    <div style={{ fontSize: 12, color: GH.accent }}>Профиль и запись →</div>
+                                    <div style={{ fontWeight: 600, fontSize: 16 }}>{post.authorName || 'Специалист Unbox'}</div>
+                                    <div style={{ fontSize: 14, color: GH.label }}>Профиль и запись →</div>
                                 </div>
                             </Link>
                         )}
