@@ -1,31 +1,45 @@
 /**
- * Cabinet detail page — /cabinet/:resourceId
+ * Cabinet detail page — /cabinet/:resourceId и /m/cabinet/:resourceId
  *
  * Design direction: Vignelli's Unigrid (1977 National Park Service catalog +
  * Unimark exhibition catalogs). Photographs treated as EVIDENCE, not mood.
- * Two-column grid: left = data spine (name + mono fact table + description +
+ * Two-column grid: left = data spine (name + fact table + description +
  * booking CTA), right = hero photo + stacked secondary photos.
  *
- * Why this and not a masonry/Airbnb gallery: therapists choose where to host
- * their clients — they need to see the room is clean, lit, undecorated. A
- * catalog-grade layout says "we take this seriously" without writing a single
- * self-congratulatory word. Plus it matches GH (IBM Plex + monochrome ink)
- * which is literally Vignelli's typographic palette.
+ * Волна 2, пакет B (G2-15, G2-02, X5-17):
+ *  - внутри /m — без MinimalLayout и чёрной полосы крошек: одна шапка
+ *    MobilePageHeader со стрелкой «Назад», все ссылки остаются в /m (catalogPath);
+ *  - на компьютере — общая PublicHeader, крошки в её подстроке;
+ *  - на узком экране фото идёт ПЕРВЫМ, остальные кадры — лентой, а кнопка
+ *    «Забронировать · 20 ₾/ч» прилипает к низу (над нижним меню в /m);
+ *  - превью WebP вместо оригиналов 1280×960 в миниатюрах;
+ *  - закрытый кабинет (isActive: false, сейчас кабинет 9) не показываем.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { MinimalLayout } from '../components/MinimalLayout';
+import { MapPin } from 'lucide-react';
 import { RESOURCES, LOCATIONS, CABINET_SERVICES } from '../utils/data';
 import { useBookingStore } from '../store/bookingStore';
-import { COLOR } from '../design/tokens';
+import { COLOR, FONT, Z } from '../design/tokens';
 import { formatGel } from '../utils/format';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { useCatalogPath, useInMobileShell } from '../utils/catalogPath';
+import { photoSrcSet, photoVariant } from '../utils/cabinetPhotos';
+import { PublicHeader } from '../components/public/PublicHeader';
+import { MobilePageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
+import { PhotoLightbox } from '../components/catalog/PhotoLightbox';
+import { PhotoStrip } from '../components/catalog/PhotoStrip';
 
 export function CabinetPage() {
     const { resourceId } = useParams<{ resourceId: string }>();
     const navigate = useNavigate();
     const setStep = useBookingStore(s => s.setStep);
+    const inShell = useInMobileShell();
+    const toCatalog = useCatalogPath();
+    const wide = useMediaQuery('(min-width: 900px)');
     const [lightbox, setLightbox] = useState<number | null>(null);
 
     const resource = useMemo(
@@ -36,15 +50,21 @@ export function CabinetPage() {
         () => resource ? LOCATIONS.find(l => l.id === resource.locationId) : null,
         [resource],
     );
+    // Кабинет 9 закрыт (владелец, 30.09): старые ссылки ведут на его центр.
+    const closed = !!resource && resource.isActive === false;
+
+    useDocumentTitle(resource && !closed ? resource.name : null);
 
     useEffect(() => {
         if (!resource) {
-            // Unknown resource — bounce home rather than render a half-page.
-            navigate('/', { replace: true });
+            // Неизвестный кабинет — в каталог, а не на полупустую страницу.
+            navigate(inShell ? '/m/places' : '/', { replace: true });
+        } else if (closed) {
+            navigate(toCatalog(`/location/${resource.locationId}`), { replace: true });
         }
-    }, [resource, navigate]);
+    }, [resource, closed, navigate, inShell, toCatalog]);
 
-    if (!resource || !location) return null;
+    if (!resource || !location || closed) return null;
 
     const photos = resource.photos && resource.photos.length > 0
         ? resource.photos
@@ -52,14 +72,14 @@ export function CabinetPage() {
 
     const hero = photos[0];
     const secondary = photos.slice(1);
+    const altFor = (i: number) => `${resource.name}, ${location.name} — фото ${i + 1} из ${photos.length}`;
+    const rateLabel = `${formatGel(resource.hourlyRate)}/ч`;
 
-    // Format the fact table with the same vocabulary the wizard uses.
-    // Keys are mono-uppercased per Vignelli's signature for tabular data.
     const facts: Array<[string, string]> = [
-        ['ПЛОЩАДЬ',     `${resource.area} м²`],
-        ['ВМЕСТИМОСТЬ', `до ${resource.capacity} чел.`],
-        ['СТАВКА',      `${formatGel(resource.hourlyRate)}/ч${resource.groupRate ? ` · группа ${formatGel(resource.groupRate)}/ч` : ''}`],
-        ['ФОРМАТЫ',     (resource.formats ?? ['individual']).map(formatLabel).join(' · ')],
+        ['Площадь',     `${resource.area} м²`],
+        ['Вместимость', `до ${resource.capacity} чел.`],
+        ['Ставка',      `${rateLabel}${resource.groupRate ? ` · группа ${formatGel(resource.groupRate)}/ч` : ''}`],
+        ['Форматы',     (resource.formats ?? ['individual']).map(formatLabel).join(' · ')],
     ];
 
     const services = (resource.services ?? [])
@@ -67,10 +87,10 @@ export function CabinetPage() {
         .filter((x): x is string => !!x);
 
     const handleBook = () => {
-        // На телефоне ведём в новый мобильный мастер /m/find (шаг слотов 30 мин,
-        // выбор длительности 1/1.5/2/3ч одним тапом). Старый /checkout на мобиле
+        // В приложении и на телефоне — мобильный поиск /m/find с этим кабинетом
+        // (шаг 30 мин, длительность одним тапом). Старый /checkout на телефоне
         // округлял старт к целому часу и требовал тыкать слоты по одному.
-        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        if (inShell || (typeof window !== 'undefined' && window.innerWidth < 768)) {
             navigate(`/m/find?cab=${resource.id}`);
             return;
         }
@@ -78,351 +98,239 @@ export function CabinetPage() {
         navigate('/checkout');
     };
 
+    const crumbs = (
+        <nav aria-label="Где вы" style={{
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: GH.ink60,
+        }}>
+            <Link to={toCatalog('/')} style={crumbLink}>Unbox</Link>
+            <span aria-hidden="true">/</span>
+            <Link to={toCatalog(`/location/${location.id}`)} style={crumbLink}>{location.name}</Link>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page" style={{ color: GH.ink }}>{resource.name}</span>
+        </nav>
+    );
+
+    // Липкая кнопка брони на узком экране: в /m — над нижним меню и в ширину
+    // оболочки (480), на сайте — у нижнего края.
+    const stickyCta = !wide;
+
     return (
-        <MinimalLayout glassMode noPadding>
-            <div style={{ background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-                {/* Black breadcrumb bar — Vignelli's National Park Service spine.
-                    A solid black slab carries the location name in inverted Plex Mono. */}
-                <div style={{ background: GH.ink, color: GH.paper, padding: '14px 24px' }}>
-                    <div style={{
-                        maxWidth: 1280, margin: '0 auto',
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                    }}>
-                        <Link to="/" style={{ color: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
-                            <ArrowLeft size={14} /> Unbox
-                        </Link>
-                        <span style={{ opacity: 0.4 }}>/</span>
-                        <Link to={`/location/${location.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                            {location.name}
-                        </Link>
-                        <span style={{ opacity: 0.4 }}>/</span>
-                        <span>{resource.name}</span>
-                    </div>
-                </div>
+        <div style={{ background: GH.paper, color: GH.ink, fontFamily: GH_SANS, minHeight: inShell ? undefined : '100vh' }}>
+            <PublicHeader subnav={crumbs} />
+            {inShell && (
+                <MobilePageHeader title={resource.name} fallbackTo={`/m/location/${location.id}`} />
+            )}
 
-                <div style={{
-                    maxWidth: 1280, margin: '0 auto',
-                    padding: '40px 24px 80px',
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 1fr)',
-                    gap: 0,
-                }}>
-                    <div className="cabpg-grid">
-                        {/* ── LEFT: Data spine ── */}
-                        <aside style={{ borderRight: `1px solid ${GH.ink}` }} className="cabpg-spine">
-                            <h1 style={{
-                                margin: 0,
-                                fontSize: 'clamp(40px, 5vw, 64px)',
-                                fontWeight: 800,
-                                lineHeight: 0.95,
-                                letterSpacing: '-0.03em',
-                            }}>
-                                {resource.name}
-                            </h1>
+            <div style={{
+                maxWidth: 1280, margin: '0 auto',
+                padding: wide ? '40px 24px 80px' : `16px 16px ${stickyCta ? 112 : 48}px`,
+            }}>
+                <div className="cabpg-grid">
+                    {/* ── Data spine ── */}
+                    <aside className="cabpg-spine">
+                        <h1 style={{
+                            margin: 0,
+                            fontSize: 'clamp(28px, 5vw, 56px)',
+                            fontWeight: 600,
+                            lineHeight: 1.05,
+                            letterSpacing: '-0.02em',
+                        }}>
+                            {resource.name}
+                        </h1>
 
-                            {/* Address line — mono, restrained, with map link */}
-                            <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.name} ${location.address} Batumi`)}`}
-                                target="_blank" rel="noopener noreferrer"
-                                style={{
-                                    marginTop: 12,
-                                    fontFamily: GH_MONO, fontSize: 12,
-                                    letterSpacing: '0.08em', textTransform: 'uppercase',
-                                    color: GH.ink60, textDecoration: 'none',
-                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                        <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.name} ${location.address} Batumi`)}`}
+                            target="_blank" rel="noopener noreferrer"
+                            style={{
+                                marginTop: 8,
+                                minHeight: 44,
+                                fontSize: 14,
+                                color: GH.ink60, textDecoration: 'none',
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                            }}
+                        >
+                            <MapPin size={14} aria-hidden="true" />
+                            <span style={{ borderBottom: `1px solid ${GH.ink10}` }}>{location.name} · {location.address}</span>
+                        </a>
+
+                        <dl style={{ margin: '16px 0 0', padding: 0, borderTop: `1px solid ${GH.ink}` }}>
+                            {facts.map(([label, value]) => (
+                                <div key={label} style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '120px minmax(0, 1fr)',
+                                    gap: 12,
+                                    padding: '12px 0',
                                     borderBottom: `1px solid ${GH.ink10}`,
-                                    paddingBottom: 2,
-                                }}
-                            >
-                                <MapPin size={12} /> {location.name} · {location.address}
-                            </a>
+                                    alignItems: 'baseline',
+                                }}>
+                                    <dt style={{ fontSize: 14, color: GH.ink60 }}>{label}</dt>
+                                    <dd style={{ margin: 0, fontSize: 16, fontWeight: 500, color: GH.ink }}>{value}</dd>
+                                </div>
+                            ))}
+                        </dl>
 
-                            {/* Fact table — Vignelli's tabular block.
-                                Mono labels on left, values right, hairline rules. */}
-                            <dl style={{
-                                margin: '32px 0 0',
-                                padding: 0,
-                                borderTop: `1px solid ${GH.ink}`,
-                            }}>
-                                {facts.map(([label, value]) => (
-                                    <div key={label} style={{
-                                        display: 'grid',
-                                        // На phone-width 140px метка съедает почти всё —
-                                        // переходим на колонку, на десктопе сохраняется.
-                                        gridTemplateColumns: 'minmax(0, 1fr)',
-                                        gap: 4,
-                                        padding: '12px 0',
-                                        borderBottom: `1px solid ${GH.ink10}`,
-                                        alignItems: 'baseline',
-                                    }}
-                                    className="cabinet-fact-row">
-                                        <dt style={{
-                                            fontFamily: GH_MONO, fontSize: 12,
-                                            letterSpacing: '0.06em', textTransform: 'uppercase',
-                                            color: GH.ink60,
-                                        }}>{label}</dt>
-                                        <dd style={{
-                                            margin: 0,
-                                            fontSize: 15, fontWeight: 500,
-                                            color: GH.ink,
-                                        }}>{value}</dd>
-                                    </div>
-                                ))}
-                            </dl>
-
-                            {/* Body — single paragraph, single column, max 60 words */}
-                            <p style={{
-                                margin: '28px 0 0',
-                                fontSize: 15, lineHeight: 1.55,
-                                color: GH.ink,
-                                maxWidth: 460,
-                            }}>
+                        {resource.description && (
+                            <p style={{ margin: '24px 0 0', fontSize: 16, lineHeight: 1.55, color: GH.ink, maxWidth: 460 }}>
                                 {resource.description}
                             </p>
+                        )}
 
-                            {/* Service list — only if any. Mono chips, no emoji. */}
-                            {services.length > 0 && (
-                                <div style={{ marginTop: 24 }}>
-                                    <div style={{
-                                        fontFamily: GH_MONO, fontSize: 12,
-                                        letterSpacing: '0.06em', textTransform: 'uppercase',
-                                        color: GH.ink60, marginBottom: 8,
-                                    }}>
-                                        Оборудование
-                                    </div>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                        {services.map(s => (
-                                            <span key={s} style={{
-                                                padding: '4px 10px',
-                                                border: `1px solid ${GH.ink}`,
-                                                fontFamily: GH_MONO,
-                                                fontSize: 12,
-                                                letterSpacing: '0.04em',
-                                            }}>{s}</span>
-                                        ))}
-                                    </div>
+                        {services.length > 0 && (
+                            <div style={{ marginTop: 24 }}>
+                                <div style={{
+                                    fontFamily: GH_MONO, fontSize: 12,
+                                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                                    color: GH.ink60, marginBottom: 8,
+                                }}>
+                                    Оборудование
                                 </div>
-                            )}
-
-                            {/* CTA — ink-black slab, no rounding, no shadow */}
-                            <button
-                                onClick={handleBook}
-                                style={{
-                                    marginTop: 36,
-                                    width: '100%',
-                                    background: GH.ink,
-                                    color: GH.paper,
-                                    border: 'none',
-                                    padding: '16px 20px',
-                                    fontFamily: GH_MONO,
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                    letterSpacing: '0.16em',
-                                    textTransform: 'uppercase',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                Забронировать
-                            </button>
-                        </aside>
-
-                        {/* ── RIGHT: Hero + vertical stack ── */}
-                        <div className="cabpg-photos">
-                            {/* Hero — large 16:9, fills column width */}
-                            <button
-                                type="button"
-                                onClick={() => setLightbox(0)}
-                                style={{
-                                    padding: 0, margin: 0, border: 'none', background: 'none',
-                                    width: '100%', cursor: 'zoom-in', display: 'block',
-                                }}
-                                aria-label="Открыть фото в полном размере"
-                            >
-                                <img
-                                    src={hero}
-                                    alt={resource.name}
-                                    style={{
-                                        width: '100%', aspectRatio: '16 / 10',
-                                        objectFit: 'cover', display: 'block',
-                                        background: GH.ink5,
-                                    }}
-                                />
-                            </button>
-
-                            {/* Stacked secondary photos — vertical, 4:3, hairline gap */}
-                            {secondary.length > 0 && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 1 }}>
-                                    {secondary.map((p, i) => (
-                                        <button
-                                            key={p}
-                                            type="button"
-                                            onClick={() => setLightbox(i + 1)}
-                                            style={{
-                                                padding: 0, margin: 0, border: 'none',
-                                                background: 'none', cursor: 'zoom-in',
-                                                display: 'block',
-                                            }}
-                                            aria-label={`Фото ${i + 2} из ${photos.length}`}
-                                        >
-                                            <img
-                                                src={p}
-                                                alt={`${resource.name} — фото ${i + 2}`}
-                                                loading="lazy"
-                                                style={{
-                                                    width: '100%', aspectRatio: '4 / 3',
-                                                    objectFit: 'cover', display: 'block',
-                                                    background: GH.ink5,
-                                                }}
-                                            />
-                                        </button>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                    {services.map(s => (
+                                        <span key={s} style={{
+                                            padding: '4px 10px',
+                                            border: `1px solid ${GH.ink20}`,
+                                            fontSize: 14,
+                                        }}>{s}</span>
                                     ))}
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
+
+                        {!stickyCta && (
+                            <div style={{ marginTop: 32 }}>
+                                <Button block size="touch" onClick={handleBook}>
+                                    Забронировать · <span className="num">{rateLabel}</span>
+                                </Button>
+                            </div>
+                        )}
+                    </aside>
+
+                    {/* ── Фото. На узком экране — первым (CSS order). ── */}
+                    <div className="cabpg-photos">
+                        <button
+                            type="button"
+                            onClick={() => setLightbox(0)}
+                            style={{
+                                padding: 0, margin: 0, border: 'none', background: 'none',
+                                width: '100%', cursor: 'zoom-in', display: 'block',
+                            }}
+                            aria-label={`${altFor(0)} — открыть`}
+                        >
+                            <img
+                                src={wide ? hero : photoVariant(hero, 'md')}
+                                srcSet={photoSrcSet(hero)}
+                                sizes="(min-width: 900px) 60vw, 100vw"
+                                alt={altFor(0)}
+                                fetchPriority="high"
+                                style={{
+                                    width: '100%', aspectRatio: wide ? '16 / 10' : '4 / 3',
+                                    objectFit: 'cover', display: 'block',
+                                    background: GH.ink5,
+                                }}
+                            />
+                        </button>
+
+                        {secondary.length > 0 && (wide ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 1 }}>
+                                {secondary.map((p, i) => (
+                                    <button
+                                        key={p}
+                                        type="button"
+                                        onClick={() => setLightbox(i + 1)}
+                                        style={{ padding: 0, margin: 0, border: 'none', background: 'none', cursor: 'zoom-in', display: 'block' }}
+                                        aria-label={`${altFor(i + 1)} — открыть`}
+                                    >
+                                        <img
+                                            src={photoVariant(p, 'md')}
+                                            alt={altFor(i + 1)}
+                                            loading="lazy"
+                                            decoding="async"
+                                            style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block', background: GH.ink5 }}
+                                        />
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ marginTop: 8 }}>
+                                <PhotoStrip
+                                    photos={secondary}
+                                    onOpen={i => setLightbox(i + 1)}
+                                    altFor={i => altFor(i + 1)}
+                                />
+                            </div>
+                        ))}
                     </div>
                 </div>
-
-                {/* Sibling cabinets — quiet bottom band, mono-labeled */}
-                <SiblingCabinets currentId={resource.id} locationId={location.id} />
             </div>
 
-            {/* Lightbox — native dialog with keyboard nav. Click anywhere outside
-                the image to close; arrows / ESC keyboard-controlled. */}
+            <SiblingCabinets currentId={resource.id} locationId={location.id} toCatalog={toCatalog} />
+
+            {stickyCta && (
+                <div style={{
+                    position: 'fixed',
+                    left: '50%', transform: 'translateX(-50%)',
+                    width: '100%', maxWidth: inShell ? 480 : undefined,
+                    bottom: inShell ? 'calc(72px + env(safe-area-inset-bottom, 0px))' : 0,
+                    padding: inShell ? '8px 16px' : '8px 16px calc(8px + env(safe-area-inset-bottom, 0px))',
+                    background: COLOR.card,
+                    borderTop: `1px solid ${COLOR.ink10}`,
+                    zIndex: Z.sticky,
+                }}>
+                    <Button block size="touch" onClick={handleBook}>
+                        Забронировать · <span className="num">{rateLabel}</span>
+                    </Button>
+                </div>
+            )}
+
             {lightbox !== null && (
-                <Lightbox
+                <PhotoLightbox
                     photos={photos}
                     index={lightbox}
                     onClose={() => setLightbox(null)}
-                    onNav={(dir) => setLightbox(i => {
-                        if (i === null) return null;
-                        const next = (i + dir + photos.length) % photos.length;
-                        return next;
-                    })}
+                    onIndexChange={setLightbox}
+                    altFor={altFor}
+                    label={`Фото: ${resource.name}`}
                 />
             )}
 
-            {/* Responsive grid — desktop two columns, mobile single column.
-                Inline style block keeps the page self-contained (no global CSS bloat). */}
             <style>{`
                 .cabpg-grid {
                     display: grid;
-                    grid-template-columns: 1fr;
-                    gap: 32px;
+                    grid-template-columns: minmax(0, 1fr);
+                    gap: 24px;
                 }
+                .cabpg-photos { order: -1; }
                 @media (min-width: 900px) {
                     .cabpg-grid {
                         grid-template-columns: minmax(320px, 420px) 1fr;
                         gap: 48px;
                         align-items: start;
                     }
+                    .cabpg-photos { order: 0; }
                     .cabpg-spine {
                         position: sticky;
-                        top: 32px;
+                        top: 88px;
                         padding-right: 32px;
+                        border-right: 1px solid ${GH.ink};
                     }
                 }
-                @media (max-width: 899px) {
-                    .cabpg-spine { border-right: none !important; }
-                }
             `}</style>
-        </MinimalLayout>
-    );
-}
-
-function Lightbox({ photos, index, onClose, onNav }: {
-    photos: string[];
-    index: number;
-    onClose: () => void;
-    onNav: (dir: 1 | -1) => void;
-}) {
-    const closeRef = useRef<HTMLButtonElement>(null);
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-            if (e.key === 'ArrowRight') onNav(1);
-            if (e.key === 'ArrowLeft') onNav(-1);
-        };
-        document.addEventListener('keydown', onKey);
-        const prevOverflow = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        closeRef.current?.focus();
-        return () => {
-            document.removeEventListener('keydown', onKey);
-            document.body.style.overflow = prevOverflow;
-        };
-    }, [onClose, onNav]);
-
-    return (
-        <div
-            role="dialog" aria-modal="true"
-            onClick={onClose}
-            style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(14,14,14,0.94)',
-                zIndex: 9999,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 32,
-            }}
-        >
-            <button
-                ref={closeRef}
-                onClick={onClose}
-                aria-label="Закрыть"
-                style={{
-                    position: 'absolute', top: 16, right: 16,
-                    background: 'none', border: 'none', color: COLOR.onInk,
-                    cursor: 'pointer', padding: 8,
-                }}
-            >
-                <X size={24} />
-            </button>
-            {photos.length > 1 && (
-                <>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onNav(-1); }}
-                        aria-label="Предыдущее фото"
-                        style={navButtonStyle('left')}
-                    ><ChevronLeft size={28} /></button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onNav(1); }}
-                        aria-label="Следующее фото"
-                        style={navButtonStyle('right')}
-                    ><ChevronRight size={28} /></button>
-                </>
-            )}
-            <img
-                src={photos[index]}
-                alt=""
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                    maxWidth: '92vw', maxHeight: '88vh',
-                    objectFit: 'contain', boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-                }}
-            />
-            <div style={{
-                position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-                color: COLOR.onInk, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.18em',
-            }}>
-                {String(index + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}
-            </div>
         </div>
     );
 }
 
-function navButtonStyle(side: 'left' | 'right'): React.CSSProperties {
-    return {
-        position: 'absolute', top: '50%',
-        transform: 'translateY(-50%)',
-        [side]: 16,
-        background: 'rgba(255,255,255,0.1)', border: 'none', color: COLOR.onInk,
-        cursor: 'pointer', padding: 12,
-        display: 'grid', placeItems: 'center',
-    } as React.CSSProperties;
-}
+const crumbLink: React.CSSProperties = {
+    color: 'inherit', textDecoration: 'none',
+    minHeight: 36, display: 'inline-flex', alignItems: 'center',
+};
 
-function SiblingCabinets({ currentId, locationId }: { currentId: string; locationId: string }) {
+function SiblingCabinets({ currentId, locationId, toCatalog }: {
+    currentId: string;
+    locationId: string;
+    toCatalog: (path: string) => string;
+}) {
     const siblings = RESOURCES
         .filter(r => r.locationId === locationId && r.id !== currentId && r.isActive !== false)
         .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
@@ -433,28 +341,28 @@ function SiblingCabinets({ currentId, locationId }: { currentId: string; locatio
         <div style={{
             background: GH.ink5,
             borderTop: `1px solid ${GH.ink}`,
-            padding: '40px 24px 56px',
+            padding: '32px 16px 48px',
         }}>
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-                <div style={{
-                    fontFamily: GH_MONO, fontSize: 12,
+                <h2 style={{
+                    fontFamily: GH_MONO, fontSize: 12, fontWeight: 500,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    color: GH.ink60, marginBottom: 16,
+                    color: GH.ink60, margin: '0 0 16px',
                 }}>
                     Другие кабинеты в этом центре
-                </div>
+                </h2>
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
                     gap: 16,
                 }}>
                     {siblings.map(r => (
                         <Link
                             key={r.id}
-                            to={`/cabinet/${r.id}`}
+                            to={toCatalog(`/cabinet/${r.id}`)}
                             style={{
                                 background: GH.paper,
-                                border: `1px solid ${GH.ink}`,
+                                border: `1px solid ${GH.ink20}`,
                                 textDecoration: 'none',
                                 color: GH.ink,
                                 display: 'block',
@@ -462,20 +370,17 @@ function SiblingCabinets({ currentId, locationId }: { currentId: string; locatio
                         >
                             {r.photos && r.photos[0] && (
                                 <img
-                                    src={r.photos[0]}
-                                    alt={r.name}
+                                    src={photoVariant(r.photos[0], 'sm')}
+                                    alt=""
                                     loading="lazy"
+                                    decoding="async"
                                     style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block' }}
                                 />
                             )}
                             <div style={{ padding: 14 }}>
-                                <div style={{ fontWeight: 700, fontSize: 16 }}>{r.name}</div>
-                                <div style={{
-                                    fontFamily: GH_MONO, fontSize: 12,
-                                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                                    color: GH.ink60, marginTop: 4,
-                                }}>
-                                    {r.area} м² · до {r.capacity} чел. · {formatGel(r.hourlyRate)}/ч
+                                <div style={{ fontWeight: 600, fontSize: 16 }}>{r.name}</div>
+                                <div style={{ fontSize: 14, color: GH.ink60, marginTop: 4, fontFamily: FONT.sans }}>
+                                    {r.area} м² · до {r.capacity} чел. · <span className="num">{formatGel(r.hourlyRate)}/ч</span>
                                 </div>
                             </div>
                         </Link>
@@ -488,9 +393,9 @@ function SiblingCabinets({ currentId, locationId }: { currentId: string; locatio
 
 function formatLabel(f: string): string {
     switch (f) {
-        case 'individual':  return 'Индивид.';
+        case 'individual':  return 'Индивидуально';
         case 'group':       return 'Группа';
-        case 'intervision': return 'Интервиз.';
+        case 'intervision': return 'Интервизия';
         default:            return f;
     }
 }
