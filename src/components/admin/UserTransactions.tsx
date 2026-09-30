@@ -5,7 +5,6 @@ import { useCashboxStore } from '../../store/cashboxStore';
 import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { formatDayMonth, formatMoney, formatTime } from '../../utils/format';
 import { ruCountWord } from '../../utils/plural';
-import { StatusBadge } from '../ui/StatusBadge';
 import { SkeletonList } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 
@@ -128,13 +127,23 @@ export function UserTransactions({ email }: UserTransactionsProps) {
         }
     };
 
-    // Статус платежа — слова и цвет из общего словаря (src/design/statuses.ts).
-    const PAYMENT_CODE: Record<string, string> = {
-        completed: 'paid', pending: 'pending', failed: 'unpaid', refunded: 'refunded',
+    // Статус КАССОВОЙ операции (не оплаты брони) — свои точные слова,
+    // цвет — статусные токены через общий бейдж ui-badge (wave 1).
+    const TX_STATUS: Record<string, { label: string; tone: 'ok' | 'pending' | 'danger' | 'muted' }> = {
+        completed: { label: 'Проведена', tone: 'ok' },
+        pending: { label: 'В обработке', tone: 'pending' },
+        failed: { label: 'Ошибка', tone: 'danger' },
+        refunded: { label: 'Возвращено', tone: 'muted' },
     };
     const getStatusBadge = (status?: string) => {
         const s = status || 'completed';
-        return <StatusBadge kind="payment" status={PAYMENT_CODE[s] ?? s} audience="staff" variant="dot" />;
+        const def = TX_STATUS[s] ?? { label: 'Другой статус', tone: 'muted' as const };
+        return (
+            <span className={`ui-badge ui-badge--${def.tone} ui-badge--dot`} title={TX_STATUS[s] ? undefined : s}>
+                <span className="ui-badge__dot" aria-hidden="true" />
+                {def.label}
+            </span>
+        );
     };
 
     return (

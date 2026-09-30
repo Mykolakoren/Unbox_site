@@ -9,6 +9,7 @@ import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { formatDayMonth, formatGel, formatTime } from '../../../utils/format';
 import { SkeletonList } from '../../ui/Skeleton';
 import { EmptyState } from '../../ui/EmptyState';
+import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
@@ -60,8 +61,21 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [editingTx, setEditingTx] = useState<CashboxTransaction | null>(null);
     const isSeniorOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
+    const { confirm } = useConfirmDialog();
 
-    const handleDelete = async (id: string) => {
+    // Удаление операции — деньги в кассе: спрашиваем явно (раньше — один клик).
+    const handleDelete = async (tx: CashboxTransaction) => {
+        const d = parseUTC(tx.date);
+        const when = `${formatDayMonth(d, { timeZone: BATUMI_TZ, withYear: 'auto' })}, ${formatTime(d, { timeZone: BATUMI_TZ })}`;
+        const ok = await confirm({
+            title: 'Удалить операцию?',
+            body: `${tx.type === 'income' ? 'Приход' : 'Расход'} ${formatGel(Number(tx.amount ?? 0))} от ${when} исчезнет из журнала кассы.`,
+            confirmLabel: 'Удалить операцию',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        const id = tx.id;
         setDeletingId(id);
         try {
             await deleteTransaction(id);
@@ -196,7 +210,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                             )}
                                             {canDelete && (
                                                 <button
-                                                    onClick={() => handleDelete(tx.id)}
+                                                    onClick={() => handleDelete(tx)}
                                                     disabled={deletingId === tx.id}
                                                     className="text-ink-60 hover:text-[var(--status-danger-fg)] transition-colors p-1"
                                                     title="Удалить"
@@ -255,7 +269,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                     )}
                                     {canDelete && (
                                         <button
-                                            onClick={() => handleDelete(tx.id)}
+                                            onClick={() => handleDelete(tx)}
                                             disabled={deletingId === tx.id}
                                             aria-label="Удалить операцию"
                                             className="text-ink-60 active:text-[var(--status-danger-fg)] min-w-11 min-h-11 -my-2 -mr-2 flex items-center justify-center"

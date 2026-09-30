@@ -1317,7 +1317,7 @@ export function AdminChessboardView() {
                                                 : selectedBooking.paymentStatus === 'waived'
                                                     ? `Штраф снят${selectedBooking.waiverReason ? ` · ${selectedBooking.waiverReason}` : ''}`
                                                     : selectedBooking.chargedAt
-                                                        ? `${statusLabel('payment', 'paid', 'staff')} ${formatDayMonth(selectedBooking.chargedAt, { timeZone: BATUMI_TZ })}, ${formatTime(selectedBooking.chargedAt, { timeZone: BATUMI_TZ })}`
+                                                        ? `${statusLabel('payment', 'paid', 'staff')} ${formatDayMonth(parseUTC(selectedBooking.chargedAt), { timeZone: BATUMI_TZ })}, ${formatTime(parseUTC(selectedBooking.chargedAt), { timeZone: BATUMI_TZ })}`
                                                         : statusLabel('payment', 'paid', 'staff')
                                         }
                                     />
@@ -1764,7 +1764,7 @@ export function AdminChessboardView() {
                                                             )}
                                                         </>
                                                     ) : (
-                                                        !cell.past && <span className="text-ink-60 opacity-0 group-hover/cell:opacity-100 transition-opacity" aria-hidden="true">{cell.slot}</span>
+                                                        !cell.past && <span className="text-ink-60 opacity-0 group-hover/cell:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" aria-hidden="true">{cell.slot}</span>
                                                     )}
                                                 </div>
                                             </td>

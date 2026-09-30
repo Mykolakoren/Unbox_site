@@ -169,9 +169,13 @@ def test_chessboard_legend_and_statuses():
 
 
 def test_status_badges_from_dictionary():
-    for rel in ("UserBookingsTab.tsx", "UserTransactions.tsx"):
-        src = _strip_comments((AREA / rel).read_text(encoding="utf-8"))
-        assert "<StatusBadge" in src, f"{rel}: статус не через общий StatusBadge"
+    src = _strip_comments((AREA / "UserBookingsTab.tsx").read_text(encoding="utf-8"))
+    assert "<StatusBadge" in src, "UserBookingsTab.tsx: статус брони не через общий StatusBadge"
+    # Кассовая операция — не оплата брони: свои точные слова, цвет — ui-badge.
+    ut = _strip_comments((AREA / "UserTransactions.tsx").read_text(encoding="utf-8"))
+    for word in ("'Проведена'", "'В обработке'", "'Ошибка'", "'Возвращено'"):
+        assert word in ut, f"UserTransactions: нет подписи статуса операции {word}"
+    assert "ui-badge--" in ut, "UserTransactions: статус операции не на общем бейдже"
     ub = _strip_comments((AREA / "UserBookingsTab.tsx").read_text(encoding="utf-8"))
     for old in ("'Забронировано'", "'Завершено'", "'Пересдано'"):
         assert old not in ub, f"UserBookingsTab: снова своя подпись статуса {old}"
@@ -180,6 +184,19 @@ def test_status_badges_from_dictionary():
 def test_money_through_formatter():
     bad = _hits(r"toFixed\(\d\)\s*\}?\s*₾|\.toFixed\(\d\)\}\s*₾|\$\{[^}]*toFixed\([^)]*\)\}\s*₾")
     assert not bad, "сумма собрана вручную через toFixed + ₾ (нужен formatGel/<Money>):\n" + "\n".join(bad)
+
+
+def test_cashbox_delete_asks_first():
+    """Ревью 30.09: удаление кассовой операции было в один клик."""
+    src = _strip_comments((AREA / "cashbox" / "CashboxTransactionTable.tsx").read_text(encoding="utf-8"))
+    assert "useConfirmDialog" in src, "журнал кассы: удаление без подтверждения"
+    assert "'Удалить операцию?'" in src and "'Удалить операцию'" in src and "'Оставить'" in src, \
+        "журнал кассы: окно удаления без кнопок-действий «Удалить операцию» / «Оставить»"
+    assert "tone: 'danger'" in src, "журнал кассы: удаление должно быть tone: 'danger'"
+    i = src.find("const handleDelete")
+    j = src.find("deleteTransaction(", i)
+    assert i != -1 and j != -1 and "await confirm(" in src[i:j], \
+        "журнал кассы: deleteTransaction вызывается раньше подтверждения"
 
 
 def test_load_errors_are_not_empty_states():
