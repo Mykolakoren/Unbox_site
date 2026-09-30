@@ -1,33 +1,45 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { AlertTriangle, X } from 'lucide-react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Sheet } from './Sheet';
+import { Button } from './Button';
 
 /**
- * Imperative confirm dialog — drop-in replacement for the native `confirm()`.
+ * Окно подтверждения — замена системным confirm() (wave 1, 30.09).
  *
- * Why this exists: across the codebase admins hit a confusing mix of
- * native browser confirms (ugly on iOS), inline modals (require local state),
- * and sonner toasts with action buttons (easy to miss). One dialog, called
- * via a hook returning a Promise, eliminates all three:
+ * Системное окно браузера спрашивает «ОК / Отмена», и непонятно, что значит
+ * «ОК» — «да, отменить бронь» или «ок, понял». Здесь кнопки называют
+ * действие: «Отменить 6 броней» / «Оставить».
  *
  *   const { confirm } = useConfirmDialog();
- *   if (await confirm({ title: 'Удалить?', message: 'Это необратимо.' })) {
- *       await api.delete(...);
- *   }
+ *   const ok = await confirm({
+ *       title: 'Отменить серию?',
+ *       body: 'Отменим 6 будущих броней, 120 ₾ вернём на баланс.',
+ *       confirmLabel: 'Отменить 6 броней',
+ *       cancelLabel: 'Оставить',
+ *       tone: 'danger',
+ *   });
+ *   if (ok) { … }
  *
- * Mounted ONCE at the app root via <ConfirmDialogProvider>. Multiple
- * sequential confirms queue naturally because each call awaits its own
- * Promise — a second call while one is open just gets the next dialog
- * after the first closes.
+ * Вне React-компонента (стор, утилита) — confirmAction({ … }) с тем же API.
+ * После удаления — undoToast('Платёж удалён', restore) с кнопкой «Вернуть»
+ * (./undoToast.ts).
+ *
+ * На телефоне — шторка снизу, на компьютере — окно по центру. Слой dialog —
+ * выше любых старых модалок, чтобы подтверждение из них не пряталось.
+ * Несколько вызовов подряд встают в очередь, каждый ждёт свой ответ.
  */
-interface ConfirmOptions {
+export interface ConfirmOptions {
     title: string;
-    message?: ReactNode;
-    /** Primary CTA label. Default: 'Подтвердить'. */
+    /** Что именно произойдёт — с числами («вернём 90 ₾ на баланс»). */
+    body?: ReactNode;
+    /** Кнопка действия — глагол + объект. По умолчанию «Подтвердить». */
     confirmLabel?: string;
-    /** Secondary label. Default: 'Отмена'. */
+    /** Кнопка отказа. По умолчанию «Отмена». */
     cancelLabel?: string;
-    /** Marks the action as destructive — red primary button, warning icon. */
+    /** danger — необратимое: красная кнопка, фокус на «Отмена». */
+    tone?: 'default' | 'danger';
+    /** @deprecated старое имя body */
+    message?: ReactNode;
+    /** @deprecated старое имя tone: 'danger' */
     destructive?: boolean;
 }
 
@@ -35,54 +47,102 @@ type ConfirmFn = (opts: ConfirmOptions) => Promise<boolean>;
 
 const ConfirmContext = createContext<{ confirm: ConfirmFn } | null>(null);
 
-interface State {
-    open: boolean;
+interface Request {
     opts: ConfirmOptions;
-    resolve: ((v: boolean) => void) | null;
+    resolve: (v: boolean) => void;
 }
 
-const initial: State = {
-    open: false,
-    opts: { title: '' },
-    resolve: null,
-};
+interface QueueState {
+    queue: Request[];
+    /** Что показано в окне. После ответа остаётся прежним, чтобы текст не
+     *  пропадал во время анимации ухода. */
+    shown?: Request;
+}
+
+// Уже отвеченные запросы: двойной тап не «съест» следующий в очереди.
+const answered = new WeakSet<Request>();
+
+// Ссылка на смонтированный провайдер — для confirmAction() вне React.
+let activeConfirm: ConfirmFn | null = null;
 
 export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
-    const [state, setState] = useState<State>(initial);
+    const [state, setState] = useState<QueueState>({ queue: [] });
+    const open = state.queue.length > 0;
 
     const confirm: ConfirmFn = useCallback((opts) => {
         return new Promise<boolean>((resolve) => {
-            setState({ open: true, opts, resolve });
+            const req: Request = { opts, resolve };
+            setState(s => ({
+                queue: [...s.queue, req],
+                // Окно свободно — показываем сразу; иначе ждём своей очереди.
+                shown: s.queue.length > 0 ? s.shown : req,
+            }));
         });
     }, []);
 
-    const close = useCallback((value: boolean) => {
-        setState((s) => {
-            s.resolve?.(value);
-            return { ...s, open: false, resolve: null };
+    useEffect(() => {
+        activeConfirm = confirm;
+        return () => { if (activeConfirm === confirm) activeConfirm = null; };
+    }, [confirm]);
+
+    const shown = state.shown;
+    const answer = (value: boolean) => {
+        if (!shown || answered.has(shown)) return;
+        answered.add(shown);
+        shown.resolve(value);
+        setState(s => {
+            const rest = s.queue.filter(r => r !== shown);
+            return { queue: rest, shown: rest[0] ?? shown };
         });
-    }, []);
+    };
 
     return (
         <ConfirmContext.Provider value={{ confirm }}>
             {children}
-            {state.open && createPortal(
-                <ConfirmDialogShell
-                    title={state.opts.title}
-                    message={state.opts.message}
-                    confirmLabel={state.opts.confirmLabel ?? 'Подтвердить'}
-                    cancelLabel={state.opts.cancelLabel ?? 'Отмена'}
-                    destructive={state.opts.destructive ?? false}
-                    onCancel={() => close(false)}
-                    onConfirm={() => close(true)}
-                />,
-                document.body,
-            )}
+            <ConfirmSheet open={open} request={shown} onAnswer={answer} />
         </ConfirmContext.Provider>
     );
 }
 
-/** Hook: returns `{ confirm }`. Throws if used outside the provider. */
+function ConfirmSheet({ open, request, onAnswer }: { open: boolean; request?: Request; onAnswer: (v: boolean) => void }) {
+    const cancelRef = useRef<HTMLButtonElement>(null);
+    const confirmRef = useRef<HTMLButtonElement>(null);
+    const opts = request?.opts;
+    const danger = opts?.tone === 'danger' || !!opts?.destructive;
+    const body = opts?.body ?? opts?.message;
+
+    return (
+        <Sheet
+            open={open}
+            onClose={() => onAnswer(false)}
+            title={opts?.title ?? ''}
+            layer="dialog"
+            role="alertdialog"
+            width={420}
+            // Необратимое — фокус на безопасной кнопке, Enter не удалит случайно.
+            initialFocus={danger ? cancelRef : confirmRef}
+            footer={
+                <>
+                    <Button
+                        ref={confirmRef}
+                        variant={danger ? 'danger' : 'primary'}
+                        block
+                        onClick={() => onAnswer(true)}
+                    >
+                        {opts?.confirmLabel ?? 'Подтвердить'}
+                    </Button>
+                    <Button ref={cancelRef} variant="secondary" block onClick={() => onAnswer(false)}>
+                        {opts?.cancelLabel ?? 'Отмена'}
+                    </Button>
+                </>
+            }
+        >
+            {body ? <div style={{ color: 'var(--color-ink-80)' }}>{body}</div> : null}
+        </Sheet>
+    );
+}
+
+/** Хук: `{ confirm }`. Бросает, если провайдера нет выше по дереву. */
 export function useConfirmDialog() {
     const ctx = useContext(ConfirmContext);
     if (!ctx) {
@@ -91,144 +151,13 @@ export function useConfirmDialog() {
     return ctx;
 }
 
-function ConfirmDialogShell({
-    title, message, confirmLabel, cancelLabel, destructive, onCancel, onConfirm,
-}: {
-    title: string;
-    message?: ReactNode;
-    confirmLabel: string;
-    cancelLabel: string;
-    destructive: boolean;
-    onCancel: () => void;
-    onConfirm: () => void;
-}) {
-    return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 9999,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(4px)',
-                WebkitBackdropFilter: 'blur(4px)',
-                padding: 16,
-                animation: 'confirm-fade-in 160ms ease-out',
-            }}
-            onClick={onCancel}
-        >
-            <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                    background: '#fff',
-                    borderRadius: 16,
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
-                    width: '100%',
-                    maxWidth: 380,
-                    padding: 24,
-                    position: 'relative',
-                    animation: 'confirm-zoom-in 160ms ease-out',
-                    fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-                    color: '#0E0E0E',
-                }}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="confirm-title"
-            >
-                <button
-                    onClick={onCancel}
-                    aria-label="Закрыть"
-                    style={{
-                        position: 'absolute',
-                        top: 14, right: 14,
-                        background: 'none', border: 'none',
-                        cursor: 'pointer', color: '#888',
-                        padding: 4,
-                    }}
-                >
-                    <X size={18} />
-                </button>
-
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                    <div style={{
-                        width: 44, height: 44, borderRadius: 12,
-                        background: destructive ? 'rgba(179,38,30,0.10)' : 'rgba(76,138,107,0.10)',
-                        color: destructive ? '#B3261E' : '#1B7430',
-                        display: 'grid', placeItems: 'center',
-                        marginBottom: 14,
-                    }}>
-                        <AlertTriangle size={22} />
-                    </div>
-                    <h3 id="confirm-title" style={{
-                        fontSize: 17, fontWeight: 700,
-                        margin: '0 0 6px', lineHeight: 1.3,
-                    }}>
-                        {title}
-                    </h3>
-                    {message && (
-                        <div style={{
-                            color: '#555',
-                            fontSize: 13,
-                            lineHeight: 1.5,
-                            marginBottom: 18,
-                        }}>
-                            {message}
-                        </div>
-                    )}
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: message ? 0 : 12 }}>
-                    <button
-                        onClick={onCancel}
-                        style={{
-                            flex: 1,
-                            padding: '11px 0',
-                            background: 'rgba(0,0,0,0.04)',
-                            color: '#0E0E0E',
-                            border: 'none',
-                            borderRadius: 10,
-                            fontSize: 14,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                        }}
-                        autoFocus={!destructive}
-                    >
-                        {cancelLabel}
-                    </button>
-                    <button
-                        onClick={onConfirm}
-                        style={{
-                            flex: 1,
-                            padding: '11px 0',
-                            background: destructive ? '#B3261E' : '#0E0E0E',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: 10,
-                            fontSize: 14,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                        }}
-                        autoFocus={destructive}
-                    >
-                        {confirmLabel}
-                    </button>
-                </div>
-            </div>
-
-            <style>{`
-                @keyframes confirm-fade-in {
-                    from { opacity: 0; }
-                    to { opacity: 1; }
-                }
-                @keyframes confirm-zoom-in {
-                    from { transform: scale(0.95); opacity: 0; }
-                    to { transform: scale(1); opacity: 1; }
-                }
-            `}</style>
-        </div>
-    );
+/**
+ * То же подтверждение вне компонентов (сторы, утилиты). Провайдер смонтирован
+ * в App.tsx. Если его вдруг нет — это ошибка разработки: пишем в консоль и
+ * отвечаем «нет», чтобы необратимое действие не прошло без явного согласия.
+ */
+export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
+    if (activeConfirm) return activeConfirm(opts);
+    console.error('confirmAction: нет <ConfirmDialogProvider> — действие не подтверждено', opts.title);
+    return Promise.resolve(false);
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useUserStore } from '../store/userStore';
-import { Button } from '../components/ui/Button';
+import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import { PhoneInput } from '../components/ui/PhoneInput';
 import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';

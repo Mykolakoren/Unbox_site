@@ -1,0 +1,470 @@
+/* ═══════════════════════════════════════════════════════════════════════
+ * Общие компоненты дизайн-системы (wave 1, 30.09).
+ * Только токены из @theme (index.css) — никаких вписанных вручную цветов.
+ * Слой components: утилиты Tailwind в className перебивают эти стили
+ * (например, className="w-full"), а эти — перебивают базу.
+ * Компоненты: src/components/ui/*. Правила — docs/DESIGN-SYSTEM.md.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Button ─────────────────────────────────────────────────────────── */
+  .ui-btn {
+    --btn-h: var(--control-h, 44px);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--btn-h);
+    padding: 0 var(--space-4);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-family: var(--font-sans);
+    font-size: var(--control-font, 1rem);
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      transform var(--dur-press) var(--ease-out-strong),
+      background-color var(--dur-ui) ease,
+      border-color var(--dur-ui) ease,
+      color var(--dur-ui) ease;
+  }
+  /* Отклик на нажатие: 0.97 за 140 мс (не 0.92 — кнопка не «проваливается») */
+  .ui-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .ui-btn--touch   { --btn-h: 44px; font-size: 1rem; }
+  .ui-btn--compact { --btn-h: 36px; font-size: 0.875rem; padding: 0 var(--space-3); }
+  .ui-btn--block   { width: 100%; }
+  .ui-btn--icon    { padding: 0; width: var(--btn-h); }
+
+  .ui-btn--primary { background: var(--color-accent); color: var(--color-on-accent); }
+  .ui-btn--secondary { background: var(--color-card); color: var(--color-ink); border-color: var(--color-ink-20); }
+  .ui-btn--quiet { background: transparent; color: var(--color-ink); padding: 0 var(--space-3); }
+  .ui-btn--danger { background: var(--status-danger-solid); color: var(--color-on-accent); }
+
+  @media (hover: hover) and (pointer: fine) {
+    .ui-btn--primary:hover:not(:disabled)   { background: var(--color-accent-hover); }
+    .ui-btn--secondary:hover:not(:disabled) { background: var(--color-sunken); }
+    .ui-btn--quiet:hover:not(:disabled)     { background: var(--color-ink-05); }
+    .ui-btn--danger:hover:not(:disabled)    { background: var(--status-danger-fg); }
+  }
+
+  /* Недоступна (но не «идёт запрос»): бледно — это единственное место, где
+   * текст бледнее ink-60 допустим (WCAG не требует контраста у disabled). */
+  .ui-btn:disabled:not([aria-busy="true"]) {
+    background: var(--color-ink-08);
+    border-color: transparent;
+    color: var(--color-ink-40);
+    cursor: not-allowed;
+  }
+  .ui-btn--quiet:disabled:not([aria-busy="true"]) { background: transparent; }
+  /* Идёт запрос: цвет кнопки остаётся, рядом со словом крутится значок */
+  .ui-btn[aria-busy="true"] { cursor: progress; }
+
+  .ui-spin { animation: spin 600ms linear infinite; flex: none; }
+
+  /* ── Sheet: шторка снизу (телефон) / окно по центру (компьютер) ─────── */
+  .ui-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 15, 16, 0.45);
+  }
+  .ui-sheet-layer {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    pointer-events: none;
+  }
+  .ui-sheet-layer--bottom { align-items: flex-end; justify-content: center; }
+  .ui-sheet-layer--center { align-items: center; justify-content: center; padding: var(--space-5); }
+
+  .ui-sheet {
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    box-shadow: var(--shadow-pop);
+    outline: none;
+  }
+  .ui-sheet--bottom {
+    max-width: 480px;
+    /* dvh учитывает панели Safari; сверху оставляем зазор и вырез iPhone */
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px));
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  }
+  .ui-sheet--center {
+    max-width: var(--sheet-w, 480px);
+    max-height: min(85dvh, 760px);
+    border-radius: var(--radius-grid);
+    border: 1px solid var(--color-ink-10);
+  }
+  /* Зона, за которую шторку тянут вниз: ручка + шапка (не тело — там свой скролл) */
+  .ui-sheet__grab { flex: none; touch-action: none; }
+  .ui-sheet__handle {
+    width: 36px;
+    height: 4px;
+    margin: var(--space-2) auto 0;
+    border-radius: 2px;
+    background: var(--color-ink-20);
+  }
+  .ui-sheet__header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-5);
+  }
+  .ui-sheet--center .ui-sheet__header { padding-top: var(--space-3); }
+  .ui-sheet__heading { flex: 1; min-width: 0; padding-top: 10px; }
+  .ui-sheet__title {
+    margin: 0;
+    font-size: var(--text-title);
+    line-height: var(--leading-heading);
+    font-weight: 600;
+  }
+  .ui-sheet__desc {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-small);
+    line-height: var(--leading-body);
+    color: var(--color-ink-60);
+  }
+  .ui-sheet__close {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--color-ink-60);
+    cursor: pointer;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-sheet__close:hover { background: var(--color-ink-05); color: var(--color-ink); }
+  }
+  /* Тело прокручивается внутри — главная кнопка в подвале всегда видна */
+  .ui-sheet__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 var(--space-5) var(--space-4);
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+  }
+  .ui-sheet--bottom .ui-sheet__body:last-child {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  }
+  .ui-sheet__footer {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--color-ink-08);
+    background: var(--color-card);
+  }
+  .ui-sheet--center .ui-sheet__footer {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+    padding-bottom: var(--space-4);
+  }
+
+  /* ── StatusBadge ────────────────────────────────────────────────────── */
+  .ui-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 24px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-control);
+    font-family: var(--font-sans);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .ui-badge--ok      { background: var(--status-ok-bg);      color: var(--status-ok-fg); }
+  .ui-badge--pending { background: var(--status-pending-bg); color: var(--status-pending-fg); }
+  .ui-badge--danger  { background: var(--status-danger-bg);  color: var(--status-danger-fg); }
+  .ui-badge--info    { background: var(--status-info-bg);    color: var(--status-info-fg); }
+  .ui-badge--muted   { background: var(--status-muted-bg);   color: var(--status-muted-fg); }
+  /* Точка + текст — для плотных таблиц Grid House */
+  .ui-badge--dot { background: transparent; padding: 0; min-height: 0; color: var(--color-ink-80); font-weight: 500; font-size: var(--text-small); }
+  .ui-badge__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: currentColor; }
+  .ui-badge--dot.ui-badge--ok .ui-badge__dot      { background: var(--status-ok-fg); }
+  .ui-badge--dot.ui-badge--pending .ui-badge__dot { background: var(--status-pending-fg); }
+  .ui-badge--dot.ui-badge--danger .ui-badge__dot  { background: var(--status-danger-fg); }
+  .ui-badge--dot.ui-badge--info .ui-badge__dot    { background: var(--status-info-fg); }
+  .ui-badge--dot.ui-badge--muted .ui-badge__dot   { background: var(--status-muted-fg); }
+
+  /* ── Field / Input ──────────────────────────────────────────────────── */
+  .ui-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+  .ui-field__label {
+    font-family: var(--font-sans);
+    font-size: var(--text-small);
+    line-height: 1.3;
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+  .ui-field__optional { font-weight: 400; color: var(--color-ink-60); }
+  .ui-field__hint,
+  .ui-field__error {
+    margin-top: calc(var(--space-1) * -1);
+    font-size: var(--text-small);
+    line-height: 1.4;
+  }
+  .ui-field__hint { color: var(--color-ink-60); }
+  .ui-field__error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--status-danger-fg);
+    font-weight: 500;
+  }
+  .ui-field__error svg { flex: none; margin-top: 2px; }
+
+  .ui-input-wrap { position: relative; display: flex; align-items: center; }
+  .ui-input {
+    width: 100%;
+    min-height: var(--control-h, 44px);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-ink-20);
+    border-radius: var(--radius-control);
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--control-font, 1rem);
+    line-height: 1.5;
+    transition: border-color var(--dur-ui) ease;
+    appearance: none;
+  }
+  .ui-input::placeholder { color: var(--color-ink-60); opacity: 1; }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-input:hover:not(:disabled):not(:focus) { border-color: var(--color-ink-30); }
+  }
+  /* Фокус — рамка цвета акцента; outline, а не тень (видно и в режиме высокой контрастности) */
+  .ui-input:focus,
+  .ui-input:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -1px;
+    border-color: var(--color-accent);
+  }
+  .ui-input[aria-invalid="true"] { border-color: var(--status-danger-fg); }
+  .ui-input[aria-invalid="true"]:focus,
+  .ui-input[aria-invalid="true"]:focus-visible { outline-color: var(--status-danger-fg); }
+  .ui-input:disabled { background: var(--color-sunken); color: var(--color-ink-60); cursor: not-allowed; }
+  textarea.ui-input { min-height: 96px; padding: 10px var(--space-3); resize: vertical; }
+  select.ui-input {
+    padding-right: 40px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230F0F10' stroke-opacity='0.6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+  .ui-input--with-suffix { padding-right: 40px; }
+  .ui-input__suffix {
+    position: absolute;
+    right: var(--space-3);
+    color: var(--color-ink-60);
+    font-size: var(--control-font, 1rem);
+    pointer-events: none;
+  }
+
+  /* ── Chip / Segmented ───────────────────────────────────────────────── */
+  .ui-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--control-h, 44px);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-ink-20);
+    border-radius: var(--radius-control);
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-small);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      transform var(--dur-press) var(--ease-out-strong),
+      background-color var(--dur-ui) ease,
+      border-color var(--dur-ui) ease;
+  }
+  .ui-chip:active:not(:disabled) { transform: scale(0.97); }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-chip:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--color-sunken); }
+  }
+  /* Выбрано — бирюза Unbox: подложка, рамка, вес и галочка (не только цвет) */
+  .ui-chip[aria-pressed="true"] {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-accent-ink);
+    font-weight: 600;
+  }
+  .ui-chip:disabled { color: var(--color-ink-40); border-color: var(--color-ink-10); cursor: not-allowed; }
+  .ui-chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+  .ui-segmented {
+    display: flex;
+    width: 100%;
+    border: 1px solid var(--color-ink-20);
+    border-radius: var(--radius-control);
+    background: var(--color-card);
+    overflow: hidden;
+  }
+  .ui-segmented__item {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: calc(var(--control-h, 44px) - 2px);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-left: 1px solid var(--color-ink-10);
+    background: transparent;
+    color: var(--color-ink-80);
+    font-family: var(--font-sans);
+    font-size: var(--text-small);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background-color var(--dur-ui) ease, color var(--dur-ui) ease;
+  }
+  .ui-segmented__item:first-child { border-left: 0; }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-segmented__item:hover:not([aria-pressed="true"]) { background: var(--color-ink-05); }
+  }
+  .ui-segmented__item[aria-pressed="true"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-ink);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+  .ui-segmented__item:focus-visible { outline-offset: -2px; }
+
+  /* ── ErrorBar ───────────────────────────────────────────────────────── */
+  .ui-errorbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+    border-radius: var(--radius-control);
+    font-family: var(--font-sans);
+    font-size: var(--text-small);
+    line-height: 1.4;
+  }
+  .ui-errorbar--danger  { background: var(--status-danger-bg);  color: var(--status-danger-fg); }
+  .ui-errorbar--pending { background: var(--status-pending-bg); color: var(--status-pending-fg); }
+  .ui-errorbar__text { flex: 1; min-width: 0; padding: var(--space-2) 0; }
+  .ui-errorbar__title { font-weight: 600; }
+  .ui-errorbar__retry { color: inherit; }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-errorbar .ui-errorbar__retry:hover:not(:disabled) { background: var(--color-ink-05); }
+  }
+
+  /* ── EmptyState ─────────────────────────────────────────────────────── */
+  .ui-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-7) var(--space-5);
+    text-align: center;
+    font-family: var(--font-sans);
+  }
+  .ui-empty--compact { padding: var(--space-5) var(--space-4); }
+  .ui-empty__icon { color: var(--color-ink-40); margin-bottom: var(--space-1); }
+  .ui-empty__title { margin: 0; font-size: var(--text-body); line-height: 1.4; font-weight: 600; color: var(--color-ink); }
+  .ui-empty__hint { margin: 0; max-width: 36ch; font-size: var(--text-small); line-height: var(--leading-body); color: var(--color-ink-60); }
+  .ui-empty__action { margin-top: var(--space-2); }
+
+  /* ── PageHeader (компьютер, Grid House) ─────────────────────────────── */
+  .ui-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    padding-bottom: var(--space-4);
+    margin-bottom: var(--space-5);
+    border-bottom: 1px solid var(--color-ink-10);
+    font-family: var(--font-sans);
+  }
+  .ui-page-header__main { min-width: 0; flex: 1 1 320px; }
+  .ui-page-header__back {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 36px;
+    margin-bottom: var(--space-2);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-ink-60);
+    font: inherit;
+    font-size: var(--text-small);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-page-header__back:hover { color: var(--color-ink); }
+  }
+  .ui-page-header__title {
+    margin: 0;
+    font-size: var(--text-heading);
+    line-height: var(--leading-heading);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+  }
+  .ui-page-header__desc {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+    color: var(--color-ink-60);
+  }
+  .ui-page-header__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+  /* ── MobilePageHeader (/m) ──────────────────────────────────────────── */
+  .ui-m-header {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 56px;
+    padding: 6px var(--space-2);
+    background: var(--color-card);
+    border-bottom: 1px solid var(--color-ink-08);
+    font-family: var(--font-sans);
+  }
+  .ui-m-header__title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0 var(--space-2);
+    font-size: var(--text-title);
+    line-height: var(--leading-heading);
+    font-weight: 600;
+    color: var(--color-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ui-m-header__slot { flex: none; display: flex; align-items: center; }
+}

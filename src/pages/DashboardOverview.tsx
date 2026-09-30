@@ -8,7 +8,7 @@ import {
     CalendarPlus, UserCheck,
 } from 'lucide-react';
 import { QuickActionsStrip } from '../components/ui/QuickActionsStrip';
-import { Button } from '../components/ui/Button';
+import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
 import { RESOURCES } from '../utils/data';
 import { format } from 'date-fns';

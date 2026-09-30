@@ -2,7 +2,7 @@ import { useBookingStore } from '../../store/bookingStore';
 import { EXTRAS } from '../../utils/data';
 import { Card } from '../ui/Card';
 import { Check, ArrowRight, ArrowLeft, User as UserIcon, Users as UsersIcon, MessageSquare } from 'lucide-react';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 

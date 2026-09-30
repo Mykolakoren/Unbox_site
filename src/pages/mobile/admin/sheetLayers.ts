@@ -8,6 +8,12 @@ import type { CSSProperties } from 'react';
  * поверх и закрывает главную кнопку шторки. Так было с «Пополнить баланс»,
  * «Новая операция» и «Закрыть кабинет» — промах по кнопке уводил на другую
  * вкладку, и введённое пропадало. Шторка поверх шторки — Z_SHEET_OVER_SHEET.
+ *
+ * Wave 1: числа совпадают с общей шкалой слоёв (src/design/tokens.ts → Z,
+ * index.css → --z-*): Z_TABBAR = Z.nav, Z_SHEET = Z.sheetBackdrop. Здесь они
+ * записаны числами, потому что сторож guard_wave0_c читает их из исходника;
+ * guard_wave1_foundation следит, чтобы они не разошлись со шкалой. Новые
+ * шторки делайте на общем Sheet (src/components/ui/Sheet.tsx).
  */
 export const Z_TABBAR = 100;
 export const Z_SHEET = 200;

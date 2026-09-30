@@ -1,36 +1,76 @@
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { Loader2 } from 'lucide-react';
 import clsx from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
-    size?: 'sm' | 'md' | 'lg';
+/**
+ * Button — общая кнопка дизайн-системы (wave 1, 30.09).
+ *
+ * Варианты:
+ *   primary   — главное действие экрана (бирюза Unbox). Одно на экран/шторку.
+ *   secondary — второе действие («Оставить», «Отмена»): тонкая рамка.
+ *   quiet     — третье, «тихое»: без рамки и заливки.
+ *   danger    — необратимое («Удалить», «Отменить 6 броней»).
+ *
+ * Размер по умолчанию — из плотности (--control-h): 44 px на телефоне и в /m,
+ * 36 px на компьютере. size="touch" / "compact" — задать явно.
+ *
+ * Текст называет действие: «Пополнить на 20 ₾», а не «ОК» и не «Да».
+ *
+ * loading — пока идёт запрос: кнопка заблокирована (повторный тап не
+ * отправит второй запрос), рядом со словом крутится значок, ширина не прыгает.
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger';
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+    variant?: ButtonVariant;
+    size?: 'auto' | 'touch' | 'compact';
+    /** Растянуть на всю ширину (главная кнопка в шторке на телефоне). */
+    block?: boolean;
+    loading?: boolean;
+    /** Значок Lucide слева от текста. Во время loading заменяется спиннером. */
+    icon?: ReactNode;
+    /** Значок справа (стрелка «→» и т.п.). */
+    iconRight?: ReactNode;
 }
 
-export function Button({
-    className,
-    variant = 'primary',
-    size = 'md',
-    ...props
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+    {
+        variant = 'primary',
+        size = 'auto',
+        block = false,
+        loading = false,
+        icon,
+        iconRight,
+        disabled,
+        className,
+        children,
+        type = 'button',
+        ...rest
+    },
+    ref,
+) {
+    const iconOnly = !children && !!(icon || iconRight);
     return (
         <button
-            className={twMerge(
-                clsx(
-                    "inline-flex items-center justify-center rounded-xl font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none",
-                    {
-                        'bg-unbox-green text-white hover:bg-unbox-dark focus:ring-unbox-green': variant === 'primary',
-                        'bg-unbox-light text-unbox-dark hover:bg-white border border-transparent hover:border-unbox-light focus:ring-unbox-grey': variant === 'secondary',
-                        'border-2 border-unbox-green text-unbox-green hover:bg-unbox-green hover:text-white': variant === 'outline',
-                        'text-unbox-grey hover:text-unbox-dark': variant === 'ghost',
-
-                        'h-9 px-4 text-sm': size === 'sm',
-                        'h-11 px-6 text-base': size === 'md',
-                        'h-14 px-8 text-lg': size === 'lg',
-                    }
-                ),
-                className
+            ref={ref}
+            type={type}
+            disabled={disabled || loading}
+            aria-busy={loading || undefined}
+            className={clsx(
+                'ui-btn',
+                `ui-btn--${variant}`,
+                size !== 'auto' && `ui-btn--${size}`,
+                block && 'ui-btn--block',
+                iconOnly && 'ui-btn--icon',
+                className,
             )}
-            {...props}
-        />
+            {...rest}
+        >
+            {loading
+                ? <Loader2 size={18} className="ui-spin" aria-hidden="true" />
+                : icon}
+            {children}
+            {!loading && iconRight}
+        </button>
     );
-}
+});

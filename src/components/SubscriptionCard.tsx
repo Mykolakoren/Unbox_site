@@ -2,7 +2,7 @@ import type { FC } from 'react';
 import { toast } from 'sonner';
 import { useUserStore, type User } from '../store/userStore';
 import { Calendar, RefreshCcw, Snowflake, CheckCircle2 } from 'lucide-react';
-import { Button } from './ui/Button';
+import { LegacyButton as Button } from './ui/LegacyButton';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { SUBSCRIPTION_PLANS } from '../utils/data';

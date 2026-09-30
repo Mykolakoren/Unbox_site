@@ -1,80 +1,43 @@
 import type { ReactNode } from 'react';
-import { GH, GH_MONO, GH_SANS } from '../../hooks/useDesignFlag';
-
-interface Props {
-    /** Short sentence — what the user is looking at. */
-    title: string;
-    /** Optional second line — what to do about it. */
-    hint?: string;
-    /** Optional primary CTA. Omit if there's nothing useful the user can do. */
-    action?: { label: string; onClick: () => void };
-    /** Optional icon / illustration node (keep it small). */
-    icon?: ReactNode;
-    /** Tighten vertical padding when used inside a modal or small card. */
-    compact?: boolean;
-}
+import clsx from 'clsx';
+import { Button } from './Button';
 
 /**
- * Reusable empty-state. Use whenever a list or table returns zero rows.
- * Consistent visual language and always ships the "what now?" guidance,
- * so users don't stare at a blank panel wondering if it loaded.
+ * EmptyState — «здесь пока пусто, и вот что сделать» (wave 1, 30.09).
+ *
+ * Показывать ТОЛЬКО после успешной загрузки, когда данных правда нет.
+ * Пока грузится — Skeleton; если не загрузилось — ErrorBar.
+ *
+ * Текст — что человек видит + что делать: «Будущих броней пока нет» /
+ * «Выберите свободное время — займёт минуту» + кнопка «Найти время».
+ *
+ * Wave 1: убрана моно-метка «ПУСТО» цветом ink30 (контраст 2:1) и пунктирная
+ * рамка; кнопка — общий Button. API прежний (title, hint, action, icon, compact).
  */
-export function EmptyState({ title, hint, action, icon, compact }: Props) {
+interface Props {
+    /** Короткая фраза — что человек видит. */
+    title: string;
+    /** Вторая строка — что с этим сделать. */
+    hint?: string;
+    /** Главное действие. Не добавляйте, если делать нечего. */
+    action?: { label: string; onClick: () => void };
+    /** Небольшой значок Lucide (24–32 px). */
+    icon?: ReactNode;
+    /** Меньше отступов — внутри шторки или маленькой карточки. */
+    compact?: boolean;
+    className?: string;
+}
+
+export function EmptyState({ title, hint, action, icon, compact, className }: Props) {
     return (
-        <div
-            style={{
-                textAlign: 'center',
-                padding: compact ? '24px 16px' : '48px 24px',
-                fontFamily: GH_SANS,
-                color: GH.ink60,
-                border: `1px dashed ${GH.ink10}`,
-                borderRadius: 12,
-                background: GH.paper,
-            }}
-        >
-            {icon && (
-                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center', color: GH.ink30 }}>
-                    {icon}
-                </div>
-            )}
-            <div
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 10,
-                    letterSpacing: '0.18em',
-                    textTransform: 'uppercase',
-                    color: GH.ink30,
-                    marginBottom: 8,
-                }}
-            >
-                Пусто
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: GH.ink, marginBottom: 6 }}>
-                {title}
-            </div>
-            {hint && (
-                <div style={{ fontSize: 14, marginBottom: action ? 16 : 0 }}>
-                    {hint}
-                </div>
-            )}
+        <div className={clsx('ui-empty', compact && 'ui-empty--compact', className)}>
+            {icon && <div className="ui-empty__icon" aria-hidden="true">{icon}</div>}
+            <p className="ui-empty__title">{title}</p>
+            {hint && <p className="ui-empty__hint">{hint}</p>}
             {action && (
-                <button
-                    type="button"
-                    onClick={action.onClick}
-                    style={{
-                        marginTop: 8,
-                        padding: '10px 20px',
-                        background: GH.ink,
-                        color: GH.paper,
-                        border: 'none',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        fontFamily: GH_SANS,
-                    }}
-                >
+                <Button variant="primary" className="ui-empty__action" onClick={action.onClick}>
                     {action.label}
-                </button>
+                </Button>
             )}
         </div>
     );

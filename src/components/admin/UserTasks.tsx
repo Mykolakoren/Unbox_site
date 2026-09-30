@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { safeFormat } from '../../utils/dateUtils';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 
 interface UserTasksProps {
     email: string;

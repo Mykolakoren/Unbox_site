@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, User as UserIcon, Calendar, MapPin, BookOpen, Wallet, ArrowRight } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import { FONT } from '../../design/tokens';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 
@@ -182,7 +183,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
                 paddingTop: 'min(15vh, 100px)',
                 padding: '15vh 16px 16px',
-                fontFamily: 'system-ui, -apple-system, sans-serif',
+                fontFamily: FONT.sans,
             }}
         >
             <div

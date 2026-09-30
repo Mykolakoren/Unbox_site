@@ -9,6 +9,9 @@ import { AdminInbox } from '../../components/admin/AdminInbox';
 import { useCashboxStore } from '../../store/cashboxStore';
 import { cashboxApi, type CashboxAnalytics } from '../../api/cashbox';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+// Wave 1: месяцы были по-английски («September 2026», «29 September») —
+// format() без русской локали. Теперь общие форматтеры.
+import { formatDayMonth, formatMonthLabel } from '../../utils/format';
 import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 
 
@@ -190,8 +193,8 @@ function GridHouseAdminDashboard({
     const fmt = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n);
 
     const kpi = [
-        { label: 'Выручка · Сегодня', num: `${fmt(todayRevenue)} ₾`, sub: format(new Date(), 'dd MMMM') },
-        { label: 'Выручка · Месяц', num: `${fmt(monthRevenue)} ₾`, sub: format(new Date(), 'LLLL yyyy') },
+        { label: 'Выручка · Сегодня', num: `${fmt(todayRevenue)} ₾`, sub: formatDayMonth(new Date()) },
+        { label: 'Выручка · Месяц', num: `${fmt(monthRevenue)} ₾`, sub: formatMonthLabel(new Date()) },
         { label: 'Броней · Активных', num: String(activeBookingsCount).padStart(2, '0'), sub: 'Впереди' },
         { label: 'Клиентов · Всего', num: String(totalUsers).padStart(2, '0'), sub: 'В базе' },
     ];
@@ -219,7 +222,7 @@ function GridHouseAdminDashboard({
                         textTransform: 'capitalize',
                     }}
                 >
-                    {format(new Date(), 'LLLL yyyy')}
+                    {formatMonthLabel(new Date())}
                 </h1>
             </div>
 

@@ -11,7 +11,7 @@ import {
 import { format, isPast, isToday, isTomorrow, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
-import { Button } from '../../components/ui/Button';
+import { LegacyButton as Button } from '../../components/ui/LegacyButton';
 import { toast } from 'sonner';
 import {
     DndContext, PointerSensor, TouchSensor,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '../../ui/Button';
+import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, Ticket } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { SUBSCRIPTION_PLANS } from '../../../utils/data';

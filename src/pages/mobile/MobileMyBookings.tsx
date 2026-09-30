@@ -11,6 +11,7 @@ import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
+import { formatDateLabel as formatDateLabelRu } from '../../utils/format';
 import { SwipeRow } from './SwipeRow';
 import { useLongPress } from './useLongPress';
 import { bookingsApi } from '../../api/bookings';
@@ -408,12 +409,11 @@ function Row({ booking, dt, dimmed, onTap, onRepeat }: {
     );
 }
 
-/** "Вс, 10 мая" — capitalised weekday short, day, full month. */
+/** «Вт, 29 сентября». Wave 1: месяц брался отдельно (month:'long') — это
+ *  именительный падеж, и карточки писали «29 сентябрь». Теперь общий
+ *  форматтер: день и месяц одной строкой, месяц в родительном. */
 function formatDateLabel(d: Date): string {
-    const wd = d.toLocaleDateString('ru-RU', { weekday: 'short' }).replace('.', '');
-    const day = d.getDate();
-    const month = d.toLocaleDateString('ru-RU', { month: 'long' });
-    return `${wd[0].toUpperCase()}${wd.slice(1)}, ${day} ${month}`;
+    return formatDateLabelRu(d, { capitalize: true });
 }
 
 function SeriesRow({ items, onTap }: { items: BookingHistoryItem[]; onTap?: () => void }) {

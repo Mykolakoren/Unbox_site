@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { waitlistApi } from '../../api/waitlist';
-import { Button } from './Button';
+import { LegacyButton as Button } from './LegacyButton';
 
 interface Props {
     isOpen: boolean;

@@ -2,6 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import { useScrollLock } from './useScrollLock';
 import { ArrowRight, Calendar, CheckCircle2, Compass, Home, Search, Smartphone, User as UserIcon, X } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import { FONT } from '../../design/tokens';
 
 /**
  * First-visit onboarding tour for /m.
@@ -177,7 +178,7 @@ export function OnboardingTour({
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
-                fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+                fontFamily: FONT.sans,
                 // No backdrop here — spotlight overlay below handles dimming
                 // so the highlighted element punches through cleanly.
             }}

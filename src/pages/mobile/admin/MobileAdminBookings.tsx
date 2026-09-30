@@ -158,8 +158,8 @@ export function MobileAdminBookings() {
                                 style={{
                                     flexShrink: 0,
                                     padding: '0 14px',
-                                    background: active ? 'var(--color-ink)' : 'var(--color-surface)',
-                                    color: active ? 'var(--color-paper)' : 'var(--color-ink)',
+                                    background: active ? 'var(--color-ink)' : 'var(--color-sunken)',
+                                    color: active ? 'var(--color-on-ink)' : 'var(--color-ink)',
                                     border: 'none',
                                     borderRadius: 999,
                                     fontSize: 13,
@@ -182,7 +182,7 @@ export function MobileAdminBookings() {
                         className="tap-target"
                         style={{
                             flex: 1,
-                            background: 'var(--color-paper)',
+                            background: 'var(--color-card)',
                             border: '1px solid var(--color-ink-08)',
                             borderRadius: 10,
                             padding: '0 12px',
@@ -196,7 +196,7 @@ export function MobileAdminBookings() {
                             onClick={() => setDayKey(todayKey)}
                             className="press tap-target"
                             style={{
-                                background: 'var(--color-surface)',
+                                background: 'var(--color-sunken)',
                                 border: 'none',
                                 borderRadius: 10,
                                 padding: '0 14px',
@@ -218,7 +218,7 @@ export function MobileAdminBookings() {
                 <GroupLabel>Что</GroupLabel>
                 <div style={{
                     display: 'flex', alignItems: 'center',
-                    background: 'var(--color-surface)', borderRadius: 12,
+                    background: 'var(--color-sunken)', borderRadius: 12,
                     padding: '10px 12px', gap: 8, minHeight: 44,
                 }}>
                     <Search size={16} color="var(--color-ink-40)" />
@@ -268,7 +268,7 @@ export function MobileAdminBookings() {
                     {counts.past > 0 && (
                         <span style={{
                             fontSize: 12, fontWeight: 700, color: 'var(--color-ink-60)',
-                            background: 'var(--color-paper)',
+                            background: 'var(--color-card)',
                             padding: '2px 8px', borderRadius: 999,
                         }}>{counts.past}</span>
                     )}
@@ -279,7 +279,7 @@ export function MobileAdminBookings() {
             <div className="stagger-in" style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {dayBookings.length === 0 && (
                     <div style={{
-                        background: 'var(--color-surface)', borderRadius: 12,
+                        background: 'var(--color-sunken)', borderRadius: 12,
                         padding: 32, textAlign: 'center', color: 'var(--color-ink-60)', fontSize: 14,
                         lineHeight: 1.5,
                     }}>
@@ -306,7 +306,7 @@ export function MobileAdminBookings() {
                             onClick={() => setSheet(b)}
                             className="press"
                             style={{
-                                background: isBlocker ? 'var(--color-surface)' : 'var(--color-paper)',
+                                background: isBlocker ? 'var(--color-sunken)' : 'var(--color-card)',
                                 border: `1px solid ${isBlocker ? 'var(--color-ink-04)' : 'var(--color-ink-08)'}`,
                                 borderRadius: 12, padding: '12px 14px',
                                 display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10,
@@ -415,7 +415,7 @@ function Chip({ active, onClick, label }: { active: boolean; onClick: () => void
                 flexShrink: 0,
                 padding: '0 14px',
                 background: active ? 'var(--color-ink)' : 'var(--color-ink-04)',
-                color: active ? 'var(--color-paper)' : 'var(--color-ink)',
+                color: active ? 'var(--color-on-ink)' : 'var(--color-ink)',
                 border: 'none', borderRadius: 999,
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 whiteSpace: 'nowrap', fontFamily: 'inherit',

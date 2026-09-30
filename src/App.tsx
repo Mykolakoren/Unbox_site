@@ -285,9 +285,17 @@ function BookingWizard() {
 }
 
 import { Toaster } from 'sonner';
+import { MotionConfig } from 'framer-motion';
 import { ConfirmDialogProvider } from './components/ui/ConfirmDialogProvider';
 import { CmdKProvider } from './components/admin/CmdKSearch';
 import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
+import { FONT, Z } from './design/tokens';
+
+// Витрина дизайн-системы — только в `npm run dev`. В прод-сборке
+// import.meta.env.DEV === false, ветка и сам чанк выбрасываются сборщиком.
+const DevUiPage = import.meta.env.DEV
+  ? lazy(() => import('./dev/DevUiPage').then(m => ({ default: m.DevUiPage })))
+  : null;
 
 function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
@@ -394,11 +402,15 @@ function App() {
   );
 
   return (
+    // reducedMotion="user": при «уменьшить движение» в системе framer-motion
+    // убирает сдвиги и масштаб, оставляя только прозрачность.
+    <MotionConfig reducedMotion="user">
     <ConfirmDialogProvider>
-      <Toaster position="top-center" richColors closeButton />
+      <Toaster position="top-center" richColors closeButton style={{ zIndex: Z.toast, fontFamily: FONT.sans }} />
       <CmdKProvider />
       <Suspense fallback={lazyFallback}>
       <Routes>
+        {DevUiPage && <Route path="/dev/ui" element={<DevUiPage />} />}
         {/* Public Booking Flow */}
         <Route path="/" element={<ExplorePage />} />
         <Route path="/explore" element={<Navigate to="/" replace />} />
@@ -569,6 +581,7 @@ function App() {
       </Routes>
       </Suspense>
     </ConfirmDialogProvider>
+    </MotionConfig>
   );
 }
 

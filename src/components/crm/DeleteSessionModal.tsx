@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 
 /**
  * Delete-confirm dialog for CRM therapy sessions. When the session is part of

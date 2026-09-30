@@ -6,7 +6,7 @@ import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore, isSam
 import { ru } from 'date-fns/locale';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock, X } from 'lucide-react';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';

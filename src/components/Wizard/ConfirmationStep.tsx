@@ -3,7 +3,7 @@ import { calculatePrice } from '../../utils/pricing';
 import { getMyBookingsPath } from '../../utils/userPaths';
 import { useUserStore } from '../../store/userStore';
 import { bookingsApi } from '../../api/bookings';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 import { PhoneInput } from '../ui/PhoneInput';
 import {
     CheckCircle,

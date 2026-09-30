@@ -8,22 +8,32 @@
  * stays for now to avoid a 40-file import rename; plan is to move the
  * tokens into a `gh-tokens.ts` module and delete this one in a follow-up.
  */
+import { COLOR, FONT, STATUS } from '../design/tokens';
+
+// Wave 1 (30.09): GH больше не хранит свои значения — берёт их из общих
+// токенов (src/design/tokens.ts ↔ @theme в index.css). Имена ключей прежние,
+// чтобы ~60 файлов Grid House подхватили новую палитру без правок.
+// ink30 — только линии и неактивное; для текста минимум ink60.
 export const GH = {
-    ink: '#0F0F10',
-    paper: '#FAFAF7',
-    ink5: 'rgba(15,15,16,0.05)',
-    ink8: 'rgba(15,15,16,0.08)',
-    ink10: 'rgba(15,15,16,0.10)',
-    ink30: 'rgba(15,15,16,0.30)',
-    ink60: 'rgba(15,15,16,0.60)',
+    ink: COLOR.ink,
+    paper: COLOR.paper,
+    card: COLOR.card,
+    sunken: COLOR.sunken,
+    ink5: COLOR.ink05,
+    ink8: COLOR.ink08,
+    ink10: COLOR.ink10,
+    ink20: COLOR.ink20,
+    ink30: COLOR.ink30,
+    ink60: COLOR.ink60,
+    ink80: COLOR.ink80,
     cellDead: '#F6F2E8',
-    accent: '#476D6B',
-    danger: '#B84A2F',
-    // Teal-ink for mono-uppercase labels. A shade deeper than `accent` so that
-    // 10-11px letter-spaced text on paper hits ~5:1 contrast (WCAG AA for
-    // small text). Swap to `ink60` to revert the "teal labels" experiment.
-    label: '#2F5F5E',
+    accent: COLOR.accent,
+    // Был свой кирпичный #B84A2F — одиннадцатый оттенок красного. Теперь это
+    // статус «опасно» (--status-danger-fg), как во всём продукте.
+    danger: STATUS.danger.fg,
+    // Бирюза для мелких моно-подписей: на бумаге ~6.9:1 (AA для мелкого текста).
+    label: COLOR.accentInk,
 } as const;
 
-export const GH_SANS = '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-export const GH_MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+export const GH_SANS = FONT.sans;
+export const GH_MONO = FONT.mono;

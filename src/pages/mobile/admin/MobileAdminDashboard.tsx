@@ -403,7 +403,7 @@ function Stat({ icon, label, value, to }: { icon: React.ReactNode; label: string
         </>
     );
     const baseStyle: React.CSSProperties = {
-        background: 'var(--color-paper)',
+        background: 'var(--color-card)',
         border: '1px solid var(--color-ink-08)',
         borderRadius: 12,
         padding: '12px 14px',

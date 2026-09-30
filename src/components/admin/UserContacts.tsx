@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus, X, Globe, Phone, Mail, MessageCircle, Send, Instagram } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 
 interface UserContactsProps {
     email: string;

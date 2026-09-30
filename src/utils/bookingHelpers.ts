@@ -16,6 +16,7 @@ import {
     setHours, setMinutes, startOfToday, isBefore, addMinutes,
 } from 'date-fns';
 import type { BookingHistoryItem } from '../store/types';
+import { STATUS_DICTIONARY, statusLabel } from '../design/statuses';
 // `parseUTC` живёт в dateUtils — здесь только реэкспорт, чтобы старый
 // импорт `from '../utils/bookingHelpers'` продолжал работать.
 export { parseUTC } from './dateUtils';
@@ -129,21 +130,15 @@ export function formatBookingDuration(min: number): string {
     return `${h} ч ${m} мин`;
 }
 
-/** Единый словарь статусов брони → русская подпись.
- *  Прошедшее время, ж.р. (бронь — она). Используется в карточках,
- *  фильтрах, бейджах. */
-export const BOOKING_STATUS_LABELS: Record<string, string> = {
-    confirmed: 'Подтверждена',
-    pending_approval: 'Ожидает',
-    completed: 'Завершена',
-    cancelled: 'Отменена',
-    rescheduled: 'Перенесена',
-    're-rented': 'Пересдана',
-    no_show: 'Не пришёл',
-};
+/** Статус брони → русская подпись. Wave 1 (30.09): больше не свой словарь —
+ *  берём из общего src/design/statuses.ts (тот же, что у StatusBadge), чтобы
+ *  «Ожидает / Ждём подтверждения», «Завершена / Прошла» не расходились. */
+export const BOOKING_STATUS_LABELS: Record<string, string> = Object.fromEntries(
+    Object.entries(STATUS_DICTIONARY.booking).map(([code, def]) => [code, def.label]),
+);
 
 export function getStatusLabel(status: string): string {
-    return BOOKING_STATUS_LABELS[status] ?? status;
+    return statusLabel('booking', status);
 }
 
 /** Принадлежность статуса к «прошлому» (для дефолтного скрытия в

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { X, Loader2, Wallet } from 'lucide-react';
+import { FONT } from '../../design/tokens';
 import { usersApi } from '../../api/users';
 
 interface Props {
@@ -78,7 +79,7 @@ export function BalanceCorrectionModal({
                     padding: 22,
                     position: 'relative',
                     boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
-                    fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+                    fontFamily: FONT.sans,
                     color: '#0E0E0E',
                 }}
             >

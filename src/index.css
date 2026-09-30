@@ -1,16 +1,105 @@
 @import "tailwindcss";
+/* Общие компоненты дизайн-системы (Button, Sheet, Field, Chip, StatusBadge…) */
+@import "./styles/ui.css";
 
-@theme {
-  --color-unbox-green: #476D6B;
-  --color-unbox-dark: #2C3240;
-  --color-unbox-light: #D4E2E1;
-  --color-unbox-grey: #9299A3;
-  --color-unbox-accent: #3A8C7D;
+/* ═══════════════════════════════════════════════════════════════════════
+ * ТОКЕНЫ ДИЗАЙН-СИСТЕМЫ UNBOX (Grid House) — единственный источник.
+ *
+ * Цвет, шрифт, размеры текста, отступы, скругления, тень, движение и слои
+ * берутся отсюда. TS-зеркало для inline-стилей — src/design/tokens.ts
+ * (значения совпадают; сторож backend/tests/guard_wave1_foundation.py
+ * сверяет). Правила применения — docs/DESIGN-SYSTEM.md.
+ *
+ * static — переменные попадают в CSS всегда: мы читаем их через var() из
+ * inline-стилей, а не только через классы Tailwind.
+ * ═══════════════════════════════════════════════════════════════════════ */
+@theme static {
+  /* ── Нейтральные: бумага и чернила ──
+   * Текст — не бледнее ink-60 (5.0:1 на бумаге, 4.9:1 на sunken).
+   * ink-40/30/20/10 — только линии, иконки и неактивное, НЕ текст. */
+  --color-paper:   #FAFAF7;   /* фон страницы */
+  --color-card:    #FDFDFB;   /* карточки, шторки, поля — вместо чистого #FFF */
+  --color-surface: #FDFDFB;   /* старое имя поверхности = card */
+  --color-sunken:  #F4F4F2;   /* углублённое: чипы, дорожка сегментов, скелетон */
+  --color-ink:     #0F0F10;   /* основной текст и заголовки */
+  --color-ink-80:  rgba(15,15,16,0.80);
+  --color-ink-60:  rgba(15,15,16,0.60);   /* вторичный текст — минимум для текста */
+  --color-ink-40:  rgba(15,15,16,0.40);   /* иконки, неактивное */
+  --color-ink-30:  rgba(15,15,16,0.30);   /* только линии и disabled */
+  --color-ink-20:  rgba(15,15,16,0.20);   /* рамки полей и кнопок */
+  --color-ink-10:  rgba(15,15,16,0.10);   /* волосяные линии Grid House */
+  --color-ink-08:  rgba(15,15,16,0.08);
+  --color-ink-05:  rgba(15,15,16,0.05);   /* подложка при наведении */
+  --color-ink-04:  rgba(15,15,16,0.04);
+  --color-on-ink:  #FAFAF7;   /* текст на тёмном */
 
-  --font-sans: Akrobat, "BPG Arial", Inter, system-ui, sans-serif;
-  --font-geo: "BPG Nino Mtavruli Bold", sans-serif;
+  /* ── Бирюза Unbox — только «выбрано», фокус и главная кнопка ──
+   * Не путать с зелёным «оплачено» (--status-ok-*). */
+  --color-accent:       #476D6B;   /* 5.5:1 на бумаге */
+  --color-accent-hover: #3B5B59;
+  --color-accent-ink:   #2F5F5E;   /* мелкий текст акцентом, 6.9:1 */
+  --color-accent-soft:  #E7ECEA;   /* подложка выбранного чипа */
+  --color-on-accent:    #FDFDFB;   /* текст на акценте, 5.4:1 */
 
-  /* Glass Design Tokens — optimized for photo background */
+  /* ── Легаси-бренд (старые Tailwind-экраны: text-unbox-grey и т.п.) ── */
+  --color-unbox-green:  #476D6B;
+  --color-unbox-dark:   #2C3240;
+  --color-unbox-light:  #D4E2E1;
+  --color-unbox-grey:   #636A74;   /* был #9299A3 (2.75:1) → 5.2:1 на бумаге */
+  --color-unbox-accent: #476D6B;   /* фокус = акцент (был отдельный #3A8C7D) */
+
+  /* ── Шрифты: IBM Plex Sans + Mono — единый голос (грузятся в index.html) ── */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ── Шкала текста: 12 / 14 / 16 / 20 / 28 / 40 (+56 hero). Меньше 12 — нельзя.
+   * Веса только 400 / 500 / 600. Строка 1.5 у текста, 1.2 у заголовков. ── */
+  --text-caption: 0.75rem;   --text-caption--line-height: 1.5;   /* 12 — подписи, вкладки меню */
+  --text-small:   0.875rem;  --text-small--line-height: 1.5;     /* 14 — вторичный, плотные таблицы */
+  --text-body:    1rem;      --text-body--line-height: 1.5;      /* 16 — основной */
+  --text-title:   1.25rem;   --text-title--line-height: 1.2;     /* 20 — заголовок карточки */
+  --text-heading: 1.75rem;   --text-heading--line-height: 1.2;   /* 28 — заголовок экрана */
+  --text-display: 2.5rem;    --text-display--line-height: 1.2;   /* 40 — публичные страницы */
+  --text-hero:    3.5rem;    --text-hero--line-height: 1.1;      /* 56 — только hero */
+  --leading-body: 1.5;
+  --leading-heading: 1.2;
+
+  /* ── Отступы: шаг 4 px (в Tailwind это p-1/2/3/4/6/8/12) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;   /* поля экрана на телефоне */
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ── Скругления: три значения ── */
+  --radius-grid:    0px;    /* десктоп Grid House: карточки, таблицы, сетка, окна */
+  --radius-control: 8px;    /* кнопки, поля, чипы, бейджи */
+  --radius-sheet:   16px;   /* шторки и карточки на телефоне */
+
+  /* ── Тень: одна, только для всплывающего (шторки, меню, окна) ── */
+  --shadow-pop: 0 12px 32px -8px rgba(15,15,16,0.18), 0 2px 6px rgba(15,15,16,0.06);
+
+  /* ── Движение ── */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer:     cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press:     140ms;   /* отклик на нажатие, scale 0.97 */
+  --dur-ui:        200ms;   /* переходы экранов и состояний */
+  --dur-sheet-in:  220ms;
+  --dur-sheet-out: 180ms;
+
+  /* ── Слои (z-index). Шторки всегда выше нижнего меню. ── */
+  --z-dropdown:       40;
+  --z-sticky:         90;      /* липкие шапки и кнопка над меню */
+  --z-nav:            100;     /* нижнее меню /m */
+  --z-sheet-backdrop: 200;
+  --z-sheet:          201;
+  --z-dialog:         10050;   /* подтверждения — выше старых модалок (1000/9999/10000) */
+  --z-toast:          10100;
+  --z-tooltip:        10200;
+
+  /* Glass Design Tokens — optimized for photo background (легаси, уходит) */
   --color-glass-bg: rgba(255, 255, 255, 0.65);
   --color-glass-bg-light: rgba(255, 255, 255, 0.45);
   --color-glass-border: rgba(255, 255, 255, 0.40);
@@ -19,21 +108,10 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(71, 109, 107, 0.06);
   --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(71, 109, 107, 0.10);
 
-  /* 2026-06-02 impeccable audit P0: единая neutral-шкала
-   * Tinted ink/paper, never pure #000/#fff. Все mobile-pages должны
-   * мигрировать на эти токены вместо хардкода. */
-  --color-ink:       #0E0E0E;          /* primary body, headings */
-  --color-ink-80:    rgba(14,14,14,0.80);
-  --color-ink-60:    rgba(14,14,14,0.60);
-  --color-ink-40:    rgba(14,14,14,0.40);
-  --color-ink-20:    rgba(14,14,14,0.20);
-  --color-ink-08:    rgba(14,14,14,0.08);
-  --color-ink-04:    rgba(14,14,14,0.04);
-  --color-paper:     #FFFFFF;          /* card surface */
-  --color-surface:   #F4F4F2;          /* page surface, chip-default */
-
-  /* Status tokens — для StatusBadge, ActionRow и любых state-уведомлений.
-   * Контрасты выверены: bg vs fg ≥ 4.5:1 для AA-compliance. */
+  /* Статусы — единственные цвета со смыслом (StatusBadge, ErrorBar, …).
+   * ok — оплачено/подтверждено, pending — ждём, danger — долг/отмена/
+   * опасно, info — запланировано, muted — прошло. warn — легаси, новое не
+   * красим. Контрасты выверены: fg на своём bg ≥ 4.5:1. */
   --status-ok-bg:        #E6F4EA;
   --status-ok-fg:        #1B6E36;  /* 5.7:1 on bg */
   --status-pending-bg:   #FEF3C7;
@@ -90,6 +168,12 @@ button, a, [role="button"], [role="tab"], [role="link"], label, summary {
 body.scroll-locked {
   overflow: hidden;
 }
+/* На компьютере прокручивается корень страницы — лочим и его. gutter
+ * сохраняет место под полосу прокрутки, чтобы страница не дёргалась вбок. */
+html.scroll-locked {
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
 body.scroll-locked [data-mobile-scroll] {
   overflow: hidden !important;
 }
@@ -133,9 +217,55 @@ body.scroll-locked [data-mobile-scroll] {
  * navigation была невозможна. Унифицируем: видимая 2px рамка цветом
  * accent, отступ 2px, скруглена под форму элемента. */
 :where(button, a, [role="button"], [role="link"], input, select, textarea):focus-visible {
-  outline: 2px solid var(--color-unbox-accent, #3A8C7D);
+  outline: 2px solid var(--color-accent, #476D6B);
   outline-offset: 2px;
   border-radius: inherit;
+}
+
+/* ── Плотность управления (wave 1) ──
+ * Высота кнопок/полей/чипов: 44 px на телефоне, 36 px на компьютере.
+ * Мобильные оболочки /m ставят html[data-density="touch"] (useTouchDensity),
+ * поэтому /m, открытый на широком экране, остаётся «пальцевым». */
+:root {
+  --control-h: 44px;
+  --control-font: 1rem;
+}
+@media (min-width: 768px) {
+  :root {
+    --control-h: 36px;
+    --control-font: 0.875rem;
+  }
+}
+html[data-density="touch"], [data-density="touch"] {
+  --control-h: 44px;
+  --control-font: 1rem;
+}
+html[data-density="compact"], [data-density="compact"] {
+  --control-h: 36px;
+  --control-font: 0.875rem;
+}
+
+/* Кнопка действия в уведомлении («Вернуть» у undoToast): у sonner она 24 px —
+ * пальцем не попасть. Стили sonner вне слоёв, поэтому перебиваем тоже вне
+ * слоёв и чуть сильнее по специфичности. */
+html [data-sonner-toast] [data-button] {
+  height: auto;
+  min-height: var(--control-h, 44px);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
+  font-weight: 600;
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+}
+
+/* Деньги и время — моно-цифрами Plex Mono, цифры не прыгают (tabular-nums).
+ * Если остаёмся в Sans (крупный заголовок) — просто класс tabular-nums. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 /* Touch-target minimum для mobile chip-buttons.
@@ -206,19 +336,15 @@ body.scroll-locked [data-mobile-scroll] {
   /* 2026-06-02 emil-design-eng: «buttons must feel responsive».
    * .press — single canonical utility, добавляется на любую кнопку/
    * tappable карточку. Transition: только transform (не all), strong
-   * ease-out curve, 160ms. Активен на :active и :focus-visible (для
-   * клавиатуры). Hover-вариант гейтится pointer:fine — иначе на
-   * touch экранах любой тап триггерит hover-scale и мерцает. */
+   * ease-out curve.
+   * Wave 1 (30.09): было 220ms и сжатие до 0.92 — кнопка «проваливалась».
+   * Теперь как обещает PRODUCT.md: 140ms и 0.97. Увеличение при наведении
+   * убрано — карточки на компьютере не должны «прыгать». */
   .press {
-    transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: transform var(--dur-press) var(--ease-out-strong);
   }
   .press:active {
-    transform: scale(0.92);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .press:hover {
-      transform: scale(1.02);
-    }
+    transform: scale(0.97);
   }
   @media (prefers-reduced-motion: reduce) {
     .press, .press:active, .press:hover {
@@ -234,23 +360,21 @@ body.scroll-locked [data-mobile-scroll] {
     animation: spin 600ms linear infinite;
   }
 
-  /* Stagger entry для списков — добавь .stagger-in к контейнеру,
-   * элементы автоматически появляются с задержкой 60ms между nth-child.
-   * Использовать только на «above the fold» списках, чтобы не задерживать
-   * взаимодействие. Decorative — не блокирует тап. */
+  /* Stagger entry для списков — добавь .stagger-in к контейнеру.
+   * Wave 1 (30.09): «лесенка» была 100ms на шаг и до 1.2 с на восьмую
+   * бронь — на частых экранах это ощущалось как тормоза. Теперь шаг 30ms,
+   * вся лесенка укладывается в 150ms, сдвиг 6px, 200ms. */
   .stagger-in > * {
     opacity: 0;
-    transform: translateY(20px);
-    animation: stagger-fade-in 500ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    transform: translateY(6px);
+    animation: stagger-fade-in var(--dur-ui) var(--ease-out-strong) forwards;
   }
   .stagger-in > *:nth-child(1)  { animation-delay:   0ms; }
-  .stagger-in > *:nth-child(2)  { animation-delay: 100ms; }
-  .stagger-in > *:nth-child(3)  { animation-delay: 200ms; }
-  .stagger-in > *:nth-child(4)  { animation-delay: 300ms; }
-  .stagger-in > *:nth-child(5)  { animation-delay: 400ms; }
-  .stagger-in > *:nth-child(6)  { animation-delay: 500ms; }
-  .stagger-in > *:nth-child(7)  { animation-delay: 600ms; }
-  .stagger-in > *:nth-child(n+8) { animation-delay: 700ms; }
+  .stagger-in > *:nth-child(2)  { animation-delay:  30ms; }
+  .stagger-in > *:nth-child(3)  { animation-delay:  60ms; }
+  .stagger-in > *:nth-child(4)  { animation-delay:  90ms; }
+  .stagger-in > *:nth-child(5)  { animation-delay: 120ms; }
+  .stagger-in > *:nth-child(n+6) { animation-delay: 150ms; }
   @keyframes stagger-fade-in {
     to { opacity: 1; transform: translateY(0); }
   }
@@ -286,16 +410,20 @@ body.scroll-locked [data-mobile-scroll] {
     opacity: 0.25;
   }
 
-  /* ── Skeleton loading animation ── */
+  /* ── Скелетон загрузки ──
+   * Wave 1: было бирюзовое «мерцание» бегущим градиентом. Теперь спокойная
+   * мягкая пульсация углублённого цвета; при reduced-motion — статично. */
   .skeleton {
-    background: linear-gradient(90deg, rgba(212,226,225,0.4) 25%, rgba(212,226,225,0.7) 50%, rgba(212,226,225,0.4) 75%);
-    background-size: 200% 100%;
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
+    background: var(--color-sunken);
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
   }
 
   @keyframes skeleton-pulse {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
   }
 
   /* ── Stat card accent border ── */
@@ -324,8 +452,10 @@ body.scroll-locked [data-mobile-scroll] {
        проглядывал зелёный. Все живые страницы ставят свой фон (десктоп GH.paper
        #FAFAF7, мобилка #F4F4F2), на body-фон не полагаются — смена безопасна. */
     @apply text-unbox-dark antialiased;
-    background-color: #F4F4F2;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-color: var(--color-sunken);
+    /* Шрифт по умолчанию — IBM Plex Sans (--font-sans). Раньше стояли
+       cv02/cv03/cv04/cv11 — это фичи Inter, в Plex они ничего не делали. */
+    font-family: var(--font-sans);
   }
 
   /* Ensure readable contrast on all interactive text */

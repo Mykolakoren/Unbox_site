@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Save, Trash, Plus, Upload, Image, Check } from 'lucide-react';
-import { Button } from '../ui/Button';
+import { LegacyButton as Button } from '../ui/LegacyButton';
 import { resourcesApi } from '../../api/resources';
 import { useBookingStore } from '../../store/bookingStore';
 import { CABINET_SERVICES } from '../../utils/data';

@@ -88,7 +88,8 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         ? legacyText : null;
 
     const time = formatBatumi(session.date, 'HH:mm');
-    const dateLabel = formatBatumi(session.date, 'd MMMM, EEE');
+    // Wave 1: без русской локали шапка шторки была «29 September, Tue».
+    const dateLabel = formatBatumi(session.date, 'd MMMM, EEE', ru);
 
     const update = async (patch: Parameters<typeof crmApi.updateSession>[1], successMsg = 'Сохранено') => {
         setBusy(true);

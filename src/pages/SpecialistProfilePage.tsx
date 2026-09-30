@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Video, MapPin, Calendar, CheckCircle, Instagram, Send, Globe } from 'lucide-react';
-import { Button } from '../components/ui/Button';
+import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import { Card } from '../components/ui/Card';
 import { api } from '../api/client';
 import type { Specialist } from '../components/Specialists/SpecialistCard';

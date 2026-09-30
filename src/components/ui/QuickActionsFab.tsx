@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, X } from 'lucide-react';
+import { FONT } from '../../design/tokens';
 
 export interface QuickAction {
     label: string;
@@ -72,7 +73,7 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                 right: 20,
                 bottom: 20,
                 zIndex: 50,
-                fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+                fontFamily: FONT.sans,
             }}
         >
             {/* Excel #19/#20 — on desktop we render a visible strip via

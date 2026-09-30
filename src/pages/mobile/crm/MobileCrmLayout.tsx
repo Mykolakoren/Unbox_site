@@ -8,6 +8,9 @@ import { hasCompletedTour } from '../OnboardingTour';
 import { MobileCrmTour, CRM_TOUR_PREFIX } from './MobileCrmTour';
 import { NotificationsBell } from '../NotificationsBell';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
+// Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
+import { COLOR, FONT, TEXT, Z } from '../../../design/tokens';
+import { useTouchDensity } from '../../../hooks/useTouchDensity';
 
 /**
  * Mobile CRM shell — separate workspace from /m (cabinet).
@@ -25,6 +28,7 @@ export function MobileCrmLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const [tourOpen, setTourOpen] = useState(false);
+    useTouchDensity();
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -80,7 +84,7 @@ export function MobileCrmLayout() {
 
     if (!currentUser) {
         return (
-            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff' }}>
+            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
                 <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
             </div>
         );
@@ -97,7 +101,7 @@ export function MobileCrmLayout() {
     return (
         <div style={{
             minHeight: '100vh',
-            background: '#F4F4F2',
+            background: COLOR.sunken,
             display: 'flex',
             justifyContent: 'center',
         }}>
@@ -105,13 +109,13 @@ export function MobileCrmLayout() {
                 width: '100%',
                 maxWidth: 480,
                 minHeight: '100vh',
-                background: '#fff',
+                background: COLOR.card,
                 display: 'flex',
                 flexDirection: 'column',
                 paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
-                fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-                color: '#0E0E0E',
-                boxShadow: '0 0 0 1px rgba(0,0,0,0.04)',
+                fontFamily: FONT.sans,
+                color: COLOR.ink,
+                boxShadow: `0 0 0 1px ${COLOR.ink05}`,
             }}>
                 {/* Workspace header — tap to go back to cabinet.
                     В standalone-режиме iOS (сайт добавлен на экран «Домой»,
@@ -189,12 +193,12 @@ export function MobileCrmLayout() {
                 transform: 'translateX(-50%)',
                 width: '100%',
                 maxWidth: 480,
-                background: '#fff',
-                borderTop: '1px solid rgba(0,0,0,0.08)',
+                background: COLOR.card,
+                borderTop: `1px solid ${COLOR.ink08}`,
                 display: 'grid',
                 gridTemplateColumns: 'repeat(5, 1fr)',
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                zIndex: 100,
+                zIndex: Z.nav,
             }}>
                 <TabLink to="/m/crm/today" icon={CalendarDays} label="Сегодня" />
                 <TabLink to="/m/crm/clients" icon={Users} label="Клиенты" />
@@ -221,10 +225,10 @@ function TabLink({ to, icon: Icon, label }: { to: string; icon: React.ElementTyp
                 justifyContent: 'center',
                 gap: 4,
                 padding: '10px 0 12px',
-                color: isActive ? '#0E0E0E' : '#999',
+                color: isActive ? COLOR.accentInk : COLOR.ink60,
                 textDecoration: 'none',
-                fontSize: 11,
-                fontWeight: isActive ? 700 : 500,
+                fontSize: TEXT.caption,
+                fontWeight: isActive ? 600 : 500,
                 lineHeight: 1,
             })}
         >

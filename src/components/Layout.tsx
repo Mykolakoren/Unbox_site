@@ -2,7 +2,7 @@ import { User as UserIcon, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { useBookingStore } from '../store/bookingStore';
-import { Button } from './ui/Button';
+import { LegacyButton as Button } from './ui/LegacyButton';
 
 export function Layout({ children }: { children: React.ReactNode }) {
     const user = useUserStore((s) => s.currentUser);

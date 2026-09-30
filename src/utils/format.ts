@@ -1,0 +1,180 @@
+/**
+ * Общие форматтеры денег, дат и времени (wave 1, 30.09).
+ *
+ * Одна функция на каждый вид записи, чтобы сумма и дата выглядели одинаково
+ * на всех экранах: «1 250 ₾», «вт, 29 сентября», «29 сентября», «14:05».
+ * Раньше каждый экран писал по-своему: гривна вместо лари, «20.0 ₾», «16052.00₾»,
+ * «85 GEL», «29 сентябрь», «September 2026».
+ *
+ * Модуль без побочных эффектов (в отличие от utils/currency.ts, который при
+ * импорте ходит за курсами) — его можно тянуть откуда угодно.
+ *
+ * Часовой пояс. Строка «2026-09-29» — это календарная дата, она выводится
+ * как есть, без сдвигов. Date и ISO-строки со временем по умолчанию
+ * выводятся в поясе браузера — так брони строятся по всему коду
+ * (new Date(`${date}T${start}`)). Для времени из базы (UTC — сессии CRM,
+ * касса) передайте { timeZone: BATUMI_TZ }.
+ */
+
+/** Символы валют. Для незнакомого кода выводим сам код («UAH»). */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+    GEL: '₾',
+    USD: '$',
+    EUR: '€',
+    RUB: '₽',
+    USDT: '₮',
+};
+
+const NBSP = ' ';
+const MINUS = '−';
+
+type NumLike = number | string | null | undefined;
+
+function toNumber(v: NumLike): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+}
+
+export interface MoneyOptions {
+    /** Код валюты, по умолчанию GEL. */
+    currency?: string;
+    /** «+150 ₾» у положительных — для пополнений и возвратов. */
+    sign?: boolean;
+    /** Что показать, если суммы нет. По умолчанию «—». */
+    fallback?: string;
+    /** Дробная часть: 'auto' — только если нужна («31,5 ₾»), 0 — округлить. */
+    fraction?: 'auto' | 0;
+}
+
+/**
+ * Сумма денег: «1 250 ₾», «31,5 ₾», «−150 ₾», «+20 ₾».
+ * Группировка разрядов по-русски (неразрывный пробел), без «.00», если
+ * копеек нет; знак валюты через неразрывный пробел — не отрывается от числа.
+ */
+export function formatMoney(amount: NumLike, opts: MoneyOptions = {}): string {
+    const n = toNumber(amount);
+    if (n === null) return opts.fallback ?? '—';
+    const code = (opts.currency || 'GEL').toUpperCase();
+    const symbol = CURRENCY_SYMBOLS[code] ?? code;
+    const abs = Math.abs(n);
+    const digits = opts.fraction === 0 ? 0 : 2;
+    // Округляем до копеек, чтобы 0.1 + 0.2 не превратилось в «0,30000000004».
+    const rounded = Math.round(abs * 10 ** digits) / 10 ** digits;
+    const body = new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: digits,
+    }).format(rounded);
+    const isZero = rounded === 0;
+    const signStr = n < 0 && !isZero ? MINUS : (opts.sign && n > 0 && !isZero ? '+' : '');
+    return `${signStr}${body}${NBSP}${symbol}`;
+}
+
+/** Сумма в лари: formatGel(1250) → «1 250 ₾». */
+export function formatGel(amount: NumLike, opts: Omit<MoneyOptions, 'currency'> = {}): string {
+    return formatMoney(amount, { ...opts, currency: 'GEL' });
+}
+
+// ── Даты ────────────────────────────────────────────────────────────────
+
+type DateLike = Date | string | number | null | undefined;
+
+export interface DateOptions {
+    /** IANA-пояс (например BATUMI_TZ из dateUtils). По умолчанию — браузера. */
+    timeZone?: string;
+    /** Что показать, если даты нет или она битая. По умолчанию «—». */
+    fallback?: string;
+}
+
+const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Разбирает вход. Календарная «YYYY-MM-DD» → полдень UTC и пояс UTC,
+ *  чтобы день не съехал ни в одном поясе браузера. */
+function resolve(d: DateLike, timeZone?: string): { date: Date; timeZone?: string } | null {
+    if (d === null || d === undefined || d === '') return null;
+    if (typeof d === 'string') {
+        const m = YMD_RE.exec(d.trim());
+        if (m) {
+            const date = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+            return { date, timeZone: 'UTC' };
+        }
+    }
+    const date = d instanceof Date ? d : new Date(d);
+    if (isNaN(date.getTime())) return null;
+    return { date, timeZone };
+}
+
+function fmt(d: DateLike, parts: Intl.DateTimeFormatOptions, opts: DateOptions): string | null {
+    const r = resolve(d, opts.timeZone);
+    if (!r) return null;
+    try {
+        return new Intl.DateTimeFormat('ru-RU', { ...parts, timeZone: r.timeZone }).format(r.date);
+    } catch {
+        return null;
+    }
+}
+
+/** Год нужен, только если дата не в текущем году. */
+function needsYear(d: DateLike, opts: DateOptions): boolean {
+    const y = fmt(d, { year: 'numeric' }, opts);
+    const now = fmt(new Date(), { year: 'numeric' }, opts);
+    return !!y && y !== now;
+}
+
+/**
+ * «29 сентября» — день и месяц в родительном падеже (не «29 сентябрь»).
+ * withYear: 'auto' — год только если не текущий («29 сентября 2025»).
+ */
+export function formatDayMonth(d: DateLike, opts: DateOptions & { withYear?: boolean | 'auto' } = {}): string {
+    const withYear = opts.withYear === true || (opts.withYear === 'auto' && needsYear(d, opts));
+    const s = fmt(d, withYear
+        ? { day: 'numeric', month: 'long', year: 'numeric' }
+        : { day: 'numeric', month: 'long' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    return s.replace(/\s?г\.$/, '');
+}
+
+/**
+ * «вт, 29 сентября» — день недели коротко, день, месяц в родительном.
+ * capitalize: «Вт, 29 сентября» — заглавная только у первой буквы строки.
+ */
+export function formatDateLabel(
+    d: DateLike,
+    opts: DateOptions & { capitalize?: boolean; withYear?: boolean | 'auto' } = {},
+): string {
+    const withYear = opts.withYear === true || (opts.withYear === 'auto' && needsYear(d, opts));
+    const s = fmt(d, withYear
+        ? { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }
+        : { weekday: 'short', day: 'numeric', month: 'long' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    const clean = s.replace(/\s?г\.$/, '');
+    return opts.capitalize ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
+/** «сентябрь 2026» — подпись месяца (именительный падеж, для заголовков). */
+export function formatMonthLabel(d: DateLike, opts: DateOptions & { capitalize?: boolean } = {}): string {
+    const s = fmt(d, { month: 'long', year: 'numeric' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    const clean = s.replace(/\s?г\.$/, '');
+    return opts.capitalize ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
+const HHMM_RE = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
+
+/**
+ * «14:05». Принимает Date/ISO (выводит в поясе) или готовую строку
+ * «14:05» / «14:05:00» из брони — её просто подрезает до часов и минут.
+ */
+export function formatTime(d: DateLike, opts: DateOptions = {}): string {
+    if (typeof d === 'string') {
+        const m = HHMM_RE.exec(d.trim());
+        if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+    }
+    const s = fmt(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, opts);
+    return s === null ? (opts.fallback ?? '—') : s;
+}
+
+/** «15:00–16:00» — интервал через короткое тире без пробелов. */
+export function formatTimeRange(start: DateLike, end: DateLike, opts: DateOptions = {}): string {
+    return `${formatTime(start, opts)}–${formatTime(end, opts)}`;
+}

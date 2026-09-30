@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
-import { Button } from '../../components/ui/Button';
+import { LegacyButton as Button } from '../../components/ui/LegacyButton';
 import { Card } from '../../components/ui/Card';
 import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet } from 'lucide-react';
 import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrectionModal';

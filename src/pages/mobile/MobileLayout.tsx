@@ -7,6 +7,11 @@ import { registerPtrScrollContainer } from './usePullToRefresh';
 import { forceUnlockScroll } from './useScrollLock';
 import { InstallBanner } from './InstallBanner';
 import { loginPathWithRedirect } from '../../utils/loginRedirect';
+// Wave 1: оболочка на общих токенах — шрифт IBM Plex (был system-ui),
+// тёплая карточка вместо #fff, меню на слое Z.nav, подписи вкладок 12 px
+// цветом ink-60 (было #999, 2.8:1), активная — бирюзой «выбрано».
+import { COLOR, FONT, TEXT, Z } from '../../design/tokens';
+import { useTouchDensity } from '../../hooks/useTouchDensity';
 
 /**
  * Mobile beta shell.
@@ -26,6 +31,7 @@ export function MobileLayout() {
     const location = useLocation();
     const [tourOpen, setTourOpen] = useState(false);
     const mainRef = useRef<HTMLElement>(null);
+    useTouchDensity();
 
     // Register the real scroll container so usePullToRefresh gates on its
     // scrollTop (PTR was firing even when scrolled down inside lists).
@@ -75,7 +81,7 @@ export function MobileLayout() {
 
     if (!currentUser) {
         return (
-            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff' }}>
+            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
                 <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
             </div>
         );
@@ -101,7 +107,7 @@ export function MobileLayout() {
             className="notranslate"
             style={{
                 minHeight: '100vh',
-                background: '#F4F4F2',
+                background: COLOR.sunken,
                 display: 'flex',
                 justifyContent: 'center',
             }}
@@ -111,7 +117,7 @@ export function MobileLayout() {
                     width: '100%',
                     maxWidth: 480,
                     minHeight: '100vh',
-                    background: '#fff',
+                    background: COLOR.card,
                     display: 'flex',
                     flexDirection: 'column',
                     // Safe-area сверху: в standalone-режиме iOS контент
@@ -119,9 +125,9 @@ export function MobileLayout() {
                     // оболочках). В обычном браузере env() = 0.
                     paddingTop: 'env(safe-area-inset-top, 0px)',
                     paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
-                    fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-                    color: '#0E0E0E',
-                    boxShadow: '0 0 0 1px rgba(0,0,0,0.04)',
+                    fontFamily: FONT.sans,
+                    color: COLOR.ink,
+                    boxShadow: `0 0 0 1px ${COLOR.ink05}`,
                 }}
             >
                 {/* 2026-06-02 owner: убран Beta-баннер и кнопка «десктоп».
@@ -148,12 +154,12 @@ export function MobileLayout() {
                     transform: 'translateX(-50%)',
                     width: '100%',
                     maxWidth: 480,
-                    background: '#fff',
-                    borderTop: '1px solid rgba(0,0,0,0.08)',
+                    background: COLOR.card,
+                    borderTop: `1px solid ${COLOR.ink08}`,
                     display: 'grid',
                     gridTemplateColumns: 'repeat(4, 1fr)',
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                    zIndex: 100,
+                    zIndex: Z.nav,
                 }}
             >
                 <TabLink to="/m/today" icon={Home} label="Сегодня" tourId="tab-today" />
@@ -179,10 +185,10 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
                 justifyContent: 'center',
                 gap: 4,
                 padding: '10px 0 12px',
-                color: isActive ? '#0E0E0E' : '#999',
+                color: isActive ? COLOR.accentInk : COLOR.ink60,
                 textDecoration: 'none',
-                fontSize: 11,
-                fontWeight: isActive ? 700 : 500,
+                fontSize: TEXT.caption,
+                fontWeight: isActive ? 600 : 500,
                 lineHeight: 1,
             })}
         >

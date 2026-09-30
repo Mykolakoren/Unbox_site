@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import { useUserStore } from '../store/userStore';
 import { useState, useEffect } from 'react';
-import { Button } from './ui/Button';
+import { LegacyButton as Button } from './ui/LegacyButton';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
 interface ReconciliationModalProps {

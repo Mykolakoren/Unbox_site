@@ -24,8 +24,12 @@
     <meta name="twitter:title" content="Unbox — аренда кабинетов для психологов в Батуми" />
     <meta name="twitter:description" content="Аренда кабинетов для психологов, коучей и терапевтов в Батуми. Онлайн-бронирование, две локации: Палиашвили 4 и Тбел Абусеридзе 38." />
     <meta name="twitter:image" content="https://unbox.com.ge/og-cover.jpg" />
-    <!-- Grid House experiment — IBM Plex fonts. Remove this line to revert. -->
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- IBM Plex Sans + Mono — единый шрифт Unbox (--font-sans / --font-mono в
+         src/index.css), в том числе в мобильной версии /m. preconnect —
+         чтобы шрифт приходил раньше. 800 у Plex Sans нет (Google отдаёт 400–700). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <title>Unbox — аренда кабинетов для психологов в Батуми</title>
     <script type="application/ld+json">
       {

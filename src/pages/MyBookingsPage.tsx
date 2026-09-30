@@ -3,7 +3,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { useCrmStore } from '../store/crmStore';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
+import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,

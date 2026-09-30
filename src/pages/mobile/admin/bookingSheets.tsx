@@ -288,7 +288,7 @@ function ActionSheet({
             <div
                 onClick={e => e.stopPropagation()}
                 style={{
-                    width: '100%', maxWidth: 480, background: 'var(--color-paper)',
+                    width: '100%', maxWidth: 480, background: 'var(--color-card)',
                     borderRadius: '20px 20px 0 0',
                     padding: 20,
                     paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
@@ -443,7 +443,7 @@ function BottomSheet({ onClose, children }: { onClose: () => void; children: Rea
             <div
                 onClick={e => e.stopPropagation()}
                 style={{
-                    width: '100%', maxWidth: 480, background: 'var(--color-paper)',
+                    width: '100%', maxWidth: 480, background: 'var(--color-card)',
                     borderRadius: '20px 20px 0 0',
                     padding: 20,
                     paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',

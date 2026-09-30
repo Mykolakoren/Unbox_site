@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button } from '../../ui/Button';
+import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, Shield } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
