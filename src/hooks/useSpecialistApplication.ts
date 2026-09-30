@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { specialistsApi } from '../api/specialists';
+import { specialistsApi, type SpecialistProfile } from '../api/specialists';
 import { useUserStore } from '../store/userStore';
 
 /**
@@ -16,6 +16,41 @@ export type SpecialistApplicationStatus = 'none' | 'pending' | 'approved' | 'rej
 const sentKey = (userId: string) => `unbox:specialist-application-sent:${userId}`;
 // Ответ сервера на сессию вкладки: переходы между экранами не мигают карточкой.
 const known = new Map<string, SpecialistApplicationStatus>();
+
+/**
+ * Анкета → статус. Одно правило для карточки на экранах брони и для самой
+ * страницы анкеты (волна 2, E): раньше страница решала по-своему.
+ * Одобрена = проверена админом (is_verified) или статус approved. Старые
+ * анкеты, заведённые админом без статуса и без проверки, считаем «на проверке».
+ */
+export function applicationStatusOf(profile: SpecialistProfile | null | undefined): SpecialistApplicationStatus {
+    if (!profile) return 'none';
+    if (profile.isVerified || profile.applicationStatus === 'approved') return 'approved';
+    if (profile.applicationStatus === 'rejected') return 'rejected';
+    return 'pending';
+}
+
+/**
+ * Причина отказа, если сервер её отдаёт. Сейчас «Отклонить» в админке
+ * причину не сохраняет — поле читаем про запас под любым из привычных имён,
+ * чтобы экран показал её, как только сервер начнёт её присылать.
+ */
+export function applicationRejectReason(profile: SpecialistProfile | null | undefined): string | null {
+    if (!profile) return null;
+    const p = profile as SpecialistProfile & Record<string, unknown>;
+    for (const key of ['rejectionReason', 'rejectReason', 'reviewComment', 'adminComment']) {
+        const v = p[key];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return null;
+}
+
+/** Страница анкеты узнала свежий статус — карточки на экранах брони
+ *  берут его сразу, без своего запроса и без мигания. */
+export function rememberSpecialistApplicationStatus(userId: string | undefined, status: SpecialistApplicationStatus) {
+    if (!userId) return;
+    known.set(userId, status);
+}
 
 /** После успешной отправки анкеты: запоминаем на устройстве и в памяти. */
 export function markSpecialistApplicationSent(userId: string | undefined) {
@@ -47,11 +82,7 @@ export function useSpecialistApplicationStatus(
         let cancelled = false;
         specialistsApi.getMine()
             .then(profile => {
-                const next: SpecialistApplicationStatus = !profile
-                    ? 'none'
-                    : profile.isVerified || profile.applicationStatus === 'approved'
-                        ? 'approved'
-                        : profile.applicationStatus === 'rejected' ? 'rejected' : 'pending';
+                const next = applicationStatusOf(profile);
                 known.set(userId, next);
                 if (!cancelled) setStatus(next);
                 // Анкету одобрили, а роль в сохранённом профиле старая —
