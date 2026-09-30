@@ -396,8 +396,33 @@ def approve_specialist_application(
     specialist.is_verified = True
     specialist.application_status = "approved"
     session.add(specialist)
+
+    # Решение владельца 30.09: одобрение анкеты сразу даёт право бронировать.
+    # Раньше роль оставалась «user», и require_can_book отказывал, пока админ
+    # отдельно не менял роль. Повышаем только обычного клиента — роли
+    # админов/владельца не трогаем. Смена роли пишется в журнал, как в админке.
+    owner_user = session.get(User, specialist.user_id) if specialist.user_id else None
+    old_role = owner_user.role if owner_user else None
+    if owner_user and (old_role or "user") == "user":
+        owner_user.role = "specialist"
+        owner_user.is_admin = False
+        session.add(owner_user)
+
     session.commit()
     session.refresh(specialist)
+
+    if owner_user and owner_user.role == "specialist" and (old_role or "user") == "user":
+        from app.services.timeline import timeline_service
+        timeline_service.log_event(
+            session=session,
+            actor_id=_admin.id,
+            actor_role=_admin.role,
+            target_id=str(owner_user.id),
+            target_type="user",
+            event_type="role_change",
+            description=f"Changed role from {old_role or 'user'} to specialist (анкета одобрена)",
+            metadata={"old_role": old_role or "user", "new_role": "specialist", "via": "specialist_approve"},
+        )
     return specialist
 
 
