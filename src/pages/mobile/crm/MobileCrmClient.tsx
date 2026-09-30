@@ -1,18 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Phone, MessageCircle, Mail, Plus } from 'lucide-react';
-import { ru } from 'date-fns/locale';
-import { toast } from 'sonner';
 import { crmApi, type CrmClient, type CrmSession, type CrmPayment, type CrmNote } from '../../../api/crm';
-import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
-import { CheckCircle2, Clock, XCircle, Wallet, FileText, Calendar as CalIcon } from 'lucide-react';
+import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
+import { CheckCircle2, Clock, XCircle, Wallet, FileText } from 'lucide-react';
 import { useCrmDataVersion } from './crmDataVersion';
+import { Button } from '../../../components/ui/Button';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
+import { getStatusDef, statusLabel } from '../../../design/statuses';
+import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
+
+/** Дата/время из базы (UTC) — по Батуми. */
+const TZ = { timeZone: BATUMI_TZ };
+
+/** 1 сессия, 2 сессии, 5 сессий. */
+function plural(n: number, one: string, few: string, many: string): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+}
 
 /**
  * Mobile CRM — single client card.
  *
  * Quick view: contact, balance summary, last 10 sessions, "Новая сессия" CTA.
  * Phone/email/Telegram all tap-to-act (`tel:`, `mailto:`, t.me link).
+ *
+ * Wave 1: суммы — formatMoney («140 ₾», не «140 GEL»), статусы сессий — из
+ * общего словаря, эмодзи-счётчики (🗓💳📝) → словами, кнопка Telegram —
+ * нейтральная, как «Звонок»; «не найден» и «не загрузилось» — разные
+ * состояния (раньше обрыв сети выглядел как «Клиент не найден»).
  */
 export function MobileCrmClient() {
     const { clientId } = useParams<{ clientId: string }>();
@@ -29,6 +49,9 @@ export function MobileCrmClient() {
     // shape, not the declared one.
     const [balance, setBalance] = useState<{ totalPaid: number; totalExpected: number; debt: number; prepayment: number } | null>(null);
     const [loading, setLoading] = useState(true);
+    // Сбой загрузки (сеть, 5xx) — не «клиент не найден» (аудит X5-04).
+    const [loadFailed, setLoadFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
     // Растёт, когда прошедшие сессии автоматически закрылись — долг мог
     // измениться, перечитываем карточку (см. MobileCrmLayout).
     const dataVersion = useCrmDataVersion();
@@ -50,6 +73,7 @@ export function MobileCrmClient() {
             .then(([c, ss, bal, pp, nn]) => {
                 if (cancelled) return;
                 loadedFor.current = clientId;
+                setLoadFailed(false);
                 setClient(c);
                 setSessions(ss);
                 setBalance(bal as any);
@@ -57,12 +81,13 @@ export function MobileCrmClient() {
                 setNotes(nn as CrmNote[]);
             })
             .catch((e: any) => {
-                const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось загрузить';
-                toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить');
+                if (cancelled) return;
+                // 404 — клиента правда нет; всё остальное — «не загрузилось».
+                if (e?.response?.status !== 404) setLoadFailed(true);
             })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [clientId, dataVersion]);
+    }, [clientId, attempt, dataVersion]);
 
     const recentSessions = useMemo(() => {
         // parseUTC for sort — same UTC-naive convention as everywhere in CRM.
@@ -100,13 +125,32 @@ export function MobileCrmClient() {
     }, [sessions, payments, notes]);
 
     if (loading) {
-        return <div style={{ padding: 20, color: '#666' }}>Загружаю…</div>;
+        return (
+            <div role="status" aria-busy="true" style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <span className="sr-only">Загружаем карточку клиента…</span>
+                <Skeleton height={28} width="60%" />
+                <Skeleton height={60} />
+                <SkeletonList count={3} label="Загружаем историю" cardHeight={52} />
+            </div>
+        );
+    }
+    if (!client && loadFailed) {
+        return (
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <ErrorBar message="Не удалось загрузить карточку клиента" onRetry={() => setAttempt(a => a + 1)} />
+                <Link to="/m/crm/clients" style={{ color: 'var(--color-ink)', fontSize: 14, minHeight: 44, display: 'inline-flex', alignItems: 'center' }}>← К списку клиентов</Link>
+            </div>
+        );
     }
     if (!client) {
         return (
-            <div style={{ padding: 20 }}>
-                <div style={{ color: '#C8253A', fontSize: 14 }}>Клиент не найден.</div>
-                <Link to="/m/crm/clients" style={{ color: '#0E0E0E', fontSize: 13 }}>← К списку клиентов</Link>
+            <div style={{ padding: 16 }}>
+                <EmptyState
+                    compact
+                    title="Клиент не найден"
+                    hint="Возможно, его удалили или объединили с другим."
+                    action={{ label: 'К списку клиентов', onClick: () => navigate('/m/crm/clients') }}
+                />
             </div>
         );
     }
@@ -118,18 +162,21 @@ export function MobileCrmClient() {
             <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
                     onClick={() => navigate('/m/crm/clients')}
+                    aria-label="К списку клиентов"
                     style={{
-                        background: '#F4F4F2',
+                        background: 'var(--color-sunken)',
                         border: 'none',
                         borderRadius: 10,
-                        width: 36, height: 36,
+                        width: 44, height: 44,
                         display: 'grid', placeItems: 'center',
                         cursor: 'pointer',
+                        color: 'var(--color-ink)',
+                        flexShrink: 0,
                     }}
                 >
-                    <ArrowLeft size={18} />
+                    <ArrowLeft size={18} aria-hidden="true" />
                 </button>
-                <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, flex: 1, minWidth: 0 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1, minWidth: 0 }}>
                     {client.aliasCode ? `${client.aliasCode} · ` : ''}{client.name}
                 </h1>
             </div>
@@ -138,8 +185,8 @@ export function MobileCrmClient() {
             <div style={{ padding: '0 16px', display: 'flex', gap: 8 }}>
                 {phoneClean && (
                     <a href={`tel:${phoneClean}`} style={contactBtn}>
-                        <Phone size={16} />
-                        <span style={{ fontSize: 11 }}>Звонок</span>
+                        <Phone size={16} aria-hidden="true" />
+                        <span style={{ fontSize: 12 }}>Звонок</span>
                     </a>
                 )}
                 {client.telegram && (
@@ -147,37 +194,45 @@ export function MobileCrmClient() {
                         href={`https://t.me/${client.telegram.replace('@', '')}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{ ...contactBtn, background: '#229ED9', color: '#fff' }}
+                        // Wave 1: нейтральная, как «Звонок» (голубая #229ED9 кричала
+                        // громче всего и не проходила контраст — аудит G6-18, X4-15).
+                        style={contactBtn}
                     >
-                        <MessageCircle size={16} />
-                        <span style={{ fontSize: 11 }}>Telegram</span>
+                        <MessageCircle size={16} aria-hidden="true" />
+                        <span style={{ fontSize: 12 }}>Telegram</span>
                     </a>
                 )}
                 {client.email && (
                     <a href={`mailto:${client.email}`} style={contactBtn}>
-                        <Mail size={16} />
-                        <span style={{ fontSize: 11 }}>Email</span>
+                        <Mail size={16} aria-hidden="true" />
+                        <span style={{ fontSize: 12 }}>Почта</span>
                     </a>
                 )}
             </div>
+
+            {loadFailed && (
+                <div style={{ padding: '0 16px' }}>
+                    <ErrorBar message="Не удалось обновить карточку" onRetry={() => setAttempt(a => a + 1)} />
+                </div>
+            )}
 
             {/* Balance */}
             {balance && (
                 <div style={{ padding: '0 16px' }}>
                     <SectionTitle>Баланс</SectionTitle>
                     <div style={{
-                        background: '#F4F4F2',
+                        background: 'var(--color-sunken)',
                         borderRadius: 14,
                         padding: 14,
                         display: 'flex',
                         gap: 12,
                     }}>
-                        <Stat label="Всего оплачено" value={`${(balance.totalPaid ?? 0).toFixed(0)}`} unit={client.currency || 'GEL'} />
+                        <Stat label="Всего оплачено" value={formatMoney(balance.totalPaid ?? 0, { currency: client.currency || 'GEL' })} />
                         {(balance.debt ?? 0) > 0 && (
-                            <Stat label="Долг" value={`${(balance.debt ?? 0).toFixed(0)}`} unit={client.currency || 'GEL'} tone="danger" />
+                            <Stat label="Долг" value={formatMoney(balance.debt ?? 0, { currency: client.currency || 'GEL' })} tone="danger" />
                         )}
                         {(balance.prepayment ?? 0) > 0 && (
-                            <Stat label="Аванс" value={`${(balance.prepayment ?? 0).toFixed(0)}`} unit={client.currency || 'GEL'} tone="ok" />
+                            <Stat label="Аванс" value={formatMoney(balance.prepayment ?? 0, { currency: client.currency || 'GEL' })} tone="ok" />
                         )}
                     </div>
                 </div>
@@ -187,14 +242,18 @@ export function MobileCrmClient() {
             <div style={{ padding: '0 16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <SectionTitle>История · {timeline.length}</SectionTitle>
-                    <span style={{ fontSize: 10, color: '#999' }}>
-                        {sessions.length}🗓 · {payments.length}💳 · {notes.length}📝
+                    <span style={{ fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 8 }}>
+                        {sessions.length} {plural(sessions.length, 'сессия', 'сессии', 'сессий')}
+                        {' · '}{payments.length} {plural(payments.length, 'оплата', 'оплаты', 'оплат')}
+                        {' · '}{notes.length} {plural(notes.length, 'заметка', 'заметки', 'заметок')}
                     </span>
                 </div>
                 {timeline.length === 0 ? (
-                    <div style={{ background: '#F4F4F2', borderRadius: 12, padding: 14, color: '#666', fontSize: 13, textAlign: 'center' }}>
-                        История пуста. Создайте первую сессию.
-                    </div>
+                    <EmptyState
+                        compact
+                        title="История пока пуста"
+                        hint="Сессии появятся здесь после записи в Google Календарь и синхронизации."
+                    />
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                         {timeline.map(item => (
@@ -207,42 +266,26 @@ export function MobileCrmClient() {
             {/* Note about full editing */}
             <div style={{ padding: '0 16px' }}>
                 <div style={{
-                    background: '#FEF3C7',
-                    border: '1px solid #FCD34D',
-                    color: '#8A5A00',
+                    background: 'var(--color-sunken)',
+                    color: 'var(--color-ink-80)',
                     borderRadius: 10,
                     padding: '10px 12px',
                     fontSize: 12,
-                    lineHeight: 1.4,
+                    lineHeight: 1.5,
                 }}>
-                    Редактирование заметок, история платежей и тонкие настройки — в десктопной CRM.
+                    Редактировать заметки, платежи и настройки клиента удобнее на компьютере: unbox.com.ge/crm
                 </div>
             </div>
 
             {/* CTA: new booking pre-linked to this client */}
             <div style={{ padding: '0 16px' }}>
-                <button
+                <Button
+                    block
+                    icon={<Plus size={16} aria-hidden="true" />}
                     onClick={() => navigate('/m/find')}
-                    style={{
-                        width: '100%',
-                        background: '#0E0E0E',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 12,
-                        padding: '14px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 10,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 14,
-                        fontWeight: 700,
-                    }}
                 >
-                    <Plus size={16} />
                     Забронировать кабинет
-                </button>
+                </Button>
             </div>
         </div>
     );
@@ -250,9 +293,9 @@ export function MobileCrmClient() {
 
 const contactBtn: React.CSSProperties = {
     flex: 1,
-    background: '#fff',
-    color: '#0E0E0E',
-    border: '1px solid rgba(0,0,0,0.10)',
+    background: 'var(--color-card)',
+    color: 'var(--color-ink)',
+    border: '1px solid var(--color-ink-10)',
     borderRadius: 12,
     padding: '10px 8px',
     display: 'flex',
@@ -260,47 +303,39 @@ const contactBtn: React.CSSProperties = {
     alignItems: 'center',
     gap: 4,
     fontFamily: 'inherit',
-    fontSize: 11,
-    fontWeight: 700,
+    fontSize: 12,
+    fontWeight: 600,
     textDecoration: 'none',
     cursor: 'pointer',
+    minHeight: 56,
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
         <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: '#999',
+            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+            textTransform: 'uppercase', color: 'var(--color-ink-60)',
             marginBottom: 8,
         }}>{children}</div>
     );
 }
 
-function Stat({ label, value, unit, tone }: { label: string; value: string; unit?: string; tone?: 'danger' | 'ok' }) {
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'ok' }) {
     return (
         <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: '#999', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
+            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
                 {label}
             </div>
-            <div style={{
-                fontSize: 16, fontWeight: 700,
-                color: tone === 'danger' ? '#C8253A' : tone === 'ok' ? '#1B6E36' : '#0E0E0E',
+            <div className="num" style={{
+                fontSize: 16, fontWeight: 600,
+                color: tone === 'danger' ? 'var(--status-danger-fg)' : tone === 'ok' ? 'var(--status-ok-fg)' : 'var(--color-ink)',
                 marginTop: 2,
                 lineHeight: 1.1,
             }}>
                 {value}
-                {unit && <span style={{ fontSize: 11, color: '#999', marginLeft: 3 }}>{unit}</span>}
             </div>
         </div>
     );
-}
-
-function statusLabel(s: string): string {
-    if (s === 'COMPLETED') return 'Прошла';
-    if (s === 'CANCELLED_CLIENT') return 'Отменил клиент';
-    if (s === 'CANCELLED_THERAPIST') return 'Отменили вы';
-    if (s === 'PLANNED') return 'Запланирована';
-    return s;
 }
 
 type TimelineItemUnion =
@@ -317,36 +352,32 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
         const isPlanned = s.status === 'PLANNED';
         // Прошла, но не отмечена — как на экране дня: жёлтым, а не «Запланирована».
         const isUnmarked = isPlanned && item.ts + (s.durationMinutes ?? 60) * 60000 < Date.now();
-        const color = isCancelled
-            ? { bg: 'rgba(179,38,30,0.10)', fg: '#B3261E' }
-            : isUnmarked
-                ? { bg: '#FEF3C7', fg: '#8A5A00' }
-                : isPlanned
-                    ? { bg: 'rgba(76,138,255,0.10)', fg: '#3F6BD8' }
-                    : { bg: 'rgba(76,138,107,0.10)', fg: '#1B7430' };
+        // Цвет — по тону статуса из общего словаря; «не отмечена» — янтарное «ждём».
+        const tone = isUnmarked ? 'pending' : getStatusDef('session', s.status).tone;
+        const color = { bg: `var(--status-${tone}-bg)`, fg: `var(--status-${tone}-fg)` };
         const Icon = isCancelled ? XCircle : isPlanned ? Clock : CheckCircle2;
         return (
             <div style={{
-                background: '#fff', border: '1px solid rgba(0,0,0,0.06)',
+                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
                 borderRadius: 10, padding: '9px 12px',
                 display: 'flex', alignItems: 'center', gap: 10,
-                opacity: isCancelled ? 0.6 : 1,
+                opacity: isCancelled ? 0.75 : 1,
             }}>
                 <div style={{
                     width: 30, height: 30, borderRadius: 8,
                     background: color.bg, color: color.fg,
                     display: 'grid', placeItems: 'center', flexShrink: 0,
                 }}>
-                    <Icon size={14} />
+                    <Icon size={14} aria-hidden="true" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#0E0E0E' }}>
-                        Сессия · {isUnmarked ? 'Не отмечена' : statusLabel(s.status)}
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+                        Сессия · {isUnmarked ? 'Не отмечена' : statusLabel('session', s.status)}
                     </div>
-                    <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
-                        {formatBatumi(s.date, 'd MMM, EEE HH:mm', ru)}
-                        {s.price ? ` · ${s.price.toFixed(0)} ${s.currency || '₾'}` : ''}
-                        {s.isPaid ? ' · оплачено' : ''}
+                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                        {formatDateLabel(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
+                        {s.price ? ` · ${formatMoney(s.price, { currency: s.currency || 'GEL' })}` : ''}
+                        {s.isPaid ? ` · ${statusLabel('payment', 'paid').toLowerCase()}` : ''}
                     </div>
                 </div>
             </div>
@@ -356,23 +387,23 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
         const p = item.payment;
         return (
             <div style={{
-                background: '#fff', border: '1px solid rgba(0,0,0,0.06)',
+                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
                 borderRadius: 10, padding: '9px 12px',
                 display: 'flex', alignItems: 'center', gap: 10,
             }}>
                 <div style={{
                     width: 30, height: 30, borderRadius: 8,
-                    background: 'rgba(76,138,107,0.10)', color: '#1B7430',
+                    background: 'var(--status-ok-bg)', color: 'var(--status-ok-fg)',
                     display: 'grid', placeItems: 'center', flexShrink: 0,
                 }}>
-                    <Wallet size={14} />
+                    <Wallet size={14} aria-hidden="true" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#0E0E0E' }}>
-                        Платёж · {(p.amount || 0).toFixed(0)} {p.currency || '₾'}
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+                        Платёж · <span className="num">{formatMoney(p.amount || 0, { currency: p.currency || 'GEL' })}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
-                        {formatBatumi(p.date, 'd MMM HH:mm', ru)}
+                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                        {formatDayMonth(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
                         {p.account ? ` · ${p.account}` : ''}
                     </div>
                 </div>
@@ -396,34 +427,36 @@ function NoteRow({ note: n }: { note: CrmNote }) {
             type="button"
             onClick={() => { if (isLong) setExpanded(v => !v); }}
             aria-expanded={isLong ? expanded : undefined}
+            // Заметка — нейтральная карточка: цвет только для статуса.
             style={{
-                background: '#FFFBEB', border: '1px solid #FCD34D',
+                background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
                 borderRadius: 10, padding: '9px 12px',
                 display: 'flex', alignItems: 'flex-start', gap: 10,
                 width: '100%', textAlign: 'left', fontFamily: 'inherit',
                 cursor: isLong ? 'pointer' : 'default',
+                color: 'var(--color-ink)',
             }}
         >
             <div style={{
                 width: 30, height: 30, borderRadius: 8,
-                background: 'rgba(217,119,6,0.15)', color: '#92400E',
+                background: 'var(--color-card)', color: 'var(--color-ink-80)',
                 display: 'grid', placeItems: 'center', flexShrink: 0,
             }}>
-                <FileText size={14} />
+                <FileText size={14} aria-hidden="true" />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#92400E' }}>Заметка</div>
-                <div style={{ fontSize: 12, color: '#444', marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>Заметка</div>
+                <div style={{ fontSize: 12, color: 'var(--color-ink-80)', marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {expanded || !isLong ? content : `${content.slice(0, NOTE_PREVIEW_CHARS)}…`}
                 </div>
                 {isLong && (
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)', marginTop: 4, textDecoration: 'underline' }}>
                         {expanded ? 'Свернуть' : 'Показать полностью'}
                     </div>
                 )}
                 {n.createdAt && (
-                    <div style={{ fontSize: 10, color: '#8A5A00', marginTop: 3 }}>
-                        {formatBatumi(n.createdAt, 'd MMM HH:mm', ru)}
+                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 3 }}>
+                        {formatDayMonth(parseUTC(n.createdAt), TZ)}, {formatTime(parseUTC(n.createdAt), TZ)}
                     </div>
                 )}
             </div>

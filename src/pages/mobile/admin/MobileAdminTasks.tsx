@@ -1,19 +1,52 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, X, AlertTriangle, Clock, User as UserIcon, ChevronDown } from 'lucide-react';
-import { format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Search, AlertTriangle, Clock, User as UserIcon, ChevronDown, Circle, CircleDot, CircleCheck, Repeat, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminTasksApi, type AdminTask } from '../../../api/adminTasks';
 import { useUserStore } from '../../../store/userStore';
 import { SwipeRow } from '../SwipeRow';
 import { getRecurrence, withRecurrence, recurrenceLabel, nextDeadline, type Recurrence } from './taskRecurrence';
+import { Sheet } from '../../../components/ui/Sheet';
+import { Button } from '../../../components/ui/Button';
+import { Chip, Segmented } from '../../../components/ui/Chip';
+import { Field, Input, Select, TextArea } from '../../../components/ui/Field';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { COLOR, STATUS, Z } from '../../../design/tokens';
+import { formatDateLabel, formatDayMonth, formatTime } from '../../../utils/format';
 
 type FilterTab = 'mine' | 'team' | 'overdue' | 'all';
 type StatusFilter = 'open' | 'all' | 'done';
+type TaskStatus = AdminTask['status'];
+type TaskPriority = AdminTask['priority'];
 
 const ADMIN_ROLES = new Set(['owner', 'senior_admin', 'admin']);
 const isAssignableUser = (u: { role?: string; isAdmin?: boolean }) =>
     !!(u.isAdmin || (u.role && ADMIN_ROLES.has(u.role)));
+
+/** Роль по-русски — в выборе исполнителя был сырой код («senior_admin»). */
+const ROLE_LABEL: Record<string, string> = {
+    admin: 'Админ',
+    senior_admin: 'Старший админ',
+    owner: 'Владелец',
+    specialist: 'Специалист',
+    user: 'Клиент',
+};
+
+const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = [
+    { value: 'LOW', label: 'Низкий' },
+    { value: 'MEDIUM', label: 'Средний' },
+    { value: 'HIGH', label: 'Срочный' },
+];
+
+const RECURRENCE_OPTIONS: Array<[Recurrence | null, string]> = [
+    [null, 'Разовая'],
+    ['daily', 'Ежедневно'],
+    ['weekly', 'Еженедельно'],
+    ['biweekly', 'Раз в 2 недели'],
+    ['monthly', 'Ежемесячно'],
+];
 
 /**
  * Mobile admin — task board (vertical list, not Kanban).
@@ -23,20 +56,25 @@ const isAssignableUser = (u: { role?: string; isAdmin?: boolean }) =>
  * the page below is a clean vertical list. Status changes are tap-on-badge
  * or swipe — no drag-between-columns.
  *
- * Two scopes:
- *   - "Мои"        — current user is assignee
- *   - "Команды"    — anything assigned to *anyone* (admin overview)
- *   - "Просроч."   — has deadline + open + deadline < now
- *   - "Все"        — no filter (admin sees everything)
+ * Scopes:
+ *   - "Мои"          — current user is assignee
+ *   - "Команда"      — anything assigned to *anyone* (admin overview)
+ *   - "Просроченные" — has deadline + open + deadline < now
+ *   - "Все"          — no filter (admin sees everything)
  *
  * Status filter is secondary (chip row): default "Открытые" hides DONE so
  * the list doesn't fill up with closed work; switch to "Все" or "Сделано"
  * when you want history.
+ *
+ * Wave 1: шторки задачи и создания — на общем Sheet (кнопка «Создать задачу»
+ * в подвале всегда видна); удаление — окном подтверждения, не confirm();
+ * обращение «вы»; эмодзи (🎉 🔁 ⚠ ✓) → значки Lucide; токены вместо hex.
  */
 export function MobileAdminTasks() {
     const { currentUser, users, fetchUsers } = useUserStore();
     const [tasks, setTasks] = useState<AdminTask[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [tab, setTab] = useState<FilterTab>('mine');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
     const [query, setQuery] = useState('');
@@ -53,8 +91,9 @@ export function MobileAdminTasks() {
         try {
             const list = await adminTasksApi.list();
             setTasks(list);
+            setFailed(false);
         } catch {
-            toast.error('Не удалось загрузить задачи');
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -118,12 +157,12 @@ export function MobileAdminTasks() {
                 await maybeSpawnRecurring(t);
             }
             toast.success(
-                next === 'DONE' ? 'Готово ✓'
-                : next === 'IN_PROGRESS' ? 'Взята в работу'
-                : 'Возвращена в открытые',
+                next === 'DONE' ? 'Задача выполнена'
+                : next === 'IN_PROGRESS' ? 'Задача взята в работу'
+                : 'Задача снова открыта',
             );
         } catch {
-            toast.error('Не удалось обновить');
+            toast.error('Не удалось обновить задачу. Попробуйте ещё раз');
         }
     }
 
@@ -143,23 +182,33 @@ export function MobileAdminTasks() {
                 labels: withRecurrence(t.labels, rec),
             });
             setTasks(prev => [created, ...prev]);
-            toast.info(`Создана следующая: «${created.title}»`, { duration: 3500 });
+            toast.info(`Создали следующую: «${created.title}» до ${formatDayMonth(nextDl)}`, { duration: 3500 });
         } catch {
-            toast.error('Не удалось создать следующую регулярную');
+            toast.error('Не удалось создать следующую регулярную задачу');
         }
     }
+
+    const emptyTitle = query
+        ? 'Ничего не нашлось'
+        : tab === 'mine' ? 'У вас нет открытых задач'
+        : tab === 'overdue' ? 'Просроченных задач нет'
+        : 'Задач пока нет';
+    const emptyHint = query
+        ? 'Попробуйте другой запрос.'
+        : tab === 'overdue' ? undefined
+        : 'Создайте задачу кнопкой «Новая задача».';
 
     return (
         <>
             <div style={{ paddingTop: 12, paddingBottom: 'calc(96px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
                     <div>
-                        <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                        <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                             Задачи
                         </h1>
-                        <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                            На тебе: {myCount} {overdueCount > 0 && (
-                                <span style={{ color: '#C8253A', fontWeight: 700 }}>· просрочено: {overdueCount}</span>
+                        <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                            На вас: {myCount} {overdueCount > 0 && (
+                                <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>· просрочено: {overdueCount}</span>
                             )}
                         </p>
                     </div>
@@ -170,24 +219,27 @@ export function MobileAdminTasks() {
                     <div style={{
                         display: 'flex',
                         alignItems: 'center',
-                        background: '#F4F4F2',
+                        background: 'var(--color-sunken)',
                         borderRadius: 12,
-                        padding: '10px 12px',
+                        padding: '0 12px',
+                        minHeight: 44,
                         gap: 8,
                     }}>
-                        <Search size={16} color="#999" />
+                        <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                         <input
                             value={query}
                             onChange={e => setQuery(e.target.value)}
+                            aria-label="Поиск задачи"
                             placeholder="Заголовок, исполнитель…"
                             style={{
                                 flex: 1,
                                 background: 'transparent',
                                 border: 'none',
                                 outline: 'none',
-                                fontSize: 14,
+                                fontSize: 16,
                                 fontFamily: 'inherit',
                                 minWidth: 0,
+                                color: 'var(--color-ink)',
                             }}
                         />
                     </div>
@@ -195,28 +247,24 @@ export function MobileAdminTasks() {
 
                 {/* Scope chips */}
                 <div style={{ padding: '0 16px' }}>
-                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+                    <div role="group" aria-label="Чьи задачи" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
                         {([
                             ['mine', 'Мои', myCount],
-                            ['team', 'Команды', tasks.filter(t => !!t.assigneeId).length],
-                            ['overdue', 'Просроч.', overdueCount],
+                            ['team', 'Команда', tasks.filter(t => !!t.assigneeId).length],
+                            ['overdue', 'Просроченные', overdueCount],
                             ['all', 'Все', tasks.length],
                         ] as Array<[FilterTab, string, number]>).map(([id, label, count]) => {
                             const active = tab === id;
+                            const urgent = id === 'overdue' && count > 0 && !active;
                             return (
-                                <button
+                                <Chip
                                     key={id}
+                                    selected={active}
                                     onClick={() => setTab(id)}
-                                    style={chipStyle(active, id === 'overdue' && count > 0 && !active)}
+                                    style={{ flexShrink: 0, color: urgent ? 'var(--status-danger-fg)' : undefined }}
                                 >
-                                    {label}
-                                    <span style={{
-                                        marginLeft: 6,
-                                        fontSize: 10,
-                                        fontWeight: 700,
-                                        opacity: 0.7,
-                                    }}>{count}</span>
-                                </button>
+                                    {label} · {count}
+                                </Chip>
                             );
                         })}
                     </div>
@@ -224,54 +272,33 @@ export function MobileAdminTasks() {
 
                 {/* Status sub-filter */}
                 <div style={{ padding: '0 16px' }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        {([
-                            ['open', 'Открытые'],
-                            ['all', 'Все'],
-                            ['done', 'Сделано'],
-                        ] as Array<[StatusFilter, string]>).map(([id, label]) => {
-                            const active = statusFilter === id;
-                            return (
-                                <button
-                                    key={id}
-                                    onClick={() => setStatusFilter(id)}
-                                    style={{
-                                        background: active ? '#0E0E0E' : 'transparent',
-                                        color: active ? '#fff' : '#666',
-                                        border: active ? 'none' : '1px solid rgba(0,0,0,0.10)',
-                                        borderRadius: 8,
-                                        padding: '6px 10px',
-                                        fontSize: 11,
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit',
-                                    }}
-                                >
-                                    {label}
-                                </button>
-                            );
-                        })}
-                    </div>
+                    <Segmented<StatusFilter>
+                        aria-label="Статус задач"
+                        options={[
+                            { value: 'open', label: 'Открытые' },
+                            { value: 'all', label: 'Все' },
+                            { value: 'done', label: 'Сделано' },
+                        ]}
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                    />
                 </div>
 
-                {loading && <div style={{ padding: '0 16px', color: '#666', fontSize: 14 }}>Загружаю…</div>}
-
-                {!loading && filtered.length === 0 && (
+                {failed && !loading && (
                     <div style={{ padding: '0 16px' }}>
-                        <div style={{
-                            background: '#F4F4F2',
-                            borderRadius: 14,
-                            padding: 20,
-                            textAlign: 'center',
-                            color: '#666',
-                            fontSize: 14,
-                        }}>
-                            {query
-                                ? 'Ничего не нашлось'
-                                : tab === 'mine' ? 'У тебя нет открытых задач 🎉'
-                                : tab === 'overdue' ? 'Просроченных нет — отлично!'
-                                : 'Список пуст. Тапни «+» чтобы создать.'}
-                        </div>
+                        <ErrorBar message="Не удалось загрузить задачи" onRetry={reload} />
+                    </div>
+                )}
+
+                {loading && tasks.length === 0 && (
+                    <div style={{ padding: '0 16px' }}>
+                        <SkeletonList count={4} label="Загружаем задачи" cardHeight={72} />
+                    </div>
+                )}
+
+                {!loading && !failed && filtered.length === 0 && (
+                    <div style={{ padding: '0 16px' }}>
+                        <EmptyState compact title={emptyTitle} hint={emptyHint} />
                     </div>
                 )}
 
@@ -280,27 +307,27 @@ export function MobileAdminTasks() {
                         <SwipeRow
                             key={t.id}
                             primary={{
-                                label: t.status === 'DONE' ? '↺ Открыть' : '✓ Готово',
-                                color: t.status === 'DONE' ? '#666' : '#1B6E36',
+                                label: t.status === 'DONE' ? 'Вернуть' : 'Готово',
+                                color: t.status === 'DONE' ? STATUS.muted.fg : STATUS.ok.fg,
                                 onAction: () => {
                                     if (t.status === 'DONE') {
                                         adminTasksApi.update(t.id, { status: 'TODO' })
                                             .then(updated => setTasks(prev => prev.map(x => x.id === t.id ? updated : x)))
-                                            .catch(() => toast.error('Не получилось'));
+                                            .catch(() => toast.error('Не удалось вернуть задачу. Попробуйте ещё раз'));
                                     } else {
                                         adminTasksApi.update(t.id, { status: 'DONE' })
                                             .then(async updated => {
                                                 setTasks(prev => prev.map(x => x.id === t.id ? updated : x));
-                                                toast.success('Готово ✓');
+                                                toast.success('Задача выполнена');
                                                 await maybeSpawnRecurring(t);
                                             })
-                                            .catch(() => toast.error('Не получилось'));
+                                            .catch(() => toast.error('Не удалось закрыть задачу. Попробуйте ещё раз'));
                                     }
                                 },
                             }}
                             secondary={{
                                 label: 'Открыть',
-                                color: '#666',
+                                color: STATUS.muted.fg,
                                 onAction: () => setOpenTask(t),
                             }}
                         >
@@ -324,33 +351,18 @@ export function MobileAdminTasks() {
                 width: '100%',
                 maxWidth: 480,
                 padding: '8px 16px',
-                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 30%)',
-                zIndex: 90,
+                background: 'linear-gradient(to bottom, rgba(253,253,251,0) 0%, var(--color-card) 30%)',
+                zIndex: Z.sticky,
                 pointerEvents: 'none',
             }}>
-                <button
+                <Button
+                    block
+                    icon={<Plus size={16} aria-hidden="true" />}
                     onClick={() => setCreating(true)}
-                    style={{
-                        pointerEvents: 'auto',
-                        width: '100%',
-                        background: '#0E0E0E',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 12,
-                        padding: '14px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 14,
-                        fontWeight: 700,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-                    }}
+                    style={{ pointerEvents: 'auto' }}
                 >
-                    <Plus size={16} /> Новая задача
-                </button>
+                    Новая задача
+                </Button>
             </div>
 
             {openTask && (
@@ -358,7 +370,10 @@ export function MobileAdminTasks() {
                     task={openTask}
                     assigneeName={openTask.assigneeId ? (userById.get(openTask.assigneeId) || openTask.assigneeName) : undefined}
                     onClose={() => setOpenTask(null)}
-                    onChange={updated => setTasks(prev => prev.map(x => x.id === updated.id ? updated : x))}
+                    onChange={updated => {
+                        setTasks(prev => prev.map(x => x.id === updated.id ? updated : x));
+                        setOpenTask(updated);
+                    }}
                     onDelete={id => setTasks(prev => prev.filter(x => x.id !== id))}
                 />
             )}
@@ -387,68 +402,81 @@ function TaskRow({ task: t, assigneeName, onTap, onAdvanceStatus }: {
     const due = t.deadline ? new Date(t.deadline) : null;
     const dueLabel = due ? humanizeDeadline(due) : null;
     const recurrence = getRecurrence(t);
+    const StatusIcon = statusIcon(t.status);
 
     return (
         <div
             onClick={onTap}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } }}
             style={{
-                background: '#fff',
-                border: `1px solid ${overdue ? '#FCA5A5' : 'rgba(0,0,0,0.08)'}`,
+                background: 'var(--color-card)',
+                border: `1px solid ${overdue ? 'var(--status-danger-fg)' : 'var(--color-ink-08)'}`,
                 borderRadius: 12,
                 padding: '12px 14px',
-                opacity: t.status === 'DONE' ? 0.55 : 1,
+                opacity: t.status === 'DONE' ? 0.7 : 1,
                 cursor: 'pointer',
             }}
             role="button"
+            tabIndex={0}
         >
             {/* Title row */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{
-                    fontSize: 14, fontWeight: 700, lineHeight: 1.3, flex: 1,
+                    fontSize: 14, fontWeight: 600, lineHeight: 1.3, flex: 1,
                     textDecoration: t.status === 'DONE' ? 'line-through' : 'none',
                 }}>
-                    {t.priority === 'HIGH' && <span style={{ color: '#C8253A' }}>⚠ </span>}
+                    {t.priority === 'HIGH' && (
+                        <AlertTriangle size={14} aria-label="Срочная" style={{ color: 'var(--status-danger-fg)', marginRight: 4, verticalAlign: '-2px' }} />
+                    )}
                     {t.title}
                 </div>
-                {/* Tap-to-cycle status badge */}
+                {/* Tap-to-cycle status badge. Зона нажатия 44 px, пилюля — внутри. */}
                 <button
                     onClick={(e) => { e.stopPropagation(); onAdvanceStatus(); }}
-                    style={statusBadgeBtn(t.status)}
+                    aria-label={`Статус: ${statusLabel(t.status)}. Нажмите, чтобы сменить`}
+                    style={{
+                        background: 'transparent', border: 'none', padding: 0,
+                        minWidth: 44, minHeight: 44, margin: '-12px -8px -12px 0',
+                        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                        cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit',
+                    }}
                 >
-                    {statusEmoji(t.status)} {statusLabel(t.status)}
+                    <span style={statusPill(t.status)}>
+                        <StatusIcon size={12} aria-hidden="true" /> {statusLabel(t.status)}
+                    </span>
                 </button>
             </div>
             {/* Meta row */}
-            <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#666', marginTop: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--color-ink-60)', marginTop: 8, flexWrap: 'wrap' }}>
                 {assigneeName && (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <UserIcon size={11} /> {assigneeName}
+                        <UserIcon size={12} aria-hidden="true" /> {assigneeName}
                     </span>
                 )}
                 {dueLabel && (
                     <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 4,
-                        color: overdue ? '#C8253A' : '#666',
-                        fontWeight: overdue ? 700 : 500,
+                        color: overdue ? 'var(--status-danger-fg)' : 'var(--color-ink-60)',
+                        fontWeight: overdue ? 600 : 500,
                     }}>
-                        <Clock size={11} /> {dueLabel}
+                        <Clock size={12} aria-hidden="true" /> {dueLabel}
                     </span>
                 )}
                 {overdue && t.status !== 'DONE' && (
                     <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 4,
-                        color: '#C8253A', fontWeight: 700,
+                        color: 'var(--status-danger-fg)', fontWeight: 600,
                     }}>
-                        <AlertTriangle size={11} /> просрочена
+                        <AlertTriangle size={12} aria-hidden="true" /> просрочена
                     </span>
                 )}
                 {recurrence && (
                     <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 4,
-                        background: '#E0E7FF', color: '#3730A3',
-                        fontWeight: 700, padding: '2px 6px', borderRadius: 6,
+                        background: 'var(--color-sunken)', color: 'var(--color-ink-80)',
+                        fontWeight: 600, padding: '2px 6px', borderRadius: 6,
                     }}>
-                        🔁 {recurrenceLabel(recurrence)}
+                        <Repeat size={12} aria-hidden="true" /> {recurrenceLabel(recurrence)}
                     </span>
                 )}
             </div>
@@ -467,20 +495,21 @@ function TaskDetailSheet({ task, assigneeName, onClose, onChange, onDelete }: {
     const { users } = useUserStore();
     const [busy, setBusy] = useState(false);
     const [pickAssignee, setPickAssignee] = useState(false);
+    const { confirm } = useConfirmDialog();
 
-    const setStatus = async (status: 'TODO' | 'IN_PROGRESS' | 'DONE') => {
+    const setStatus = async (status: TaskStatus) => {
         setBusy(true);
         try {
             const updated = await adminTasksApi.update(task.id, { status });
             onChange(updated);
-        } catch { toast.error('Не получилось'); } finally { setBusy(false); }
+        } catch { toast.error('Не удалось сменить статус. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
-    const setPriority = async (priority: 'LOW' | 'MEDIUM' | 'HIGH') => {
+    const setPriority = async (priority: TaskPriority) => {
         setBusy(true);
         try {
             const updated = await adminTasksApi.update(task.id, { priority });
             onChange(updated);
-        } catch { toast.error('Не получилось'); } finally { setBusy(false); }
+        } catch { toast.error('Не удалось сменить приоритет. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
     const setAssignee = async (uid: string | null, name: string | null) => {
         setBusy(true);
@@ -488,7 +517,7 @@ function TaskDetailSheet({ task, assigneeName, onClose, onChange, onDelete }: {
             const updated = await adminTasksApi.update(task.id, { assigneeId: uid ?? undefined, assigneeName: name ?? undefined });
             onChange(updated);
             setPickAssignee(false);
-        } catch { toast.error('Не получилось'); } finally { setBusy(false); }
+        } catch { toast.error('Не удалось назначить исполнителя. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
     const setRecurrenceVal = async (rec: Recurrence | null) => {
         setBusy(true);
@@ -496,205 +525,170 @@ function TaskDetailSheet({ task, assigneeName, onClose, onChange, onDelete }: {
             const labels = withRecurrence(task.labels, rec);
             const updated = await adminTasksApi.update(task.id, { labels });
             onChange(updated);
-        } catch { toast.error('Не получилось'); } finally { setBusy(false); }
+        } catch { toast.error('Не удалось сохранить повтор. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
     const currentRecurrence = getRecurrence(task);
     const remove = async () => {
-        if (!window.confirm('Удалить задачу?')) return;
+        const ok = await confirm({
+            title: 'Удалить задачу?',
+            body: `«${task.title}» удалится у всей команды. Вернуть её не получится.`,
+            confirmLabel: 'Удалить задачу',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
         setBusy(true);
         try {
             await adminTasksApi.delete(task.id);
             onDelete(task.id);
             onClose();
-            toast.success('Удалено');
-        } catch { toast.error('Не получилось'); } finally { setBusy(false); }
+            toast.success('Задача удалена');
+        } catch { toast.error('Не удалось удалить задачу. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
 
-    return (
-        <div onClick={onClose} style={overlayStyle}>
-            <div onClick={e => e.stopPropagation()} style={sheetStyle}>
-                {!pickAssignee ? (
-                    <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: 1, lineHeight: 1.3 }}>
-                                {task.title}
-                            </h3>
-                            <button onClick={onClose} style={iconCloseBtn}>
-                                <X size={22} />
-                            </button>
-                        </div>
-
-                        {task.description && (
-                            <div style={{ fontSize: 13, color: '#444', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
-                                {task.description}
-                            </div>
-                        )}
-
-                        {/* Status row */}
-                        <div>
-                            <div style={fieldLabel}>Статус</div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                {(['TODO', 'IN_PROGRESS', 'DONE'] as const).map(s => (
-                                    <button
-                                        key={s}
-                                        onClick={() => setStatus(s)}
-                                        disabled={busy}
-                                        style={pickerBtn(task.status === s)}
-                                    >
-                                        {statusEmoji(s)} {statusLabel(s)}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Priority row */}
-                        <div>
-                            <div style={fieldLabel}>Приоритет</div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
-                                    <button
-                                        key={p}
-                                        onClick={() => setPriority(p)}
-                                        disabled={busy}
-                                        style={pickerBtn(task.priority === p)}
-                                    >
-                                        {p === 'HIGH' ? '⚠ Срочно' : p === 'MEDIUM' ? 'Средне' : 'Низко'}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Assignee */}
-                        <div>
-                            <div style={fieldLabel}>Исполнитель</div>
+    if (pickAssignee) {
+        // Выбор исполнителя — шаг внутри шторки: «Закрыть» возвращает к задаче.
+        return (
+            <Sheet open onClose={() => setPickAssignee(false)} title="Кому назначить">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <button
+                        onClick={() => setAssignee(null, null)}
+                        disabled={busy}
+                        aria-pressed={!task.assigneeId}
+                        style={pickerListItem(!task.assigneeId)}
+                    >
+                        Не назначен
+                    </button>
+                    {(users || [])
+                        .filter(isAssignableUser)
+                        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'))
+                        .map(u => (
                             <button
-                                onClick={() => setPickAssignee(true)}
-                                style={{
-                                    width: '100%',
-                                    background: '#fff',
-                                    border: '1px solid rgba(0,0,0,0.10)',
-                                    borderRadius: 10,
-                                    padding: '10px 12px',
-                                    fontSize: 14,
-                                    fontFamily: 'inherit',
-                                    color: '#0E0E0E',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                }}
-                            >
-                                <span>{assigneeName || 'Не назначен'}</span>
-                                <ChevronDown size={16} color="#999" />
-                            </button>
-                        </div>
-
-                        {/* Recurrence */}
-                        <div>
-                            <div style={fieldLabel}>Регулярная задача</div>
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                {([
-                                    [null, 'Разовая'],
-                                    ['daily', 'Ежедневно'],
-                                    ['weekly', 'Еженедельно'],
-                                    ['biweekly', 'Раз в 2 нед.'],
-                                    ['monthly', 'Ежемесячно'],
-                                ] as Array<[Recurrence | null, string]>).map(([rec, label]) => (
-                                    <button
-                                        key={String(rec)}
-                                        onClick={() => setRecurrenceVal(rec)}
-                                        disabled={busy}
-                                        style={{
-                                            ...pickerBtn(currentRecurrence === rec),
-                                            flex: '0 0 auto',
-                                            padding: '8px 12px',
-                                            fontSize: 12,
-                                        }}
-                                    >
-                                        {label}
-                                    </button>
-                                ))}
-                            </div>
-                            {currentRecurrence && (
-                                <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
-                                    Когда отметишь как «Сделано» — автоматически создастся следующая задача с тем же исполнителем и сдвинутым дедлайном.
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Deadline */}
-                        {task.deadline && (
-                            <div>
-                                <div style={fieldLabel}>Дедлайн</div>
-                                <div style={{ fontSize: 14, color: isOverdue(task) ? '#C8253A' : '#0E0E0E', fontWeight: 600 }}>
-                                    {fmtDate(new Date(task.deadline), 'EEEE, d MMMM', { locale: ru })}
-                                    {isOverdue(task) && <span style={{ marginLeft: 8 }}>· просрочена</span>}
-                                </div>
-                            </div>
-                        )}
-
-                        <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
-                            Создал: {task.createdByName} · {fmtDate(new Date(task.createdAt), 'd MMM, HH:mm', { locale: ru })}
-                        </div>
-
-                        {/* Delete */}
-                        <button
-                            onClick={remove}
-                            disabled={busy}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#C8253A',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                padding: '8px 0',
-                                fontFamily: 'inherit',
-                                marginTop: 4,
-                            }}
-                        >
-                            Удалить задачу
-                        </button>
-
-                        <div style={{ fontSize: 11, color: '#666', textAlign: 'center', borderTop: '1px solid rgba(0,0,0,0.06)', paddingTop: 10 }}>
-                            Расширенное редактирование (комменты, чек-листы, файлы) — в десктопной админке.
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Кому назначить</h3>
-                            <button onClick={() => setPickAssignee(false)} style={iconCloseBtn}>
-                                <X size={22} />
-                            </button>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '55vh', overflow: 'auto' }}>
-                            <button
-                                onClick={() => setAssignee(null, null)}
+                                key={u.id}
+                                onClick={() => setAssignee(u.id, u.name || u.email)}
                                 disabled={busy}
-                                style={pickerListItem(!task.assigneeId)}
+                                aria-pressed={task.assigneeId === u.id}
+                                style={pickerListItem(task.assigneeId === u.id)}
                             >
-                                Не назначен
+                                <span>{u.name || u.email}</span>
+                                {u.role && <span style={{ fontSize: 12, fontWeight: 400 }}>{ROLE_LABEL[u.role] ?? 'Другая роль'}</span>}
                             </button>
-                            {(users || [])
-                                .filter(isAssignableUser)
-                                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'))
-                                .map(u => (
-                                    <button
-                                        key={u.id}
-                                        onClick={() => setAssignee(u.id, u.name || u.email)}
-                                        disabled={busy}
-                                        style={pickerListItem(task.assigneeId === u.id)}
-                                    >
-                                        <span>{u.name || u.email}</span>
-                                        {u.role && <span style={{ fontSize: 11, opacity: 0.6 }}>{u.role}</span>}
-                                    </button>
-                                ))}
-                        </div>
-                    </>
+                        ))}
+                </div>
+            </Sheet>
+        );
+    }
+
+    return (
+        <Sheet open onClose={onClose} title={task.title}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {task.description && (
+                    <div style={{ fontSize: 14, color: 'var(--color-ink-80)', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                        {task.description}
+                    </div>
                 )}
+
+                {/* Status row */}
+                <div>
+                    <div style={fieldLabel}>Статус</div>
+                    <Segmented<TaskStatus>
+                        aria-label="Статус"
+                        options={(['TODO', 'IN_PROGRESS', 'DONE'] as const).map(s => ({ value: s, label: statusLabel(s), disabled: busy }))}
+                        value={task.status}
+                        onChange={s => { if (s !== task.status) setStatus(s); }}
+                    />
+                </div>
+
+                {/* Priority row */}
+                <div>
+                    <div style={fieldLabel}>Приоритет</div>
+                    <Segmented<TaskPriority>
+                        aria-label="Приоритет"
+                        options={PRIORITY_OPTIONS.map(o => ({ ...o, disabled: busy }))}
+                        value={task.priority}
+                        onChange={p => { if (p !== task.priority) setPriority(p); }}
+                    />
+                </div>
+
+                {/* Assignee */}
+                <div>
+                    <div style={fieldLabel}>Исполнитель</div>
+                    <button
+                        onClick={() => setPickAssignee(true)}
+                        style={{
+                            width: '100%',
+                            minHeight: 44,
+                            background: 'var(--color-card)',
+                            border: '1px solid var(--color-ink-20)',
+                            borderRadius: 8,
+                            padding: '10px 12px',
+                            fontSize: 16,
+                            fontFamily: 'inherit',
+                            color: 'var(--color-ink)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                        }}
+                    >
+                        <span>{assigneeName || 'Не назначен'}</span>
+                        <ChevronDown size={16} color={COLOR.ink60} aria-hidden="true" />
+                    </button>
+                </div>
+
+                {/* Recurrence */}
+                <div>
+                    <div style={fieldLabel}>Повтор</div>
+                    <div role="group" aria-label="Повтор" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {RECURRENCE_OPTIONS.map(([rec, label]) => (
+                            <Chip
+                                key={String(rec)}
+                                selected={currentRecurrence === rec}
+                                disabled={busy}
+                                onClick={() => setRecurrenceVal(rec)}
+                            >
+                                {label}
+                            </Chip>
+                        ))}
+                    </div>
+                    {currentRecurrence && (
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6 }}>
+                            Когда отметите задачу сделанной, следующая создастся сама — с тем же исполнителем и сдвинутым сроком.
+                        </div>
+                    )}
+                </div>
+
+                {/* Deadline */}
+                {task.deadline && (
+                    <div>
+                        <div style={fieldLabel}>Срок</div>
+                        <div style={{ fontSize: 14, color: isOverdue(task) ? 'var(--status-danger-fg)' : 'var(--color-ink)', fontWeight: 600 }}>
+                            {formatDateLabel(new Date(task.deadline), { capitalize: true })}
+                            {isOverdue(task) && <span style={{ marginLeft: 8 }}>· просрочена</span>}
+                        </div>
+                    </div>
+                )}
+
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                    Создал: {task.createdByName} · {formatDayMonth(new Date(task.createdAt))}, {formatTime(new Date(task.createdAt))}
+                </div>
+
+                {/* Delete */}
+                <Button
+                    variant="quiet"
+                    disabled={busy}
+                    icon={<Trash2 size={16} aria-hidden="true" />}
+                    onClick={remove}
+                    style={{ color: 'var(--status-danger-fg)', alignSelf: 'flex-start', paddingLeft: 0 }}
+                >
+                    Удалить задачу
+                </Button>
+
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', borderTop: '1px solid var(--color-ink-08)', paddingTop: 10 }}>
+                    Комментарии, чек-листы и файлы удобнее вести на компьютере.
+                </div>
             </div>
-        </div>
+        </Sheet>
     );
 }
 
@@ -708,9 +702,11 @@ function CreateTaskSheet({ onClose, onCreated }: {
     const [description, setDescription] = useState('');
     const [assigneeId, setAssigneeId] = useState<string | null>(currentUser?.id ?? null);
     const [deadlinePreset, setDeadlinePreset] = useState<'today' | 'tomorrow' | 'week' | 'none'>('none');
-    const [priority, setPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
+    const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
     const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
     const [busy, setBusy] = useState(false);
+    // Фокус сразу в поле заголовка (шторка сама ставит фокус на себя).
+    const titleRef = useRef<HTMLInputElement>(null);
 
     const deadline = useMemo(() => {
         if (deadlinePreset === 'none') return null;
@@ -723,7 +719,7 @@ function CreateTaskSheet({ onClose, onCreated }: {
 
     const submit = async () => {
         if (!title.trim()) {
-            toast.error('Введи заголовок');
+            toast.error('Введите заголовок задачи');
             return;
         }
         setBusy(true);
@@ -762,7 +758,7 @@ function CreateTaskSheet({ onClose, onCreated }: {
                 ? detail
                 : Array.isArray(detail)
                     ? detail.map((d: any) => `${(d.loc || []).slice(-1).join('')}: ${d.msg}`).join('; ')
-                    : (e?.message || 'Не удалось создать');
+                    : 'Не удалось создать задачу. Попробуйте ещё раз';
             toast.error(msg, { duration: 7000 });
             console.error('[task create]', e?.response?.data ?? e);
         } finally { setBusy(false); }
@@ -777,143 +773,105 @@ function CreateTaskSheet({ onClose, onCreated }: {
     }, [users]);
 
     return (
-        <div onClick={onClose} style={overlayStyle}>
-            <div onClick={e => e.stopPropagation()} style={sheetStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Новая задача</h3>
-                    <button onClick={onClose} style={iconCloseBtn}>
-                        <X size={22} />
-                    </button>
-                </div>
-
-                <div>
-                    <div style={fieldLabel}>Заголовок</div>
-                    <input
+        <Sheet
+            open
+            onClose={onClose}
+            title="Новая задача"
+            initialFocus={titleRef}
+            footer={
+                <Button block loading={busy} disabled={!title.trim()} onClick={submit}>
+                    Создать задачу
+                </Button>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <Field label="Заголовок">
+                    <Input
+                        ref={titleRef}
                         value={title}
                         onChange={e => setTitle(e.target.value)}
                         placeholder="Что нужно сделать?"
-                        autoFocus
-                        style={textInput}
                     />
-                </div>
+                </Field>
 
-                <div>
-                    <div style={fieldLabel}>Описание (необязательно)</div>
-                    <textarea
+                <Field label="Описание" optional>
+                    <TextArea
                         value={description}
                         onChange={e => setDescription(e.target.value)}
                         placeholder="Детали"
                         rows={3}
-                        style={{ ...textInput, resize: 'none', fontFamily: 'inherit' }}
                     />
-                </div>
+                </Field>
 
-                <div>
-                    <div style={fieldLabel}>Кому</div>
-                    <select
+                <Field label="Кому">
+                    <Select
                         value={assigneeId ?? ''}
                         onChange={e => setAssigneeId(e.target.value || null)}
-                        style={textInput}
                     >
-                        <option value="">— Не назначать —</option>
+                        <option value="">Не назначать</option>
                         {sortedUsers.map(u => (
                             <option key={u.id} value={u.id}>
                                 {u.name || u.email}
                                 {u.id === currentUser?.id ? ' (мне)' : ''}
                             </option>
                         ))}
-                    </select>
-                </div>
+                    </Select>
+                </Field>
 
                 <div>
-                    <div style={fieldLabel}>Дедлайн</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <div style={fieldLabel}>Срок</div>
+                    <div role="group" aria-label="Срок" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {([
                             ['none', 'Без срока'],
                             ['today', 'Сегодня'],
                             ['tomorrow', 'Завтра'],
                             ['week', 'Через неделю'],
                         ] as Array<['today' | 'tomorrow' | 'week' | 'none', string]>).map(([id, label]) => (
-                            <button
+                            <Chip
                                 key={id}
+                                selected={deadlinePreset === id}
                                 onClick={() => setDeadlinePreset(id)}
-                                style={pickerBtn(deadlinePreset === id)}
                             >
                                 {label}
-                            </button>
+                            </Chip>
                         ))}
                     </div>
                 </div>
 
                 <div>
                     <div style={fieldLabel}>Приоритет</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
-                            <button
-                                key={p}
-                                onClick={() => setPriority(p)}
-                                style={pickerBtn(priority === p)}
-                            >
-                                {p === 'HIGH' ? '⚠ Срочно' : p === 'MEDIUM' ? 'Средне' : 'Низко'}
-                            </button>
-                        ))}
-                    </div>
+                    <Segmented<TaskPriority>
+                        aria-label="Приоритет"
+                        options={PRIORITY_OPTIONS}
+                        value={priority}
+                        onChange={setPriority}
+                    />
                 </div>
 
                 {/* Recurrence — turns the task into a "regular" one. When the
                     new task is marked DONE, the next occurrence is auto-created. */}
                 <div>
-                    <div style={fieldLabel}>Регулярная задача</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {([
-                            [null, 'Разовая'],
-                            ['daily', 'Ежедневно'],
-                            ['weekly', 'Еженедельно'],
-                            ['biweekly', 'Раз в 2 нед.'],
-                            ['monthly', 'Ежемесячно'],
-                        ] as Array<[Recurrence | null, string]>).map(([rec, label]) => (
-                            <button
+                    <div style={fieldLabel}>Повтор</div>
+                    <div role="group" aria-label="Повтор" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {RECURRENCE_OPTIONS.map(([rec, label]) => (
+                            <Chip
                                 key={String(rec)}
+                                selected={recurrence === rec}
                                 onClick={() => setRecurrence(rec)}
-                                style={{
-                                    ...pickerBtn(recurrence === rec),
-                                    flex: '0 0 auto',
-                                    padding: '8px 12px',
-                                    fontSize: 12,
-                                }}
                             >
                                 {label}
-                            </button>
+                            </Chip>
                         ))}
                     </div>
                     {recurrence && (
-                        <div style={{ fontSize: 11, color: '#666', marginTop: 6, lineHeight: 1.4 }}>
-                            Следующая будет создана автоматически когда отметите эту как сделанную.
-                            Дедлайн сдвинется на {recurrenceLabel(recurrence).toLowerCase()}.
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6, lineHeight: 1.4 }}>
+                            Когда отметите эту задачу сделанной, следующая создастся сама.
+                            Срок сдвинется: {recurrenceLabel(recurrence).toLowerCase()}.
                         </div>
                     )}
                 </div>
-
-                <button
-                    onClick={submit}
-                    disabled={busy || !title.trim()}
-                    style={{
-                        background: '#0E0E0E',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 12,
-                        padding: '14px 18px',
-                        fontSize: 15,
-                        fontWeight: 700,
-                        cursor: busy ? 'wait' : 'pointer',
-                        fontFamily: 'inherit',
-                        opacity: busy || !title.trim() ? 0.6 : 1,
-                    }}
-                >
-                    {busy ? 'Создаю…' : 'Создать задачу'}
-                </button>
             </div>
-        </div>
+        </Sheet>
     );
 }
 
@@ -924,11 +882,13 @@ function isOverdue(t: AdminTask): boolean {
     return new Date(t.deadline).getTime() < Date.now();
 }
 
+/** Статусы задач — свой набор (не брони и не сессии), поэтому здесь, а не
+ *  в src/design/statuses.ts. */
 function statusLabel(s: string): string {
     return s === 'TODO' ? 'Открыта' : s === 'IN_PROGRESS' ? 'В работе' : 'Сделано';
 }
-function statusEmoji(s: string): string {
-    return s === 'TODO' ? '○' : s === 'IN_PROGRESS' ? '◐' : '●';
+function statusIcon(s: string) {
+    return s === 'TODO' ? Circle : s === 'IN_PROGRESS' ? CircleDot : CircleCheck;
 }
 
 function humanizeDeadline(d: Date): string {
@@ -938,126 +898,50 @@ function humanizeDeadline(d: Date): string {
     const dDay = new Date(d);
     dDay.setHours(0, 0, 0, 0);
     const ms = dDay.getTime() - today.getTime();
-    if (ms < 0) return `до ${fmtDate(d, 'd MMM', { locale: ru })}`;
+    if (ms < 0) return `до ${formatDayMonth(d)}`;
     if (dDay.getTime() === today.getTime()) return 'до сегодня';
     if (dDay.getTime() === tomorrow.getTime()) return 'до завтра';
-    if (ms < 7 * 86400000) return `до ${fmtDate(d, 'EEE', { locale: ru })}`;
-    return `до ${fmtDate(d, 'd MMM', { locale: ru })}`;
+    if (ms < 7 * 86400000) return `до ${formatDateLabel(d)}`;
+    return `до ${formatDayMonth(d)}`;
 }
 
 const fieldLabel: React.CSSProperties = {
-    fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-    textTransform: 'uppercase', color: '#999',
-    marginBottom: 6,
+    fontSize: 14, fontWeight: 600,
+    color: 'var(--color-ink)',
+    marginBottom: 8,
 };
 
-const overlayStyle: React.CSSProperties = {
-    position: 'fixed', inset: 0,
-    background: 'rgba(0,0,0,0.55)',
-    zIndex: 200,
-    display: 'flex',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-};
-
-const sheetStyle: React.CSSProperties = {
-    width: '100%',
-    maxWidth: 480,
-    background: '#fff',
-    borderRadius: '20px 20px 0 0',
-    padding: 20,
-    paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 14,
-    maxHeight: '85vh',
-    overflow: 'auto',
-};
-
-const iconCloseBtn: React.CSSProperties = {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    color: '#666',
-    padding: 0,
-};
-
-const textInput: React.CSSProperties = {
-    width: '100%',
-    background: '#F4F4F2',
-    border: 'none',
-    borderRadius: 10,
-    padding: '10px 12px',
-    fontSize: 14,
-    color: '#0E0E0E',
-    outline: 'none',
-    fontFamily: 'inherit',
-    appearance: 'none',
-    WebkitAppearance: 'none',
-};
-
-function chipStyle(active: boolean, urgent: boolean): React.CSSProperties {
-    return {
-        background: active ? '#0E0E0E' : urgent ? '#FEF2F2' : '#F4F4F2',
-        color: active ? '#fff' : urgent ? '#C8253A' : '#0E0E0E',
-        border: 'none',
-        borderRadius: 10,
-        padding: '8px 12px',
-        fontSize: 12,
-        fontWeight: 700,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        flex: '0 0 auto',
-        whiteSpace: 'nowrap',
-    };
-}
-
-function statusBadgeBtn(s: string): React.CSSProperties {
+function statusPill(s: string): React.CSSProperties {
     const map: Record<string, { bg: string; fg: string }> = {
-        TODO: { bg: '#F4F4F2', fg: '#666' },
-        IN_PROGRESS: { bg: '#FEF3C7', fg: '#8A5A00' },
-        DONE: { bg: '#E6F4EA', fg: '#1B6E36' },
+        TODO: { bg: 'var(--status-muted-bg)', fg: 'var(--status-muted-fg)' },
+        IN_PROGRESS: { bg: 'var(--status-pending-bg)', fg: 'var(--status-pending-fg)' },
+        DONE: { bg: 'var(--status-ok-bg)', fg: 'var(--status-ok-fg)' },
     };
     const c = map[s] || map.TODO;
     return {
         background: c.bg,
         color: c.fg,
-        border: 'none',
         borderRadius: 999,
         padding: '4px 10px',
-        fontSize: 10,
-        fontWeight: 700,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
+        fontSize: 12,
+        fontWeight: 600,
         whiteSpace: 'nowrap',
-        flexShrink: 0,
-    };
-}
-
-function pickerBtn(active: boolean): React.CSSProperties {
-    return {
-        background: active ? '#0E0E0E' : '#F4F4F2',
-        color: active ? '#fff' : '#0E0E0E',
-        border: 'none',
-        borderRadius: 10,
-        padding: '10px 12px',
-        fontSize: 13,
-        fontWeight: 700,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        flex: 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
     };
 }
 
 function pickerListItem(active: boolean): React.CSSProperties {
     return {
-        background: active ? '#0E0E0E' : '#fff',
-        color: active ? '#fff' : '#0E0E0E',
-        border: active ? 'none' : '1px solid rgba(0,0,0,0.10)',
-        borderRadius: 10,
+        background: active ? 'var(--color-accent-soft)' : 'var(--color-card)',
+        color: 'var(--color-ink)',
+        border: active ? '1px solid var(--color-accent)' : '1px solid var(--color-ink-10)',
+        borderRadius: 8,
         padding: '12px 14px',
-        fontSize: 14,
-        fontWeight: 600,
+        minHeight: 48,
+        fontSize: 16,
+        fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         fontFamily: 'inherit',
         textAlign: 'left',

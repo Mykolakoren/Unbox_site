@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Power, Users as UsersIcon } from 'lucide-react';
+import { Power, Users as UsersIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { teamApi, type TeamMember } from '../../../api/team';
+import { Button } from '../../../components/ui/Button';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
 
 const ROLE_LABEL: Record<string, string> = {
     founder: 'Основатель',
@@ -10,31 +14,29 @@ const ROLE_LABEL: Record<string, string> = {
     other: 'Другое',
 };
 
-const ROLE_COLOR: Record<string, { bg: string; fg: string }> = {
-    founder:      { bg: 'rgba(76,138,107,0.15)', fg: '#1B7430' },
-    senior_admin: { bg: 'rgba(76,138,255,0.12)', fg: '#3F6BD8' },
-    admin:        { bg: 'rgba(0,0,0,0.06)',      fg: '#0E0E0E' },
-    other:        { bg: 'rgba(0,0,0,0.04)',      fg: '#666' },
-};
-
 /**
  * Mobile admin: Команда — read-only list of staff with quick "active toggle".
  * Editing fields (name/role/photo) intentionally lives only on desktop; the
  * mobile screen is for at-a-glance lookups + temporarily disabling a member
  * (e.g. when someone is on leave).
+ *
+ * Wave 1: роль — нейтральной плашкой (раньше зелёная/синяя для красоты),
+ * кнопка называет действие («Отключить» / «Включить»), а не состояние.
  */
 export function MobileAdminTeam() {
     const [members, setMembers] = useState<TeamMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [failed, setFailed] = useState(false);
 
     const load = async () => {
         setLoading(true);
         try {
             const data = await teamApi.getAllAdmin();
             setMembers(data);
+            setFailed(false);
         } catch {
-            toast.error('Не удалось загрузить команду');
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -58,9 +60,9 @@ export function MobileAdminTeam() {
         try {
             await teamApi.update(m.id, { is_active: !m.isActive });
             await load();
-            toast.success(m.isActive ? 'Отключён' : 'Включён');
+            toast.success(m.isActive ? `${m.name}: отключён` : `${m.name}: включён`);
         } catch {
-            toast.error('Не удалось обновить');
+            toast.error('Не удалось обновить. Попробуйте ещё раз');
         } finally {
             setBusyId(null);
         }
@@ -69,35 +71,32 @@ export function MobileAdminTeam() {
     return (
         <div style={{ padding: '14px 14px 90px' }}>
             <div style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: '#888',
+                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: 'var(--color-ink-60)',
                 marginBottom: 10,
             }}>
                 Команда · {members.length}
             </div>
 
+            {failed && !loading && (
+                <ErrorBar message="Не удалось загрузить команду" onRetry={load} className="mb-3" />
+            )}
             {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-                    <Loader2 size={20} className="animate-spin" style={{ color: '#888' }} />
-                </div>
-            ) : sorted.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 32, color: '#888', fontSize: 13 }}>
-                    Никого нет
-                </div>
+                <SkeletonList count={4} label="Загружаем команду" cardHeight={64} />
+            ) : failed ? null : sorted.length === 0 ? (
+                <EmptyState compact title="В команде пока никого" hint="Добавить сотрудника можно на компьютере." />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {sorted.map(m => {
-                        const role = ROLE_COLOR[m.roleType] || ROLE_COLOR.other;
                         return (
                             <div key={m.id} style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.06)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 12,
-                                padding: '11px 12px',
+                                padding: '8px 8px 8px 12px',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 10,
-                                opacity: m.isActive ? 1 : 0.5,
                             }}>
                                 {m.photoUrl ? (
                                     <img
@@ -113,52 +112,38 @@ export function MobileAdminTeam() {
                                 ) : (
                                     <div style={{
                                         width: 40, height: 40, borderRadius: 10,
-                                        background: 'rgba(0,0,0,0.06)',
-                                        color: '#888',
+                                        background: 'var(--color-ink-05)',
+                                        color: 'var(--color-ink-60)',
                                         display: 'grid', placeItems: 'center',
-                                        fontSize: 13, fontWeight: 700,
+                                        fontSize: 13, fontWeight: 600,
                                         flexShrink: 0,
                                     }}>
                                         {m.name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}
                                     </div>
                                 )}
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: 14, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                <div style={{ flex: 1, minWidth: 0, opacity: m.isActive ? 1 : 0.7 }}>
+                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {m.name}
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                        <span style={{
-                                            background: role.bg, color: role.fg,
-                                            padding: '2px 7px', borderRadius: 5,
-                                            fontSize: 10, fontWeight: 700,
-                                            letterSpacing: '0.04em', textTransform: 'uppercase',
-                                        }}>
+                                        <span className="ui-badge ui-badge--muted">
                                             {ROLE_LABEL[m.roleType] || 'Другое'}
                                         </span>
-                                        <span style={{ fontSize: 11, color: '#888' }}>{m.role}</span>
+                                        <span style={{ fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {!m.isActive && 'Отключён · '}{m.role}
+                                        </span>
                                     </div>
                                 </div>
-                                <button
+                                <Button
+                                    variant="secondary"
+                                    size="touch"
+                                    loading={busyId === m.id}
+                                    icon={<Power size={16} aria-hidden="true" />}
                                     onClick={() => handleToggle(m)}
-                                    disabled={busyId === m.id}
-                                    style={{
-                                        background: m.isActive ? 'rgba(0,0,0,0.05)' : '#B3261E',
-                                        color: m.isActive ? '#0E0E0E' : '#fff',
-                                        border: 'none',
-                                        borderRadius: 8,
-                                        padding: '7px 10px',
-                                        fontSize: 11,
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                        flexShrink: 0,
-                                    }}
+                                    aria-label={`${m.isActive ? 'Отключить' : 'Включить'}: ${m.name}`}
                                 >
-                                    {busyId === m.id
-                                        ? <Loader2 size={12} className="animate-spin" />
-                                        : <Power size={12} />}
-                                    {m.isActive ? 'Вкл' : 'Выкл'}
-                                </button>
+                                    {m.isActive ? 'Отключить' : 'Включить'}
+                                </Button>
                             </div>
                         );
                     })}
@@ -168,18 +153,19 @@ export function MobileAdminTeam() {
             <div style={{
                 marginTop: 16,
                 padding: 12,
-                background: 'rgba(76,138,107,0.06)',
+                background: 'var(--color-sunken)',
                 borderRadius: 10,
                 fontSize: 12,
-                color: '#444',
+                color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
                 gap: 8,
                 alignItems: 'flex-start',
             }}>
-                <UsersIcon size={14} style={{ flexShrink: 0, marginTop: 2, color: '#1B7430' }} />
+                <UsersIcon size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Редактирование (фото, био, роль) и добавление новых — в десктоп-версии /admin/team.
+                    Фото, описание, роль и новых сотрудников удобнее менять на компьютере:
+                    unbox.com.ge/admin/team
                 </span>
             </div>
         </div>

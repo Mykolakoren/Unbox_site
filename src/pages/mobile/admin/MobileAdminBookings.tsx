@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Check, Clock, AlertTriangle, Sparkles, Plus } from 'lucide-react';
+import { Search, Sparkles, Plus } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import type { BookingHistoryItem } from '../../../store/types';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { statusLabel } from '../../../design/statuses';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { Chip } from '../../../components/ui/Chip';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { COLOR } from '../../../design/tokens';
+import { formatDateLabel, formatDayMonth } from '../../../utils/format';
 
 /**
  * Mobile admin — bookings overview.
@@ -77,7 +81,7 @@ export function MobileAdminBookings() {
         const h = Math.floor(min / 60);
         const m = min % 60;
         if (m === 0) return `${h} ч`;
-        if (m === 30) return `${h}.5 ч`;
+        if (m === 30) return `${h},5 ч`;
         return `${h} ч ${m} мин`;
     };
 
@@ -123,13 +127,13 @@ export function MobileAdminBookings() {
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
                     Все брони
                 </h1>
                 {/* P0-fix: было #666 на #fff = 3.4:1 (FAIL). Теперь ink-60
                     через rgba — реальный контраст 5.4:1 (AA pass). */}
                 <p style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {fmtDate(targetDate, 'EEEE, d MMMM', { locale: ru })}
+                    {formatDateLabel(targetDate, { capitalize: true })}
                     {' · '}
                     {showPast
                         ? `всего ${counts.active + counts.past}`
@@ -142,7 +146,7 @@ export function MobileAdminBookings() {
                 стек, читались как одна стена. */}
             <div style={{ padding: '0 16px' }}>
                 <GroupLabel>Когда</GroupLabel>
-                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                <div role="group" aria-label="День" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
                     {Array.from({ length: 32 }, (_, i) => i - 1).map(off => {
                         const d = addDays(new Date(), off);
                         const key = fmtDate(d, 'yyyy-MM-dd');
@@ -150,28 +154,16 @@ export function MobileAdminBookings() {
                         const label = off === 0 ? 'Сегодня'
                             : off === 1 ? 'Завтра'
                             : off === -1 ? 'Вчера'
-                            : fmtDate(d, 'd MMM', { locale: ru });
+                            : formatDayMonth(key);
                         return (
-                            <button
+                            <Chip
                                 key={off}
+                                selected={active}
                                 onClick={() => setDayKey(key)}
-                                className="press tap-target"
-                                style={{
-                                    flexShrink: 0,
-                                    padding: '0 14px',
-                                    background: active ? 'var(--color-ink)' : 'var(--color-sunken)',
-                                    color: active ? 'var(--color-on-ink)' : 'var(--color-ink)',
-                                    border: 'none',
-                                    borderRadius: 999,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    whiteSpace: 'nowrap',
-                                    fontFamily: 'inherit',
-                                }}
+                                style={{ flexShrink: 0 }}
                             >
                                 {label}
-                            </button>
+                            </Chip>
                         );
                     })}
                 </div>
@@ -222,10 +214,11 @@ export function MobileAdminBookings() {
                     background: 'var(--color-sunken)', borderRadius: 12,
                     padding: '10px 12px', gap: 8, minHeight: 44,
                 }}>
-                    <Search size={16} color="var(--color-ink-40)" />
+                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
+                        aria-label="Поиск брони"
                         placeholder="Имя, email, кабинет…"
                         style={{
                             flex: 1, background: 'transparent', border: 'none',
@@ -235,13 +228,13 @@ export function MobileAdminBookings() {
                     />
                 </div>
 
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <div role="group" aria-label="Филиал" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {([
                         { id: 'all' as LocFilter, label: 'Все локации' },
                         { id: 'unbox_one' as LocFilter, label: 'Unbox One' },
                         { id: 'unbox_uni' as LocFilter, label: 'Unbox Uni' },
                     ]).map(f => (
-                        <Chip key={f.id} active={loc === f.id} onClick={() => setLoc(f.id)} label={f.label} />
+                        <Chip key={f.id} selected={loc === f.id} onClick={() => setLoc(f.id)}>{f.label}</Chip>
                     ))}
                 </div>
 
@@ -268,7 +261,7 @@ export function MobileAdminBookings() {
                     <span style={{ flex: 1 }}>Показать прошедшие и отменённые</span>
                     {counts.past > 0 && (
                         <span style={{
-                            fontSize: 12, fontWeight: 700, color: 'var(--color-ink-60)',
+                            fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)',
                             background: 'var(--color-card)',
                             padding: '2px 8px', borderRadius: 999,
                         }}>{counts.past}</span>
@@ -277,18 +270,15 @@ export function MobileAdminBookings() {
             </div>
 
             {/* Booking list */}
-            <div className="stagger-in" style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* Wave 1: без «лесенки» появления — список перерисовывается при
+                каждой смене дня, волна в 1,2 с мешала (правило 10). */}
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {dayBookings.length === 0 && (
-                    <div style={{
-                        background: 'var(--color-sunken)', borderRadius: 12,
-                        padding: 32, textAlign: 'center', color: 'var(--color-ink-60)', fontSize: 14,
-                        lineHeight: 1.5,
-                    }}>
-                        На этот день броней нет.<br/>
-                        <span style={{ fontSize: 12, color: 'var(--color-ink-40)' }}>
-                            Попробуй соседние дни в строке выше.
-                        </span>
-                    </div>
+                    <EmptyState
+                        compact
+                        title="На этот день броней нет"
+                        hint="Выберите соседний день в строке выше."
+                    />
                 )}
                 {dayBookings.map(b => {
                     const r = RESOURCES.find(x => x.id === b.resourceId);
@@ -305,6 +295,7 @@ export function MobileAdminBookings() {
                         <button
                             key={b.id}
                             onClick={() => setSheet(b)}
+                            aria-label={`${b.startTime}, ${userName}, ${isBlocker ? 'блок' : statusLabel('booking', b.status, 'staff')}`}
                             className="press"
                             style={{
                                 background: isBlocker ? 'var(--color-sunken)' : 'var(--color-card)',
@@ -317,12 +308,12 @@ export function MobileAdminBookings() {
                                 opacity: isBlocker ? 0.78 : isPast ? 0.65 : 1,
                             }}
                         >
-                            <div style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--color-ink)' }}>
+                            <div style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--color-ink)' }}>
                                 {b.startTime}
                             </div>
                             <div style={{ minWidth: 0 }}>
                                 <div style={{
-                                    fontSize: 14, fontWeight: 700,
+                                    fontSize: 14, fontWeight: 600,
                                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                     color: 'var(--color-ink)',
                                     display: 'flex', alignItems: 'center', gap: 5,
@@ -349,11 +340,11 @@ export function MobileAdminBookings() {
                                 ? <span style={{
                                     background: 'var(--color-ink-08)',
                                     color: 'var(--color-ink-60)',
-                                    fontSize: 11, fontWeight: 700,
+                                    fontSize: 12, fontWeight: 600,
                                     padding: '4px 9px', borderRadius: 999,
                                     whiteSpace: 'nowrap',
                                 }}>Блок</span>
-                                : <StatusBadge status={b.status} />
+                                : <StatusBadge kind="booking" status={b.status} audience="staff" />
                             }
                         </button>
                     );
@@ -382,10 +373,10 @@ export function MobileAdminBookings() {
                     bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
                     width: 56, height: 56,
                     borderRadius: 28,
-                    background: '#0E0E0E',
-                    color: '#fff',
+                    background: 'var(--color-ink)',
+                    color: 'var(--color-on-ink)',
                     display: 'grid', placeItems: 'center',
-                    boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+                    boxShadow: 'var(--shadow-pop)',
                     textDecoration: 'none',
                     zIndex: 30,
                 }}
@@ -400,69 +391,10 @@ export function MobileAdminBookings() {
 function GroupLabel({ children }: { children: React.ReactNode }) {
     return (
         <div style={{
-            fontSize: 11, fontWeight: 700,
-            letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: 'var(--color-ink-40)', marginBottom: 8,
+            fontSize: 12, fontWeight: 600,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: 'var(--color-ink-60)', marginBottom: 8,
         }}>{children}</div>
     );
 }
 
-function Chip({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-    return (
-        <button
-            onClick={onClick}
-            className="press tap-target"
-            style={{
-                flexShrink: 0,
-                padding: '0 14px',
-                background: active ? 'var(--color-ink)' : 'var(--color-ink-04)',
-                color: active ? 'var(--color-on-ink)' : 'var(--color-ink)',
-                border: 'none', borderRadius: 999,
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                whiteSpace: 'nowrap', fontFamily: 'inherit',
-            }}
-        >
-            {label}
-        </button>
-    );
-}
-
-/** Унифицированный StatusBadge.
- *  Было: 'OK'/'ждёт'/'отм'/'✓'/'пересд'/'no-show'/'перенос' — 7 разных
- *  стилей в одном компоненте, сканируемость нулевая.
- *  Стало: полные слова, один регистр, один источник цвета (CSS-токены). */
-/** Status pill — это INFO, не ACTION. Полные слова в прошедшем времени
- *  (была отменена, была завершена), без × и других action-иконок.
- *  «Cancelled» раньше выглядел как красная кнопка-CTA — путал админов
- *  (owner 2026-06-02). */
-function StatusBadge({ status }: { status: string }) {
-    const map: Record<string, { bgVar: string; fgVar: string; label: string; icon?: any }> = {
-        // Активные/будущие — выраженный цвет, иконка ок (это операционный state)
-        confirmed:        { bgVar: '--status-ok-bg',      fgVar: '--status-ok-fg',      label: statusLabel('booking', 'confirmed', 'staff'), icon: Check },
-        pending_approval: { bgVar: '--status-pending-bg', fgVar: '--status-pending-fg', label: statusLabel('booking', 'pending_approval', 'staff'),      icon: Clock },
-
-        // Завершённые/неактивные — мутный тон, без иконок. Они в прошлом,
-        // не должны кричать.
-        completed:        { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: statusLabel('booking', 'completed', 'staff') },
-        cancelled:        { bgVar: '--status-muted-bg',   fgVar: '--status-danger-fg',  label: statusLabel('booking', 'cancelled', 'staff') },
-        're-rented':      { bgVar: '--status-muted-bg',   fgVar: '--status-info-fg',    label: statusLabel('booking', 're-rented', 'staff') },
-        rescheduled:      { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: statusLabel('booking', 'rescheduled', 'staff') },
-        // No-show — единственный «прошедший» статус с тревожным тоном,
-        // потому что это требует реакции админа (списать как штраф?).
-        no_show:          { bgVar: '--status-warn-bg',    fgVar: '--status-warn-fg',    label: statusLabel('booking', 'no_show', 'staff'),    icon: AlertTriangle },
-    };
-    const s = map[status] || { bgVar: '--status-muted-bg', fgVar: '--status-muted-fg', label: statusLabel('booking', status, 'staff') };
-    const Icon = s.icon;
-    return (
-        <span style={{
-            background: `var(${s.bgVar})`,
-            color: `var(${s.fgVar})`,
-            fontSize: 11, fontWeight: 700,
-            padding: '4px 9px', borderRadius: 999,
-            whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4,
-        }}>
-            {Icon && <Icon size={11} aria-hidden="true" />}
-            {s.label}
-        </span>
-    );
-}

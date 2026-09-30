@@ -1,13 +1,25 @@
 import { useEffect, useState } from 'react';
-import { Check, Clock, MapPin, X } from 'lucide-react';
-import { format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { Check, Clock, MapPin, X, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../../api/bookings';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES } from '../../../utils/data';
 import { formatBookingDuration } from '../../../utils/bookingHelpers';
 import type { BookingHistoryItem } from '../../../store/types';
+import { Sheet } from '../../../components/ui/Sheet';
+import { Button } from '../../../components/ui/Button';
+import { Field, TextArea } from '../../../components/ui/Field';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { formatDateLabel, formatGel } from '../../../utils/format';
+
+/** Формат брони по-русски (с сервера приходит код: individual / group …). */
+const FORMAT_LABEL: Record<string, string> = {
+    individual: 'индивидуальная',
+    group: 'групповая',
+    intervision: 'интервизия',
+};
 
 /**
  * Mobile admin inbox — hot-booking approvals.
@@ -18,13 +30,14 @@ import type { BookingHistoryItem } from '../../../store/types';
  *
  * Optimistic local-state update keeps the list snappy; on error we re-fetch.
  *
- * CRM access requests / specialist applications can be added here too in
- * a later iteration — same pattern, different endpoints.
+ * Wave 1: ошибка загрузки больше не рисует «Все заявки разобраны»; карточка
+ * ожидания — янтарная («ждём»), а не красная; шторка причины — общий Sheet.
  */
 export function MobileAdminInbox() {
     const { users, fetchUsers } = useUserStore();
     const [items, setItems] = useState<BookingHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
     const [rejecting, setRejecting] = useState<BookingHistoryItem | null>(null);
     const [rejectReason, setRejectReason] = useState('');
@@ -32,8 +45,8 @@ export function MobileAdminInbox() {
     const reload = () => {
         setLoading(true);
         bookingsApi.getPendingApprovals()
-            .then(setItems)
-            .catch(() => toast.error('Не удалось загрузить заявки'))
+            .then(list => { setItems(list); setFailed(false); })
+            .catch(() => setFailed(true))
             .finally(() => setLoading(false));
     };
 
@@ -49,9 +62,9 @@ export function MobileAdminInbox() {
         try {
             await bookingsApi.approveBooking(b.id);
             setItems(prev => prev.filter(x => x.id !== b.id));
-            toast.success('Одобрено');
-        } catch (e: any) {
-            toast.error('Не получилось одобрить');
+            toast.success('Бронь одобрена');
+        } catch {
+            toast.error('Не удалось одобрить бронь. Попробуйте ещё раз');
             reload();
         } finally { setBusy(null); }
     };
@@ -60,18 +73,18 @@ export function MobileAdminInbox() {
         if (!rejecting) return;
         const reason = rejectReason.trim();
         if (!reason) {
-            toast.error('Укажи причину отказа — её увидит специалист');
+            toast.error('Укажите причину отказа — её увидит специалист');
             return;
         }
         setBusy(rejecting.id);
         try {
             await bookingsApi.rejectBooking(rejecting.id, reason);
             setItems(prev => prev.filter(x => x.id !== rejecting.id));
-            toast.success('Отклонено');
+            toast.success('Бронь отклонена');
             setRejecting(null);
             setRejectReason('');
-        } catch (e: any) {
-            toast.error('Не получилось отклонить');
+        } catch {
+            toast.error('Не удалось отклонить бронь. Попробуйте ещё раз');
             reload();
         } finally { setBusy(null); }
     };
@@ -80,29 +93,34 @@ export function MobileAdminInbox() {
         <>
             <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div style={{ padding: '0 16px' }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                         Заявки
                     </h1>
-                    <p style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
-                        Hot-booking, ждут одобрения. Тут же будут CRM-доступы и заявки в специалисты.
+                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                        Срочные брони, которые ждут вашего решения.
                     </p>
                 </div>
 
-                {loading && <div style={{ padding: '0 16px', color: '#666', fontSize: 14 }}>Загружаю…</div>}
-
-                {!loading && items.length === 0 && (
+                {failed && !loading && (
                     <div style={{ padding: '0 16px' }}>
-                        <div style={{
-                            background: '#E6F4EA',
-                            border: '1px solid #A7E1B8',
-                            color: '#1B6E36',
-                            borderRadius: 14,
-                            padding: 18,
-                            textAlign: 'center',
-                            fontSize: 14,
-                        }}>
-                            ✓ Все заявки разобраны.
-                        </div>
+                        <ErrorBar message="Не удалось загрузить заявки" onRetry={reload} />
+                    </div>
+                )}
+
+                {loading && items.length === 0 && (
+                    <div style={{ padding: '0 16px' }}>
+                        <SkeletonList count={2} label="Загружаем заявки" cardHeight={140} />
+                    </div>
+                )}
+
+                {!loading && !failed && items.length === 0 && (
+                    <div style={{ padding: '0 16px' }}>
+                        <EmptyState
+                            compact
+                            icon={<Inbox size={28} />}
+                            title="Все заявки разобраны"
+                            hint="Новые срочные брони появятся здесь."
+                        />
                     </div>
                 )}
 
@@ -110,97 +128,69 @@ export function MobileAdminInbox() {
                     {items.map(b => {
                         const user = userByEmail(b.userId);
                         const resource = RESOURCES.find(r => r.id === b.resourceId);
-                        const dt = b.date ? new Date(b.date as any) : null;
-                        const dateLabel = dt ? fmtDate(dt, 'EEEE, d MMMM', { locale: ru }) : '—';
+                        const dateLabel = b.date ? formatDateLabel(b.date as any) : '—';
                         const isThisItemBusy = busy === b.id;
+                        const formatLabel = b.format ? (FORMAT_LABEL[b.format] ?? b.format) : null;
                         return (
                             <div key={b.id} style={{
-                                background: '#fff',
-                                border: '1px solid #FCA5A5',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-10)',
                                 borderRadius: 14,
                                 padding: 14,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: 8,
                             }}>
-                                <div style={{
-                                    fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                                    textTransform: 'uppercase', color: '#991B1B',
-                                }}>
-                                    Hot-booking · ждёт ответа
+                                <div>
+                                    <span className="ui-badge ui-badge--pending">
+                                        <Clock size={14} aria-hidden="true" /> Срочная бронь · ждёт ответа
+                                    </span>
                                 </div>
 
-                                <div style={{ fontSize: 15, fontWeight: 700 }}>
+                                <div style={{ fontSize: 16, fontWeight: 600 }}>
                                     {user?.name || b.userId}
                                 </div>
                                 {user?.email && user.email !== user.name && (
-                                    <div style={{ fontSize: 11, color: '#666', marginTop: -4 }}>
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: -4 }}>
                                         {user.email}
                                     </div>
                                 )}
 
-                                <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, color: '#444' }}>
-                                    <Clock size={14} />
+                                <div style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-ink-80)' }}>
+                                    <Clock size={14} aria-hidden="true" />
                                     {dateLabel}, {b.startTime} · {formatBookingDuration(b.duration ?? 60)}
                                 </div>
-                                <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, color: '#444' }}>
-                                    <MapPin size={14} />
+                                <div style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-ink-80)' }}>
+                                    <MapPin size={14} aria-hidden="true" />
                                     {resource?.name ?? b.resourceId}
                                 </div>
 
-                                <div style={{ fontSize: 12, color: '#666' }}>
-                                    {(b.finalPrice ?? 0).toFixed(0)} ₾ · {b.format}
+                                <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
+                                    {formatGel(b.finalPrice ?? 0)}
+                                    {formatLabel && <> · {formatLabel}</>}
                                     {user && (
-                                        <> · Баланс: {(user.balance ?? 0).toFixed(0)} ₾</>
+                                        <> · Баланс: <span style={{ color: (user.balance ?? 0) < 0 ? 'var(--status-danger-fg)' : undefined }}>{formatGel(user.balance ?? 0)}</span></>
                                     )}
                                 </div>
 
                                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                                    <button
+                                    <Button
+                                        style={{ flex: 1 }}
+                                        loading={isThisItemBusy}
+                                        icon={<Check size={16} aria-hidden="true" />}
                                         onClick={() => approve(b)}
-                                        disabled={isThisItemBusy}
-                                        style={{
-                                            flex: 1,
-                                            background: '#0E0E0E',
-                                            color: '#fff',
-                                            border: 'none',
-                                            borderRadius: 10,
-                                            padding: '10px 12px',
-                                            fontSize: 13,
-                                            fontWeight: 700,
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 6,
-                                            opacity: isThisItemBusy ? 0.6 : 1,
-                                        }}
                                     >
-                                        <Check size={14} /> Одобрить
-                                    </button>
-                                    <button
+                                        Одобрить
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        style={{ flex: 1 }}
+                                        disabled={isThisItemBusy}
+                                        icon={<X size={16} aria-hidden="true" />}
                                         onClick={() => { setRejecting(b); setRejectReason(''); }}
-                                        disabled={isThisItemBusy}
-                                        style={{
-                                            flex: 1,
-                                            background: '#fff',
-                                            color: '#C8253A',
-                                            border: '1px solid #FCA5A5',
-                                            borderRadius: 10,
-                                            padding: '10px 12px',
-                                            fontSize: 13,
-                                            fontWeight: 700,
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 6,
-                                        }}
                                     >
-                                        <X size={14} /> Отклонить
-                                    </button>
+                                        Отклонить
+                                    </Button>
                                 </div>
                             </div>
                         );
@@ -209,95 +199,41 @@ export function MobileAdminInbox() {
             </div>
 
             {rejecting && (
-                <div
-                    onClick={() => setRejecting(null)}
-                    style={{
-                        position: 'fixed', inset: 0,
-                        background: 'rgba(0,0,0,0.55)',
-                        zIndex: 200,
-                        display: 'flex',
-                        alignItems: 'flex-end',
-                        justifyContent: 'center',
-                    }}
+                <Sheet
+                    open
+                    onClose={() => setRejecting(null)}
+                    title="Причина отказа"
+                    description="Специалист увидит этот текст в уведомлении в Telegram."
+                    footer={
+                        <>
+                            <Button
+                                variant="danger"
+                                block
+                                loading={busy === rejecting.id}
+                                onClick={submitReject}
+                            >
+                                Отклонить бронь
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                block
+                                disabled={busy === rejecting.id}
+                                onClick={() => setRejecting(null)}
+                            >
+                                Не отклонять
+                            </Button>
+                        </>
+                    }
                 >
-                    <div
-                        onClick={e => e.stopPropagation()}
-                        style={{
-                            width: '100%',
-                            maxWidth: 480,
-                            background: '#fff',
-                            borderRadius: '20px 20px 0 0',
-                            padding: 20,
-                            paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 12,
-                            // Высокое содержимое не уходит под тулбар Safari —
-                            // ограничиваем высоту (dvh) и даём внутренний скролл.
-                            maxHeight: 'calc(100dvh - 16px)',
-                            overflowY: 'auto',
-                            WebkitOverflowScrolling: 'touch',
-                        }}
-                    >
-                        <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Причина отказа</h3>
-                        <div style={{ fontSize: 13, color: '#666' }}>
-                            Специалист увидит этот текст в TG-уведомлении.
-                        </div>
-                        <textarea
+                    <Field label="Причина">
+                        <TextArea
                             value={rejectReason}
                             onChange={e => setRejectReason(e.target.value)}
                             placeholder="Например: «слот зарезервирован для группового тренинга»"
                             rows={3}
-                            style={{
-                                background: '#F4F4F2',
-                                border: 'none',
-                                borderRadius: 10,
-                                padding: '10px 12px',
-                                fontSize: 14,
-                                fontFamily: 'inherit',
-                                resize: 'none',
-                                outline: 'none',
-                            }}
                         />
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                onClick={() => setRejecting(null)}
-                                disabled={busy === rejecting.id}
-                                style={{
-                                    flex: 1,
-                                    background: '#F4F4F2',
-                                    color: '#0E0E0E',
-                                    border: 'none',
-                                    borderRadius: 10,
-                                    padding: 12,
-                                    fontSize: 14, fontWeight: 700,
-                                    fontFamily: 'inherit',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                Назад
-                            </button>
-                            <button
-                                onClick={submitReject}
-                                disabled={busy === rejecting.id}
-                                style={{
-                                    flex: 1,
-                                    background: '#C8253A',
-                                    color: '#fff',
-                                    border: 'none',
-                                    borderRadius: 10,
-                                    padding: 12,
-                                    fontSize: 14, fontWeight: 700,
-                                    fontFamily: 'inherit',
-                                    cursor: 'pointer',
-                                    opacity: busy === rejecting.id ? 0.7 : 1,
-                                }}
-                            >
-                                {busy === rejecting.id ? 'Отклоняю…' : 'Отклонить'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    </Field>
+                </Sheet>
             )}
         </>
     );

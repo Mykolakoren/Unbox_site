@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Upload, Save, X, Plane, CalendarClock, ChevronRight } from 'lucide-react';
+import { Upload, Save, X, Plane, CalendarClock, ChevronRight, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, API_URL } from '../../../api/client';
 import { compressImage } from '../../../utils/imageCompress';
 import { useUserStore } from '../../../store/userStore';
 import { usersApi } from '../../../api/users';
+import { Button } from '../../../components/ui/Button';
+import { Chip } from '../../../components/ui/Chip';
+import { Input, TextArea } from '../../../components/ui/Field';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { Skeleton } from '../../../components/ui/Skeleton';
+import { formatDayMonth } from '../../../utils/format';
 
 /**
  * Mobile CRM — specialist's own public profile editor.
@@ -14,6 +20,10 @@ import { usersApi } from '../../../api/users';
  * mobile workspace's visual language. Built 2026-05-22 so specialists can
  * upload a photo / edit their card from a phone — previously the only
  * editor was the desktop page.
+ *
+ * Wave 1: общие поля (Input/TextArea, 44 px, подпись для диктора), форматы —
+ * Chip, кнопки — Button; крестик специализации — зона 44 px (был 13 px);
+ * даты отпуска — «до 5 октября», а не «до 2026-10-05».
  */
 interface ProfileData {
     firstName: string;
@@ -72,13 +82,24 @@ export function MobileCrmProfile() {
     };
 
     if (loading) {
-        return <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 14 }}>Загрузка…</div>;
+        return (
+            <div role="status" aria-busy="true" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <span className="sr-only">Загружаем анкету…</span>
+                <Skeleton height={28} width="50%" />
+                <Skeleton height={64} radius={14} />
+                <Skeleton height={120} radius={14} />
+                <Skeleton height={120} radius={14} />
+            </div>
+        );
     }
     if (!profile) {
         return (
-            <div style={{ padding: 24, fontSize: 14, color: '#666' }}>
-                Анкета не найдена. Если вы недавно подали заявку — она появится
-                после подтверждения админом.
+            <div style={{ padding: 16 }}>
+                <EmptyState
+                    compact
+                    title="Анкета не найдена"
+                    hint="Если вы недавно подали заявку — анкета появится после подтверждения администратором."
+                />
             </div>
         );
     }
@@ -102,10 +123,10 @@ export function MobileCrmProfile() {
     return (
         <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                     Моя анкета
                 </h1>
-                <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
                     Так вас видят клиенты в каталоге специалистов.
                 </p>
             </div>
@@ -117,19 +138,19 @@ export function MobileCrmProfile() {
                     to="/m/crm/schedule"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 12,
-                        background: '#0E0E0E', color: '#fff',
+                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
                         borderRadius: 14, padding: '14px 14px',
                         textDecoration: 'none',
                     }}
                 >
-                    <CalendarClock size={22} style={{ flexShrink: 0 }} />
+                    <CalendarClock size={22} aria-hidden="true" style={{ flexShrink: 0 }} />
                     <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>Часы приёма</span>
-                        <span style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
+                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>Часы приёма</span>
+                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-on-ink)', opacity: 0.8, marginTop: 2 }}>
                             Клиенты записываются к вам на сайте только в эти часы
                         </span>
                     </span>
-                    <ChevronRight size={18} style={{ flexShrink: 0 }} />
+                    <ChevronRight size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
                 </Link>
             </div>
 
@@ -145,139 +166,138 @@ export function MobileCrmProfile() {
                     ) : (
                         <div style={{
                             width: 64, height: 64, borderRadius: 12, flexShrink: 0,
-                            background: '#F4F4F2', display: 'grid', placeItems: 'center',
-                            fontWeight: 700, fontSize: 20, color: '#999',
+                            background: 'var(--color-sunken)', display: 'grid', placeItems: 'center',
+                            fontWeight: 600, fontSize: 20, color: 'var(--color-ink-60)',
                         }}>
                             {(profile.firstName[0] || '') + (profile.lastName[0] || '')}
                         </div>
                     )}
                     <PhotoUpload onUploaded={(url) => set('photoUrl', url)} hasPhoto={!!profile.photoUrl} />
                 </div>
-                <div style={{ fontSize: 11, color: '#999', marginTop: 6 }}>jpg, png · до 2 МБ</div>
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6 }}>jpg, png · до 2 МБ</div>
             </Section>
 
             {/* Name */}
             <Section title="Имя и фамилия">
                 <div style={{ display: 'flex', gap: 8 }}>
-                    <input
+                    <Input
+                        kind="name"
+                        aria-label="Имя"
                         value={profile.firstName}
                         onChange={e => set('firstName', e.target.value)}
                         placeholder="Имя"
-                        style={inputStyle}
                     />
-                    <input
+                    <Input
+                        kind="name"
+                        aria-label="Фамилия"
                         value={profile.lastName}
                         onChange={e => set('lastName', e.target.value)}
                         placeholder="Фамилия"
-                        style={inputStyle}
                     />
                 </div>
             </Section>
 
             {/* Tagline */}
             <Section title="Слоган (одна строка)">
-                <input
+                <Input
+                    aria-label="Слоган"
                     value={profile.tagline}
                     onChange={e => set('tagline', e.target.value)}
                     placeholder="Гештальт-терапевт. Тревога, выгорание."
                     maxLength={150}
-                    style={inputStyle}
                 />
             </Section>
 
             {/* Bio */}
             <Section title="О себе">
-                <textarea
+                <TextArea
+                    aria-label="О себе"
                     value={profile.bio}
                     onChange={e => set('bio', e.target.value)}
                     placeholder="Образование, подход, опыт, с чем работаете…"
                     rows={6}
                     maxLength={5000}
-                    style={{ ...inputStyle, resize: 'vertical', minHeight: 120 }}
+                    style={{ minHeight: 120 }}
                 />
             </Section>
 
             {/* Base price */}
-            <Section title="Базовая цена сессии, ₾">
-                <input
-                    type="number"
-                    inputMode="numeric"
+            <Section title="Базовая цена сессии">
+                <Input
+                    kind="integer"
+                    suffix="₾"
+                    aria-label="Базовая цена сессии, лари"
                     value={profile.basePriceGel || ''}
                     onChange={e => set('basePriceGel', parseInt(e.target.value) || 0)}
                     placeholder="100"
-                    style={inputStyle}
                 />
             </Section>
 
             {/* Session duration — показывается в шапке профиля на сайте */}
-            <Section title="Длительность консультации, мин">
-                <input
-                    type="number"
-                    inputMode="numeric"
+            <Section title="Длительность консультации">
+                <Input
+                    kind="integer"
+                    suffix="мин"
+                    aria-label="Длительность консультации, минут"
                     value={profile.sessionDurationMin ?? 50}
                     onChange={e => set('sessionDurationMin', parseInt(e.target.value) || 50)}
                     placeholder="50"
-                    style={inputStyle}
                 />
             </Section>
 
             {/* Formats */}
             <Section title="Формат работы">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {FORMAT_OPTIONS.map(f => {
-                        const active = profile.formats.includes(f.id);
-                        return (
-                            <button
-                                key={f.id}
-                                onClick={() => toggleFormat(f.id)}
-                                style={{
-                                    padding: '8px 12px',
-                                    borderRadius: 10,
-                                    border: active ? 'none' : '1px solid rgba(0,0,0,0.12)',
-                                    background: active ? '#0E0E0E' : '#fff',
-                                    color: active ? '#fff' : '#0E0E0E',
-                                    fontSize: 13, fontWeight: 600,
-                                    fontFamily: 'inherit', cursor: 'pointer',
-                                }}
-                            >
-                                {f.label}
-                            </button>
-                        );
-                    })}
+                <div role="group" aria-label="Формат работы" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {FORMAT_OPTIONS.map(f => (
+                        <Chip
+                            key={f.id}
+                            selected={profile.formats.includes(f.id)}
+                            onClick={() => toggleFormat(f.id)}
+                        >
+                            {f.label}
+                        </Chip>
+                    ))}
                 </div>
             </Section>
 
             {/* Specializations */}
             <Section title="Специализации">
                 <div style={{ display: 'flex', gap: 6 }}>
-                    <input
+                    <Input
+                        aria-label="Новая специализация"
                         value={specInput}
                         onChange={e => setSpecInput(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSpec(); } }}
                         placeholder="Тревога"
-                        style={inputStyle}
                     />
-                    <button onClick={addSpec} style={{
-                        background: '#0E0E0E', color: '#fff', border: 'none',
-                        borderRadius: 10, padding: '0 16px', fontWeight: 700,
-                        fontFamily: 'inherit', cursor: 'pointer', flexShrink: 0,
-                    }}>+</button>
+                    <Button
+                        variant="secondary"
+                        icon={<Plus size={18} aria-hidden="true" />}
+                        aria-label="Добавить специализацию"
+                        onClick={addSpec}
+                        style={{ flexShrink: 0 }}
+                    />
                 </div>
                 {profile.specializations.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                         {profile.specializations.map(s => (
                             <span key={s} style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 4,
-                                background: '#F4F4F2', borderRadius: 999,
-                                padding: '4px 8px 4px 10px', fontSize: 12, fontWeight: 600,
+                                display: 'inline-flex', alignItems: 'center', gap: 0,
+                                background: 'var(--color-sunken)', borderRadius: 8,
+                                padding: '0 0 0 12px', fontSize: 14, fontWeight: 500,
+                                minHeight: 44,
                             }}>
                                 {s}
                                 <button
                                     onClick={() => removeSpec(s)}
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: '#999' }}
+                                    style={{
+                                        background: 'none', border: 'none', cursor: 'pointer',
+                                        width: 44, height: 44, display: 'grid', placeItems: 'center',
+                                        color: 'var(--color-ink-60)',
+                                    }}
                                     aria-label={`Убрать ${s}`}
                                 >
-                                    <X size={13} />
+                                    <X size={16} aria-hidden="true" />
                                 </button>
                             </span>
                         ))}
@@ -289,20 +309,14 @@ export function MobileCrmProfile() {
 
             {/* Save — sticky-ish at bottom of content */}
             <div style={{ padding: '8px 16px 0' }}>
-                <button
+                <Button
+                    block
+                    loading={saving}
+                    icon={<Save size={16} aria-hidden="true" />}
                     onClick={save}
-                    disabled={saving}
-                    style={{
-                        width: '100%', background: '#0E0E0E', color: '#fff',
-                        border: 'none', borderRadius: 12, padding: '15px',
-                        fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1,
-                    }}
                 >
-                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    {saving ? 'Сохраняем…' : 'Сохранить анкету'}
-                </button>
+                    Сохранить анкету
+                </Button>
             </div>
         </div>
     );
@@ -312,11 +326,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     return (
         <div style={{ padding: '0 16px' }}>
             <div style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.10em',
-                textTransform: 'uppercase', color: '#999', marginBottom: 8,
+                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8,
             }}>{title}</div>
             <div style={{
-                background: '#fff', border: '1px solid rgba(0,0,0,0.08)',
+                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
                 borderRadius: 14, padding: 14,
             }}>
                 {children}
@@ -345,10 +359,10 @@ function PhotoUpload({ onUploaded, hasPhoto }: { onUploaded: (url: string) => vo
             });
             const baseUrl = (API_URL || '').replace('/api/v1', '');
             onUploaded(`${baseUrl}${res.data.url}`);
-            toast.success('Фото загружено — не забудьте «Сохранить»');
+            toast.success('Фото загружено — не забудьте сохранить анкету');
         } catch (err: unknown) {
             const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить');
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить фото. Попробуйте ещё раз');
         } finally {
             setBusy(false);
             e.target.value = '';
@@ -357,36 +371,18 @@ function PhotoUpload({ onUploaded, hasPhoto }: { onUploaded: (url: string) => vo
     return (
         <>
             <input ref={inputRef} type="file" accept="image/*" onChange={handlePick} style={{ display: 'none' }} />
-            <button
-                type="button"
+            <Button
+                variant="secondary"
+                loading={busy}
+                icon={<Upload size={16} aria-hidden="true" />}
                 onClick={() => inputRef.current?.click()}
-                disabled={busy}
-                style={{
-                    flex: 1, background: '#0E0E0E', color: '#fff', border: 'none',
-                    borderRadius: 10, padding: '12px 14px', fontWeight: 700, fontSize: 13,
-                    fontFamily: 'inherit', cursor: busy ? 'wait' : 'pointer',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    opacity: busy ? 0.7 : 1,
-                }}
+                style={{ flex: 1 }}
             >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {busy ? 'Загружаем…' : hasPhoto ? 'Заменить фото' : 'Загрузить фото'}
-            </button>
+            </Button>
         </>
     );
 }
-
-const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '11px 12px',
-    border: '1px solid rgba(0,0,0,0.12)',
-    borderRadius: 10,
-    fontSize: 14,
-    fontFamily: 'inherit',
-    background: '#fff',
-    color: '#0E0E0E',
-    boxSizing: 'border-box',
-};
 
 /** "Я в отпуске до ..." — sets crm_data.vacation_until on the User row.
  *  Specialist's Today screen shows a banner when active so the specialist
@@ -409,9 +405,9 @@ function VacationSection() {
         try {
             await usersApi.setVacation(newDate);
             await fetchCurrentUser();
-            toast.success(newDate ? `Установлен отпуск до ${newDate}` : 'Отпуск снят');
+            toast.success(newDate ? `Отпуск отмечен до ${formatDayMonth(newDate, { withYear: 'auto' })}` : 'Отпуск снят');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось обновить');
+            toast.error(e?.response?.data?.detail || 'Не удалось сохранить отпуск. Попробуйте ещё раз');
         } finally {
             setBusy(false);
         }
@@ -422,68 +418,56 @@ function VacationSection() {
     return (
         <div style={{ padding: '0 16px' }}>
             <div style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.10em',
-                textTransform: 'uppercase', color: '#999', marginBottom: 8,
+                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8,
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
-                <Plane size={11} /> Отпуск / отъезд
+                <Plane size={12} aria-hidden="true" /> Отпуск или отъезд
             </div>
             <div style={{
-                background: isActive ? 'rgba(255,138,76,0.10)' : '#fff',
-                border: isActive ? '1px solid rgba(255,138,76,0.40)' : '1px solid rgba(0,0,0,0.08)',
+                background: isActive ? 'var(--status-pending-bg)' : 'var(--color-card)',
+                border: '1px solid var(--color-ink-08)',
                 borderRadius: 14,
                 padding: 14,
             }}>
                 {isActive ? (
-                    <div style={{ fontSize: 13, color: '#C66019', marginBottom: 10 }}>
-                        Сейчас отмечено: «не принимаю клиентов до <b>{vacUntil}</b>».
-                        В этот период баннер виден на Today, ваша анкета помечена.
+                    <div style={{ fontSize: 14, color: 'var(--status-pending-fg)', marginBottom: 10 }}>
+                        Сейчас отмечено: «не принимаю клиентов до <b>{formatDayMonth(vacUntil!, { withYear: 'auto' })}</b>».
+                        В этот период на экране «Сегодня» виден баннер, ваша анкета помечена.
                     </div>
                 ) : (
-                    <div style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginBottom: 10 }}>
                         Поставьте дату возвращения — на «Сегодня» появится баннер,
                         админам будет видно, что вас нет, и они не подсунут вам
                         горячую бронь.
                     </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                        type="date"
+                    <Input
+                        kind="date"
+                        aria-label="Дата возвращения"
                         value={date}
                         min={new Date().toISOString().slice(0, 10)}
                         onChange={e => setDate(e.target.value)}
-                        style={{ ...inputStyle, flex: 1 }}
+                        style={{ flex: 1 }}
                     />
-                    <button
+                    <Button
+                        variant="secondary"
+                        loading={busy}
+                        disabled={!date || date === vacUntil}
                         onClick={() => save(date || null)}
-                        disabled={busy || !date || date === vacUntil}
-                        style={{
-                            padding: '11px 14px',
-                            background: '#0E0E0E', color: '#fff',
-                            border: 'none', borderRadius: 10,
-                            fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                            cursor: busy ? 'wait' : (date && date !== vacUntil) ? 'pointer' : 'not-allowed',
-                            opacity: !date || date === vacUntil ? 0.5 : 1,
-                        }}
+                        style={{ flexShrink: 0 }}
                     >
-                        {busy ? <Loader2 size={14} className="animate-spin" /> : 'Сохранить'}
-                    </button>
+                        Сохранить
+                    </Button>
                     {isActive && (
-                        <button
-                            onClick={() => save(null)}
+                        <Button
+                            variant="quiet"
                             disabled={busy}
-                            style={{
-                                padding: '11px',
-                                background: 'rgba(0,0,0,0.05)',
-                                color: '#0E0E0E',
-                                border: 'none', borderRadius: 10,
-                                fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
-                                cursor: 'pointer',
-                            }}
-                            title="Снять отпуск"
-                        >
-                            <X size={14} />
-                        </button>
+                            icon={<X size={18} aria-hidden="true" />}
+                            aria-label="Снять отпуск"
+                            onClick={() => save(null)}
+                        />
                     )}
                 </div>
             </div>

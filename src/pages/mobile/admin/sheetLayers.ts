@@ -25,7 +25,7 @@ export const Z_SHEET_OVER_SHEET = 210;
 export const SHEET_FOOTER: CSSProperties = {
     position: 'sticky',
     bottom: 0,
-    background: '#fff',
+    background: 'var(--color-card)',
     paddingTop: 10,
     paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
 };

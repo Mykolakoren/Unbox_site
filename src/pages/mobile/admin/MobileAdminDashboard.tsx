@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Button } from '../../../components/ui/Button';
 import { Inbox, AlertTriangle, CheckCircle, Calendar, ArrowRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus } from 'lucide-react';
 import { format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { useUserStore } from '../../../store/userStore';
 import { bookingsApi } from '../../../api/bookings';
 import type { BookingHistoryItem } from '../../../store/types';
 import { RESOURCES } from '../../../utils/data';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { formatDateLabel, formatGel } from '../../../utils/format';
+
+/** 1 клиент, 2 клиента, 5 клиентов. */
+function plural(n: number, one: string, few: string, many: string): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+}
 
 /**
  * Mobile admin dashboard — quick numbers for "what's happening today" plus
@@ -24,6 +36,11 @@ export function MobileAdminDashboard() {
     // затирал полные данные «Броней» в общем сторе.
     const { bookings, users, fetchAllBookings, fetchUsers } = useUserStore();
     const [pendingApprovals, setPendingApprovals] = useState<BookingHistoryItem[] | null>(null);
+    // Wave 1: сбой проверки заявок — отдельное состояние. Раньше ошибка
+    // превращалась в пустой список, и красный баннер молча пропадал.
+    const [approvalsFailed, setApprovalsFailed] = useState(false);
+    // Пока брони не пришли, не рисуем «0» и «Сегодня пусто».
+    const [bookingsLoaded, setBookingsLoaded] = useState(false);
     // Owner asked 2026-05-25: today's booking list was inert. Tapping a row
     // now opens a bottom sheet with admin actions. Шторки те же, что во
     // вкладке «Брони» (bookingSheets.tsx): отмена 100/50/0, цена от настоящей.
@@ -37,10 +54,17 @@ export function MobileAdminDashboard() {
     const [forecast, setForecast] = useState<Awaited<ReturnType<typeof bookingsApi.getLimitForecast>> | null>(null);
     const [forecastExpanded, setForecastExpanded] = useState(false);
 
+    const loadApprovals = () => {
+        setApprovalsFailed(false);
+        bookingsApi.getPendingApprovals()
+            .then(setPendingApprovals)
+            .catch(() => { setPendingApprovals(null); setApprovalsFailed(true); });
+    };
+
     useEffect(() => {
-        fetchAllBookings();
+        Promise.resolve(fetchAllBookings()).finally(() => setBookingsLoaded(true));
         if (!users || users.length === 0) fetchUsers();
-        bookingsApi.getPendingApprovals().then(setPendingApprovals).catch(() => setPendingApprovals([]));
+        loadApprovals();
         bookingsApi.getLimitForecast().then(setForecast).catch(() => setForecast(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchAllBookings]);
@@ -71,16 +95,25 @@ export function MobileAdminDashboard() {
         );
     }, [bookings]);
 
+    // Брони могли уже лежать в сторе (открывали «Брони») — тогда показываем их.
+    const bookingsPending = !bookingsLoaded && bookings.length === 0;
+
     return (
         <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
-                    Дашборд
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
+                    Главная
                 </h1>
-                <p style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
-                    {fmtDate(new Date(), 'EEEE, d MMMM', { locale: ru })}
+                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    {formatDateLabel(new Date(), { capitalize: true })}
                 </p>
             </div>
+
+            {approvalsFailed && (
+                <div style={{ padding: '0 16px' }}>
+                    <ErrorBar message="Не удалось проверить заявки" onRetry={loadApprovals} />
+                </div>
+            )}
 
             {/* Pending approvals — most urgent */}
             {pendingApprovals && pendingApprovals.length > 0 && (
@@ -91,28 +124,28 @@ export function MobileAdminDashboard() {
                             display: 'flex',
                             alignItems: 'center',
                             gap: 12,
-                            background: '#FEF2F2',
-                            border: '1px solid #FCA5A5',
+                            background: 'var(--status-pending-bg)',
+                            border: '1px solid var(--color-ink-10)',
                             borderRadius: 14,
                             padding: '14px 16px',
-                            color: '#991B1B',
+                            color: 'var(--status-pending-fg)',
                             textDecoration: 'none',
                         }}
                     >
                         <AlertTriangle size={20} />
                         <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>
-                                Hot-booking на одобрении
+                            <div style={{ fontSize: 14, fontWeight: 600 }}>
+                                Срочные брони ждут одобрения
                             </div>
-                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-                                Ждут вашей реакции — {pendingApprovals.length} шт.
+                            <div style={{ fontSize: 12, marginTop: 2 }}>
+                                Ждут вашего решения: {pendingApprovals.length}
                             </div>
                         </div>
                         <span style={{
-                            background: '#991B1B',
-                            color: '#fff',
+                            background: 'var(--status-pending-fg)',
+                            color: 'var(--color-on-ink)',
                             fontSize: 13,
-                            fontWeight: 800,
+                            fontWeight: 600,
                             padding: '4px 10px',
                             borderRadius: 999,
                             minWidth: 28,
@@ -129,19 +162,19 @@ export function MobileAdminDashboard() {
                         onClick={() => setForecastExpanded(v => !v)}
                         style={{
                             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-                            background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 14,
-                            padding: '14px 16px', color: '#92400E', textAlign: 'left', cursor: 'pointer',
+                            background: 'var(--status-pending-bg)', border: '1px solid var(--color-ink-10)', borderRadius: 14,
+                            padding: '14px 16px', color: 'var(--status-pending-fg)', textAlign: 'left', cursor: 'pointer',
                         }}
                     >
                         <AlertTriangle size={20} />
                         <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>Риск превышения лимита</div>
-                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-                                {forecast.count} клиент(ов) уйдут за лимит после будущих списаний
+                            <div style={{ fontSize: 14, fontWeight: 600 }}>Риск превышения лимита</div>
+                            <div style={{ fontSize: 12, marginTop: 2 }}>
+                                {forecast.count} {plural(forecast.count, 'клиент уйдёт', 'клиента уйдут', 'клиентов уйдут')} за лимит после будущих списаний
                             </div>
                         </div>
                         <span style={{
-                            background: '#92400E', color: '#fff', fontSize: 13, fontWeight: 800,
+                            background: 'var(--status-pending-fg)', color: 'var(--color-on-ink)', fontSize: 13, fontWeight: 600,
                             padding: '4px 10px', borderRadius: 999, minWidth: 28, textAlign: 'center',
                         }}>{forecast.count}</span>
                     </button>
@@ -153,19 +186,19 @@ export function MobileAdminDashboard() {
                                     to={`/m/admin/users/${encodeURIComponent(c.email)}`}
                                     style={{
                                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        gap: 10, background: '#fff', border: '1px solid #F3E8C8',
+                                        gap: 10, background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
                                         borderRadius: 12, padding: '10px 14px', textDecoration: 'none', color: 'inherit',
                                     }}
                                 >
                                     <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                                        <div style={{ fontSize: 11, color: '#92400E', marginTop: 2 }}>
-                                            баланс {c.balance}₾ · лимит {c.creditLimit}₾ · pending {c.pendingTotal}₾ ({c.pendingCount})
+                                        <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                                        <div style={{ fontSize: 12, color: 'var(--status-pending-fg)', marginTop: 2 }}>
+                                            баланс {formatGel(c.balance)} · лимит {formatGel(c.creditLimit)} · ждут списания {formatGel(c.pendingTotal)} ({c.pendingCount})
                                         </div>
                                     </div>
                                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 800, color: '#B45309' }}>−{c.overLimitBy}₾</div>
-                                        <div style={{ fontSize: 10, color: '#999' }}>за лимит</div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--status-pending-fg)' }}>{formatGel(-c.overLimitBy)}</div>
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>за лимит</div>
                                     </div>
                                 </Link>
                             ))}
@@ -187,26 +220,26 @@ export function MobileAdminDashboard() {
                 }}>
                     <Stat
                         icon={<Calendar size={16} />}
-                        label="Сегодня бронь"
-                        value={today.length}
+                        label="Брони сегодня"
+                        value={bookingsPending ? '—' : today.length}
                         to="/m/admin/bookings"
                     />
                     <Stat
                         icon={<Calendar size={16} />}
-                        label="Завтра бронь"
-                        value={tomorrow.length}
+                        label="Брони завтра"
+                        value={bookingsPending ? '—' : tomorrow.length}
                         to="/m/admin/bookings?day=tomorrow"
                     />
                     <Stat
                         icon={<CheckCircle size={16} />}
-                        label="Hold pending"
-                        value={pendingApprovals?.length ?? '…'}
+                        label="Ждут одобрения"
+                        value={pendingApprovals?.length ?? '—'}
                         to="/m/admin/inbox"
                     />
                     <Stat
                         icon={<Inbox size={16} />}
                         label="Предстоящие брони"
-                        value={upcoming}
+                        value={bookingsPending ? '—' : upcoming}
                         to="/m/admin/bookings"
                     />
                 </div>
@@ -214,18 +247,11 @@ export function MobileAdminDashboard() {
 
             {/* Today list — at-a-glance who's where */}
             <div style={{ padding: '0 16px' }}>
-                <SectionTitle>Сегодня · {today.length}</SectionTitle>
-                {today.length === 0 ? (
-                    <div style={{
-                        background: '#F4F4F2',
-                        borderRadius: 14,
-                        padding: 18,
-                        textAlign: 'center',
-                        color: '#666',
-                        fontSize: 14,
-                    }}>
-                        Сегодня пока пусто.
-                    </div>
+                <SectionTitle>{bookingsPending ? 'Сегодня' : `Сегодня · ${today.length}`}</SectionTitle>
+                {bookingsPending ? (
+                    <SkeletonList count={3} label="Загружаем брони" cardHeight={56} />
+                ) : today.length === 0 ? (
+                    <EmptyState compact title="Сегодня броней нет" />
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {today
@@ -237,10 +263,11 @@ export function MobileAdminDashboard() {
                                     key={b.id}
                                     onClick={() => setActiveBooking(b)}
                                     style={{
-                                        background: '#fff',
-                                        border: '1px solid rgba(0,0,0,0.08)',
+                                        background: 'var(--color-card)',
+                                        border: '1px solid var(--color-ink-08)',
                                         borderRadius: 10,
                                         padding: '8px 12px',
+                                        minHeight: 48,
                                         display: 'flex',
                                         gap: 10,
                                         alignItems: 'center',
@@ -250,52 +277,37 @@ export function MobileAdminDashboard() {
                                         width: '100%',
                                     }}
                                 >
-                                    <div style={{ fontSize: 13, fontWeight: 700, minWidth: 50 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, minWidth: 50 }}>
                                         {b.startTime}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25 }}>
                                             {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
                                         </div>
-                                        <div style={{ fontSize: 11, color: '#666', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {getAdminUserName(users, b.userId)}
                                         </div>
                                     </div>
-                                    <ArrowRight size={14} style={{ color: '#bbb', flexShrink: 0 }} />
+                                    <ArrowRight size={14} style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
                                 </button>
                             ))}
                         {today.length > 8 && (
                             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                                <button
+                                <Button
+                                    variant="secondary"
                                     onClick={() => setTodayExpanded(v => !v)}
-                                    style={{
-                                        flex: 1,
-                                        background: '#F4F4F2', color: '#0E0E0E',
-                                        border: '1px solid rgba(0,0,0,0.06)',
-                                        borderRadius: 10,
-                                        padding: '8px 10px',
-                                        fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                                        cursor: 'pointer',
-                                    }}
+                                    style={{ flex: 1 }}
                                 >
                                     {todayExpanded
                                         ? 'Свернуть'
                                         : `Показать ещё ${today.length - 8}`}
-                                </button>
+                                </Button>
                                 <Link
                                     to="/m/admin/bookings"
-                                    style={{
-                                        flex: 1,
-                                        background: '#0E0E0E', color: '#fff',
-                                        border: 'none', borderRadius: 10,
-                                        padding: '8px 10px',
-                                        fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-                                        cursor: 'pointer',
-                                        textAlign: 'center', textDecoration: 'none',
-                                        lineHeight: 1.4,
-                                    }}
+                                    className="ui-btn ui-btn--primary"
+                                    style={{ flex: 1 }}
                                 >
-                                    Открыть все →
+                                    Все брони
                                 </Link>
                             </div>
                         )}
@@ -312,7 +324,7 @@ export function MobileAdminDashboard() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <QuickLink to="/m/admin/cabinets" icon={DoorOpen} label="Кабинеты" />
                     <QuickLink to="/m/admin/team" icon={UsersIcon} label="Команда" />
-                    <QuickLink to="/m/admin/specialists" icon={ShieldCheck} label="Специал." />
+                    <QuickLink to="/m/admin/specialists" icon={ShieldCheck} label="Специалисты" />
                     <QuickLink to="/m/admin/kb" icon={BookOpen} label="База знаний" />
                 </div>
             </div>
@@ -335,10 +347,10 @@ export function MobileAdminDashboard() {
                     bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
                     width: 56, height: 56,
                     borderRadius: 28,
-                    background: '#0E0E0E',
-                    color: '#fff',
+                    background: 'var(--color-ink)',
+                    color: 'var(--color-on-ink)',
                     display: 'grid', placeItems: 'center',
-                    boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+                    boxShadow: 'var(--shadow-pop)',
                     textDecoration: 'none',
                     zIndex: 30,
                 }}
@@ -359,16 +371,16 @@ function QuickLink({ to, icon: Icon, label }: { to: string; icon: React.ElementT
                 alignItems: 'center',
                 gap: 6,
                 padding: '14px 8px',
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.06)',
+                background: 'var(--color-card)',
+                border: '1px solid var(--color-ink-08)',
                 borderRadius: 11,
-                color: '#0E0E0E',
+                color: 'var(--color-ink)',
                 textDecoration: 'none',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
             }}
         >
-            <Icon size={18} style={{ color: '#1B7430' }} />
+            <Icon size={18} style={{ color: 'var(--color-ink-60)' }} aria-hidden="true" />
             <span>{label}</span>
         </Link>
     );
@@ -377,8 +389,8 @@ function QuickLink({ to, icon: Icon, label }: { to: string; icon: React.ElementT
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
         <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: '#999',
+            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+            textTransform: 'uppercase', color: 'var(--color-ink-60)',
             marginBottom: 8,
         }}>{children}</div>
     );
@@ -389,16 +401,16 @@ function Stat({ icon, label, value, to }: { icon: React.ReactNode; label: string
         <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-ink-60)' }}>
                 {icon}
-                <span style={{ fontSize: 11, fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
             </div>
             <div style={{
                 display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
                 gap: 6,
             }}>
-                <span style={{ fontSize: 22, fontWeight: 800, lineHeight: 1, color: 'var(--color-ink)' }}>
+                <span style={{ fontSize: 22, fontWeight: 600, lineHeight: 1, color: 'var(--color-ink)' }}>
                     {value}
                 </span>
-                {to && <ArrowRight size={14} style={{ color: 'var(--color-ink-40)', flexShrink: 0 }} />}
+                {to && <ArrowRight size={14} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />}
             </div>
         </>
     );

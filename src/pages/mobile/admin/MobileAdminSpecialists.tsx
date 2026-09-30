@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Search, ShieldCheck, ShieldX, GripVertical } from 'lucide-react';
+import { Search, ShieldCheck, ShieldX, GripVertical, Clock, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../../api/client';
+import { Button } from '../../../components/ui/Button';
+import { Segmented } from '../../../components/ui/Chip';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { COLOR } from '../../../design/tokens';
 
 interface SpecialistRow {
     id: string;
@@ -29,6 +35,9 @@ const CATEGORY_LABEL: Record<string, string> = {
  * Drag-to-reorder + photo upload + bio editing stays on desktop (better
  * mouse precision); this screen is meant for the on-call admin who needs
  * to quickly approve a freshly-submitted application or hide a card.
+ *
+ * Wave 1: общие Segmented/Button, эмодзи ⏳ → значок, кнопки 44 px;
+ * «Открыть» → «Опубликовать» (что именно произойдёт).
  */
 export function MobileAdminSpecialists() {
     const [rows, setRows] = useState<SpecialistRow[]>([]);
@@ -36,14 +45,16 @@ export function MobileAdminSpecialists() {
     const [busyId, setBusyId] = useState<string | null>(null);
     const [q, setQ] = useState('');
     const [filter, setFilter] = useState<'all' | 'pending' | 'verified'>('all');
+    const [failed, setFailed] = useState(false);
 
     const load = async () => {
         setLoading(true);
         try {
             const { data } = await api.get<SpecialistRow[]>('/specialists/admin/all');
             setRows(data);
+            setFailed(false);
         } catch {
-            toast.error('Не удалось загрузить специалистов');
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -82,9 +93,9 @@ export function MobileAdminSpecialists() {
                 : { is_verified: next };
             await (api as any)[method](endpoint, body);
             await load();
-            toast.success(next ? 'Опубликован' : 'Скрыт');
+            toast.success(next ? 'Анкета опубликована' : 'Анкета скрыта с сайта');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка');
+            toast.error(e?.response?.data?.detail || 'Не удалось изменить анкету. Попробуйте ещё раз');
         } finally {
             setBusyId(null);
         }
@@ -101,22 +112,25 @@ export function MobileAdminSpecialists() {
                         width: '100%',
                         marginBottom: 12,
                         padding: '10px 12px',
-                        background: '#FEF3C7',
-                        color: '#92400E',
+                        background: 'var(--status-pending-bg)',
+                        color: 'var(--status-pending-fg)',
                         border: 'none',
                         borderRadius: 10,
-                        fontSize: 13,
-                        fontWeight: 700,
+                        fontSize: 14,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
+                        minHeight: 44,
                     }}
                 >
-                    <span>⏳ Заявки на верификацию</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <Clock size={16} aria-hidden="true" /> Анкеты ждут проверки
+                    </span>
                     <span style={{
-                        background: '#92400E',
-                        color: '#fff',
+                        background: 'var(--status-pending-fg)',
+                        color: 'var(--color-on-ink)',
                         padding: '2px 8px',
                         borderRadius: 999,
                         fontSize: 12,
@@ -125,69 +139,57 @@ export function MobileAdminSpecialists() {
             )}
 
             <div style={{ position: 'relative', marginBottom: 10 }}>
-                <Search size={14} style={{ position: 'absolute', left: 11, top: 11, color: '#888' }} />
+                <Search size={16} aria-hidden="true" style={{ position: 'absolute', left: 12, top: 14, color: COLOR.ink60 }} />
                 <input
                     type="text"
-                    placeholder="Поиск по имени или таглайну"
+                    aria-label="Поиск специалиста"
+                    placeholder="Имя или слоган"
                     value={q}
                     onChange={e => setQ(e.target.value)}
                     style={{
                         width: '100%',
-                        padding: '9px 12px 9px 32px',
-                        border: '1px solid rgba(0,0,0,0.1)',
-                        borderRadius: 9,
-                        fontSize: 13,
+                        minHeight: 44,
+                        padding: '10px 12px 10px 36px',
+                        border: '1px solid var(--color-ink-20)',
+                        borderRadius: 8,
+                        fontSize: 16,
+                        background: 'var(--color-card)',
+                        color: 'var(--color-ink)',
                         outline: 'none',
                     }}
                 />
             </div>
 
-            <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-                {([
-                    { id: 'all', label: 'Все' },
-                    { id: 'verified', label: 'Опубликованы' },
-                    { id: 'pending', label: 'На проверке' },
-                ] as const).map(f => (
-                    <button
-                        key={f.id}
-                        onClick={() => setFilter(f.id)}
-                        style={{
-                            flex: 1,
-                            padding: '7px 0',
-                            background: filter === f.id ? '#0E0E0E' : 'rgba(0,0,0,0.04)',
-                            color: filter === f.id ? '#fff' : '#0E0E0E',
-                            border: 'none',
-                            borderRadius: 8,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                        }}
-                    >
-                        {f.label}
-                    </button>
-                ))}
-            </div>
+            <Segmented<'all' | 'pending' | 'verified'>
+                aria-label="Какие анкеты показать"
+                className="mb-3"
+                options={[
+                    { value: 'all', label: 'Все' },
+                    { value: 'verified', label: 'Опубликованы' },
+                    { value: 'pending', label: 'На проверке' },
+                ]}
+                value={filter}
+                onChange={setFilter}
+            />
 
+            {failed && !loading && (
+                <ErrorBar message="Не удалось загрузить специалистов" onRetry={load} className="mb-3" />
+            )}
             {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-                    <Loader2 size={20} className="animate-spin" style={{ color: '#888' }} />
-                </div>
-            ) : filtered.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 32, color: '#888', fontSize: 13 }}>
-                    Ничего не найдено
-                </div>
+                <SkeletonList count={5} label="Загружаем специалистов" cardHeight={60} />
+            ) : failed ? null : filtered.length === 0 ? (
+                <EmptyState compact title="Ничего не найдено" hint={q ? 'Попробуйте другое имя.' : undefined} />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                     {filtered.map(r => (
                         <div key={r.id} style={{
-                            background: '#fff',
-                            border: '1px solid rgba(0,0,0,0.06)',
+                            background: 'var(--color-card)',
+                            border: '1px solid var(--color-ink-08)',
                             borderRadius: 11,
-                            padding: '10px 12px',
+                            padding: '8px 8px 8px 12px',
                             display: 'flex',
                             alignItems: 'center',
                             gap: 10,
-                            opacity: r.isVerified ? 1 : 0.55,
                         }}>
                             {r.photoUrl ? (
                                 <img
@@ -203,54 +205,44 @@ export function MobileAdminSpecialists() {
                             ) : (
                                 <div style={{
                                     width: 36, height: 36, borderRadius: 9,
-                                    background: 'rgba(0,0,0,0.06)',
-                                    color: '#888',
+                                    background: 'var(--color-ink-05)',
+                                    color: 'var(--color-ink-60)',
                                     display: 'grid', placeItems: 'center',
-                                    fontSize: 12, fontWeight: 700,
+                                    fontSize: 12, fontWeight: 600,
                                     flexShrink: 0,
                                 }}>
                                     {r.firstName[0]?.toUpperCase()}{r.lastName[0]?.toUpperCase()}
                                 </div>
                             )}
-                            <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ flex: 1, minWidth: 0, opacity: r.isVerified ? 1 : 0.75 }}>
                                 <div style={{
-                                    fontWeight: 600, fontSize: 13, color: '#0E0E0E',
+                                    fontWeight: 600, fontSize: 14, color: 'var(--color-ink)',
                                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                 }}>
                                     {r.firstName} {r.lastName}
-                                    {r.isOwner && <span style={{ marginLeft: 4, color: '#1B7430' }}>★</span>}
+                                    {r.isOwner && <Star size={12} aria-label="Владелец" style={{ marginLeft: 4, color: 'var(--color-ink-60)', verticalAlign: '-1px' }} />}
                                 </div>
                                 <div style={{
-                                    fontSize: 10, color: '#888',
+                                    fontSize: 12, color: 'var(--color-ink-60)',
                                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                     marginTop: 1,
                                 }}>
                                     {CATEGORY_LABEL[r.category || ''] || '—'}
                                     {r.applicationStatus === 'pending' && (
-                                        <span style={{ marginLeft: 6, color: '#92400E', fontWeight: 700 }}>· на проверке</span>
+                                        <span style={{ marginLeft: 6, color: 'var(--status-pending-fg)', fontWeight: 600 }}>· ждёт проверки</span>
                                     )}
                                 </div>
                             </div>
-                            <button
+                            <Button
+                                variant="secondary"
+                                size="touch"
+                                loading={busyId === r.id}
+                                icon={r.isVerified ? <ShieldX size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
                                 onClick={() => handleVerify(r, !r.isVerified)}
-                                disabled={busyId === r.id}
-                                style={{
-                                    background: r.isVerified ? 'rgba(0,0,0,0.05)' : '#1B7430',
-                                    color: r.isVerified ? '#0E0E0E' : '#fff',
-                                    border: 'none',
-                                    borderRadius: 7,
-                                    padding: '6px 9px',
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                    flexShrink: 0,
-                                }}
+                                aria-label={`${r.isVerified ? 'Скрыть с сайта' : 'Опубликовать'}: ${r.firstName} ${r.lastName}`}
                             >
-                                {busyId === r.id ? <Loader2 size={11} className="animate-spin" />
-                                    : r.isVerified ? <ShieldX size={11} /> : <ShieldCheck size={11} />}
-                                {r.isVerified ? 'Скрыть' : 'Открыть'}
-                            </button>
+                                {r.isVerified ? 'Скрыть' : 'Опубликовать'}
+                            </Button>
                         </div>
                     ))}
                 </div>
@@ -259,18 +251,19 @@ export function MobileAdminSpecialists() {
             <div style={{
                 marginTop: 16,
                 padding: 12,
-                background: 'rgba(76,138,107,0.06)',
+                background: 'var(--color-sunken)',
                 borderRadius: 10,
                 fontSize: 12,
-                color: '#444',
+                color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
                 gap: 8,
                 alignItems: 'flex-start',
             }}>
-                <GripVertical size={14} style={{ flexShrink: 0, marginTop: 2, color: '#1B7430' }} />
+                <GripVertical size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Drag-and-drop порядка карточек, загрузка фото и редактирование анкеты — в десктоп-версии /admin/specialists.
+                    Порядок карточек, фото и текст анкеты удобнее менять на компьютере:
+                    unbox.com.ge/admin/specialists
                 </span>
             </div>
         </div>

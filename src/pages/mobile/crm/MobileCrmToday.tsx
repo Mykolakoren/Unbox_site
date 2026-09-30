@@ -1,27 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-    ChevronLeft, ChevronRight, Calendar, Check, Clock,
-    RefreshCw, MapPin,
+    ChevronLeft, ChevronRight, Calendar, Clock,
+    RefreshCw, MapPin, AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { addDays, format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { crmApi, type CrmSession, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { useUserStore } from '../../../store/userStore';
 import { Plane } from 'lucide-react';
-import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
+import { parseUTC, formatBatumi, BATUMI_TZ } from '../../../utils/dateUtils';
 import { SessionActionSheet } from './SessionActionSheet';
-import { CURRENCIES } from '../../../utils/currency';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { useCrmDataVersion } from './crmDataVersion';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { Button } from '../../../components/ui/Button';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 
 const NO_SESSIONS: CrmSession[] = [];
-
-function symbolFor(code: string): string {
-    return CURRENCIES.find(c => c.code === code)?.symbol ?? code;
-}
 
 /**
  * Mobile CRM — day view (the route is still `/m/crm/today` for back-compat,
@@ -35,6 +35,10 @@ function symbolFor(code: string): string {
  *  - Tapping a session opens SessionActionSheet (full CRM controls).
  *  - Hard cap on the API range — only fetches one day at a time so the
  *    payload stays small on flaky phone networks.
+ *
+ * Wave 1: статусы и оплата — общий StatusBadge (слова из statuses.ts),
+ * суммы — formatMoney («160 ₾», а не «₾ 160»), даты — formatDayMonth,
+ * загрузка — скелетон, пусто — EmptyState, «Синхр» → понятные подписи.
  */
 export function MobileCrmToday() {
     const navigate = useNavigate();
@@ -146,13 +150,13 @@ export function MobileCrmToday() {
             const result = await crmApi.syncFromCalendar(false, 1, 2);
             const orphans = (result as unknown as { orphansCancelled?: number }).orphansCancelled ?? 0;
             toast.success(
-                `Синхр: ${result.created || 0} новых, ${result.updated || 0} обнов.${orphans > 0 ? `, отмен. ${orphans}` : ''}`,
+                `Календарь: добавлено ${result.created || 0}, обновлено ${result.updated || 0}${orphans > 0 ? `, отменено ${orphans}` : ''}`,
                 { duration: 4500 },
             );
             await reload();
         } catch (e: unknown) {
             const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof detail === 'string' ? detail : 'Ошибка синхронизации');
+            toast.error(typeof detail === 'string' ? detail : 'Не удалось синхронизировать с Google Календарём. Попробуйте ещё раз');
         } finally {
             setSyncing(false);
         }
@@ -168,9 +172,8 @@ export function MobileCrmToday() {
         return m;
     }, [clients]);
 
-    const dateObj = parseISO(dateStr);
     const isToday = dateStr === todayStr;
-    const longDayLabel = fmtDate(dateObj, 'd MMMM, EEEE', { locale: ru });
+    const longDayLabel = formatDateLabel(dateStr, { capitalize: true, withYear: 'auto' });
 
     return (
         <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -178,32 +181,30 @@ export function MobileCrmToday() {
             {/* ── Header ─────────────────────────────────────────────── */}
             <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.15 }}>
-                        {isToday ? 'Сегодня' : fmtDate(dateObj, 'd MMM', { locale: ru })}
+                    <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.15 }}>
+                        {isToday ? 'Сегодня' : formatDayMonth(dateStr)}
                     </h1>
-                    <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
                         {longDayLabel}
                     </p>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                    <button
+                <div style={{ display: 'flex', gap: 4 }}>
+                    <Button
+                        variant="secondary"
+                        size="touch"
+                        icon={<Calendar size={16} aria-hidden="true" />}
                         onClick={() => navigate('/m/crm/sessions')}
-                        aria-label="Все сессии"
-                        title="Все сессии · фильтры по периоду и статусу"
-                        style={syncBtnStyle(false)}
                     >
-                        <Calendar size={14} />
-                        Все
-                    </button>
-                    <button
-                        onClick={handleSync}
+                        Все сессии
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        size="touch"
                         disabled={syncing}
-                        aria-label="Синхр Google Calendar"
-                        style={syncBtnStyle(syncing)}
-                    >
-                        <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />
-                        {syncing ? 'Синхр…' : 'Синхр'}
-                    </button>
+                        onClick={handleSync}
+                        aria-label={syncing ? 'Синхронизируем с Google Календарём' : 'Синхронизировать с Google Календарём'}
+                        icon={<RefreshCw size={16} aria-hidden="true" style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />}
+                    />
                 </div>
             </div>
 
@@ -213,7 +214,7 @@ export function MobileCrmToday() {
             <div style={{ padding: '0 16px' }}>
                 <div style={dayPagerStyle}>
                     <button onClick={() => shiftDay(-1)} style={navBtn} aria-label="Предыдущий день">
-                        <ChevronLeft size={18} />
+                        <ChevronLeft size={20} aria-hidden="true" />
                     </button>
                     {!isToday && (
                         <button onClick={jumpToToday} style={todayPill}>
@@ -221,10 +222,11 @@ export function MobileCrmToday() {
                         </button>
                     )}
                     <label style={{ ...todayPill, position: 'relative' }}>
-                        <Calendar size={14} />
-                        <span>{fmtDate(dateObj, 'd MMM', { locale: ru })}</span>
+                        <Calendar size={16} aria-hidden="true" />
+                        <span>{formatDayMonth(dateStr)}</span>
                         <input
                             type="date"
+                            aria-label="Выбрать дату"
                             value={dateStr}
                             onChange={e => jumpToDate(e.target.value)}
                             style={{
@@ -234,7 +236,7 @@ export function MobileCrmToday() {
                         />
                     </label>
                     <button onClick={() => shiftDay(1)} style={navBtn} aria-label="Следующий день">
-                        <ChevronRight size={18} />
+                        <ChevronRight size={20} aria-hidden="true" />
                     </button>
                 </div>
             </div>
@@ -246,84 +248,92 @@ export function MobileCrmToday() {
                 onTouchEnd={onTouchEnd}
                 style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200 }}
             >
-                {(loading || (!dayLoaded && !loadFailed)) && (
-                    <div style={{ color: '#666', fontSize: 14 }}>Загружаю…</div>
+                {/* Скелетон — пока день ещё не загружен. При тихом обновлении
+                    того же дня список остаётся на месте. */}
+                {!dayLoaded && !loadFailed && (
+                    <SkeletonList count={3} label="Загружаем сессии" cardHeight={96} />
                 )}
 
                 {loadFailed && !loading && (
-                    <div style={errorStyle}>
-                        {dayLoaded ? 'Не удалось обновить день.' : 'Не удалось загрузить день.'}
-                        <button onClick={() => reload()} style={retryBtn}>Повторить</button>
-                    </div>
+                    <ErrorBar
+                        message={dayLoaded ? 'Не удалось обновить день' : 'Не удалось загрузить день'}
+                        onRetry={() => reload()}
+                    />
                 )}
 
                 {dayLoaded && !loading && sorted.length === 0 && (
-                    <div style={emptyStyle}>
-                        Сессий на эту дату нет.
-                        <div style={{ marginTop: 6, fontSize: 12, color: '#aaa' }}>
-                            Свайп ← → или стрелки сверху для других дат
-                        </div>
-                    </div>
+                    <EmptyState
+                        compact
+                        title="Сессий на эту дату нет"
+                        hint="Листайте дни свайпом влево-вправо или стрелками сверху."
+                    />
                 )}
 
                 {sorted.map(s => {
                     const client = clientById.get(s.clientId);
-                    const time = formatBatumi(s.date, 'HH:mm');
+                    const time = formatTime(parseUTC(s.date), { timeZone: BATUMI_TZ });
                     const isPast = parseUTC(s.date).getTime() + (s.durationMinutes ?? 60) * 60000 < Date.now();
                     // 2026-05-14: CANCELLED_* status больше не используется
                     // (отмена = удаление). Если каким-то синком пришла стрый
                     // CANCELLED row — рендерим её как «отменена», но в новом
                     // потоке таких быть не должно.
                     const isLegacyCancelled = s.status === 'CANCELLED_CLIENT' || s.status === 'CANCELLED_THERAPIST';
-                    const statusLabel =
-                        s.status === 'COMPLETED' ? 'Прошла'
-                        : isLegacyCancelled ? 'Отменена'
-                        : isPast ? 'Не отмечена' : 'Запланирована';
-                    const statusTone =
-                        s.status === 'COMPLETED' ? 'ok'
-                        : isLegacyCancelled ? 'muted'
-                        : isPast ? 'warn' : 'normal';
+                    // «Не отмечена» — не статус из базы, а подсказка: время
+                    // прошло, а сессия всё ещё запланирована. Остальное —
+                    // слова общего словаря (StatusBadge kind="session").
+                    const isUnmarked = s.status === 'PLANNED' && isPast;
 
                     return (
                         <button
                             key={s.id}
                             onClick={() => setActiveSheet(s)}
                             style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.08)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 14,
                                 padding: 14,
-                                opacity: isLegacyCancelled ? 0.55 : 1,
+                                opacity: isLegacyCancelled ? 0.7 : 1,
                                 textAlign: 'left',
                                 fontFamily: 'inherit',
-                                color: '#0E0E0E',
+                                color: 'var(--color-ink)',
                                 cursor: 'pointer',
                                 width: '100%',
                                 display: 'block',
                             }}
                         >
-                            <div style={{ fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Clock size={16} /> {time}
-                                <span style={{ fontSize: 12, fontWeight: 500, color: '#999' }}>
+                            <div style={{ fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Clock size={16} aria-hidden="true" /> <span className="num">{time}</span>
+                                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-ink-60)' }}>
                                     · {s.durationMinutes ?? 60} мин
                                 </span>
                             </div>
                             <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>
-                                {client?.name ?? `ID ${s.clientId.slice(0, 6)}…`}
+                                {client?.name ?? 'Клиент…'}
                             </div>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-                                <Badge tone={statusTone}>{statusLabel}</Badge>
+                                {isUnmarked
+                                    ? <Badge tone="warn"><AlertCircle size={14} aria-hidden="true" /> Не отмечена</Badge>
+                                    : <StatusBadge kind="session" status={s.status} />}
                                 {(() => {
                                     // Galina+owner 2026-06-02: цена была видна только
                                     // когда session.price явно задана. Падаем на
                                     // client.basePrice (дефолт клиента), чтобы цена
                                     // была видна везде где она известна, а не только
                                     // для уже отыгранных сессий.
+                                    // Wave 1: сумма одним форматом («160 ₾»). Жёлтым —
+                                    // только прошедшая неоплаченная (ждём оплату);
+                                    // у будущей цена нейтральная (аудит G6-07/G6-15).
                                     const cur = s.currency || client?.currency || 'GEL';
-                                    const sym = symbolFor(cur);
                                     const effectivePrice = s.price ?? client?.basePrice ?? null;
-                                    if (s.isPaid) return <Badge tone="ok"><Check size={10} /> Оплачено</Badge>;
-                                    if (effectivePrice) return <Badge tone="warn">{sym} {effectivePrice.toFixed(0)}</Badge>;
+                                    if (s.isPaid) return <StatusBadge kind="payment" status="paid" />;
+                                    if (effectivePrice) {
+                                        return (
+                                            <Badge tone={isPast && !isLegacyCancelled ? 'warn' : 'normal'}>
+                                                {isPast && !isLegacyCancelled ? 'Ждёт оплаты · ' : ''}
+                                                <span className="num">{formatMoney(effectivePrice, { currency: cur })}</span>
+                                            </Badge>
+                                        );
+                                    }
                                     return null;
                                 })()}
                                 {s.isBooked && (() => {
@@ -338,7 +348,7 @@ export function MobileCrmToday() {
                                     const label = res
                                         ? (loc ? `${res.name} · ${loc.name}` : res.name)
                                         : 'кабинет';
-                                    return <Badge tone="info"><MapPin size={10} /> {label}</Badge>;
+                                    return <Badge tone="normal"><MapPin size={14} aria-hidden="true" /> {label}</Badge>;
                                 })()}
                             </div>
                         </button>
@@ -368,25 +378,25 @@ export function MobileCrmToday() {
 }
 
 function parseISO(yyyymmdd: string): Date {
-    // Local midnight on the given calendar day. Used for label rendering.
+    // Local midnight on the given calendar day. Used for day navigation.
     const [y, m, d] = yyyymmdd.split('-').map(Number);
     return new Date(y, (m || 1) - 1, d || 1);
 }
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: string }) {
+    // Только два тона: «ждём» (янтарный) и нейтральный. Статусы брони,
+    // оплаты и сессии — через общий StatusBadge.
     const colors: Record<string, { bg: string; fg: string }> = {
-        ok: { bg: '#E6F4EA', fg: '#1B6E36' },
-        warn: { bg: '#FEF3C7', fg: '#8A5A00' },
-        muted: { bg: '#EEE', fg: '#666' },
-        info: { bg: '#E0F2FE', fg: '#0369A1' },
-        normal: { bg: '#F4F4F2', fg: '#0E0E0E' },
+        warn: { bg: 'var(--status-pending-bg)', fg: 'var(--status-pending-fg)' },
+        normal: { bg: 'var(--color-sunken)', fg: 'var(--color-ink-80)' },
     };
     const c = colors[tone] || colors.normal;
     return (
         <span style={{
             background: c.bg, color: c.fg,
-            fontSize: 11, fontWeight: 700,
-            padding: '3px 8px', borderRadius: 999,
+            fontSize: 12, fontWeight: 600,
+            minHeight: 24,
+            padding: '0 8px', borderRadius: 8,
             whiteSpace: 'nowrap',
             display: 'inline-flex', alignItems: 'center', gap: 4,
         }}>{children}</span>
@@ -394,81 +404,38 @@ function Badge({ children, tone }: { children: React.ReactNode; tone: string }) 
 }
 
 // ─── styles ──────────────────────────────────────────────────────────
-function syncBtnStyle(syncing: boolean): React.CSSProperties {
-    return {
-        background: '#F4F4F2',
-        border: 'none',
-        borderRadius: 10,
-        padding: '8px 12px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        cursor: syncing ? 'wait' : 'pointer',
-        fontFamily: 'inherit',
-        fontSize: 12,
-        fontWeight: 700,
-        color: '#0E0E0E',
-        opacity: syncing ? 0.7 : 1,
-        flexShrink: 0,
-    };
-}
-
 const dayPagerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    background: '#F4F4F2',
+    background: 'var(--color-sunken)',
     borderRadius: 14,
     padding: 6,
 };
 
 const navBtn: React.CSSProperties = {
-    background: '#fff',
+    background: 'var(--color-card)',
     border: 'none',
     borderRadius: 10,
-    width: 38, height: 38,
+    width: 44, height: 44,
     display: 'grid', placeItems: 'center',
     cursor: 'pointer',
-    color: '#0E0E0E',
+    color: 'var(--color-ink)',
 };
 
 const todayPill: React.CSSProperties = {
     flex: 1,
-    background: '#fff',
+    background: 'var(--color-card)',
     border: 'none',
     borderRadius: 10,
-    padding: '8px 12px',
-    fontSize: 13, fontWeight: 700,
+    padding: '0 12px',
+    minHeight: 44,
+    fontSize: 14, fontWeight: 600,
     fontFamily: 'inherit',
-    color: '#0E0E0E',
+    color: 'var(--color-ink)',
     cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
 };
-
-const errorStyle: React.CSSProperties = {
-    background: '#FEF3C7',
-    border: '1px solid #FCD34D',
-    color: '#8A5A00',
-    borderRadius: 12,
-    padding: '12px 14px',
-    fontSize: 14,
-};
-
-const retryBtn: React.CSSProperties = {
-    background: 'none', border: 'none', padding: 0, marginLeft: 8,
-    color: '#0E0E0E', fontWeight: 700, fontSize: 14,
-    textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit',
-};
-
-const emptyStyle: React.CSSProperties = {
-    background: '#F4F4F2',
-    borderRadius: 14,
-    padding: 20,
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 14,
-};
-
 
 /** Banner — shown at top of /m/crm/today when the specialist has set
  *  vacation_until on their profile. Reminds them (and any admin in their
@@ -489,19 +456,20 @@ function VacationBanner() {
                 display: "flex",
                 margin: "0 16px",
                 padding: "10px 12px",
-                background: "rgba(255,138,76,0.10)",
-                border: "1px solid rgba(255,138,76,0.40)",
+                minHeight: 44,
+                background: "var(--status-pending-bg)",
+                border: "1px solid var(--color-ink-10)",
                 borderRadius: 10,
-                color: "#C66019",
-                fontSize: 13,
+                color: "var(--status-pending-fg)",
+                fontSize: 14,
                 gap: 10,
                 alignItems: "center",
                 textDecoration: "none",
             }}
         >
-            <Plane size={16} />
+            <Plane size={16} aria-hidden="true" />
             <span style={{ flex: 1 }}>
-                Вы отметили <b>отпуск до {until}</b>. Тап — изменить.
+                Вы отметили <b>отпуск до {formatDayMonth(until, { withYear: 'auto' })}</b>. Нажмите, чтобы изменить.
             </span>
         </a>
     );

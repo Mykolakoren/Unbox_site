@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, ShieldCheck, Loader2, X } from 'lucide-react';
+import { Search, ShieldCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { cashboxApi } from '../../../api/cashbox';
 import type { User } from '../../../store/types';
 import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
+import { Button } from '../../../components/ui/Button';
+import { Chip, Segmented } from '../../../components/ui/Chip';
+import { Field, Input } from '../../../components/ui/Field';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { COLOR } from '../../../design/tokens';
+import { formatGel } from '../../../utils/format';
 
 /**
  * Mobile admin — users search & quick view.
@@ -14,8 +21,21 @@ import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
  * the desktop user-details page (the full one) in the same tab — for the
  * mobile MVP we keep editing in desktop, this view is just "find them
  * fast on the phone".
+ *
+ * Wave 1: вкладка «Юзеры» → «Клиенты» (как на десктопе); роли по-русски
+ * вместо кодов (senior_admin); кнопка «＋₾» больше не вложена в ссылку
+ * (две соседние цели 44 px); общие Chip/Button/Field; суммы — formatGel.
  */
 type Filter = 'all' | 'debtors' | 'specialists' | 'admins' | 'clients';
+
+/** Роль по-русски. Код роли в интерфейсе («senior_admin») людям ничего не говорит. */
+const ROLE_LABEL: Record<string, string> = {
+    user: 'Клиент',
+    specialist: 'Специалист',
+    admin: 'Админ',
+    senior_admin: 'Старший админ',
+    owner: 'Владелец',
+};
 
 export function MobileAdminUsers() {
     const { users, fetchUsers } = useUserStore();
@@ -79,11 +99,11 @@ export function MobileAdminUsers() {
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
-                    Юзеры
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
+                    Клиенты
                 </h1>
-                <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    Всего: {users?.length ?? 0}
+                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    {loading && (users?.length ?? 0) === 0 ? 'Загружаем…' : `Всего: ${users?.length ?? 0}`}
                 </p>
             </div>
 
@@ -91,24 +111,27 @@ export function MobileAdminUsers() {
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
-                    background: '#F4F4F2',
+                    background: 'var(--color-sunken)',
                     borderRadius: 12,
-                    padding: '10px 12px',
+                    padding: '0 12px',
+                    minHeight: 44,
                     gap: 8,
                 }}>
-                    <Search size={16} color="#999" />
+                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
+                        aria-label="Поиск по имени, email или телефону"
                         placeholder="Имя, email, телефон…"
                         style={{
                             flex: 1,
                             background: 'transparent',
                             border: 'none',
                             outline: 'none',
-                            fontSize: 14,
+                            fontSize: 16,
                             fontFamily: 'inherit',
                             minWidth: 0,
+                            color: 'var(--color-ink)',
                         }}
                     />
                 </div>
@@ -117,39 +140,37 @@ export function MobileAdminUsers() {
             {/* Filter chips — replace the flat-list scroll-fest with quick
                 cuts admins actually use: должники, специалисты, админы. */}
             <div style={{ padding: '0 16px' }}>
-                <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4 }}>
+                <div role="group" aria-label="Кого показать" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
                     {([
                         { id: 'all', label: 'Все', count: counts.all },
                         { id: 'debtors', label: 'Должники', count: counts.debtors },
-                        { id: 'specialists', label: 'Специал.', count: counts.specialists },
+                        { id: 'specialists', label: 'Специалисты', count: counts.specialists },
                         { id: 'admins', label: 'Админы', count: counts.admins },
                         { id: 'clients', label: 'Клиенты', count: counts.clients },
                     ] as { id: Filter; label: string; count: number }[]).map(f => (
-                        <button
+                        <Chip
                             key={f.id}
-                            className="tap-target"
+                            selected={filter === f.id}
                             onClick={() => setFilter(f.id)}
-                            style={{
-                                flexShrink: 0,
-                                padding: '6px 12px',
-                                background: filter === f.id ? '#0E0E0E' : 'rgba(0,0,0,0.04)',
-                                color: filter === f.id ? '#fff' : '#0E0E0E',
-                                border: 'none',
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap',
-                                fontFamily: 'inherit',
-                            }}
+                            style={{ flexShrink: 0 }}
                         >
-                            {f.label} <span style={{ opacity: 0.7 }}>· {f.count}</span>
-                        </button>
+                            {f.label} · {f.count}
+                        </Chip>
                     ))}
                 </div>
             </div>
 
-            {loading && <div style={{ padding: '0 16px', color: '#666', fontSize: 14 }}>Загружаю…</div>}
+            {loading && (users?.length ?? 0) === 0 && (
+                <div style={{ padding: '0 16px' }}>
+                    <SkeletonList count={5} label="Загружаем клиентов" cardHeight={60} />
+                </div>
+            )}
+
+            {!loading && (users?.length ?? 0) > 0 && filtered.length === 0 && (
+                <div style={{ padding: '0 16px' }}>
+                    <EmptyState compact title="Никого не нашлось" hint="Попробуйте другое имя, email или телефон." />
+                </div>
+            )}
 
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {filtered.map(u => {
@@ -157,67 +178,80 @@ export function MobileAdminUsers() {
                     const balance = u.balance ?? 0;
                     const debt = balance < 0 ? -balance : 0;
                     return (
-                        <Link
+                        // Строка — ссылка на карточку и рядом отдельная кнопка «＋₾»:
+                        // раньше кнопка была внутри ссылки (вложенные цели нажатия).
+                        <div
                             key={u.id}
-                            to={`/m/admin/users/${encodeURIComponent(u.email)}`}
                             style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.08)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 12,
-                                padding: '12px 14px',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: 10,
-                                color: '#0E0E0E',
-                                textDecoration: 'none',
+                                gap: 4,
+                                paddingRight: 6,
                             }}
                         >
-                            <div style={{
-                                width: 36, height: 36,
-                                borderRadius: 999,
-                                background: '#F4F4F2',
-                                display: 'grid', placeItems: 'center',
-                                fontSize: 13, fontWeight: 700,
-                                color: '#666',
-                                flexShrink: 0,
-                            }}>
-                                {(u.name || u.email || '?').slice(0, 1).toUpperCase()}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    {u.name || u.email}
-                                    {isAdmin && <ShieldCheck size={12} color="#666" />}
-                                </div>
-                                <div style={{ fontSize: 11, color: '#666', marginTop: 1 }}>
-                                    {u.email}
-                                    {u.role && <span> · {u.role}</span>}
-                                </div>
-                            </div>
-                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <Link
+                                to={`/m/admin/users/${encodeURIComponent(u.email)}`}
+                                style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    padding: '12px 8px 12px 14px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    color: 'var(--color-ink)',
+                                    textDecoration: 'none',
+                                }}
+                            >
                                 <div style={{
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                    color: debt > 0 ? '#C8253A' : '#0E0E0E',
+                                    width: 36, height: 36,
+                                    borderRadius: 999,
+                                    background: 'var(--color-sunken)',
+                                    display: 'grid', placeItems: 'center',
+                                    fontSize: 14, fontWeight: 600,
+                                    color: 'var(--color-ink-60)',
+                                    flexShrink: 0,
                                 }}>
-                                    {balance.toFixed(0)} ₾
+                                    {(u.name || u.email || '?').slice(0, 1).toUpperCase()}
                                 </div>
-                                {u.subscription && (
-                                    <div style={{ fontSize: 10, color: '#666', marginTop: 1 }}>
-                                        {u.subscription.remainingHours} ч аб.
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || u.email}</span>
+                                        {isAdmin && <ShieldCheck size={12} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />}
                                     </div>
-                                )}
-                            </div>
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {u.email}
+                                        {u.role && <span> · {ROLE_LABEL[u.role] ?? 'Другая роль'}</span>}
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                    <div className="num" style={{
+                                        fontSize: 14,
+                                        fontWeight: 600,
+                                        color: debt > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
+                                    }}>
+                                        {formatGel(balance)}
+                                    </div>
+                                    {u.subscription && (
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                                            {u.subscription.remainingHours} ч абон.
+                                        </div>
+                                    )}
+                                </div>
+                            </Link>
                             <button
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setTopupUser(u); }}
+                                onClick={() => setTopupUser(u)}
                                 aria-label={`Пополнить баланс: ${u.name || u.email}`}
                                 style={{
                                     flexShrink: 0,
-                                    width: 40, height: 40,
-                                    borderRadius: 12,
-                                    border: '1px solid rgba(0,0,0,0.10)',
-                                    background: '#F4F4F2',
-                                    color: '#0E0E0E',
-                                    fontSize: 15, fontWeight: 800,
+                                    width: 44, height: 44,
+                                    borderRadius: 8,
+                                    border: '1px solid var(--color-ink-10)',
+                                    background: 'var(--color-sunken)',
+                                    color: 'var(--color-ink)',
+                                    fontSize: 14, fontWeight: 600,
                                     display: 'grid', placeItems: 'center',
                                     cursor: 'pointer',
                                     fontFamily: 'inherit',
@@ -225,22 +259,22 @@ export function MobileAdminUsers() {
                             >
                                 ＋₾
                             </button>
-                        </Link>
+                        </div>
                     );
                 })}
             </div>
 
             <div style={{ padding: '0 16px' }}>
                 <div style={{
-                    background: '#FEF3C7',
-                    border: '1px solid #FCD34D',
-                    color: '#8A5A00',
+                    background: 'var(--color-sunken)',
+                    color: 'var(--color-ink-80)',
                     borderRadius: 10,
                     padding: '10px 12px',
                     fontSize: 12,
-                    lineHeight: 1.4,
+                    lineHeight: 1.5,
                 }}>
-                    Кнопка «＋₾» пополняет баланс клиента прямо с телефона (касса + зачисление одной операцией). Тап по юзеру откроет десктопную карточку — тонкие настройки пока там.
+                    Кнопка «＋₾» пополняет баланс клиента прямо с телефона — приход в кассу и зачисление одной операцией.
+                    Тонкие настройки клиента удобнее менять на компьютере.
                 </div>
             </div>
 
@@ -266,21 +300,11 @@ function TopupSheet({ user, onClose, onDone }: {
     const [method, setMethod] = useState<'cash' | 'card_tbc' | 'card_bog'>('cash');
     const [branch, setBranch] = useState<string>('Unbox Uni');
     const [saving, setSaving] = useState(false);
-    const value = Number(amount) || 0;
-
-    const chip = (active: boolean): React.CSSProperties => ({
-        padding: '9px 13px',
-        borderRadius: 999,
-        border: active ? '1.5px solid #0E0E0E' : '1px solid rgba(0,0,0,0.12)',
-        background: active ? '#0E0E0E' : '#fff',
-        color: active ? '#fff' : '#0E0E0E',
-        fontSize: 13, fontWeight: 650,
-        cursor: 'pointer', fontFamily: 'inherit',
-        minHeight: 40,
-    });
+    // Поле текстовое (цифровая клавиатура) — принимаем и запятую.
+    const value = Number(amount.replace(',', '.')) || 0;
 
     const submit = async () => {
-        if (value <= 0) { toast.error('Введите сумму'); return; }
+        if (value <= 0) { toast.error('Введите сумму больше 0'); return; }
         setSaving(true);
         try {
             await cashboxApi.createTransaction({
@@ -293,10 +317,10 @@ function TopupSheet({ user, onClose, onDone }: {
                 client_id: user.id || user.email,
                 credit_user_balance: true,
             } as any);
-            toast.success(`Баланс пополнен на ${value} ₾ — станет ${(balance + value).toFixed(0)} ₾`);
+            toast.success(`Баланс пополнен на ${formatGel(value)} — теперь ${formatGel(balance + value)}`);
             await onDone();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось пополнить (нужен доступ к кассе)');
+            toast.error(err?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
             setSaving(false);
         }
     };
@@ -305,88 +329,95 @@ function TopupSheet({ user, onClose, onDone }: {
         <div
             // Z_SHEET: было 90 — ниже нижнего меню (100), и оно закрывало
             // кнопку «Пополнить»; промах уводил на вкладку «Финансы».
-            style={{ position: 'fixed', inset: 0, zIndex: Z_SHEET, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Пополнить баланс"
+            style={{ position: 'fixed', inset: 0, zIndex: Z_SHEET, background: 'rgba(15,15,16,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
             onClick={onClose}
         >
             <div
                 onClick={e => e.stopPropagation()}
                 style={{
                     width: '100%', maxWidth: 480,
-                    background: '#fff',
-                    borderRadius: '18px 18px 0 0',
+                    background: 'var(--color-card)',
+                    borderRadius: '16px 16px 0 0',
+                    boxShadow: 'var(--shadow-pop)',
                     // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER.
-                    padding: '18px 16px 0',
+                    padding: '12px 16px 0',
                     maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
                     overscrollBehavior: 'contain',
-                    display: 'flex', flexDirection: 'column', gap: 14,
+                    display: 'flex', flexDirection: 'column', gap: 16,
                 }}
             >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em' }}>Пополнить баланс</div>
-                        <div style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
+                        <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Пополнить баланс</h2>
+                        <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2 }}>
                             {user.name || user.email} · сейчас{' '}
-                            <b style={{ color: balance < 0 ? '#C8253A' : '#0E0E0E' }}>{balance.toFixed(0)} ₾</b>
+                            <b style={{ color: balance < 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)' }}>{formatGel(balance)}</b>
                         </div>
                     </div>
-                    <button onClick={onClose} aria-label="Закрыть" style={{ background: '#F4F4F2', border: 'none', borderRadius: 10, width: 34, height: 34, display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
-                        <X size={16} />
+                    <button
+                        onClick={onClose}
+                        aria-label="Закрыть"
+                        style={{ background: 'transparent', border: 'none', borderRadius: 8, width: 44, height: 44, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--color-ink-60)' }}
+                    >
+                        <X size={20} aria-hidden="true" />
                     </button>
                 </div>
 
                 <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Сумма, ₾</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <div role="group" aria-label="Быстрая сумма" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
                         {[20, 40, 60, 100].map(v => (
-                            <button key={v} onClick={() => setAmount(String(v))} style={chip(Number(amount) === v)}>{v}</button>
+                            <Chip key={v} selected={value === v} onClick={() => setAmount(String(v))}>{formatGel(v)}</Chip>
                         ))}
                         {balance < 0 && (
-                            <button onClick={() => setAmount(String(-balance))} style={chip(Number(amount) === -balance)}>
-                                Закрыть долг ({-balance} ₾)
-                            </button>
+                            <Chip selected={value === -balance} onClick={() => setAmount(String(-balance))}>
+                                Закрыть долг ({formatGel(-balance)})
+                            </Chip>
                         )}
                     </div>
-                    <input
-                        type="number" inputMode="decimal" value={amount}
-                        onChange={e => setAmount(e.target.value)}
-                        style={{ width: '100%', boxSizing: 'border-box', padding: '12px 14px', fontSize: 16, borderRadius: 12, border: '1px solid rgba(0,0,0,0.15)', outline: 'none', fontFamily: 'inherit' }}
+                    <Field label="Сумма">
+                        <Input kind="money" suffix="₾" value={amount} onChange={e => setAmount(e.target.value)} />
+                    </Field>
+                </div>
+
+                <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Способ оплаты</div>
+                    <Segmented<'cash' | 'card_tbc' | 'card_bog'>
+                        aria-label="Способ оплаты"
+                        options={[
+                            { value: 'cash', label: 'Наличные' },
+                            { value: 'card_tbc', label: 'Карта TBC' },
+                            { value: 'card_bog', label: 'Карта BOG' },
+                        ]}
+                        value={method}
+                        onChange={setMethod}
                     />
                 </div>
 
                 <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Способ оплаты</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button onClick={() => setMethod('cash')} style={chip(method === 'cash')}>Наличные</button>
-                        <button onClick={() => setMethod('card_tbc')} style={chip(method === 'card_tbc')}>Карта TBC</button>
-                        <button onClick={() => setMethod('card_bog')} style={chip(method === 'card_bog')}>Карта BOG</button>
-                    </div>
-                </div>
-
-                <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Филиал</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => setBranch('Unbox Uni')} style={chip(branch === 'Unbox Uni')}>Unbox Uni</button>
-                        <button onClick={() => setBranch('Unbox One')} style={chip(branch === 'Unbox One')}>Unbox One</button>
-                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Филиал</div>
+                    <Segmented
+                        aria-label="Филиал"
+                        options={[
+                            { value: 'Unbox Uni', label: 'Unbox Uni' },
+                            { value: 'Unbox One', label: 'Unbox One' },
+                        ]}
+                        value={branch}
+                        onChange={setBranch}
+                    />
                 </div>
 
                 <div style={SHEET_FOOTER}>
-                    <button
+                    <Button
+                        block
+                        loading={saving}
+                        disabled={value <= 0}
                         onClick={submit}
-                        disabled={saving || value <= 0}
-                        style={{
-                            width: '100%', padding: '14px',
-                            borderRadius: 14, border: 'none',
-                            background: '#0E0E0E', color: '#fff',
-                            fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-                            cursor: 'pointer', opacity: saving || value <= 0 ? 0.55 : 1,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                            minHeight: 50,
-                        }}
                     >
-                        {saving && <Loader2 size={16} className="animate-spin" />}
-                        Пополнить на {value > 0 ? value : '—'} ₾
-                    </button>
+                        Пополнить на {value > 0 ? formatGel(value) : '—'}
+                    </Button>
                 </div>
             </div>
         </div>

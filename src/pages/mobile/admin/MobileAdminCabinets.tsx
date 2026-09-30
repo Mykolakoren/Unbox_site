@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, MapPin, Wrench, Bell, X, Check, Loader2, Power } from 'lucide-react';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { Plus, Trash2, MapPin, Wrench, Bell, X, Check, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBookingStore } from '../../../store/bookingStore';
 import { useUserStore } from '../../../store/userStore';
@@ -12,6 +10,14 @@ import type { Resource } from '../../../types';
 import type { WaitlistEntry } from '../../../store/types';
 import { LOCATIONS, RESOURCES } from '../../../utils/data';
 import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
+import { Button } from '../../../components/ui/Button';
+import { Chip, Segmented } from '../../../components/ui/Chip';
+import { Field, Input, Select } from '../../../components/ui/Field';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { formatDateLabel, formatDayMonth, formatGel } from '../../../utils/format';
 
 type Tab = 'cabinets' | 'maintenance' | 'waitlist';
 
@@ -26,53 +32,43 @@ interface MaintenanceBlock {
     createdAt: string;
 }
 
+/** 1 кабинет, 2 кабинета, 5 кабинетов. */
+function plural(n: number, one: string, few: string, many: string): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+}
+
 /**
  * Mobile admin "Кабинеты" — three operational tabs in one page so the
  * bottom nav doesn't drown in icons.
  *
  *   Кабинеты      — view active/inactive, toggle off for the day quickly.
- *   Обслуживание  — list service blocks (cleaning, repair) and create new.
+ *   Закрытия      — list service blocks (cleaning, repair) and create new.
  *   Лист ожидания — see who's waiting for slots across all users,
  *                   remove entries when needed.
+ *
+ * Wave 1: общие Chip/Segmented/Button/Field, токены вместо hex, окна
+ * подтверждения вместо confirm(). Кнопки переключателей называют действие
+ * («Выключить» / «Включить»), а не текущее состояние («Вкл»).
  */
 export function MobileAdminCabinets() {
     const [tab, setTab] = useState<Tab>('cabinets');
 
     return (
         <div style={{ padding: '14px 14px 90px' }}>
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 4,
-                padding: 3,
-                background: 'rgba(0,0,0,0.04)',
-                borderRadius: 10,
-                marginBottom: 16,
-            }}>
-                {([
-                    { id: 'cabinets', label: 'Кабинеты' },
-                    { id: 'maintenance', label: 'Обслуж.' },
-                    { id: 'waitlist', label: 'Ожидание' },
-                ] as { id: Tab; label: string }[]).map(t => (
-                    <button
-                        key={t.id}
-                        onClick={() => setTab(t.id)}
-                        style={{
-                            padding: '8px 0',
-                            background: tab === t.id ? '#fff' : 'transparent',
-                            border: 'none',
-                            borderRadius: 8,
-                            fontWeight: tab === t.id ? 700 : 500,
-                            color: '#0E0E0E',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                            boxShadow: tab === t.id ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                        }}
-                    >
-                        {t.label}
-                    </button>
-                ))}
-            </div>
+            <Segmented<Tab>
+                aria-label="Раздел"
+                className="mb-4"
+                options={[
+                    { value: 'cabinets', label: 'Кабинеты' },
+                    { value: 'maintenance', label: 'Закрытия' },
+                    { value: 'waitlist', label: 'Ожидание' },
+                ]}
+                value={tab}
+                onChange={setTab}
+            />
 
             {tab === 'cabinets' && <CabinetsTab />}
             {tab === 'maintenance' && <MaintenanceTab />}
@@ -87,21 +83,29 @@ function CabinetsTab() {
     const { resources, fetchResources, locations, fetchLocations } = useBookingStore();
     const [filterLoc, setFilterLoc] = useState<string>('all');
     const [updating, setUpdating] = useState<string | null>(null);
+    // Пока кабинеты не пришли, не пишем «Нет кабинетов».
+    const [resourcesTried, setResourcesTried] = useState(resources.length > 0);
+    const { confirm } = useConfirmDialog();
 
     useEffect(() => {
-        if (resources.length === 0) fetchResources();
+        if (resources.length === 0) fetchResources().finally(() => setResourcesTried(true));
         if (locations.length === 0) fetchLocations();
     }, [resources.length, locations.length, fetchResources, fetchLocations]);
 
     const handleToggleLocation = async (loc: typeof LOCATIONS[number]) => {
         const next = !(loc.isActive !== false);
         const childrenAffected = resources.filter(r => r.locationId === loc.id);
-        if (!confirm(
-            `${next ? 'Включить' : 'Выключить'} локацию "${loc.name}"?\n\n`
-            + (next
-                ? 'Кабинеты внутри останутся в своём состоянии — включи нужные вручную.'
-                : `Все ${childrenAffected.length} кабинета станут скрытыми.`),
-        )) return;
+        const n = childrenAffected.length;
+        const ok = await confirm({
+            title: `${next ? 'Включить' : 'Выключить'} локацию «${loc.name}»?`,
+            body: next
+                ? 'Кабинеты внутри останутся как есть — нужные включите вручную.'
+                : `${n} ${plural(n, 'кабинет станет скрытым', 'кабинета станут скрытыми', 'кабинетов станут скрытыми')} — клиенты не смогут их бронировать.`,
+            confirmLabel: next ? 'Включить локацию' : 'Выключить локацию',
+            cancelLabel: 'Оставить как есть',
+            tone: next ? 'default' : 'danger',
+        });
+        if (!ok) return;
         setUpdating(loc.id);
         try {
             const { locationsApi } = await import('../../../api/locations');
@@ -117,7 +121,7 @@ function CabinetsTab() {
             await fetchResources();
             toast.success(next ? 'Локация включена' : 'Локация и кабинеты скрыты');
         } catch {
-            toast.error('Не удалось');
+            toast.error('Не удалось переключить локацию. Попробуйте ещё раз');
         } finally {
             setUpdating(null);
         }
@@ -144,7 +148,7 @@ function CabinetsTab() {
             await fetchResources();
             toast.success(next ? 'Кабинет включён' : 'Кабинет выключен');
         } catch {
-            toast.error('Не удалось обновить');
+            toast.error('Не удалось переключить кабинет. Попробуйте ещё раз');
         } finally {
             setUpdating(null);
         }
@@ -159,130 +163,104 @@ function CabinetsTab() {
             <div style={{
                 marginBottom: 14,
                 paddingBottom: 12,
-                borderBottom: '1px solid rgba(0,0,0,0.06)',
+                borderBottom: '1px solid var(--color-ink-08)',
             }}>
-                <div style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-                    textTransform: 'uppercase', color: '#888', marginBottom: 8,
-                }}>
-                    Локации
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <SectionLabel>Локации</SectionLabel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {liveLocations.map(loc => {
                         const isActive = loc.isActive !== false;
                         const childActive = resources.filter(r => r.locationId === loc.id && r.isActive !== false).length;
                         const childTotal = resources.filter(r => r.locationId === loc.id).length;
                         return (
                             <div key={loc.id} style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.06)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 10,
-                                padding: '8px 11px',
+                                padding: '8px 8px 8px 12px',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 8,
-                                opacity: isActive ? 1 : 0.55,
                             }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#0E0E0E' }}>
+                                <div style={{ flex: 1, minWidth: 0, opacity: isActive ? 1 : 0.7 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
                                         {loc.name}
                                         {!isActive && (
-                                            <span style={{
-                                                marginLeft: 6,
-                                                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
-                                                color: '#fff', background: '#B3261E',
-                                                padding: '2px 5px', borderRadius: 4,
-                                                textTransform: 'uppercase',
-                                            }}>Скрыта</span>
+                                            <span className="ui-badge ui-badge--muted" style={{ marginLeft: 6 }}>Скрыта</span>
                                         )}
                                     </div>
-                                    <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>
-                                        {childActive} / {childTotal} активных кабинетов
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                                        Активных кабинетов: {childActive} из {childTotal}
                                     </div>
                                 </div>
-                                <button
+                                <Button
+                                    variant="secondary"
+                                    size="touch"
+                                    loading={updating === loc.id}
+                                    icon={<Power size={16} aria-hidden="true" />}
                                     onClick={() => handleToggleLocation(loc as any)}
-                                    disabled={updating === loc.id}
-                                    style={{
-                                        background: isActive ? 'rgba(0,0,0,0.05)' : '#B3261E',
-                                        color: isActive ? '#0E0E0E' : '#fff',
-                                        border: 'none', borderRadius: 7,
-                                        padding: '6px 10px',
-                                        fontSize: 11, fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                        flexShrink: 0,
-                                    }}
+                                    aria-label={`${isActive ? 'Выключить' : 'Включить'} локацию ${loc.name}`}
                                 >
-                                    {updating === loc.id ? <Loader2 size={11} className="animate-spin" /> : <Power size={11} />}
-                                    {isActive ? 'Вкл' : 'Выкл'}
-                                </button>
+                                    {isActive ? 'Выключить' : 'Включить'}
+                                </Button>
                             </div>
                         );
                     })}
                 </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
-                <Chip active={filterLoc === 'all'} onClick={() => setFilterLoc('all')}>Все</Chip>
+            <div role="group" aria-label="Локация" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
+                <Chip selected={filterLoc === 'all'} onClick={() => setFilterLoc('all')} style={{ flexShrink: 0 }}>Все</Chip>
                 {liveLocations.map(l => (
-                    <Chip key={l.id} active={filterLoc === l.id} onClick={() => setFilterLoc(l.id)}>{l.name}</Chip>
+                    <Chip key={l.id} selected={filterLoc === l.id} onClick={() => setFilterLoc(l.id)} style={{ flexShrink: 0 }}>{l.name}</Chip>
                 ))}
             </div>
 
-            {filtered.length === 0 ? (
-                <Empty>Нет кабинетов</Empty>
+            {!resourcesTried && resources.length === 0 ? (
+                <SkeletonList count={4} label="Загружаем кабинеты" cardHeight={60} />
+            ) : filtered.length === 0 ? (
+                <EmptyState compact title="Нет кабинетов" hint="Выберите другую локацию или добавьте кабинет на компьютере." />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {filtered.map(r => {
                         const isActive = r.isActive !== false;
                         return (
                             <div key={r.id} style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.06)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 12,
-                                padding: '11px 12px',
+                                padding: '8px 8px 8px 12px',
                                 display: 'flex',
                                 gap: 10,
                                 alignItems: 'center',
-                                opacity: isActive ? 1 : 0.55,
                             }}>
                                 <div style={{
                                     width: 36, height: 36, borderRadius: 9,
-                                    background: isActive ? 'rgba(0,0,0,0.06)' : 'rgba(179,38,30,0.08)',
-                                    color: isActive ? '#0E0E0E' : '#B3261E',
+                                    background: 'var(--color-sunken)',
+                                    color: isActive ? 'var(--color-ink)' : 'var(--color-ink-60)',
                                     display: 'grid', placeItems: 'center', flexShrink: 0,
                                 }}>
-                                    <MapPin size={16} />
+                                    <MapPin size={16} aria-hidden="true" />
                                 </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 700, fontSize: 14, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                <div style={{ flex: 1, minWidth: 0, opacity: isActive ? 1 : 0.7 }}>
+                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {r.name}
                                     </div>
-                                    <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
-                                        {LOCATIONS.find(l => l.id === r.locationId)?.name || r.locationId} · {r.hourlyRate}₾/ч
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                                        {!isActive && 'Выключен · '}
+                                        {LOCATIONS.find(l => l.id === r.locationId)?.name || r.locationId} · {formatGel(r.hourlyRate)}/ч
                                         {r.capacity ? ` · до ${r.capacity}` : ''}
                                     </div>
                                 </div>
-                                <button
+                                <Button
+                                    variant="secondary"
+                                    size="touch"
+                                    loading={updating === r.id}
+                                    icon={<Power size={16} aria-hidden="true" />}
                                     onClick={() => toggleActive(r)}
-                                    disabled={updating === r.id}
-                                    style={{
-                                        background: isActive ? 'rgba(0,0,0,0.05)' : '#B3261E',
-                                        color: isActive ? '#0E0E0E' : '#fff',
-                                        border: 'none',
-                                        borderRadius: 8,
-                                        padding: '7px 11px',
-                                        fontSize: 11,
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                        flexShrink: 0,
-                                    }}
+                                    aria-label={`${isActive ? 'Выключить' : 'Включить'} ${r.name}`}
                                 >
-                                    {updating === r.id ? <Loader2 size={12} className="animate-spin" /> : <Power size={12} />}
-                                    {isActive ? 'Вкл' : 'Выкл'}
-                                </button>
+                                    {isActive ? 'Выключить' : 'Включить'}
+                                </Button>
                             </div>
                         );
                     })}
@@ -297,7 +275,10 @@ function CabinetsTab() {
 function MaintenanceTab() {
     const [blocks, setBlocks] = useState<MaintenanceBlock[]>([]);
     const [loading, setLoading] = useState(true);
+    // Сбой загрузки — не «блокировок нет».
+    const [failed, setFailed] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         setLoading(true);
@@ -307,8 +288,9 @@ function MaintenanceTab() {
                 params: { date_from: today },
             });
             setBlocks(data);
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось загрузить');
+            setFailed(false);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -317,13 +299,19 @@ function MaintenanceTab() {
     useEffect(() => { load(); }, []);
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Снять блокировку?')) return;
+        const ok = await confirm({
+            title: 'Снять блокировку?',
+            body: 'Кабинет снова станет доступен для броней в это время.',
+            confirmLabel: 'Снять блокировку',
+            cancelLabel: 'Оставить',
+        });
+        if (!ok) return;
         try {
             await api.delete(`/maintenance-blocks/${id}`);
             setBlocks(prev => prev.filter(b => b.id !== id));
-            toast.success('Снято');
+            toast.success('Блокировка снята');
         } catch {
-            toast.error('Не удалось снять');
+            toast.error('Не удалось снять блокировку. Попробуйте ещё раз');
         }
     };
 
@@ -338,81 +326,62 @@ function MaintenanceTab() {
 
     return (
         <div>
-            <button
+            <Button
+                block
+                icon={<Plus size={16} aria-hidden="true" />}
                 onClick={() => setShowCreate(true)}
-                style={{
-                    width: '100%',
-                    padding: '11px',
-                    marginBottom: 14,
-                    background: '#0E0E0E',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 10,
-                    fontWeight: 700,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                }}
+                style={{ marginBottom: 14 }}
             >
-                <Plus size={16} /> Закрыть кабинет
-            </button>
+                Закрыть кабинет
+            </Button>
+
+            {failed && !loading && (
+                <ErrorBar message="Не удалось загрузить блокировки" onRetry={load} className="mb-3" />
+            )}
 
             {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-                    <Loader2 size={18} className="animate-spin" style={{ color: '#888' }} />
-                </div>
-            ) : blocks.length === 0 ? (
-                <Empty>Открытых блокировок нет</Empty>
+                <SkeletonList count={3} label="Загружаем блокировки" cardHeight={56} />
+            ) : failed ? null : blocks.length === 0 ? (
+                <EmptyState compact title="Закрытых кабинетов нет" hint="Уборку или ремонт можно отметить кнопкой выше." />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     {Object.keys(groups).sort().map(date => (
                         <div key={date}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: '#888', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-                                {format(new Date(date + 'T00:00:00'), 'd MMM, EEEE', { locale: ru })}
-                            </div>
+                            <SectionLabel>{formatDateLabel(date, { capitalize: true })}</SectionLabel>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                 {groups[date].map(b => {
                                     const res = RESOURCES.find(r => r.id === b.resourceId);
                                     return (
                                         <div key={b.id} style={{
-                                            background: '#fff',
-                                            border: '1px solid rgba(0,0,0,0.06)',
+                                            background: 'var(--color-card)',
+                                            border: '1px solid var(--color-ink-08)',
                                             borderRadius: 10,
-                                            padding: '10px 12px',
+                                            padding: '4px 4px 4px 12px',
                                             display: 'flex',
                                             gap: 10,
                                             alignItems: 'center',
                                         }}>
                                             <div style={{
                                                 width: 32, height: 32, borderRadius: 8,
-                                                background: 'rgba(255,138,76,0.12)', color: '#C66019',
+                                                background: 'var(--color-sunken)', color: 'var(--color-ink-80)',
                                                 display: 'grid', placeItems: 'center', flexShrink: 0,
                                             }}>
-                                                <Wrench size={14} />
+                                                <Wrench size={14} aria-hidden="true" />
                                             </div>
                                             <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 13, fontWeight: 600, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                     {res?.name || b.resourceId} · {b.startTime}–{addMinTime(b.startTime, b.duration)}
                                                 </div>
-                                                <div style={{ fontSize: 11, color: '#888' }}>
+                                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                                     {b.reason || 'Без описания'}
                                                 </div>
                                             </div>
                                             <button
                                                 onClick={() => handleDelete(b.id)}
-                                                style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    color: '#B3261E',
-                                                    cursor: 'pointer',
-                                                    padding: 6,
-                                                }}
+                                                style={iconBtn('var(--status-danger-fg)')}
                                                 aria-label="Снять блокировку"
                                             >
-                                                <Trash2 size={15} />
+                                                <Trash2 size={16} aria-hidden="true" />
                                             </button>
                                         </div>
                                     );
@@ -470,7 +439,7 @@ function CreateMaintenanceSheet({ onClose, onCreated }: { onClose: () => void; o
             toast.success('Кабинет закрыт');
             await onCreated();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка');
+            toast.error(e?.response?.data?.detail || 'Не удалось закрыть кабинет. Проверьте поля и попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
@@ -478,40 +447,42 @@ function CreateMaintenanceSheet({ onClose, onCreated }: { onClose: () => void; o
 
     return (
         <BottomSheet onClose={onClose} title="Закрыть кабинет">
-            <Field label="Кабинет">
-                <select value={resourceId} onChange={e => setResourceId(e.target.value)} style={input}>
-                    {RESOURCES.filter(r => r.isActive !== false).map(r => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                </select>
-            </Field>
-            <Field label="Дата">
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} style={input} />
-            </Field>
-            <Field label="Дата окончания (необязательно, для серии)">
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={input} />
-            </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <Field label="Начало">
-                    <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={input} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+                <Field label="Кабинет">
+                    <Select value={resourceId} onChange={e => setResourceId(e.target.value)}>
+                        {RESOURCES.filter(r => r.isActive !== false).map(r => (
+                            <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                    </Select>
                 </Field>
-                <Field label="Длительность (мин)">
-                    <input type="number" min={15} step={15} value={duration} onChange={e => setDuration(Number(e.target.value))} style={input} />
+                <Field label="Дата">
+                    <Input kind="date" value={date} onChange={e => setDate(e.target.value)} />
+                </Field>
+                <Field label="Дата окончания" optional hint="Для серии — закроем каждый день до этой даты">
+                    <Input kind="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <Field label="Начало">
+                        <Input kind="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                    </Field>
+                    <Field label="Длительность">
+                        <Input kind="integer" suffix="мин" value={duration} onChange={e => setDuration(Number(e.target.value))} />
+                    </Field>
+                </div>
+                <Field label="Причина" hint="Видно в шахматке">
+                    <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Уборка, ремонт, мероприятие…" />
                 </Field>
             </div>
-            <Field label="Причина (видно в шахматке)">
-                <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="Уборка, ремонт, мероприятие..." style={input} />
-            </Field>
 
             <div style={SHEET_FOOTER}>
-                <button
+                <Button
+                    block
+                    loading={saving}
+                    icon={<Check size={16} aria-hidden="true" />}
                     onClick={handleSave}
-                    disabled={saving}
-                    style={primaryBtn}
                 >
-                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                     Закрыть кабинет
-                </button>
+                </Button>
             </div>
         </BottomSheet>
     );
@@ -523,14 +494,17 @@ function WaitlistTab() {
     const { users } = useUserStore();
     const [entries, setEntries] = useState<WaitlistEntry[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         setLoading(true);
         try {
             const data = await waitlistApi.getAllWaitlistAdmin();
             setEntries(data);
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось загрузить');
+            setFailed(false);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -539,13 +513,20 @@ function WaitlistTab() {
     useEffect(() => { load(); }, []);
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Удалить из листа ожидания?')) return;
+        const ok = await confirm({
+            title: 'Убрать из листа ожидания?',
+            body: 'Клиент больше не получит уведомление, когда слот освободится.',
+            confirmLabel: 'Убрать из листа',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
         try {
             await waitlistApi.removeFromWaitlist(id);
             setEntries(prev => prev.filter(e => e.id !== id));
-            toast.success('Удалено');
+            toast.success('Убрали из листа ожидания');
         } catch {
-            toast.error('Ошибка удаления');
+            toast.error('Не удалось убрать из листа. Попробуйте ещё раз');
         }
     };
 
@@ -553,12 +534,13 @@ function WaitlistTab() {
 
     return (
         <div>
+            {failed && !loading && (
+                <ErrorBar message="Не удалось загрузить лист ожидания" onRetry={load} className="mb-3" />
+            )}
             {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-                    <Loader2 size={18} className="animate-spin" style={{ color: '#888' }} />
-                </div>
-            ) : entries.length === 0 ? (
-                <Empty>Лист ожидания пуст</Empty>
+                <SkeletonList count={3} label="Загружаем лист ожидания" cardHeight={56} />
+            ) : failed ? null : entries.length === 0 ? (
+                <EmptyState compact title="Лист ожидания пуст" hint="Здесь появятся клиенты, которые ждут освободившийся слот." />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {entries.map(e => {
@@ -566,27 +548,20 @@ function WaitlistTab() {
                         const dateStr = String((e as any).date || '').slice(0, 10);
                         return (
                             <div key={e.id} style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.06)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 10,
-                                padding: '10px 12px',
-                                display: 'flex', gap: 10, alignItems: 'center',
+                                padding: '4px 4px 4px 12px',
+                                display: 'flex', gap: 6, alignItems: 'center',
                             }}>
-                                <div style={{
-                                    width: 32, height: 32, borderRadius: 8,
-                                    background: 'rgba(76,138,255,0.12)', color: '#3F6BD8',
-                                    display: 'grid', placeItems: 'center', flexShrink: 0,
-                                }}>
-                                    <Bell size={14} />
-                                </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {userName((e as any).userId)}
                                     </div>
-                                    <div style={{ fontSize: 11, color: '#888' }}>
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                         {res?.name || (e as any).resourceId}
                                         {' · '}
-                                        {dateStr ? format(new Date(dateStr + 'T00:00:00'), 'd MMM', { locale: ru }) : '?'}
+                                        {dateStr ? formatDayMonth(dateStr) : 'дата не указана'}
                                         {' · '}
                                         {(e as any).startTime}–{(e as any).endTime}
                                     </div>
@@ -595,22 +570,22 @@ function WaitlistTab() {
                                     onClick={async () => {
                                         try {
                                             const r = await waitlistApi.notifyEntry(e.id);
-                                            toast.success(`Уведомлён${r.notified ? ` — ${r.notified}` : ''}`);
+                                            toast.success(`Уведомление отправлено${r.notified ? ` (${r.notified})` : ''}`);
                                         } catch (err: any) {
-                                            toast.error(err?.response?.data?.detail || 'Не удалось уведомить');
+                                            toast.error(err?.response?.data?.detail || 'Не удалось отправить уведомление');
                                         }
                                     }}
-                                    style={{ background: 'none', border: 'none', color: '#3F6BD8', cursor: 'pointer', padding: 6 }}
+                                    style={iconBtn('var(--color-ink)')}
                                     aria-label="Уведомить клиента"
                                 >
-                                    <Bell size={15} />
+                                    <Bell size={16} aria-hidden="true" />
                                 </button>
                                 <button
                                     onClick={() => handleDelete(e.id)}
-                                    style={{ background: 'none', border: 'none', color: '#B3261E', cursor: 'pointer', padding: 6 }}
-                                    aria-label="Удалить"
+                                    style={iconBtn('var(--status-danger-fg)')}
+                                    aria-label="Убрать из листа ожидания"
                                 >
-                                    <Trash2 size={15} />
+                                    <Trash2 size={16} aria-hidden="true" />
                                 </button>
                             </div>
                         );
@@ -623,34 +598,31 @@ function WaitlistTab() {
 
 // ── Shared bits ──────────────────────────────────────────────────────────
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
     return (
-        <button onClick={onClick} style={{
-            flexShrink: 0,
-            padding: '7px 12px',
-            borderRadius: 999,
-            border: active ? '1px solid #0E0E0E' : '1px solid rgba(0,0,0,0.12)',
-            background: active ? '#0E0E0E' : '#fff',
-            color: active ? '#fff' : '#0E0E0E',
-            fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', whiteSpace: 'nowrap',
-        }}>{children}</button>
-    );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{ textAlign: 'center', padding: 32, color: '#888', fontSize: 13 }}>
+        <div style={{
+            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+            textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8,
+        }}>
             {children}
         </div>
     );
 }
 
+/** Кнопка-иконка 44×44 (зона нажатия), значок 16. */
+function iconBtn(color: string): React.CSSProperties {
+    return {
+        background: 'none', border: 'none', color, cursor: 'pointer',
+        width: 44, height: 44, flexShrink: 0,
+        display: 'grid', placeItems: 'center', borderRadius: 8,
+    };
+}
+
 function BottomSheet({ onClose, title, children }: { onClose: () => void; title: string; children: React.ReactNode }) {
     return (
-        <div onClick={onClose} style={{
+        <div onClick={onClose} role="dialog" aria-modal="true" aria-label={title} style={{
             position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'rgba(15,15,16,0.45)',
             // Было 100 — как у нижнего меню, и меню закрывало «Закрыть кабинет».
             zIndex: Z_SHEET,
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
@@ -658,17 +630,17 @@ function BottomSheet({ onClose, title, children }: { onClose: () => void; title:
             <div onClick={e => e.stopPropagation()} style={{
                 width: '100%', maxWidth: 480, maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
                 overscrollBehavior: 'contain',
-                background: '#fff',
-                borderTopLeftRadius: 18, borderTopRightRadius: 18,
+                background: 'var(--color-card)',
+                borderTopLeftRadius: 16, borderTopRightRadius: 16,
                 // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER
                 // (главная кнопка шторки прилипает к низу).
-                padding: '14px 16px 0',
-                boxShadow: '0 -8px 24px rgba(0,0,0,0.18)',
+                padding: '8px 16px 0',
+                boxShadow: 'var(--shadow-pop)',
             }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888' }}>
-                        <X size={20} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <h2 style={{ fontWeight: 600, fontSize: 20, margin: 0 }}>{title}</h2>
+                    <button onClick={onClose} aria-label="Закрыть" style={iconBtn('var(--color-ink-60)')}>
+                        <X size={20} aria-hidden="true" />
                     </button>
                 </div>
                 {children}
@@ -676,41 +648,3 @@ function BottomSheet({ onClose, title, children }: { onClose: () => void; title:
         </div>
     );
 }
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-        <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#666', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 5 }}>
-                {label}
-            </div>
-            {children}
-        </div>
-    );
-}
-
-const input: React.CSSProperties = {
-    width: '100%',
-    padding: '10px 12px',
-    border: '1px solid rgba(0,0,0,0.12)',
-    borderRadius: 8,
-    fontSize: 14,
-    background: '#fff',
-    color: '#0E0E0E',
-    outline: 'none',
-};
-
-const primaryBtn: React.CSSProperties = {
-    width: '100%',
-    padding: '12px',
-    background: '#0E0E0E',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    fontWeight: 700,
-    fontSize: 14,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-};

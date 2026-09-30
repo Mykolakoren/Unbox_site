@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CalendarDays, FileText, Users, UserCircle, Wallet, Monitor } from 'lucide-react';
+import { ArrowLeft, CalendarDays, FileText, Users, UserCircle, Wallet } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
 import { crmApi } from '../../../api/crm';
 import type { MobileCrmOutletContext } from './crmDataVersion';
@@ -16,7 +16,7 @@ import { useTouchDensity } from '../../../hooks/useTouchDensity';
 /**
  * Mobile CRM shell — separate workspace from /m (cabinet).
  *
- * Tabs: Сегодня (today's therapy sessions) / Клиенты / Заметки.
+ * Tabs: Сегодня (today's therapy sessions) / Клиенты / Финансы / Заметки / Анкета.
  * Profile lives back in the main cabinet, this workspace is purely the
  * specialist's daily-CRM toolbox: list of today's clients, quick payment /
  * note actions, fast lookup.
@@ -91,7 +91,7 @@ export function MobileCrmLayout() {
     if (!currentUser) {
         return (
             <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
-                <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                <div role="status" aria-label="Загружаем" className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
             </div>
         );
     }
@@ -132,56 +132,44 @@ export function MobileCrmLayout() {
                     приложениях. В обычном Safari env() = 0, ничего не
                     меняется. */}
                 <div style={{
-                    background: '#0E0E0E',
-                    color: '#fff',
-                    padding: 'calc(8px + env(safe-area-inset-top, 0px)) 14px 8px',
+                    background: 'var(--color-ink)',
+                    color: 'var(--color-on-ink)',
+                    padding: 'calc(6px + env(safe-area-inset-top, 0px)) 14px 6px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
                 }}>
+                    {/* Wave 1: голая стрелка 28×28 выглядела как «назад» и путалась
+                        со стрелкой карточки клиента (аудит G6-12). Теперь это
+                        подписанная кнопка 44 px — выход из CRM в личный кабинет. */}
                     <button
                         onClick={() => navigate('/m')}
-                        aria-label="К кабинету"
+                        aria-label="Мой кабинет"
                         style={{
-                            background: 'rgba(255,255,255,0.12)',
+                            background: 'rgba(250,250,247,0.12)',
                             border: 'none',
                             borderRadius: 8,
-                            width: 28, height: 28,
-                            display: 'grid', placeItems: 'center',
+                            minHeight: 44, minWidth: 44,
+                            padding: '0 10px',
+                            display: 'flex', alignItems: 'center', gap: 6,
                             cursor: 'pointer',
-                            color: '#fff',
+                            color: 'var(--color-on-ink)',
+                            fontFamily: 'inherit',
+                            fontSize: TEXT.caption,
+                            fontWeight: 600,
                         }}
                     >
-                        <ArrowLeft size={14} />
+                        <ArrowLeft size={16} aria-hidden="true" />
+                        Кабинет
                     </button>
-                    <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1 }}>
                         Psy-CRM · {currentUser.name?.split(' ')[0]}
                     </div>
-                    <NotificationsBell color="#fff" />
-                    <button
-                        onClick={() => {
-                            sessionStorage.setItem('forceDesktop', '1');
-                            window.location.href = '/crm';
-                        }}
-                        title="Переключиться на десктоп-версию CRM"
-                        style={{
-                            background: 'rgba(255,255,255,0.12)',
-                            border: 'none',
-                            borderRadius: 6,
-                            padding: '4px 8px',
-                            color: '#fff',
-                            fontSize: 10,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                        }}
-                        aria-label="Десктоп"
-                    >
-                        <Monitor size={11} />
-                        десктоп
-                    </button>
+                    <NotificationsBell color={COLOR.onInk} />
+                    {/* Wave 1: кнопка «десктоп» убрана, как в админке 02.06 и в
+                        /m/me. Она ставила sessionStorage.forceDesktop, который
+                        App.tsx давно не читает, — /crm на телефоне сразу
+                        возвращал в /m/crm (аудит G6-04, X2-03). */}
                 </div>
 
                 <main data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>

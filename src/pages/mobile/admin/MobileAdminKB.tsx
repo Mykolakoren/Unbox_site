@@ -12,7 +12,7 @@ interface Section {
 
 const SECTIONS: Section[] = [
     { id: 'pricing', title: 'Тарифы и скидки',  sub: '20 ₾/ч инд., 35 ₾/ч груп., скидки за длительность',  icon: Wallet },
-    { id: 'rules',   title: 'Правила бронирования', sub: 'Отмены, переносы, hot-booking, серии',           icon: BookOpen },
+    { id: 'rules',   title: 'Правила бронирования', sub: 'Отмены, переносы, срочные брони, серии',        icon: BookOpen },
     { id: 'morning', title: 'Утренний чек-лист',    sub: 'Открытие центра — кабинеты, холл, кухня',         icon: Sun },
     { id: 'day',     title: 'Дневной чек-лист',     sub: 'Регулярные проверки в течение дня',               icon: Sparkles },
     { id: 'evening', title: 'Вечерний чек-лист',    sub: 'Закрытие центра — уборка, инвентарь, сейф',       icon: Clock },
@@ -22,7 +22,11 @@ const SECTIONS: Section[] = [
  * Mobile admin: База знаний — index of canonical operations docs. Content
  * itself stays on desktop (`/admin/knowledge-base`) where text + tables read
  * better; mobile shows the index so the on-call admin can quickly tap
- * "Утренний чек-лист" and get redirected to the desktop page in a new tab.
+ * "Утренний чек-лист" and read the short version.
+ *
+ * Wave 1: ссылка «Открыть полную статью →» вела на /admin/knowledge-base,
+ * а телефон оттуда перенаправляет обратно на главную админки — тупик по
+ * кругу (аудит G9-06). Теперь честная подсказка: полная статья — на компьютере.
  */
 export function MobileAdminKB() {
     const [expandedId, setExpandedId] = useState<SectionId | null>(null);
@@ -30,11 +34,11 @@ export function MobileAdminKB() {
     return (
         <div style={{ padding: '14px 14px 90px' }}>
             <div style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: '#888',
+                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: 'var(--color-ink-60)',
                 marginBottom: 10,
             }}>
-                База знаний · {SECTIONS.length} раздела
+                База знаний · {SECTIONS.length} разделов
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -47,8 +51,8 @@ export function MobileAdminKB() {
                                 onClick={() => setExpandedId(isOpen ? null : s.id)}
                                 style={{
                                     width: '100%',
-                                    background: '#fff',
-                                    border: '1px solid rgba(0,0,0,0.06)',
+                                    background: 'var(--color-card)',
+                                    border: '1px solid var(--color-ink-08)',
                                     borderRadius: 12,
                                     borderBottomLeftRadius: isOpen ? 0 : 12,
                                     borderBottomRightRadius: isOpen ? 0 : 12,
@@ -63,19 +67,19 @@ export function MobileAdminKB() {
                             >
                                 <div style={{
                                     width: 36, height: 36, borderRadius: 9,
-                                    background: 'rgba(76,138,107,0.10)',
-                                    color: '#1B7430',
+                                    background: 'var(--color-sunken)',
+                                    color: 'var(--color-ink-80)',
                                     display: 'grid', placeItems: 'center',
                                     flexShrink: 0,
                                 }}>
-                                    <Icon size={16} />
+                                    <Icon size={16} aria-hidden="true" />
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 700, fontSize: 14, color: '#0E0E0E' }}>
+                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)' }}>
                                         {s.title}
                                     </div>
                                     <div style={{
-                                        fontSize: 11, color: '#888',
+                                        fontSize: 12, color: 'var(--color-ink-60)',
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                         marginTop: 2,
                                     }}>
@@ -85,7 +89,7 @@ export function MobileAdminKB() {
                                 <ChevronRight
                                     size={16}
                                     style={{
-                                        color: '#bbb',
+                                        color: 'var(--color-ink-60)',
                                         flexShrink: 0,
                                         transform: isOpen ? 'rotate(90deg)' : 'rotate(0)',
                                         transition: 'transform 200ms',
@@ -101,34 +105,33 @@ export function MobileAdminKB() {
             <div style={{
                 marginTop: 16,
                 padding: 12,
-                background: 'rgba(76,138,107,0.06)',
+                background: 'var(--color-sunken)',
                 borderRadius: 10,
                 fontSize: 12,
-                color: '#444',
+                color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
                 gap: 8,
                 alignItems: 'flex-start',
             }}>
-                <ListChecks size={14} style={{ flexShrink: 0, marginTop: 2, color: '#1B7430' }} />
+                <ListChecks size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Полные тексты и таблицы — в десктоп-версии /admin/knowledge-base.
-                    Тапни «Открыть» в любом разделе, чтобы перейти.
+                    Здесь — короткие версии. Полные тексты и таблицы удобнее читать
+                    на компьютере: unbox.com.ge/admin/knowledge-base
                 </span>
             </div>
         </div>
     );
 }
 
-/** Inline preview block — short content snippet + "Открыть" CTA that takes
- *  the user to the canonical desktop page anchored on the section. */
+/** Inline preview block — short content snippet + подсказка, где полная статья. */
 function SectionPreview({ section }: { section: Section }) {
     const snippet = (() => {
         switch (section.id) {
             case 'pricing':
                 return 'Базовые тарифы: индивидуальный кабинет 20 ₾/ч, групповой 35 ₾/ч, капсула 10 ₾/ч. Скидки за длительность: 2 ч → −10%, 3 ч → −15%, 5+ ч → −20%. Пиковые часы (09–10, 20–22): +5 ₾/ч.';
             case 'rules':
-                return 'Отмена бесплатно за 24 ч. Менее 24 ч — оплата 100%. Перебронирование (re-rent) даёт второй шанс. Серии: переносится «эта» или «эта и все следующие».';
+                return 'Отмена бесплатно за 24 ч. Позже — оплата 100%, но бронь можно пересдать: если её кто-то заберёт, клиенту вернётся 50%. Серии: переносится «эта» или «эта и все следующие».';
             case 'morning':
                 return '09:00 — открыть центр, проверить чистоту кабинетов, наполнить кулер, включить кондиционеры. Холл: смести крошки, перетряхнуть подушки. Кухня: помыть чашки.';
             case 'day':
@@ -142,34 +145,20 @@ function SectionPreview({ section }: { section: Section }) {
 
     return (
         <div style={{
-            background: '#fff',
-            border: '1px solid rgba(0,0,0,0.06)',
+            background: 'var(--color-card)',
+            border: '1px solid var(--color-ink-08)',
             borderTop: 'none',
             borderBottomLeftRadius: 12,
             borderBottomRightRadius: 12,
             padding: '12px 14px 14px',
-            fontSize: 12,
-            color: '#444',
+            fontSize: 14,
+            color: 'var(--color-ink-80)',
             lineHeight: 1.55,
         }}>
-            <p style={{ margin: '0 0 10px' }}>{snippet}</p>
-            <a
-                href="/admin/knowledge-base"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                    display: 'inline-block',
-                    padding: '7px 12px',
-                    background: '#0E0E0E',
-                    color: '#fff',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    borderRadius: 7,
-                    textDecoration: 'none',
-                }}
-            >
-                Открыть полную статью →
-            </a>
+            <p style={{ margin: '0 0 8px' }}>{snippet}</p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-60)' }}>
+                Полная статья — на компьютере, в разделе «База знаний».
+            </p>
         </div>
     );
 }

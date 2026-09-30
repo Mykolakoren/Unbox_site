@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, AlertCircle, Loader2, Calendar, ChevronRight } from 'lucide-react';
+import { TrendingUp, AlertCircle, Calendar, ChevronRight, ChevronLeft } from 'lucide-react';
 import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { crmApi, type CrmDashboard } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { useCrmDataVersion } from './crmDataVersion';
+import { Button } from '../../../components/ui/Button';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { COLOR } from '../../../design/tokens';
+import { formatGel, formatMoney, formatMonthLabel } from '../../../utils/format';
 
 /**
  * Mobile CRM Финансы — money snapshot for the active specialist.
@@ -16,6 +21,10 @@ import { useCrmDataVersion } from './crmDataVersion';
  *
  * Tap a debt row to jump to /m/crm/clients/<id> where the specialist can
  * mark sessions paid or record a payment.
+ *
+ * Wave 1: заголовок «Финансы», стрелки месяца — значки 44 px с подписью для
+ * диктора, светлая полоса итогов (долг — красным токеном), суммы —
+ * formatGel/formatMoney («140 ₾», а не «140 GEL»), «Ср. чек» → «Средний чек».
  */
 export function MobileCrmFinance() {
     const navigate = useNavigate();
@@ -64,32 +73,43 @@ export function MobileCrmFinance() {
 
     return (
         <div style={{ padding: '14px 14px 90px' }}>
+            <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 2px 12px' }}>
+                Финансы
+            </h1>
+
             {/* Month picker */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <button
+                <Button
+                    variant="secondary"
+                    size="touch"
+                    icon={<ChevronLeft size={20} aria-hidden="true" />}
+                    aria-label="Предыдущий месяц"
                     onClick={() => setMonthOffset(o => o - 1)}
-                    style={navBtn}
-                >‹</button>
+                />
                 <div style={{
-                    flex: 1, textAlign: 'center', padding: '8px 10px',
-                    border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8,
-                    fontSize: 13, fontWeight: 700,
+                    flex: 1, textAlign: 'center', padding: '0 10px',
+                    minHeight: 44,
+                    border: '1px solid var(--color-ink-08)', borderRadius: 8,
+                    fontSize: 14, fontWeight: 600,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}>
-                    <Calendar size={14} style={{ opacity: 0.6 }} />
-                    {format(monthDate, 'LLLL yyyy', { locale: ru })}
+                    <Calendar size={16} color={COLOR.ink60} aria-hidden="true" />
+                    {formatMonthLabel(monthDate, { capitalize: true })}
                 </div>
-                <button
-                    onClick={() => setMonthOffset(o => o + 1)}
+                <Button
+                    variant="secondary"
+                    size="touch"
+                    icon={<ChevronRight size={20} aria-hidden="true" />}
+                    aria-label="Следующий месяц"
                     disabled={monthOffset >= 0}
-                    style={{ ...navBtn, opacity: monthOffset >= 0 ? 0.3 : 1 }}
-                >›</button>
+                    onClick={() => setMonthOffset(o => o + 1)}
+                />
             </div>
 
             {/* Top totals strip */}
             <div style={{
-                background: '#0E0E0E',
-                color: '#fff',
+                background: 'var(--color-sunken)',
+                color: 'var(--color-ink)',
                 borderRadius: 14,
                 padding: '14px 16px',
                 marginBottom: 14,
@@ -98,13 +118,13 @@ export function MobileCrmFinance() {
                 gap: 10,
             }}>
                 <TotalCell
-                    icon={<TrendingUp size={12} />}
+                    icon={<TrendingUp size={14} aria-hidden="true" />}
                     label="Доход за месяц"
                     value={dashboard?.revenueThisMonth}
                     loading={pending}
                 />
                 <TotalCell
-                    icon={<AlertCircle size={12} />}
+                    icon={<AlertCircle size={14} aria-hidden="true" />}
                     label="Долг (всего)"
                     value={dashboard?.totalActiveDebt}
                     loading={pending}
@@ -113,35 +133,11 @@ export function MobileCrmFinance() {
             </div>
 
             {failed && !loading && (
-                <div style={{
-                    background: '#FEF3C7',
-                    border: '1px solid #FCD34D',
-                    color: '#8A5A00',
-                    borderRadius: 12,
-                    padding: '12px 14px',
-                    marginBottom: 14,
-                    fontSize: 13,
-                    lineHeight: 1.4,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                }}>
-                    <span style={{ flex: 1 }}>
-                        Не удалось загрузить финансы.
-                    </span>
-                    <button
-                        onClick={() => setRetryTick(t => t + 1)}
-                        style={{
-                            background: '#0E0E0E', color: '#fff',
-                            border: 'none', borderRadius: 8,
-                            padding: '8px 12px',
-                            fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                            cursor: 'pointer', flexShrink: 0,
-                        }}
-                    >
-                        Повторить
-                    </button>
-                </div>
+                <ErrorBar
+                    message="Не удалось загрузить финансы"
+                    onRetry={() => setRetryTick(t => t + 1)}
+                    className="mb-3"
+                />
             )}
 
             {/* Secondary metrics */}
@@ -152,76 +148,75 @@ export function MobileCrmFinance() {
                     gap: 6,
                     marginBottom: 14,
                 }}>
-                    <MiniMetric label="Сессий" value={dashboard.sessionsThisMonth} unit="" />
-                    <MiniMetric label="Не оплачено" value={dashboard.unpaidSessions} unit="" />
-                    <MiniMetric label="Ср. чек" value={dashboard.avgCheck} unit="₾" />
+                    <MiniMetric label="Сессий" value={dashboard.sessionsThisMonth} />
+                    <MiniMetric label="Не оплачено" value={dashboard.unpaidSessions} />
+                    <MiniMetric label="Средний чек" value={dashboard.avgCheck} money />
                 </div>
             )}
 
             {/* Debt by client */}
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8 }}>
                 Должники{dashboard ? ` · ${debts.length}` : ''}
             </div>
             {pending ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-                    <Loader2 size={18} className="animate-spin" style={{ color: '#888' }} />
-                </div>
+                <SkeletonList count={3} label="Загружаем должников" cardHeight={56} />
             ) : !dashboard ? (
                 // Сбой: не пишем «Нет задолженностей» — мы этого не знаем.
-                <div style={{ textAlign: 'center', padding: 24, color: '#888', fontSize: 13 }}>
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-ink-60)', fontSize: 14 }}>
                     —
                 </div>
             ) : debts.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 24, color: '#888', fontSize: 13 }}>
-                    Нет задолженностей
-                </div>
+                <EmptyState compact title="Нет задолженностей" hint="Все клиенты рассчитались." />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {debts.map(d => (
                         <button
                             key={d.clientId}
                             onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
+                            className="press"
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 10,
                                 padding: '11px 12px',
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.04)',
+                                minHeight: 56,
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 10,
                                 cursor: 'pointer',
                                 textAlign: 'left',
                                 width: '100%',
+                                fontFamily: 'inherit',
                             }}
                         >
                             <div style={{
                                 width: 36, height: 36, borderRadius: 9,
-                                background: 'rgba(179,38,30,0.08)',
-                                color: '#B3261E',
+                                background: 'var(--status-danger-bg)',
+                                color: 'var(--status-danger-fg)',
                                 display: 'grid', placeItems: 'center',
-                                fontSize: 13, fontWeight: 700,
+                                fontSize: 14, fontWeight: 600,
                                 flexShrink: 0,
                             }}>
                                 {initials(d.clientName)}
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                     {d.clientName}
                                 </div>
-                                <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
-                                    {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)} не оплачено
+                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                                    Не оплачено: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
                                 </div>
                             </div>
-                            <div style={{
+                            <div className="num" style={{
                                 fontSize: 14,
-                                fontWeight: 700,
-                                fontFamily: 'ui-monospace, "SF Mono", monospace',
-                                color: '#B3261E',
+                                fontWeight: 600,
+                                color: 'var(--status-danger-fg)',
                                 textAlign: 'right',
+                                whiteSpace: 'nowrap',
                             }}>
-                                {d.totalDebt.toFixed(0)}<span style={{ fontSize: 10, color: '#888' }}> {d.currency || '₾'}</span>
+                                {formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })}
                             </div>
-                            <ChevronRight size={14} style={{ color: '#999', flexShrink: 0 }} />
+                            <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" style={{ flexShrink: 0 }} />
                         </button>
                     ))}
                 </div>
@@ -229,18 +224,6 @@ export function MobileCrmFinance() {
         </div>
     );
 }
-
-const navBtn: React.CSSProperties = {
-    width: 32, height: 32,
-    border: '1px solid rgba(0,0,0,0.12)',
-    background: '#fff',
-    borderRadius: 8,
-    fontSize: 15,
-    fontWeight: 700,
-    color: '#0E0E0E',
-    cursor: 'pointer',
-    display: 'grid', placeItems: 'center',
-};
 
 function TotalCell({
     icon, label, value, loading, warning,
@@ -253,42 +236,36 @@ function TotalCell({
 }) {
     return (
         <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, opacity: 0.65, marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 4 }}>
                 {icon} {label}
             </div>
-            <div style={{
-                fontSize: 22,
-                fontWeight: 700,
-                fontFamily: 'ui-monospace, "SF Mono", monospace',
-                color: warning && (value || 0) > 0 ? '#FF8B7A' : '#fff',
-                letterSpacing: '-0.02em',
+            <div className="num" style={{
+                fontSize: 20,
+                fontWeight: 600,
+                color: warning && (value ?? 0) > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
                 lineHeight: 1.1,
             }}>
-                {loading ? '…' : value === undefined || value === null ? '—' : value.toFixed(0)}
-                <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>₾</span>
+                {loading ? '…' : value === undefined || value === null ? '—' : formatGel(value)}
             </div>
         </div>
     );
 }
 
-function MiniMetric({ label, value, unit }: { label: string; value: number | undefined; unit: string }) {
+function MiniMetric({ label, value, money }: { label: string; value: number | undefined; money?: boolean }) {
     return (
         <div style={{
-            background: '#fff',
-            border: '1px solid rgba(0,0,0,0.06)',
+            background: 'var(--color-card)',
+            border: '1px solid var(--color-ink-08)',
             borderRadius: 10,
             padding: '9px 10px 10px',
         }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#888', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 2 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 2 }}>
                 {label}
             </div>
-            <div style={{
-                fontSize: 16, fontWeight: 700, color: '#0E0E0E',
-                fontFamily: 'ui-monospace, "SF Mono", monospace',
-                letterSpacing: '-0.01em',
+            <div className="num" style={{
+                fontSize: 16, fontWeight: 600, color: 'var(--color-ink)',
             }}>
-                {value !== undefined ? value.toFixed(0) : '—'}
-                {unit && <span style={{ fontSize: 10, color: '#888', marginLeft: 2 }}>{unit}</span>}
+                {value === undefined || value === null ? '—' : money ? formatGel(value) : value.toFixed(0)}
             </div>
         </div>
     );
@@ -298,8 +275,10 @@ function initials(name: string): string {
     return name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('') || '?';
 }
 
+/** 1 сессия, 2 сессии, 5 сессий, 11 сессий, 21 сессия. */
 function pluralizeSessions(n: number): string {
-    if (n === 1) return 'сессия';
-    if (n >= 2 && n <= 4) return 'сессии';
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
     return 'сессий';
 }

@@ -15,9 +15,11 @@ import { useTouchDensity } from '../../../hooks/useTouchDensity';
 /**
  * Mobile admin shell — separate workspace at /m/admin.
  *
- * Tabs: Дашборд (cluster of today's numbers + hot-booking inbox)
- *     / Юзеры (search + quick actions)
+ * Tabs: Главная (cluster of today's numbers + hot-booking inbox)
+ *     / Брони / Задачи / Финансы
+ *     / Клиенты (search + quick actions)
  *     / Заявки (hot bookings + access requests).
+ * Wave 1: «Дашб.» → «Главная», «Юзеры» → «Клиенты» (как на десктопе).
  *
  * Gate: owner / senior_admin / admin only. Anyone else hits /m fallback.
  */
@@ -54,7 +56,7 @@ export function MobileAdminLayout() {
     if (!currentUser) {
         return (
             <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
-                <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                <div role="status" aria-label="Загружаем" className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
             </div>
         );
     }
@@ -90,32 +92,40 @@ export function MobileAdminLayout() {
                 {/* Safe-area сверху: в standalone-режиме iOS шапка пряталась
                     под чёлкой (см. MobileCrmLayout, тот же фикс 31.08). */}
                 <div style={{
-                    background: '#0E0E0E',
-                    color: '#fff',
-                    padding: 'calc(8px + env(safe-area-inset-top, 0px)) 14px 8px',
+                    background: 'var(--color-ink)',
+                    color: 'var(--color-on-ink)',
+                    padding: 'calc(6px + env(safe-area-inset-top, 0px)) 14px 6px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
                 }}>
+                    {/* Wave 1: была голая стрелка 28×28 — непонятно, куда ведёт,
+                        и мимо неё легко промахнуться. Теперь подписанная кнопка
+                        высотой 44 px: выход из админки в личный кабинет /m. */}
                     <button
                         onClick={() => navigate('/m')}
-                        aria-label="К кабинету"
+                        aria-label="Мой кабинет"
                         style={{
-                            background: 'rgba(255,255,255,0.12)',
+                            background: 'rgba(250,250,247,0.12)',
                             border: 'none',
                             borderRadius: 8,
-                            width: 28, height: 28,
-                            display: 'grid', placeItems: 'center',
+                            minHeight: 44, minWidth: 44,
+                            padding: '0 10px',
+                            display: 'flex', alignItems: 'center', gap: 6,
                             cursor: 'pointer',
-                            color: '#fff',
+                            color: 'var(--color-on-ink)',
+                            fontFamily: 'inherit',
+                            fontSize: TEXT.caption,
+                            fontWeight: 600,
                         }}
                     >
-                        <ArrowLeft size={14} />
+                        <ArrowLeft size={16} aria-hidden="true" />
+                        Кабинет
                     </button>
-                    <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1 }}>
                         Админка · {currentUser.name?.split(' ')[0]}
                     </div>
-                    <NotificationsBell color="#fff" />
+                    <NotificationsBell color={COLOR.onInk} />
                     {/* 2026-06-02 owner: кнопка «десктоп» убрана. /m/admin
                         стал самостоятельным и cover'ит все основные
                         админ-функции. Для отладки админу остался URL-параметр
@@ -148,11 +158,11 @@ export function MobileAdminLayout() {
                     не daily), вместо них «Брони» — центральная админская
                     функция. На кабинеты ссылка появилась на дашборде в
                     разделе УПРАВЛЕНИЕ. */}
-                <TabLink to="/m/admin/dashboard" icon={BarChart3} label="Дашб." />
+                <TabLink to="/m/admin/dashboard" icon={BarChart3} label="Главная" />
                 <TabLink to="/m/admin/bookings" icon={CalendarDays} label="Брони" />
                 <TabLink to="/m/admin/tasks" icon={CheckSquare} label="Задачи" />
                 <TabLink to="/m/admin/finance" icon={Wallet} label="Финансы" />
-                <TabLink to="/m/admin/users" icon={Users} label="Юзеры" />
+                <TabLink to="/m/admin/users" icon={Users} label="Клиенты" />
                 <TabLink to="/m/admin/inbox" icon={Inbox} label="Заявки" />
             </nav>
 

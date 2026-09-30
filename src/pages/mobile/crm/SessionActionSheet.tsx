@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useScrollLock } from '../useScrollLock';
 import { toast } from 'sonner';
-import { ru } from 'date-fns/locale';
 import {
     Check, X, MapPin, Calendar, Trash2,
-    Unlink, ChevronRight, AlertTriangle,
+    Unlink, ChevronRight, AlertTriangle, ArrowLeft,
 } from 'lucide-react';
 import { crmApi, type CrmSession, type CrmClient, type CrmNote } from '../../../api/crm';
-import { formatBatumi, parseUTC } from '../../../utils/dateUtils';
+import { formatBatumi, parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { CURRENCIES } from '../../../utils/currency';
 import { useUserStore } from '../../../store/userStore';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { Sheet } from '../../../components/ui/Sheet';
+import { Button } from '../../../components/ui/Button';
+import { Field, Input, Select, TextArea } from '../../../components/ui/Field';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { COLOR } from '../../../design/tokens';
+import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 import type { BookingHistoryItem } from '../../../store/types';
 
 /** Resolve the active currency for a session: session.currency overrides
@@ -25,6 +29,8 @@ function currencySymbol(code: string): string {
     return CURRENCIES.find(c => c.code === code)?.symbol ?? code;
 }
 
+/** Дата/время сессии из базы (UTC) — по Батуми. */
+const TZ = { timeZone: BATUMI_TZ };
 
 /**
  * Bottom sheet with full per-session actions used by the mobile CRM day
@@ -34,6 +40,11 @@ function currencySymbol(code: string): string {
  * Mounted with a single `session` prop; closes via `onClose`. After any
  * action that mutates the session, calls `onChange(updated)` so the parent
  * can patch its local state without a full reload.
+ *
+ * Wave 1: контейнер — общий Sheet (слой выше меню, Esc, свайп за ручку,
+ * крестик «Закрыть», фокус внутри, появление 220 мс). Оплата — вся строка
+ * кнопка (раньше системный чекбокс 22×22 внутри кнопки), снятие оплаты
+ * спрашивает подтверждение. Поля и кнопки — общие Field/Button.
  */
 
 interface Props {
@@ -54,12 +65,7 @@ const SITE_REQUEST_MARK = 'Заявка через публичный сайт';
 export function SessionActionSheet({ session, client, onClose, onChange, onDeleted }: Props) {
     const [mode, setMode] = useState<Mode>('main');
     const [busy, setBusy] = useState(false);
-    const startY = useRef<number | null>(null);
-    const sheetRef = useRef<HTMLDivElement | null>(null);
     const { confirm } = useConfirmDialog();
-
-    // Lock scroll while sheet open — ref-counted, не залипает.
-    useScrollLock();
 
     // Заметки к сессии — это те же записи (TherapistNote), что во вкладке
     // «Заметки», в истории клиента и в десктопной карточке. Раньше шторка
@@ -87,9 +93,10 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         && !sessionNotes.some(n => (n.content || '').trim() === legacyText)
         ? legacyText : null;
 
-    const time = formatBatumi(session.date, 'HH:mm');
-    // Wave 1: без русской локали шапка шторки была «29 September, Tue».
-    const dateLabel = formatBatumi(session.date, 'd MMMM, EEE', ru);
+    const when = parseUTC(session.date);
+    const time = formatTime(when, TZ);
+    // Wave 1: «вт, 29 сентября» (раньше «29 September, Tue»).
+    const dateLabel = formatDateLabel(when, TZ);
 
     const update = async (patch: Parameters<typeof crmApi.updateSession>[1], successMsg = 'Сохранено') => {
         setBusy(true);
@@ -100,7 +107,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             return updated;
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось');
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось сохранить. Попробуйте ещё раз');
             throw e;
         } finally {
             setBusy(false);
@@ -108,7 +115,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     };
 
     const handleStatus = async (status: CrmSession['status']) => {
-        try { await update({ status }, status === 'COMPLETED' ? 'Сессия закрыта' : 'Статус обновлён'); setMode('main'); } catch { /* toast already shown */ }
+        try { await update({ status }, status === 'COMPLETED' ? 'Сессия отмечена как прошедшая' : 'Статус обновлён'); setMode('main'); } catch { /* toast already shown */ }
     };
 
     const handlePaid = async (isPaid: boolean) => {
@@ -117,6 +124,17 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         // the session + client, and a TherapistPayment row is written.
         // The old path just flipped `is_paid` with updateSession, which left
         // finances with no payment record (mobile-only "phantom paid" bug).
+        if (!isPaid) {
+            // Снятие оплаты удаляет платёж — раньше это делал один тап по галочке.
+            const ok = await confirm({
+                title: 'Снять оплату?',
+                body: 'Платёж за эту сессию уберём из финансов, сессия снова станет неоплаченной.',
+                confirmLabel: 'Снять оплату',
+                cancelLabel: 'Оставить',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setBusy(true);
         try {
             if (isPaid) {
@@ -130,17 +148,17 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 });
                 toast.success(
                     res.amount
-                        ? `Оплачено: ${res.amount} ${res.currency || ''}`.trim()
-                        : 'Отмечено оплаченным',
+                        ? `Оплачено: ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}`
+                        : 'Сессия отмечена оплаченной',
                 );
             } else {
                 await crmApi.unmarkPaidSession(session.id);
                 onChange({ ...session, isPaid: false });
-                toast.success('Снято с оплаты');
+                toast.success('Оплата снята');
             }
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось');
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось изменить оплату. Попробуйте ещё раз');
         } finally {
             setBusy(false);
         }
@@ -155,7 +173,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             setMode('main');
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось');
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось изменить бронь кабинета. Попробуйте ещё раз');
         } finally { setBusy(false); }
     };
 
@@ -167,7 +185,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             onDeleted(session.id);
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось удалить');
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось удалить сессию. Попробуйте ещё раз');
         } finally { setBusy(false); }
     };
 
@@ -190,8 +208,9 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const handleDeleteNote = async (note: CrmNote) => {
         const ok = await confirm({
             title: 'Удалить заметку?',
-            message: 'Восстановить её будет нельзя.',
-            confirmLabel: 'Удалить',
+            body: 'Восстановить её будет нельзя.',
+            confirmLabel: 'Удалить заметку',
+            cancelLabel: 'Оставить',
             destructive: true,
         });
         if (!ok) return;
@@ -206,117 +225,85 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         } finally { setBusy(false); }
     };
 
-    // Drag-to-dismiss: track touchstart Y, on touchend if moved >120px down → close
-    const onTouchStart = (e: React.TouchEvent) => {
-        startY.current = e.touches[0].clientY;
-    };
-    const onTouchEnd = (e: React.TouchEvent) => {
-        if (startY.current == null) return;
-        const dy = e.changedTouches[0].clientY - startY.current;
-        startY.current = null;
-        if (dy > 120) onClose();
-    };
+    // Drag-to-dismiss, лок прокрутки, Esc и фокус — теперь у общего Sheet.
 
     return (
-        <div
-            style={overlayStyle}
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
+        <Sheet
+            open
+            onClose={onClose}
+            title={client?.name ?? 'Клиент…'}
+            description={`${dateLabel}, ${time} · ${session.durationMinutes ?? 60} мин`}
         >
-            <div
-                ref={sheetRef}
-                style={sheetStyle}
-                onClick={e => e.stopPropagation()}
-                onTouchStart={onTouchStart}
-                onTouchEnd={onTouchEnd}
-            >
-                {/* Drag handle */}
-                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
-                    <div style={{ width: 36, height: 4, borderRadius: 2, background: '#ddd' }} />
-                </div>
-
-                {/* Header */}
-                <div style={{ padding: '12px 18px 4px' }}>
-                    <div style={{ fontSize: 12, color: '#888', fontWeight: 700, letterSpacing: '0.06em' }}>
-                        {dateLabel} · {time} · {session.durationMinutes ?? 60} мин
-                    </div>
-                    <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>
-                        {client?.name ?? `ID ${session.clientId.slice(0, 6)}…`}
-                    </div>
-                </div>
-
-                {mode === 'main' && (
-                    <Main
-                        session={session}
-                        client={client}
-                        busy={busy}
-                        notes={sessionNotes}
-                        legacyNote={legacyNote}
-                        onStatus={handleStatus}
-                        onPaid={handlePaid}
-                        onPrice={() => setMode('price')}
-                        onNotes={() => setMode('notes')}
-                        onReschedule={() => setMode('reschedule')}
-                        onDelete={() => setMode('delete')}
-                        onCabinet={() => setMode('cabinet')}
-                    />
-                )}
-                {mode === 'reschedule' && (
-                    <RescheduleForm
-                        session={session}
-                        busy={busy}
-                        onSubmit={async (newDate, dur) => {
-                            try { await update({ date: newDate, durationMinutes: dur }, 'Перенесено'); setMode('main'); } catch { /* */ }
-                        }}
-                        onBack={() => setMode('main')}
-                    />
-                )}
-                {mode === 'price' && (
-                    <PriceForm
-                        session={session}
-                        client={client}
-                        busy={busy}
-                        onSubmit={async (price) => {
-                            try { await update({ price }, 'Цена обновлена'); setMode('main'); } catch { /* */ }
-                        }}
-                        onBack={() => setMode('main')}
-                    />
-                )}
-                {mode === 'notes' && (
-                    <NotesForm
-                        busy={busy}
-                        notes={sessionNotes}
-                        failed={notesFailed}
-                        legacyNote={legacyNote}
-                        onRetry={loadNotes}
-                        onAdd={async (text) => {
-                            if (await handleAddNote(text)) setMode('main');
-                        }}
-                        onMoveLegacy={(text) => { handleAddNote(text); }}
-                        onDeleteNote={handleDeleteNote}
-                        onBack={() => setMode('main')}
-                    />
-                )}
-                {mode === 'cabinet' && (
-                    <CabinetForm
-                        session={session}
-                        busy={busy}
-                        onDetach={() => handleDetach(false)}
-                        onCancelBooking={() => handleDetach(true)}
-                        onBack={() => setMode('main')}
-                    />
-                )}
-                {mode === 'delete' && (
-                    <DeleteConfirm
-                        session={session}
-                        busy={busy}
-                        onDelete={handleDelete}
-                        onBack={() => setMode('main')}
-                    />
-                )}
-            </div>
-        </div>
+            {mode === 'main' && (
+                <Main
+                    session={session}
+                    client={client}
+                    busy={busy}
+                    notes={sessionNotes}
+                    legacyNote={legacyNote}
+                    onStatus={handleStatus}
+                    onPaid={handlePaid}
+                    onPrice={() => setMode('price')}
+                    onNotes={() => setMode('notes')}
+                    onReschedule={() => setMode('reschedule')}
+                    onDelete={() => setMode('delete')}
+                    onCabinet={() => setMode('cabinet')}
+                />
+            )}
+            {mode === 'reschedule' && (
+                <RescheduleForm
+                    session={session}
+                    busy={busy}
+                    onSubmit={async (newDate, dur) => {
+                        try { await update({ date: newDate, durationMinutes: dur }, 'Сессия перенесена'); setMode('main'); } catch { /* */ }
+                    }}
+                    onBack={() => setMode('main')}
+                />
+            )}
+            {mode === 'price' && (
+                <PriceForm
+                    session={session}
+                    client={client}
+                    busy={busy}
+                    onSubmit={async (price) => {
+                        try { await update({ price }, 'Цена обновлена'); setMode('main'); } catch { /* */ }
+                    }}
+                    onBack={() => setMode('main')}
+                />
+            )}
+            {mode === 'notes' && (
+                <NotesForm
+                    busy={busy}
+                    notes={sessionNotes}
+                    failed={notesFailed}
+                    legacyNote={legacyNote}
+                    onRetry={loadNotes}
+                    onAdd={async (text) => {
+                        if (await handleAddNote(text)) setMode('main');
+                    }}
+                    onMoveLegacy={(text) => { handleAddNote(text); }}
+                    onDeleteNote={handleDeleteNote}
+                    onBack={() => setMode('main')}
+                />
+            )}
+            {mode === 'cabinet' && (
+                <CabinetForm
+                    session={session}
+                    busy={busy}
+                    onDetach={() => handleDetach(false)}
+                    onCancelBooking={() => handleDetach(true)}
+                    onBack={() => setMode('main')}
+                />
+            )}
+            {mode === 'delete' && (
+                <DeleteConfirm
+                    session={session}
+                    busy={busy}
+                    onDelete={handleDelete}
+                    onBack={() => setMode('main')}
+                />
+            )}
+        </Sheet>
     );
 }
 
@@ -343,16 +330,17 @@ function Main({
     const currency = sessionCurrency(session, client);
     const symbol = currencySymbol(currency);
     const currencyIcon = (
-        <span style={{ fontWeight: 800, fontSize: 16, lineHeight: 1 }}>{symbol}</span>
+        <span aria-hidden="true" style={{ fontWeight: 600, fontSize: 16, lineHeight: 1 }}>{symbol}</span>
     );
+    const priceText = session.price ? formatMoney(session.price, { currency }) : null;
 
     return (
-        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {/* Status quick toggle */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '0 6px 8px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingBottom: 8 }}>
                 {session.status !== 'COMPLETED' ? (
                     <ActionTile
-                        icon={<Check size={18} />}
+                        icon={<Check size={18} aria-hidden="true" />}
                         label="Прошла"
                         tone="primary"
                         disabled={busy}
@@ -360,7 +348,7 @@ function Main({
                     />
                 ) : (
                     <ActionTile
-                        icon={<Calendar size={18} />}
+                        icon={<Calendar size={18} aria-hidden="true" />}
                         label="Запланирована"
                         disabled={busy}
                         onClick={() => onStatus('PLANNED')}
@@ -370,7 +358,7 @@ function Main({
                     статуса, отмена просто удаляет запись. Бронь кабинета при
                     этом НЕ отменяется (delete_session её не трогает). */}
                 <ActionTile
-                    icon={<X size={18} />}
+                    icon={<X size={18} aria-hidden="true" />}
                     label="Отменить"
                     tone="danger-soft"
                     disabled={busy}
@@ -378,40 +366,39 @@ function Main({
                 />
             </div>
 
+            {/* Оплата: вся строка — кнопка. Раньше срабатывал только системный
+                чекбокс 22×22 внутри кнопки (вложенные элементы, мимо легко
+                промахнуться), а снятие оплаты удаляло платёж без вопроса. */}
             <Row
                 icon={currencyIcon}
-                label={session.isPaid ? 'Оплачено' : 'Не оплачено'}
-                sub={session.price ? `${session.price.toFixed(0)} ${symbol}` : 'цена не указана'}
-                right={
-                    <input
-                        type="checkbox"
-                        checked={!!session.isPaid}
-                        onChange={e => onPaid(e.target.checked)}
-                        style={{ width: 22, height: 22 }}
-                    />
-                }
+                label={session.isPaid ? 'Оплачено' : 'Отметить оплату'}
+                sub={priceText ?? 'цена не указана'}
+                pressed={!!session.isPaid}
+                disabled={busy}
+                right={<CheckMark on={!!session.isPaid} />}
+                onClick={() => onPaid(!session.isPaid)}
             />
             <Row
                 icon={currencyIcon}
                 label="Цена"
-                sub={session.price ? `${session.price.toFixed(0)} ${symbol}` : '—'}
+                sub={priceText ?? '—'}
                 onClick={onPrice}
             />
             <Row
-                icon={<Calendar size={16} />}
+                icon={<Calendar size={16} aria-hidden="true" />}
                 label="Перенести время"
                 sub="Дата · время · длительность"
                 onClick={onReschedule}
             />
             <Row
-                icon={<MapPin size={16} />}
+                icon={<MapPin size={16} aria-hidden="true" />}
                 label={session.isBooked ? `Кабинет: ${cabinet ?? 'привязан'}` : 'Привязать кабинет'}
                 sub={session.isBooked ? 'Бронь активна · открепить или отменить' : 'Забронировать кабинет под эту сессию'}
                 onClick={() => {
                     if (session.isBooked) {
                         // Отдельный шаг с последствиями: раньше «Отменить бронь»
                         // срабатывала с одного тапа, а «открепить» спрашивало
-                        // непонятным системным confirm().
+                        // непонятным системным окном.
                         onCabinet();
                     } else {
                         const date = formatBatumi(session.date, 'yyyy-MM-dd');
@@ -422,7 +409,7 @@ function Main({
                 }}
             />
             <Row
-                icon={<ChevronRight size={16} />}
+                icon={<ChevronRight size={16} aria-hidden="true" />}
                 label={notes && notes.length > 1 ? `Заметки · ${notes.length}` : 'Заметка'}
                 sub={notes === null && !legacyNote ? '…' : latestNote ? truncate(latestNote, 60) : 'добавить заметку'}
                 onClick={onNotes}
@@ -446,26 +433,27 @@ function RescheduleForm({ session, busy, onSubmit, onBack }: {
     return (
         <FormShell title="Перенос сессии" onBack={onBack}>
             <Field label="Дата">
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+                <Input kind="date" value={date} onChange={e => setDate(e.target.value)} />
             </Field>
             <Field label="Время (Батуми)">
-                <input type="time" value={time} onChange={e => setTime(e.target.value)} style={inputStyle} />
+                <Input kind="time" value={time} onChange={e => setTime(e.target.value)} />
             </Field>
-            <Field label="Длительность (мин)">
-                <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={inputStyle}>
-                    {[30, 45, 60, 75, 90, 120].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+            <Field label="Длительность">
+                <Select value={dur} onChange={e => setDur(parseInt(e.target.value))}>
+                    {[30, 45, 60, 75, 90, 120].map(n => <option key={n} value={n}>{n} мин</option>)}
+                </Select>
             </Field>
-            <SubmitButton
-                disabled={busy}
+            <Button
+                block
+                loading={busy}
                 onClick={() => {
                     // Build a Tbilisi wall-clock ISO; backend converts to UTC.
                     const iso = `${date}T${time}:00`;
                     onSubmit(iso, dur);
                 }}
             >
-                Перенести
-            </SubmitButton>
+                Перенести сессию
+            </Button>
         </FormShell>
     );
 }
@@ -479,21 +467,20 @@ function PriceForm({ session, client, busy, onSubmit, onBack }: {
     return (
         <FormShell title="Цена сессии" onBack={onBack}>
             <Field label="Цена">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                        type="number" inputMode="decimal" min={0} step={1}
-                        value={price} onChange={e => setPrice(e.target.value)}
-                        style={inputStyle}
-                    />
-                    <span style={{ fontWeight: 700, color: '#666' }}>{symbol}</span>
-                </div>
+                <Input
+                    kind="money"
+                    suffix={symbol}
+                    value={price}
+                    onChange={e => setPrice(e.target.value)}
+                />
             </Field>
-            <SubmitButton
-                disabled={busy}
-                onClick={() => onSubmit(parseFloat(price) || 0)}
+            <Button
+                block
+                loading={busy}
+                onClick={() => onSubmit(parseFloat(price.replace(',', '.')) || 0)}
             >
-                Сохранить
-            </SubmitButton>
+                Сохранить цену
+            </Button>
         </FormShell>
     );
 }
@@ -516,60 +503,72 @@ function NotesForm({ busy, notes, failed, legacyNote, onRetry, onAdd, onMoveLega
     const isSiteMark = !!legacyNote && legacyNote.startsWith(SITE_REQUEST_MARK);
     return (
         <FormShell title="Заметки к сессии" onBack={onBack}>
-            <textarea
-                value={text}
-                onChange={e => setText(e.target.value)}
-                rows={5}
-                placeholder="О чём говорили, домашнее задание, наблюдения…"
-                style={{ ...inputStyle, resize: 'vertical', minHeight: 110 }}
-            />
-            <SubmitButton disabled={busy || !text.trim()} onClick={() => onAdd(text)}>Сохранить</SubmitButton>
-            <div style={{ fontSize: 11, color: '#999', marginTop: 6 }}>
-                Заметка появится во вкладке «Заметки» и в истории клиента.
-            </div>
+            <Field label="Новая заметка" hint="Появится во вкладке «Заметки» и в истории клиента.">
+                <TextArea
+                    value={text}
+                    onChange={e => setText(e.target.value)}
+                    rows={5}
+                    placeholder="О чём говорили, домашнее задание, наблюдения…"
+                    style={{ minHeight: 110 }}
+                />
+            </Field>
+            <Button block loading={busy} disabled={!text.trim()} onClick={() => onAdd(text)}>
+                Сохранить заметку
+            </Button>
 
             {failed && (
-                <div style={warnBox}>
-                    Не удалось загрузить прошлые заметки.
-                    <button onClick={onRetry} style={linkBtn}>Повторить</button>
+                <div style={{ marginTop: 12 }}>
+                    <ErrorBar message="Не удалось загрузить прошлые заметки" onRetry={onRetry} />
                 </div>
             )}
             {notes === null && !failed && (
-                <div style={{ fontSize: 13, color: '#888', marginTop: 14 }}>Загружаю заметки…</div>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 14 }}>Загружаем заметки…</div>
             )}
 
             {legacyNote && (
-                <div style={{ ...noteCard, background: '#F4F4F2', borderColor: 'rgba(0,0,0,0.06)' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 4 }}>
+                <div style={noteCard}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
                         {isSiteMark ? 'Пометка' : 'Раньше записано здесь · видно только в этой сессии'}
                     </div>
                     <div style={noteText}>{legacyNote}</div>
                     {!isSiteMark && (
-                        <button onClick={() => onMoveLegacy(legacyNote)} disabled={busy} style={{ ...linkBtn, marginLeft: 0, marginTop: 8 }}>
+                        <Button
+                            variant="quiet"
+                            disabled={busy}
+                            onClick={() => onMoveLegacy(legacyNote)}
+                            style={{ marginTop: 4, paddingLeft: 0, textDecoration: 'underline' }}
+                        >
                             Перенести в «Заметки»
-                        </button>
+                        </Button>
                     )}
                 </div>
             )}
 
-            {(notes ?? []).map(n => (
-                <div key={n.id} style={noteCard}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#8A5A00', flex: 1 }}>
-                            {formatBatumi(n.createdAt, 'd MMM, HH:mm', ru)}
-                        </span>
-                        <button
-                            onClick={() => onDeleteNote(n)}
-                            disabled={busy}
-                            aria-label="Удалить заметку"
-                            style={{ background: 'none', border: 'none', padding: 4, color: '#C8253A', cursor: 'pointer' }}
-                        >
-                            <Trash2 size={15} />
-                        </button>
+            {(notes ?? []).map(n => {
+                const created = parseUTC(n.createdAt);
+                return (
+                    <div key={n.id} style={noteCard}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', flex: 1 }}>
+                                {formatDayMonth(created, TZ)}, {formatTime(created, TZ)}
+                            </span>
+                            <button
+                                onClick={() => onDeleteNote(n)}
+                                disabled={busy}
+                                aria-label="Удалить заметку"
+                                style={{
+                                    background: 'none', border: 'none', width: 44, height: 44,
+                                    margin: '-10px -8px -10px 0', display: 'grid', placeItems: 'center',
+                                    color: 'var(--status-danger-fg)', cursor: 'pointer',
+                                }}
+                            >
+                                <Trash2 size={16} aria-hidden="true" />
+                            </button>
+                        </div>
+                        <div style={noteText}>{n.content}</div>
                     </div>
-                    <div style={noteText}>{n.content}</div>
-                </div>
-            ))}
+                );
+            })}
         </FormShell>
     );
 }
@@ -617,52 +616,64 @@ function CabinetForm({ session, busy, onDetach, onCancelBooking, onBack }: {
     const { booking, label } = useLinkedBooking(session);
     const start = (booking && bookingStart(booking)) || parseUTC(session.date);
     const hoursLeft = (start.getTime() - Date.now()) / 3600000;
+    const sessionStart = parseUTC(session.date);
     const whenLabel = booking && booking.startTime
-        ? `${formatBatumi(start, 'd MMMM', ru)}, ${booking.startTime.slice(0, 5)} · ${booking.duration ?? 60} мин`
-        : `${formatBatumi(session.date, 'd MMMM, HH:mm', ru)} · ${session.durationMinutes ?? 60} мин`;
+        ? `${formatDayMonth(start, TZ)}, ${booking.startTime.slice(0, 5)} · ${booking.duration ?? 60} мин`
+        : `${formatDayMonth(sessionStart, TZ)}, ${formatTime(sessionStart, TZ)} · ${session.durationMinutes ?? 60} мин`;
 
     return (
         <FormShell title="Кабинет к сессии" onBack={onBack}>
-            <div style={{ ...noteCard, marginTop: 0, background: '#fff', borderColor: 'rgba(0,0,0,0.08)' }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{label ?? 'Кабинет'}</div>
-                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{whenLabel}</div>
+            <div style={{ ...noteCard, marginTop: 0, background: 'var(--color-card)' }}>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>{label ?? 'Кабинет'}</div>
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>{whenLabel}</div>
             </div>
 
-            <button onClick={onDetach} disabled={busy} style={{ ...neutralBtn, marginTop: 14 }}>
-                <Unlink size={16} /> Только открепить от сессии
-            </button>
-            <div style={{ fontSize: 12, color: '#888', margin: '6px 2px 0' }}>
+            <Button
+                variant="secondary"
+                block
+                disabled={busy}
+                icon={<Unlink size={16} aria-hidden="true" />}
+                onClick={onDetach}
+                style={{ marginTop: 14 }}
+            >
+                Только открепить от сессии
+            </Button>
+            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', margin: '6px 2px 0' }}>
                 Бронь останется за вами — её можно привязать к другой сессии.
             </div>
 
-            <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '16px 0' }} />
+            <div style={{ height: 1, background: 'var(--color-ink-08)', margin: '16px 0' }} />
 
             {hoursLeft <= 0 ? (
-                <div style={{ fontSize: 13, color: '#666' }}>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
                     Бронь уже началась или прошла — отменить её нельзя.
                 </div>
             ) : hoursLeft < 24 ? (
                 <div style={{ ...warnBox, marginTop: 0 }}>
                     <div>
                         До начала меньше суток — отменить бронь уже нельзя.
-                        Можно выставить её на переаренду в «Моих бронях».
+                        Её можно пересдать в «Моих бронях»: если время займут, вернём 50%.
                     </div>
-                    <button onClick={() => navigate('/m/bookings')} style={{ ...linkBtn, marginLeft: 0, marginTop: 8 }}>
+                    <Button
+                        variant="quiet"
+                        onClick={() => navigate('/m/bookings')}
+                        style={{ marginTop: 4, paddingLeft: 0, textDecoration: 'underline', color: 'var(--color-ink)' }}
+                    >
                         Открыть мои брони
-                    </button>
+                    </Button>
                 </div>
             ) : (
                 <>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#8A5A00', marginBottom: 10 }}>
-                        <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-                        <span style={{ fontSize: 13, lineHeight: 1.4 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: 'var(--status-pending-fg)', marginBottom: 10 }}>
+                        <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span style={{ fontSize: 14, lineHeight: 1.4 }}>
                             Бронь отменится, и кабинет смогут занять другие. Если бронь
                             уже оплачена, оплата вернётся полностью. Сессия в CRM останется.
                         </span>
                     </div>
-                    <button onClick={onCancelBooking} disabled={busy} style={destructiveBtn}>
+                    <Button variant="danger" block loading={busy} onClick={onCancelBooking}>
                         Отменить бронь кабинета
-                    </button>
+                    </Button>
                 </>
             )}
         </FormShell>
@@ -677,46 +688,52 @@ function DeleteConfirm({ session, busy, onDelete, onBack }: {
 }) {
     return (
         <FormShell title="Отменить сессию?" onBack={onBack}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#8A5A00', marginBottom: 8 }}>
-                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span style={{ fontSize: 13 }}>
-                    Сессия удалится из CRM и Google Calendar.
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: 'var(--status-pending-fg)', marginBottom: 12 }}>
+                <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 14 }}>
+                    Сессия удалится из CRM и Google Календаря.
                     {session.isBooked && ' Бронь кабинета при этом не отменится — если кабинет не нужен, сначала отмените её: «Назад» → «Кабинет».'}
                 </span>
             </div>
-            <button onClick={() => onDelete('this')} disabled={busy} style={destructiveBtn}>
-                Только эту сессию
-            </button>
+            <Button variant="danger" block disabled={busy} onClick={() => onDelete('this')}>
+                Отменить только эту сессию
+            </Button>
             {session.recurringGroupId && (
-                <button onClick={() => onDelete('future')} disabled={busy} style={{ ...destructiveBtn, marginTop: 8 }}>
-                    Эту и все будущие в серии
-                </button>
+                <Button variant="danger" block disabled={busy} onClick={() => onDelete('future')} style={{ marginTop: 8 }}>
+                    Отменить эту и все будущие в серии
+                </Button>
             )}
         </FormShell>
     );
 }
 
 // ─── small building blocks ──────────────────────────────────────────────
-function Row({ icon, label, sub, right, onClick, tone }: {
+function Row({ icon, label, sub, right, onClick, tone, pressed, disabled }: {
     icon: React.ReactNode;
     label: string;
     sub?: string;
     right?: React.ReactNode;
     onClick?: () => void;
     tone?: 'danger-soft';
+    /** Для переключателя (оплата): состояние для экранного диктора. */
+    pressed?: boolean;
+    disabled?: boolean;
 }) {
-    const fg = tone === 'danger-soft' ? '#C8253A' : '#0E0E0E';
+    const fg = tone === 'danger-soft' ? 'var(--status-danger-fg)' : 'var(--color-ink)';
     return (
         <button
             onClick={onClick}
-            disabled={!onClick && !right}
+            disabled={disabled || (!onClick && !right)}
+            aria-pressed={pressed}
+            className={onClick ? 'press' : undefined}
             style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
                 padding: '12px 14px',
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.06)',
+                minHeight: 56,
+                background: 'var(--color-card)',
+                border: '1px solid var(--color-ink-08)',
                 borderRadius: 12,
                 cursor: onClick ? 'pointer' : 'default',
                 fontFamily: 'inherit',
@@ -726,17 +743,32 @@ function Row({ icon, label, sub, right, onClick, tone }: {
             }}
         >
             <div style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: tone === 'danger-soft' ? '#FEF2F2' : '#F4F4F2',
+                width: 32, height: 32, borderRadius: 8,
+                background: tone === 'danger-soft' ? 'var(--status-danger-bg)' : 'var(--color-sunken)',
                 display: 'grid', placeItems: 'center',
                 flexShrink: 0,
             }}>{icon}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>{label}</div>
-                {sub && <div style={{ fontSize: 12, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
+                {sub && <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
             </div>
-            {right ?? (onClick && <ChevronRight size={16} color="#bbb" />)}
+            {right ?? (onClick && <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />)}
         </button>
+    );
+}
+
+/** Визуальная галочка оплаты (не отдельный элемент управления). */
+function CheckMark({ on }: { on: boolean }) {
+    return (
+        <span aria-hidden="true" style={{
+            width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+            display: 'grid', placeItems: 'center',
+            background: on ? 'var(--status-ok-fg)' : 'transparent',
+            border: on ? 'none' : '2px solid var(--color-ink-40)',
+            color: 'var(--color-on-ink)',
+        }}>
+            {on && <Check size={16} strokeWidth={3} />}
+        </span>
     );
 }
 
@@ -747,17 +779,19 @@ function ActionTile({ icon, label, onClick, tone, disabled }: {
     tone?: 'primary' | 'danger-soft';
     disabled?: boolean;
 }) {
-    const bg = tone === 'primary' ? '#0E0E0E' : tone === 'danger-soft' ? '#FEF2F2' : '#F4F4F2';
-    const fg = tone === 'primary' ? '#fff' : tone === 'danger-soft' ? '#C8253A' : '#0E0E0E';
+    const bg = tone === 'primary' ? 'var(--color-ink)' : tone === 'danger-soft' ? 'var(--status-danger-bg)' : 'var(--color-sunken)';
+    const fg = tone === 'primary' ? 'var(--color-on-ink)' : tone === 'danger-soft' ? 'var(--status-danger-fg)' : 'var(--color-ink)';
     return (
         <button
             onClick={onClick}
             disabled={disabled}
+            className="press"
             style={{
                 background: bg, color: fg,
                 border: 'none', borderRadius: 12,
                 padding: '14px 12px',
-                fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
+                minHeight: 64,
+                fontWeight: 600, fontSize: 14, fontFamily: 'inherit',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
                 cursor: 'pointer',
                 opacity: disabled ? 0.6 : 1,
@@ -773,113 +807,37 @@ function FormShell({ title, onBack, children }: {
     title: string; onBack: () => void; children: React.ReactNode;
 }) {
     return (
-        <div style={{ padding: '8px 18px 18px' }}>
-            <button onClick={onBack} style={backBtn}>
-                ← Назад
-            </button>
-            <h3 style={{ margin: '8px 0 14px', fontSize: 18, fontWeight: 700 }}>{title}</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Button
+                variant="quiet"
+                icon={<ArrowLeft size={16} aria-hidden="true" />}
+                onClick={onBack}
+                style={{ alignSelf: 'flex-start', paddingLeft: 0, color: 'var(--color-ink-60)' }}
+            >
+                Назад
+            </Button>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{title}</h3>
             {children}
         </div>
-    );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-        <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
-                {label}
-            </div>
-            {children}
-        </div>
-    );
-}
-
-function SubmitButton({ children, onClick, disabled }: {
-    children: React.ReactNode; onClick: () => void; disabled?: boolean;
-}) {
-    return (
-        <button onClick={onClick} disabled={disabled} style={{
-            background: '#0E0E0E', color: '#fff',
-            border: 'none', borderRadius: 12,
-            padding: '14px 18px', width: '100%',
-            fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-            cursor: disabled ? 'wait' : 'pointer',
-            marginTop: 8,
-            opacity: disabled ? 0.6 : 1,
-        }}>{children}</button>
     );
 }
 
 function truncate(s: string, n: number) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
 // ─── styles ─────────────────────────────────────────────────────────────
-const overlayStyle: React.CSSProperties = {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-    display: 'flex', alignItems: 'flex-end',
-    zIndex: 200,
-};
-
-const sheetStyle: React.CSSProperties = {
-    background: '#F8F8F6',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    width: '100%',
-    maxWidth: 480,
-    margin: '0 auto',
-    maxHeight: '90vh',
-    overflow: 'auto',
-    paddingBottom: 'env(safe-area-inset-bottom, 16px)',
-    fontFamily: 'inherit',
-};
-
-const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '12px 14px',
-    borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)',
-    fontSize: 15, fontFamily: 'inherit',
-    background: '#fff',
-};
-
-const backBtn: React.CSSProperties = {
-    background: 'none', border: 'none', padding: 0,
-    fontSize: 14, fontWeight: 600, color: '#666',
-    cursor: 'pointer', fontFamily: 'inherit',
-};
-
-const neutralBtn: React.CSSProperties = {
-    background: '#fff', color: '#0E0E0E',
-    border: '1px solid rgba(0,0,0,0.12)', borderRadius: 12,
-    padding: '14px 18px', width: '100%',
-    fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-    cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-};
-
 const warnBox: React.CSSProperties = {
-    background: '#FEF3C7', border: '1px solid #FCD34D', color: '#8A5A00',
+    background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
     borderRadius: 10, padding: '10px 12px', marginTop: 12,
-    fontSize: 13, lineHeight: 1.4,
+    fontSize: 14, lineHeight: 1.4,
 };
 
-const linkBtn: React.CSSProperties = {
-    background: 'none', border: 'none', padding: 0, marginLeft: 6,
-    color: '#0E0E0E', fontWeight: 700, fontSize: 13,
-    textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit',
-};
-
+// Заметка — нейтральная карточка (раньше жёлтая «стикер»: цвет — только для статуса).
 const noteCard: React.CSSProperties = {
-    background: '#FFFBEB', border: '1px solid #FCD34D',
+    background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
     borderRadius: 12, padding: '10px 12px', marginTop: 10,
 };
 
 const noteText: React.CSSProperties = {
-    fontSize: 14, color: '#333', lineHeight: 1.45,
+    fontSize: 14, color: 'var(--color-ink-80)', lineHeight: 1.45,
     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-};
-
-const destructiveBtn: React.CSSProperties = {
-    background: '#fff', color: '#C8253A',
-    border: '1px solid #FBCFD4', borderRadius: 12,
-    padding: '14px 18px', width: '100%',
-    fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-    cursor: 'pointer',
 };

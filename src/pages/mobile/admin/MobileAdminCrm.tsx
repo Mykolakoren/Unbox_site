@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ChevronRight } from 'lucide-react';
+import { Search, ChevronRight, Sprout, Flame, Star, Handshake, Moon, AlertTriangle } from 'lucide-react';
 import { isAfter, subDays } from 'date-fns';
 import { useUserStore } from '../../../store/userStore';
 import { ADMIN_ROLES } from '../../../utils/permissions';
 import type { User } from '../../../store/types';
+import { Chip } from '../../../components/ui/Chip';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { COLOR } from '../../../design/tokens';
+import { formatGel } from '../../../utils/format';
 
 /**
  * Mobile admin — CRM pipeline.
@@ -17,13 +22,14 @@ import type { User } from '../../../store/types';
  */
 type Stage = 'new' | 'active' | 'vip' | 'partner' | 'sleeping' | 'bad_client';
 
-const STAGES: { id: Stage; label: string; emoji: string }[] = [
-    { id: 'new', label: 'Новые', emoji: '🌱' },
-    { id: 'active', label: 'Активные', emoji: '🔥' },
-    { id: 'vip', label: 'VIP', emoji: '⭐' },
-    { id: 'partner', label: 'Партнёры', emoji: '🤝' },
-    { id: 'sleeping', label: 'Спящие', emoji: '💤' },
-    { id: 'bad_client', label: 'Сложные', emoji: '⚠️' },
+// Wave 1: эмодзи стадий → значки Lucide (PRODUCT.md: «эмодзи как иконки — нет»).
+const STAGES: { id: Stage; label: string; icon: React.ElementType }[] = [
+    { id: 'new', label: 'Новые', icon: Sprout },
+    { id: 'active', label: 'Активные', icon: Flame },
+    { id: 'vip', label: 'VIP', icon: Star },
+    { id: 'partner', label: 'Партнёры', icon: Handshake },
+    { id: 'sleeping', label: 'Спящие', icon: Moon },
+    { id: 'bad_client', label: 'Сложные', icon: AlertTriangle },
 ];
 
 export function MobileAdminCrm() {
@@ -31,9 +37,11 @@ export function MobileAdminCrm() {
     const { users, bookings, fetchUsers } = useUserStore();
     const [stage, setStage] = useState<Stage>('active');
     const [query, setQuery] = useState('');
+    // Пока клиенты не пришли, не пишем «никого нет» (wave 1).
+    const [usersTried, setUsersTried] = useState(users.length > 0);
 
     useEffect(() => {
-        if (!users || users.length === 0) fetchUsers();
+        if (!users || users.length === 0) fetchUsers().finally(() => setUsersTried(true));
     }, []);
 
     /** Same stage derivation as the desktop AdminCrm.analytics block — keeps
@@ -88,20 +96,21 @@ export function MobileAdminCrm() {
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                     CRM-воронка
                 </h1>
-                <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    Drag-and-drop между стадиями — на десктопе. Тут только просмотр.
+                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    Здесь только просмотр. Переносить клиентов между стадиями удобнее на компьютере.
                 </p>
             </div>
 
             <div style={{ padding: '0 16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', background: '#F4F4F2', borderRadius: 12, padding: '10px 12px', gap: 8 }}>
-                    <Search size={16} color="#999" />
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-sunken)', borderRadius: 12, padding: '10px 12px', gap: 8 }}>
+                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
+                        aria-label="Поиск клиента"
                         placeholder="Имя, email, телефон…"
                         style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', minWidth: 0 }}
                     />
@@ -110,37 +119,30 @@ export function MobileAdminCrm() {
 
             {/* Stage chips */}
             <div style={{ padding: '0 16px' }}>
-                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                <div role="group" aria-label="Стадия" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
                     {STAGES.map(s => {
-                        const active = stage === s.id;
+                        const Icon = s.icon;
                         return (
-                            <button
+                            <Chip
                                 key={s.id}
+                                selected={stage === s.id}
                                 onClick={() => setStage(s.id)}
-                                style={{
-                                    flexShrink: 0, padding: '7px 12px',
-                                    background: active ? '#0E0E0E' : '#F4F4F2',
-                                    color: active ? '#fff' : '#0E0E0E',
-                                    border: 'none', borderRadius: 999,
-                                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                                    whiteSpace: 'nowrap', fontFamily: 'inherit',
-                                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                                }}
+                                icon={<Icon size={16} aria-hidden="true" />}
+                                style={{ flexShrink: 0 }}
                             >
-                                <span>{s.emoji}</span>
-                                {s.label}
-                                <span style={{ opacity: 0.7 }}>· {counts[s.id]}</span>
-                            </button>
+                                {s.label} · {counts[s.id]}
+                            </Chip>
                         );
                     })}
                 </div>
             </div>
 
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {stageClients.length === 0 && (
-                    <div style={{ background: '#F4F4F2', borderRadius: 12, padding: 24, textAlign: 'center', color: '#666', fontSize: 13 }}>
-                        В этой стадии никого нет.
-                    </div>
+                {!usersTried && users.length === 0 && (
+                    <SkeletonList count={4} label="Загружаем клиентов" cardHeight={56} />
+                )}
+                {(usersTried || users.length > 0) && stageClients.length === 0 && (
+                    <EmptyState compact title="В этой стадии никого нет" hint={query ? 'Попробуйте другой запрос.' : undefined} />
                 )}
                 {stageClients.map(u => (
                     <ClientRow key={u.id} user={u} onClick={() => navigate(`/m/admin/users/${encodeURIComponent(u.email)}`)} />
@@ -156,33 +158,34 @@ function ClientRow({ user, onClick }: { user: User; onClick: () => void }) {
         <button
             onClick={onClick}
             style={{
-                background: '#fff', border: '1px solid rgba(0,0,0,0.08)',
+                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
                 borderRadius: 12, padding: '12px 14px',
                 display: 'flex', alignItems: 'center', gap: 10,
-                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: '#0E0E0E',
+                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--color-ink)',
+                minHeight: 56,
             }}
         >
             <div style={{
-                width: 36, height: 36, borderRadius: 999, background: '#F4F4F2',
+                width: 36, height: 36, borderRadius: 999, background: 'var(--color-sunken)',
                 display: 'grid', placeItems: 'center',
-                fontSize: 13, fontWeight: 700, color: '#666', flexShrink: 0,
+                fontSize: 13, fontWeight: 600, color: 'var(--color-ink-60)', flexShrink: 0,
             }}>
                 {(user.name || user.email || '?').slice(0, 1).toUpperCase()}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {user.name || user.email}
                 </div>
-                <div style={{ fontSize: 11, color: '#666', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {user.email}
                 </div>
             </div>
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: balance < 0 ? '#C8253A' : '#0E0E0E' }}>
-                    {balance.toFixed(0)} ₾
+                <div style={{ fontSize: 13, fontWeight: 600, color: balance < 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)' }}>
+                    {formatGel(balance)}
                 </div>
             </div>
-            <ChevronRight size={14} color="#999" />
+            <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />
         </button>
     );
 }

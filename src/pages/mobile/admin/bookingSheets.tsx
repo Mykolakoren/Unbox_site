@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Check, X, Loader2, CalendarClock, Repeat, DollarSign, Plus } from 'lucide-react';
-import { format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { bookingsApi } from '../../../api/bookings';
 import { RESOURCES } from '../../../utils/data';
 import type { BookingHistoryItem, User } from '../../../store/types';
-import { Z_SHEET, Z_SHEET_OVER_SHEET } from './sheetLayers';
+import { Sheet } from '../../../components/ui/Sheet';
+import { Button } from '../../../components/ui/Button';
+import { Field, Input } from '../../../components/ui/Field';
+import { Segmented } from '../../../components/ui/Chip';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { formatDayMonth, formatGel } from '../../../utils/format';
 
 /**
  * Шторки брони мобильной админки — ОДНИ на «Брони» и на «Дашборд».
@@ -18,6 +21,11 @@ import { Z_SHEET, Z_SHEET_OVER_SHEET } from './sheetLayers';
  * подставляла 0 (сохранишь — клиенту вернётся вся сумма), а «Удалить»
  * всегда возвращала 100% без выбора. Теперь оба экрана открывают одно и то
  * же: действия → отмена с выбором 100/50/0 → смена цены от настоящей.
+ *
+ * Wave 1: все три шторки — на общем Sheet (слой выше нижнего меню, Esc,
+ * свайп, фокус внутри, главная кнопка в подвале всегда видна). Шторка
+ * отмены/цены открывается поверх шторки действий — у Sheet есть стек.
+ * «Добавить 30 минут» спрашивает общим окном подтверждения, а не confirm().
  */
 
 /** Имя клиента по email/id из списка пользователей (как в «Бронях»). */
@@ -40,6 +48,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose }: {
     const navigate = useNavigate();
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
     const [busy, setBusy] = useState<string | null>(null);
+    const { confirm } = useConfirmDialog();
     // Отмена и смена цены — через нижние шторки. Раньше это были 2-3 системных
     // окна браузера подряд (confirm → prompt «100/50/0» → prompt причины):
     // легко промахнуться, а во встроенных браузерах prompt молча не работает.
@@ -95,7 +104,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose }: {
         try {
             await bookingsApi.setPrice(b.id, num, reason || undefined);
             await fetchAllBookings();
-            toast.success(`Цена обновлена: ${current.toFixed(0)} → ${num.toFixed(0)} ₾`);
+            toast.success(`Цена обновлена: ${formatGel(current)} → ${formatGel(num)}`);
             setPriceTarget(null);
             onClose();
         } catch (e: any) {
@@ -125,7 +134,13 @@ export function AdminBookingSheets({ booking, getUserName, onClose }: {
     };
 
     const doExtend = async (b: BookingHistoryItem) => {
-        if (!window.confirm('Добавить 30 минут к этой брони? Цена пересчитается.')) return;
+        const ok = await confirm({
+            title: 'Добавить 30 минут?',
+            body: 'Бронь станет длиннее на 30 минут, цену пересчитаем.',
+            confirmLabel: 'Добавить 30 минут',
+            cancelLabel: 'Не добавлять',
+        });
+        if (!ok) return;
         setBusy(b.id);
         try {
             await bookingsApi.extendBooking(b.id, 30);
@@ -145,8 +160,8 @@ export function AdminBookingSheets({ booking, getUserName, onClose }: {
             const updated = await bookingsApi.toggleReRent(b.id);
             await fetchAllBookings();
             toast.success(updated.isReRentListed
-                ? 'Выставлено на переаренду'
-                : 'Снято с переаренды');
+                ? 'Бронь выставлена на пересдачу'
+                : 'Бронь снята с пересдачи');
             onClose();
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось обновить статус');
@@ -203,7 +218,7 @@ function discountNote(b: BookingHistoryItem): string | null {
     if (b.appliedRule === 'SUBSCRIPTION') return 'По абонементу';
     if (!b.appliedRule || b.appliedRule === 'NONE') return null;
     if (!b.discountPercent && !b.discountAmount) return null;
-    return `${discountLabel(b.appliedRule)} · −${b.discountPercent ?? 0}% (база ${b.basePrice ?? b.finalPrice} ₾)`;
+    return `${discountLabel(b.appliedRule)} · −${b.discountPercent ?? 0}% (база ${formatGel(b.basePrice ?? b.finalPrice)})`;
 }
 
 function discountLabel(rule: string | undefined | null): string {
@@ -215,7 +230,7 @@ function discountLabel(rule: string | undefined | null): string {
         case 'SUBSCRIPTION':          return 'Абонемент';
         case 'SUBSCRIPTION_DISCOUNT': return 'Скидка по абонементу';
         case 'HOT_BOOKING':           return 'Горячая бронь';
-        default:                      return rule || '';
+        default:                      return 'Скидка';
     }
 }
 
@@ -226,7 +241,7 @@ function formatDurationStandalone(min: number): string {
     const h = Math.floor(min / 60);
     const m = min % 60;
     if (m === 0) return `${h} ч`;
-    if (m === 30) return `${h}.5 ч`;
+    if (m === 30) return `${h},5 ч`;
     return `${h} ч ${m} мин`;
 }
 
@@ -274,55 +289,21 @@ function ActionSheet({
     const canExtend = isActive && (isFuture || isToday);
     const isReRented = (booking as any).isReRentListed === true;
     const discount = discountNote(booking);
+    const priceLabel = booking.finalPrice > 0 ? ` · ${formatGel(booking.finalPrice)}` : '';
     return (
-        <div
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(14,14,14,0.55)', zIndex: Z_SHEET,
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-            }}
+        <Sheet
+            open
+            onClose={onClose}
+            title={userName}
+            description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${resourceName} · ${formatDurationStandalone(booking.duration ?? 60)}${priceLabel}`}
         >
-            <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    width: '100%', maxWidth: 480, background: 'var(--color-card)',
-                    borderRadius: '20px 20px 0 0',
-                    padding: 20,
-                    paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-                    display: 'flex', flexDirection: 'column', gap: 14,
-                    // Когда действий много, содержимое не помещается и нижняя
-                    // кнопка («Отменить») уходила под тулбар Safari. dvh учитывает
-                    // адресную строку/тулбар, внутренний скролл поднимает контент.
-                    maxHeight: 'calc(100dvh - 16px)',
-                    overflowY: 'auto',
-                    WebkitOverflowScrolling: 'touch',
-                }}
-            >
-                <div>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: 'var(--color-ink-40)',
-                        letterSpacing: '0.08em', textTransform: 'uppercase',
-                    }}>
-                        {fmtDate(new Date(booking.date as any), 'd MMMM', { locale: ru })} · {booking.startTime}
-                    </div>
-                    <div style={{ fontSize: 19, fontWeight: 800, marginTop: 4, color: 'var(--color-ink)' }}>
-                        {userName}
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {resourceName} · {formatDurationStandalone(booking.duration ?? 60)}
-                        {booking.finalPrice > 0 && ` · ${booking.finalPrice} ₾`}
-                    </div>
-                    {discount && (
-                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                            {discount}
-                        </div>
-                    )}
-                </div>
+                {discount && (
+                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '0 0 12px' }}>
+                        {discount}
+                    </p>
+                )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {canApprove && (
                         <ActionRow
                             label="Одобрить бронь"
@@ -351,7 +332,7 @@ function ActionSheet({
                     )}
                     {canReRent && (
                         <ActionRow
-                            label={isReRented ? 'Снять с переаренды' : 'Выставить на переаренду'}
+                            label={isReRented ? 'Снять с пересдачи' : 'Пересдать'}
                             sub={isReRented
                                 ? 'Бронь снова станет личной'
                                 : 'Если кто-то заберёт — 50% вернётся клиенту'}
@@ -364,8 +345,8 @@ function ActionSheet({
                     {isActive && (
                         <ActionRow
                             label="Изменить цену"
-                            sub={`Текущая: ${(booking.finalPrice ?? 0).toFixed(0)} ₾`}
-                            icon={<DollarSign size={18} />}
+                            sub={`Сейчас ${formatGel(booking.finalPrice ?? 0)}`}
+                            icon={<Banknote size={18} />}
                             busy={busy}
                             onClick={onEditPrice}
                         />
@@ -385,8 +366,7 @@ function ActionSheet({
                         />
                     )}
                 </div>
-            </div>
-        </div>
+        </Sheet>
     );
 }
 
@@ -396,7 +376,7 @@ function ActionRow({
     const bgVar = tone === 'danger' ? '--status-danger-bg'
         : tone === 'ok' ? '--status-ok-bg'
         : '--color-sunken';
-    const fgVar = tone === 'danger' ? '--status-danger-solid'
+    const fgVar = tone === 'danger' ? '--status-danger-fg'
         : tone === 'ok' ? '--status-ok-fg'
         : '--color-ink';
     return (
@@ -411,7 +391,7 @@ function ActionRow({
                 color: `var(${fgVar})`,
                 border: 'none', borderRadius: 12,
                 padding: '12px 16px', fontFamily: 'inherit',
-                fontSize: 15, fontWeight: 700, cursor: busy ? 'wait' : 'pointer',
+                fontSize: 15, fontWeight: 600, cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.6 : 1, textAlign: 'left',
                 minHeight: 52,
             }}
@@ -419,76 +399,14 @@ function ActionRow({
             {busy ? <Loader2 size={18} className="animate-spin-fast" style={{ flexShrink: 0 }} /> : <span style={{ flexShrink: 0 }}>{icon}</span>}
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
                 <span>{label}</span>
-                {sub && <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.75 }}>{sub}</span>}
+                {sub && <span style={{ fontSize: 12, fontWeight: 400 }}>{sub}</span>}
             </span>
         </button>
     );
 }
 
 
-// ─── Нижние шторки: отмена брони и смена цены ────────────────────────────────
-
-function BottomSheet({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-    return (
-        <div
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(14,14,14,0.55)', zIndex: Z_SHEET_OVER_SHEET,
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-            }}
-        >
-            <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    width: '100%', maxWidth: 480, background: 'var(--color-card)',
-                    borderRadius: '20px 20px 0 0',
-                    padding: 20,
-                    paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-                    display: 'flex', flexDirection: 'column', gap: 14,
-                    maxHeight: 'calc(100dvh - 16px)', overflowY: 'auto',
-                }}
-            >
-                {children}
-            </div>
-        </div>
-    );
-}
-
-const sheetInput: React.CSSProperties = {
-    width: '100%', padding: '12px 14px', fontSize: 16, fontFamily: 'inherit',
-    border: '1px solid var(--color-ink-20, rgba(0,0,0,0.2))', borderRadius: 12,
-    background: '#fff', color: 'var(--color-ink)', boxSizing: 'border-box',
-};
-
-function SheetButtons({ confirmLabel, danger, disabled, busy, onConfirm, onClose }: {
-    confirmLabel: string; danger?: boolean; disabled?: boolean; busy: boolean; onConfirm: () => void; onClose: () => void;
-}) {
-    return (
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button
-                onClick={onClose}
-                disabled={busy}
-                style={{ flex: 1, minHeight: 48, borderRadius: 12, border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', color: 'var(--color-ink)' }}
-            >
-                Назад
-            </button>
-            <button
-                onClick={onConfirm}
-                disabled={busy || disabled}
-                style={{
-                    flex: 1.4, minHeight: 48, borderRadius: 12, border: 'none', fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-                    background: danger ? '#C8253A' : '#0E0E0E', color: '#fff',
-                    opacity: busy || disabled ? 0.45 : 1,
-                }}
-            >
-                {busy ? 'Сохраняю…' : confirmLabel}
-            </button>
-        </div>
-    );
-}
+// ─── Шторки поверх шторки действий: отмена брони и смена цены ───────────────
 
 function CancelBookingSheet({ booking, userName, busy, onClose, onConfirm }: {
     booking: BookingHistoryItem; userName: string; busy: boolean;
@@ -501,59 +419,53 @@ function CancelBookingSheet({ booking, userName, busy, onClose, onConfirm }: {
     const refund = Math.round(price * pct) / 100;
     const notCharged = booking.paymentStatus === 'pending';
     return (
-        <BottomSheet onClose={onClose}>
-            <div>
-                <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--color-ink)' }}>Отменить бронь</div>
-                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {fmtDate(new Date(booking.date as any), 'd MMMM', { locale: ru })} · {booking.startTime} · {userName}
-                </div>
-            </div>
-            <div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--color-ink)' }}>Сколько вернуть клиенту</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {[100, 50, 0].map(v => (
-                        <button
-                            key={v}
-                            onClick={() => setPct(v)}
-                            aria-pressed={pct === v}
-                            style={{
-                                flex: 1, minHeight: 48, borderRadius: 12, fontSize: 16, fontWeight: 700, fontFamily: 'inherit',
-                                border: pct === v ? '2px solid #0E0E0E' : '1px solid rgba(0,0,0,0.15)',
-                                background: pct === v ? '#0E0E0E' : 'transparent',
-                                color: pct === v ? '#fff' : 'var(--color-ink)',
-                            }}
-                        >
-                            {v}%
-                        </button>
-                    ))}
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 8 }}>
-                    {notCharged && <div style={{ marginBottom: 4 }}>Оплата за эту бронь ещё не списывалась — при любом варианте с клиента ничего не спишется.</div>}
-                    {pct === 100 && 'Бесплатная отмена — клиенту вернётся всё списанное.'}
-                    {pct === 50 && `Вернётся половина${price > 0 ? ` (≈ ${refund} ₾ из ${price} ₾)` : ''}.`}
-                    {pct === 0 && 'Без возврата — например, клиент не пришёл.'}
-                </div>
+        <Sheet
+            open
+            onClose={onClose}
+            title="Отменить бронь"
+            description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${userName}`}
+            footer={
+                <>
+                    <Button
+                        variant="danger"
+                        block
+                        loading={busy}
+                        disabled={needReason && !reason.trim()}
+                        onClick={() => onConfirm(pct, reason.trim())}
+                    >
+                        Отменить бронь
+                    </Button>
+                    <Button variant="secondary" block disabled={busy} onClick={onClose}>
+                        Оставить бронь
+                    </Button>
+                </>
+            }
+        >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--color-ink)' }}>Сколько вернуть клиенту</div>
+            <Segmented
+                aria-label="Сколько вернуть клиенту"
+                options={[100, 50, 0].map(v => ({ value: String(v), label: `${v}%` }))}
+                value={String(pct)}
+                onChange={v => setPct(Number(v))}
+            />
+            <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 8 }}>
+                {notCharged && <div style={{ marginBottom: 4 }}>Оплата за эту бронь ещё не списывалась — при любом варианте с клиента ничего не спишется.</div>}
+                {pct === 100 && 'Бесплатная отмена — клиенту вернётся всё списанное.'}
+                {pct === 50 && `Вернётся половина${price > 0 ? ` (≈ ${formatGel(refund)} из ${formatGel(price)})` : ''}.`}
+                {pct === 0 && 'Без возврата — например, клиент не пришёл.'}
             </div>
             {needReason && (
-                <label style={{ display: 'block' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Причина — видна в истории брони</div>
-                    <input
-                        value={reason}
-                        onChange={e => setReason(e.target.value)}
-                        placeholder="Например: неявка без предупреждения"
-                        style={sheetInput}
-                    />
-                </label>
+                <div style={{ marginTop: 16 }}>
+                    <Field label="Причина — видна в истории брони">
+                        <Input
+                            value={reason}
+                            onChange={e => setReason(e.target.value)}
+                            placeholder="Например: неявка без предупреждения"
+                        />
+                    </Field>
+                </div>
             )}
-            <SheetButtons
-                confirmLabel="Отменить бронь"
-                danger
-                disabled={needReason && !reason.trim()}
-                busy={busy}
-                onClose={onClose}
-                onConfirm={() => onConfirm(pct, reason.trim())}
-            />
-        </BottomSheet>
+        </Sheet>
     );
 }
 
@@ -567,28 +479,30 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
     const num = parseFloat(raw.replace(',', '.'));
     const valid = Number.isFinite(num) && num >= 0 && num !== current;
     return (
-        <BottomSheet onClose={onClose}>
-            <div>
-                <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--color-ink)' }}>Изменить цену</div>
-                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {fmtDate(new Date(booking.date as any), 'd MMMM', { locale: ru })} · {booking.startTime} · {userName} · сейчас {current.toFixed(0)} ₾
-                </div>
+        <Sheet
+            open
+            onClose={onClose}
+            title="Изменить цену"
+            description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${userName} · сейчас ${formatGel(current)}`}
+            footer={
+                <>
+                    <Button block loading={busy} disabled={!valid} onClick={() => onConfirm(num, reason.trim())}>
+                        {valid ? `Сохранить ${formatGel(num)}` : 'Сохранить'}
+                    </Button>
+                    <Button variant="secondary" block disabled={busy} onClick={onClose}>
+                        Не менять
+                    </Button>
+                </>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <Field label="Новая цена">
+                    <Input kind="money" suffix="₾" value={raw} onChange={e => setRaw(e.target.value)} />
+                </Field>
+                <Field label="Причина" optional>
+                    <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Например: скидка по договорённости" />
+                </Field>
             </div>
-            <label style={{ display: 'block' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Новая цена, ₾</div>
-                <input value={raw} onChange={e => setRaw(e.target.value)} inputMode="decimal" style={sheetInput} />
-            </label>
-            <label style={{ display: 'block' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Причина</div>
-                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Например: скидка по договорённости" style={sheetInput} />
-            </label>
-            <SheetButtons
-                confirmLabel={valid ? `Сохранить ${num.toFixed(0)} ₾` : 'Сохранить'}
-                disabled={!valid}
-                busy={busy}
-                onClose={onClose}
-                onConfirm={() => onConfirm(num, reason.trim())}
-            />
-        </BottomSheet>
+        </Sheet>
     );
 }

@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ru } from 'date-fns/locale';
 import { Search } from 'lucide-react';
-import { formatBatumi } from '../../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { crmApi, type CrmNote, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { ErrorBar } from '../../../components/ui/ErrorBar';
+import { SkeletonList } from '../../../components/ui/Skeleton';
+import { COLOR } from '../../../design/tokens';
+import { formatDayMonth, formatTime } from '../../../utils/format';
 
 /**
  * Mobile CRM — recent notes across all clients, newest first.
@@ -12,19 +16,30 @@ import { useCrmStore } from '../../../store/crmStore';
  * Editing / creating notes happens on the client card or in desktop CRM —
  * this view is read-mostly: a glance at "what did I write recently across
  * everyone" with a search box to find a specific note.
+ *
+ * Wave 1: сбой загрузки больше не выглядит как «Заметок пока нет»;
+ * скелетон вместо «Загружаю…»; дата — по Батуми через format.ts.
  */
 export function MobileCrmNotes() {
     const [notes, setNotes] = useState<CrmNote[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
     const { clients, fetchClients } = useCrmStore();
 
-    useEffect(() => {
-        if (clients.length === 0) fetchClients(false).catch(() => {});
+    const loadNotes = () => {
+        setLoading(true);
+        setFailed(false);
         crmApi.getNotes()
             .then(setNotes)
-            .catch(() => {})
+            .catch(() => setFailed(true))
             .finally(() => setLoading(false));
+    };
+
+    useEffect(() => {
+        if (clients.length === 0) fetchClients(false).catch(() => {});
+        loadNotes();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clients.length, fetchClients]);
 
     const clientById = useMemo(() => {
@@ -49,11 +64,11 @@ export function MobileCrmNotes() {
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                     Заметки
                 </h1>
-                <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    Всего: {notes.length}
+                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    {loading && notes.length === 0 ? 'Загружаем…' : `Всего: ${notes.length}`}
                 </p>
             </div>
 
@@ -61,76 +76,85 @@ export function MobileCrmNotes() {
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
-                    background: '#F4F4F2',
+                    background: 'var(--color-sunken)',
                     borderRadius: 12,
-                    padding: '10px 12px',
+                    padding: '0 12px',
+                    minHeight: 44,
                     gap: 8,
                 }}>
-                    <Search size={16} color="#999" />
+                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
+                        aria-label="Поиск по тексту или имени клиента"
                         placeholder="Поиск по тексту или имени клиента"
                         style={{
                             flex: 1,
                             background: 'transparent',
                             border: 'none',
                             outline: 'none',
-                            fontSize: 14,
+                            fontSize: 16,
                             fontFamily: 'inherit',
                             minWidth: 0,
+                            color: 'var(--color-ink)',
                         }}
                     />
                 </div>
             </div>
 
-            {loading && <div style={{ padding: '0 16px', color: '#666', fontSize: 14 }}>Загружаю…</div>}
-
-            {!loading && filtered.length === 0 && (
+            {failed && !loading && (
                 <div style={{ padding: '0 16px' }}>
-                    <div style={{
-                        background: '#F4F4F2',
-                        borderRadius: 14,
-                        padding: 20,
-                        textAlign: 'center',
-                        color: '#666',
-                        fontSize: 14,
-                    }}>
-                        {query ? 'Ничего не нашлось' : 'Заметок пока нет.'}
-                    </div>
+                    <ErrorBar message="Не удалось загрузить заметки" onRetry={loadNotes} />
+                </div>
+            )}
+
+            {loading && notes.length === 0 && (
+                <div style={{ padding: '0 16px' }}>
+                    <SkeletonList count={4} label="Загружаем заметки" cardHeight={88} />
+                </div>
+            )}
+
+            {!loading && !failed && filtered.length === 0 && (
+                <div style={{ padding: '0 16px' }}>
+                    {query ? (
+                        <EmptyState compact title="Ничего не нашлось" hint="Попробуйте другое слово или имя." />
+                    ) : (
+                        <EmptyState compact title="Заметок пока нет" hint="Заметку можно добавить в шторке сессии." />
+                    )}
                 </div>
             )}
 
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {filtered.map(n => {
                     const c = clientById.get(n.clientId);
+                    const created = parseUTC(n.createdAt);
                     return (
                         <Link
                             key={n.id}
                             to={c ? `/m/crm/clients/${c.id}` : '/m/crm/clients'}
                             style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.08)',
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
                                 borderRadius: 12,
                                 padding: '12px 14px',
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: 6,
-                                color: '#0E0E0E',
+                                color: 'var(--color-ink)',
                                 textDecoration: 'none',
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                <span style={{ fontSize: 13, fontWeight: 700 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600 }}>
                                     {c?.name ?? '—'}
                                 </span>
-                                <span style={{ fontSize: 11, color: '#999' }}>
-                                    {formatBatumi(n.createdAt, 'd MMM, HH:mm', ru)}
+                                <span style={{ fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap' }}>
+                                    {formatDayMonth(created, { timeZone: BATUMI_TZ })}, {formatTime(created, { timeZone: BATUMI_TZ })}
                                 </span>
                             </div>
                             <div style={{
-                                fontSize: 13,
-                                color: '#444',
+                                fontSize: 14,
+                                color: 'var(--color-ink-80)',
                                 lineHeight: 1.4,
                                 overflow: 'hidden',
                                 display: '-webkit-box',
