@@ -22,6 +22,8 @@ import type { User, Transaction } from '../../store/types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { formatGel } from '../../utils/format';
 import { SkeletonList } from '../../components/ui/Skeleton';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { toast } from 'sonner';
 
 type PipelineStage = 'new' | 'active' | 'sleeping' | 'vip' | 'partner' | 'bad_client';
 
@@ -201,7 +203,12 @@ export function AdminCrm() {
 
         try {
             await updateUserById(user.id, { manualStatus: targetStage } as any);
+            // Стор глотает ошибку сервера (G8-14) — проверяем, что статус правда сменился,
+            // иначе карточка молча прыгала обратно.
+            const after = useUserStore.getState().users.find(u => u.id === user.id) as any;
+            if (after?.manualStatus !== targetStage) toast.error('Не удалось сменить этап клиента. Попробуйте ещё раз');
         } catch {
+            toast.error('Не удалось сменить этап клиента. Попробуйте ещё раз');
             // Revert on error
             setOptimisticStages(prev => {
                 const next = new Map(prev);
@@ -432,9 +439,9 @@ function GridHouseAdminCrm(p: GHCrmProps) {
 
     if (p.loading) {
         return (
-            <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-                <div style={{ maxWidth: 1600, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
-                    <div style={{ ...eyebrow, marginBottom: 24 }}>Раздел · CRM · 30 дней</div>
+            <div style={{ color: GH.ink, fontFamily: GH_SANS }}>
+                <div>
+                    <PageHeader title="Воронка клиентов" />
                     <SkeletonList count={5} label="Загружаем клиентов" />
                 </div>
             </div>
@@ -442,22 +449,20 @@ function GridHouseAdminCrm(p: GHCrmProps) {
     }
 
     return (
-        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-            <div style={{ maxWidth: 1600, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
-                {/* HEAD */}
-                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
-                    <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · CRM · 30 дней</div>
-                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
-                        Клиентский поток.
-                    </h1>
-                </div>
+        <div style={{ color: GH.ink, fontFamily: GH_SANS }}>
+            <div>
+                {/* HEAD: H1 = пункт меню (G8-08/G8-11) */}
+                <PageHeader
+                    title="Воронка клиентов"
+                    description="Этапы клиентов, ответственные и должники. Новые и бронирования — за 30 дней."
+                />
 
-                {/* KPI strip — 6 tabular cells */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
+                {/* KPI strip. «Доход · 30д» убран (G8-02): считался своей формулой и не
+                    совпадал с «Финансами» — деньги смотрим там. */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
                     {[
                         { label: 'Клиентов', value: p.analytics.totalClients, sub: null },
                         { label: 'Новых · 30д', value: p.analytics.newClients, sub: null },
-                        { label: 'Доход · 30д', value: formatGel(p.analytics.monthlyRevenue, { fraction: 0 }), sub: null },
                         { label: 'Бронирований', value: p.analytics.totalBookings, sub: `${p.analytics.cancelledBookings} отмен` },
                         { label: 'Абонементов', value: p.analytics.activeSubscriptions, sub: null },
                         { label: 'Должников', value: p.analytics.debtors.length, sub: null },
@@ -523,7 +528,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                 {/* Column head */}
                                 <div style={{ padding: '16px 12px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700, color: GH.ink }}>
-                                        {String(colIdx + 1).padStart(2, '0')} · {GH_STAGE_LABELS[stage]}
+                                        {GH_STAGE_LABELS[stage]}
                                     </span>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink }}>
                                         {clients.length}
@@ -765,10 +770,7 @@ function GHClientCard({
             <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, alignItems: 'flex-start' }}>
                 <GripVertical size={12} color={GH.ink60} style={{ marginTop: 2, cursor: 'grab' }} />
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', marginBottom: 2 }}>
-                        №{String(index + 1).padStart(3, '0')}
-                    </div>
-                    <div style={{ fontFamily: GH_SANS, fontSize: 12, fontWeight: 700, color: GH.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 600, color: GH.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user.name}>
                         {user.name}
                     </div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
