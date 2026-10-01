@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
 import { Sheet } from '../ui/Sheet';
 import { Button } from '../ui/Button';
-import { formatDateLabel } from '../../utils/format';
+import { formatDateLabel, formatGel } from '../../utils/format';
 import type { MaintenanceConflict } from '../../api/maintenance';
-import { DueBadge } from './DueBadge';
+import { statusLabel } from '../../design/statuses';
 
 /**
  * MaintenanceConflictSheet — «Закрыть кабинет» упёрся в брони (волна 4, шаг 0).
@@ -39,13 +39,29 @@ function endTime(start: string, duration: number): string {
     return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** Состояние оплаты брони из конфликта: оплачена / к оплате / без оплаты. */
+/**
+ * Деньги брони из конфликта — нейтрально, без «оплачено» / «к оплате».
+ *
+ * payment_status = 'paid' значит только «списана с баланса», а не «клиент
+ * заплатил»: при минусе на балансе «Сегодня» и шахматка у той же брони
+ * честно пишут «к оплате 7 ₾» (dueMap — computeDueByBooking по балансу).
+ * Карты dueMap здесь нет (шторку открывают «Обслуживание» и «Кабинеты»,
+ * которые брони и баланс не грузят), поэтому отметку оплаты не рисуем —
+ * только цену и что с ней сделал сервер. Узнать, должен ли клиент, — по
+ * ссылке на бронь.
+ */
 function PaymentNote({ c }: { c: MaintenanceConflict }) {
-    if (c.paymentStatus === 'paid') return <DueBadge due={0} paid />;
-    if (c.paymentStatus === 'waived' || !(c.finalPrice > 0)) {
-        return <span style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)' }}>без оплаты</span>;
-    }
-    return <DueBadge due={c.finalPrice} />;
+    const st = c.paymentStatus;
+    const what = st === 'paid' ? 'списана с баланса'
+        : st ? statusLabel('payment', st, 'staff').toLowerCase() : '';
+    const text = st === 'waived' || !(c.finalPrice > 0)
+        ? statusLabel('payment', 'waived', 'staff').toLowerCase()
+        : `${formatGel(c.finalPrice)}${what ? ` · ${what}` : ''}`;
+    return (
+        <span className="num" data-conflict-payment style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)', whiteSpace: 'nowrap' }}>
+            {text}
+        </span>
+    );
 }
 
 export function MaintenanceConflictSheet({ open, onClose, conflicts, linkFor, resourceName }: MaintenanceConflictSheetProps) {
