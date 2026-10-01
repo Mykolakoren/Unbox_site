@@ -1,19 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, ShieldCheck, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { Search, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
-import { cashboxApi } from '../../../api/cashbox';
 import type { User } from '../../../store/types';
-import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
-import { Button } from '../../../components/ui/Button';
-import { Chip, Segmented } from '../../../components/ui/Chip';
-import { Field, Input } from '../../../components/ui/Field';
+import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel } from '../../../utils/format';
-import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
+import { TopupSheet } from './TopupSheet';
 
 /**
  * Mobile admin — users search & quick view.
@@ -286,143 +281,6 @@ export function MobileAdminUsers() {
                     onDone={async () => { setTopupUser(null); await fetchUsers(); }}
                 />
             )}
-        </div>
-    );
-}
-
-// ── Шит пополнения баланса ──────────────────────────────────────────────────
-function TopupSheet({ user, onClose, onDone }: {
-    user: User;
-    onClose: () => void;
-    onDone: () => Promise<void>;
-}) {
-    const balance = user.balance ?? 0;
-    const [amount, setAmount] = useState<string>(balance < 0 ? String(-balance) : '20');
-    const [method, setMethod] = useState<'cash' | 'card_tbc' | 'card_bog'>('cash');
-    const [branch, setBranch] = useState<string>('Unbox Uni');
-    const [saving, setSaving] = useState(false);
-    // Поле текстовое (цифровая клавиатура): «1 280,50», «20.5» — общий разбор.
-    const parsed = parseMoneyInput(amount);
-    const value = parsed ?? 0;
-    const amountError = !isMoneyInputBlank(amount) && parsed === null ? MONEY_INPUT_ERROR : undefined;
-
-    const submit = async () => {
-        if (value <= 0) { toast.error('Введите сумму больше 0'); return; }
-        setSaving(true);
-        try {
-            await cashboxApi.createTransaction({
-                type: 'income',
-                amount: value,
-                payment_method: method,
-                category_id: 'cat-topup',
-                description: `Пополнение баланса: ${user.name || user.email}`,
-                branch,
-                client_id: user.id || user.email,
-                credit_user_balance: true,
-            } as any);
-            toast.success(`Баланс пополнен на ${formatGel(value)} — теперь ${formatGel(balance + value)}`);
-            await onDone();
-        } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div
-            // Z_SHEET: было 90 — ниже нижнего меню (100), и оно закрывало
-            // кнопку «Пополнить»; промах уводил на вкладку «Финансы».
-            role="dialog"
-            aria-modal="true"
-            aria-label="Пополнить баланс"
-            style={{ position: 'fixed', inset: 0, zIndex: Z_SHEET, background: 'rgba(15,15,16,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
-            onClick={onClose}
-        >
-            <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    width: '100%', maxWidth: 480,
-                    background: 'var(--color-card)',
-                    borderRadius: '16px 16px 0 0',
-                    boxShadow: 'var(--shadow-pop)',
-                    // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER.
-                    padding: '12px 16px 0',
-                    maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
-                    overscrollBehavior: 'contain',
-                    display: 'flex', flexDirection: 'column', gap: 16,
-                }}
-            >
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                        <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Пополнить баланс</h2>
-                        <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                            {user.name || user.email} · сейчас{' '}
-                            <b style={{ color: balance < 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)' }}>{formatGel(balance)}</b>
-                        </div>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        aria-label="Закрыть"
-                        style={{ background: 'transparent', border: 'none', borderRadius: 8, width: 44, height: 44, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--color-ink-60)' }}
-                    >
-                        <X size={20} aria-hidden="true" />
-                    </button>
-                </div>
-
-                <div>
-                    <div role="group" aria-label="Быстрая сумма" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                        {[20, 40, 60, 100].map(v => (
-                            <Chip key={v} selected={value === v} onClick={() => setAmount(String(v))}>{formatGel(v)}</Chip>
-                        ))}
-                        {balance < 0 && (
-                            <Chip selected={value === -balance} onClick={() => setAmount(String(-balance))}>
-                                Закрыть долг ({formatGel(-balance)})
-                            </Chip>
-                        )}
-                    </div>
-                    <Field label="Сумма" error={amountError}>
-                        <Input kind="money" suffix="₾" value={amount} onChange={e => setAmount(e.target.value)} />
-                    </Field>
-                </div>
-
-                <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Способ оплаты</div>
-                    <Segmented<'cash' | 'card_tbc' | 'card_bog'>
-                        aria-label="Способ оплаты"
-                        options={[
-                            { value: 'cash', label: 'Наличные' },
-                            { value: 'card_tbc', label: 'Карта TBC' },
-                            { value: 'card_bog', label: 'Карта BOG' },
-                        ]}
-                        value={method}
-                        onChange={setMethod}
-                    />
-                </div>
-
-                <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Филиал</div>
-                    <Segmented
-                        aria-label="Филиал"
-                        options={[
-                            { value: 'Unbox Uni', label: 'Unbox Uni' },
-                            { value: 'Unbox One', label: 'Unbox One' },
-                        ]}
-                        value={branch}
-                        onChange={setBranch}
-                    />
-                </div>
-
-                <div style={SHEET_FOOTER}>
-                    <Button
-                        block
-                        loading={saving}
-                        disabled={value <= 0}
-                        onClick={submit}
-                    >
-                        Пополнить на {value > 0 ? formatGel(value) : '—'}
-                    </Button>
-                </div>
-            </div>
         </div>
     );
 }
