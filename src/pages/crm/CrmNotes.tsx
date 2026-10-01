@@ -1,32 +1,53 @@
 import { useEffect, useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
-import {
-    Plus,
-    Trash2,
-    Loader2,
-    Check,
-    X,
-    Search,
-} from 'lucide-react';
+import { Plus, Trash2, X, Search, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import type { CrmNoteCreate, CrmNote, CrmClient } from '../../api/crm';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
 import { formatDayMonth, formatTime } from '../../utils/format';
+import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Sheet } from '../../components/ui/Sheet';
+import { Field, Input, Select, TextArea } from '../../components/ui/Field';
+
+/**
+ * Заметки Psy-CRM на компьютере (волна 3, пакет C; G5-24).
+ *
+ * - Строка заметки ~72 знака (раньше ~120 при 15 px — трудно читать).
+ * - Имя клиента — ссылка в его карточку; номера 001–010 убраны.
+ * - «Скрывать текст»: в кабинете бывают люди, а тут терапевтические записи.
+ *   Выбор запоминается в этом браузере; одну заметку можно приоткрыть.
+ * - Правки заметки нет: у сервера нет PATCH /crm/notes (вне волны).
+ * - Пишем только createNote / deleteNote — заметки шифруются на сервере.
+ */
+
+const HIDE_KEY = 'crm_notes_hide_text';
+const TZ = { timeZone: BATUMI_TZ };
+
+function readHide(): boolean {
+    try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; }
+}
 
 export function CrmNotes() {
         const { notes, clients, fetchNotes, fetchClients, createNote, deleteNote, loading, error } =
         useCrmStore();
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     // Первый ответ ещё не пришёл — скелетон, а не «Заметок ещё нет» (rule 8).
     const [loaded, setLoaded] = useState(false);
     const [filterClient, setFilterClient] = useState<string>('');
     const [showForm, setShowForm] = useState(false);
     const [search, setSearch] = useState('');
     const { confirm: askConfirm } = useConfirmDialog();
+
+    useDocumentTitle('Заметки · Psy-CRM');
 
     useEffect(() => {
         fetchClients();
@@ -69,12 +90,13 @@ export function CrmNotes() {
                 setSearch={setSearch}
                 filterClient={filterClient}
                 setFilterClient={setFilterClient}
-                showForm={showForm}
+                showForm={showForm && !viewingOther}
                 setShowForm={setShowForm}
+                canCreate={!viewingOther}
                 onCreate={async (data) => {
                     await createNote(data);
                     setShowForm(false);
-                    toast.success('Заметка создана');
+                    toast.success('Заметка сохранена');
                 }}
                 onDelete={async (id) => {
                     // Заметка стирается из базы насовсем — один клик по корзине
@@ -83,7 +105,7 @@ export function CrmNotes() {
                     const clientName = note ? clientMap.get(note.clientId)?.name : undefined;
                     const ok = await askConfirm({
                         title: clientName ? `Удалить заметку о клиенте ${clientName}?` : 'Удалить заметку?',
-                        message: <NoteDeletePreview content={note?.content} />,
+                        message: <NoteDeletePreview content={note?.content} hideText={readHide()} />,
                         confirmLabel: 'Удалить заметку',
                         cancelLabel: 'Оставить',
                         destructive: true,
@@ -101,21 +123,12 @@ export function CrmNotes() {
 }
 
 
-// NoteForm (старая форма до Grid House) нигде не рендерилась — удалена в wave 1.
-
 // ═══════════════════════════════════════════════════════════════════════════
-// Grid House variant — Vignelli × Bierut
+// Grid House — лента заметок
 // ═══════════════════════════════════════════════════════════════════════════
 
 const GHN_HAIRLINE = `1px solid ${GH.ink10}`;
-const GHN_MONO_LABEL: React.CSSProperties = {
-    fontFamily: GH_MONO,
-    fontSize: 12,
-    fontWeight: 500,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: GH.ink60,
-};
+const META: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' };
 
 function GridHouseCrmNotes({
     notes,
@@ -131,6 +144,7 @@ function GridHouseCrmNotes({
     setFilterClient,
     showForm,
     setShowForm,
+    canCreate,
     onCreate,
     onDelete,
 }: {
@@ -147,151 +161,87 @@ function GridHouseCrmNotes({
     setFilterClient: (v: string) => void;
     showForm: boolean;
     setShowForm: (v: boolean) => void;
+    canCreate: boolean;
     onCreate: (data: CrmNoteCreate) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
 }) {
     const activeClients = clients.filter((c) => c.isActive);
-    const totalFmt = String(notes.length).padStart(3, '0');
-    const filteredFmt = String(filtered.length).padStart(3, '0');
+    const [hideText, setHideText] = useState(readHide);
+    const [revealed, setRevealed] = useState<Set<string>>(new Set());
+
+    const toggleHide = () => {
+        const next = !hideText;
+        setHideText(next);
+        setRevealed(new Set());
+        try { localStorage.setItem(HIDE_KEY, next ? '1' : '0'); } catch { /* приватное окно — не страшно */ }
+    };
+
+    const filteredBy = search || filterClient;
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: GHN_HAIRLINE, paddingBottom: 28, marginBottom: 28 }}>
-                <div style={{ ...GHN_MONO_LABEL, marginBottom: 14 }}>Раздел · Заметки</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
-                    <h1
-                        style={{
-                            fontFamily: GH_SANS,
-                            fontWeight: 800,
-                            fontSize: 'clamp(36px, 4.5vw, 56px)',
-                            lineHeight: 0.95,
-                            letterSpacing: '-0.02em',
-                            margin: 0,
-                        }}
-                    >
-                        Заметки по клиентам.
-                    </h1>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                        <div style={{ ...GHN_MONO_LABEL, fontVariantNumeric: 'tabular-nums' }}>
-                            Показано: {filteredFmt} / {totalFmt}
-                        </div>
-                        <button
-                            onClick={() => setShowForm(true)}
-                            style={{
-                                background: GH.ink,
-                                color: GH.paper,
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                                padding: '14px 22px',
-                                border: 'none',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 10,
-                            }}
+            <PageHeader
+                title="Заметки"
+                description={notes.length
+                    ? (filteredBy && filtered.length !== notes.length ? `Показано ${filtered.length} из ${notes.length}` : 'Видите только вы. Хранятся зашифрованными.')
+                    : undefined}
+                actions={
+                    <>
+                        <Button
+                            variant="quiet"
+                            icon={hideText ? <Eye size={16} aria-hidden="true" /> : <EyeOff size={16} aria-hidden="true" />}
+                            aria-pressed={hideText}
+                            onClick={toggleHide}
                         >
-                            <Plus style={{ width: 14, height: 14 }} />
-                            Новая заметка
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* ── Filters ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'end', marginBottom: 28 }}>
-                {/* Search — hairline underline */}
-                <div>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 8 }}>→ Поиск</div>
-                    <div style={{ position: 'relative', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
-                        <Search style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-80%)', width: 16, height: 16, color: GH.ink60 }} />
-                        <input
-                            type="text"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Текст, тег или имя клиента"
-                            style={{
-                                width: '100%',
-                                paddingLeft: 28,
-                                paddingRight: 28,
-                                background: 'transparent',
-                                border: 'none',
-                                outline: 'none',
-                                fontFamily: GH_SANS,
-                                fontSize: 16,
-                                color: GH.ink,
-                            }}
-                        />
-                        {search && (
-                            <button
-                                onClick={() => setSearch('')}
-                                style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-80%)', background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, padding: 4 }}
-                                aria-label="Очистить поиск"
-                            >
-                                <X style={{ width: 14, height: 14 }} />
-                            </button>
+                            {hideText ? 'Показывать текст' : 'Скрывать текст'}
+                        </Button>
+                        {canCreate && (
+                            <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => setShowForm(true)}>Заметка</Button>
                         )}
-                    </div>
-                </div>
+                    </>
+                }
+            />
 
-                {/* Client filter */}
-                <div>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 8 }}>Клиент</div>
-                    <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
-                        <select
-                            value={filterClient}
-                            onChange={(e) => setFilterClient(e.target.value)}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
-                                outline: 'none',
-                                fontFamily: GH_SANS,
-                                fontSize: 16,
-                                color: GH.ink,
-                                minWidth: 200,
-                                cursor: 'pointer',
-                            }}
+            {/* ── Поиск и клиент ── */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end', marginBottom: 24, maxWidth: 'calc(72ch + 160px)' }}>
+                <div style={{ flex: '1 1 280px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: `1px solid ${GH.ink30}`, minHeight: 40 }}>
+                    <Search size={16} color={GH.ink60} aria-hidden="true" />
+                    <input
+                        type="search"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Текст, тег или имя клиента"
+                        aria-label="Поиск по заметкам"
+                        style={{ flex: 1, background: 'transparent', border: 'none', fontFamily: GH_SANS, fontSize: 15, color: GH.ink, minHeight: 36 }}
+                    />
+                    {search && (
+                        <button
+                            onClick={() => setSearch('')}
+                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            aria-label="Очистить поиск"
                         >
-                            <option value="">— Все —</option>
+                            <X size={16} />
+                        </button>
+                    )}
+                </div>
+                <div style={{ flex: '0 1 240px' }}>
+                    <Field label="Клиент">
+                        <Select value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+                            <option value="">Все клиенты</option>
                             {activeClients.map((c) => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
-                        </select>
-                    </div>
+                        </Select>
+                    </Field>
                 </div>
             </div>
 
-            {/* ── Inline form ── */}
-            {showForm && (
-                <div style={{ border: `2px solid ${GH.ink}`, background: GH.paper, padding: 28, marginBottom: 28 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 16, borderBottom: GHN_HAIRLINE }}>
-                        <div style={{ ...GHN_MONO_LABEL }}>→ Новая заметка</div>
-                        <button
-                            onClick={() => setShowForm(false)}
-                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, padding: 4 }}
-                            aria-label="Закрыть форму"
-                        >
-                            <X style={{ width: 18, height: 18 }} />
-                        </button>
-                    </div>
-                    <GridHouseNoteForm
-                        clients={activeClients}
-                        defaultClient={filterClient}
-                        onSave={onCreate}
-                        onCancel={() => setShowForm(false)}
-                    />
-                </div>
-            )}
-
-            {/* ── List / empty / loading — три разных состояния (rule 8) ── */}
+            {/* ── Лента / пусто / загрузка — три разных состояния (rule 8) ── */}
             {loadError && (
                 <ErrorBar message="Не удалось загрузить заметки" onRetry={onRetry} retrying={loading} className="mb-4" />
             )}
             {loading && !notes.length ? (
-                <div role="status" aria-busy="true" style={{ borderTop: `2px solid ${GH.ink}`, padding: '24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div role="status" aria-busy="true" style={{ borderTop: `2px solid ${GH.ink}`, padding: '24px 0', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: '72ch' }}>
                     <span className="sr-only">Загружаем заметки…</span>
                     {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} height={48} radius={0} />)}
                 </div>
@@ -299,265 +249,195 @@ function GridHouseCrmNotes({
                 loadError && !notes.length ? null : (
                     <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: GHN_HAIRLINE }}>
                         <EmptyState
-                            title={search || filterClient ? 'Ничего не нашли' : 'Заметок пока нет'}
-                            hint={search || filterClient ? 'Сбросьте фильтр или попробуйте другой запрос.' : 'Создайте первую заметку о клиенте.'}
-                            action={search || filterClient
+                            title={filteredBy ? 'Ничего не нашли' : 'Заметок пока нет'}
+                            hint={filteredBy ? 'Сбросьте фильтр или попробуйте другой запрос.' : 'Записывайте наблюдения и домашние задания — их видите только вы.'}
+                            action={filteredBy
                                 ? { label: 'Сбросить фильтр', onClick: () => { setSearch(''); setFilterClient(''); } }
-                                : { label: 'Новая заметка', onClick: () => setShowForm(true) }}
+                                : canCreate ? { label: 'Новая заметка', onClick: () => setShowForm(true) } : undefined}
                         />
                     </div>
                 )
             ) : (
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
-                    {filtered.map((note, idx) => {
+                    {filtered.map((note) => {
                         const client = clientMap.get(note.clientId);
+                        const created = parseUTC(note.createdAt);
+                        const hidden = hideText && !revealed.has(note.id);
+                        const tags = (note.tags || '').split(',').map(t => t.trim()).filter(Boolean);
                         return (
-                            <div
+                            <article
                                 key={note.id}
-                                style={{
-                                    borderBottom: GHN_HAIRLINE,
-                                    padding: '24px 0',
-                                    display: 'grid',
-                                    gridTemplateColumns: '60px 1fr 40px',
-                                    gap: 20,
-                                    alignItems: 'start',
-                                }}
+                                style={{ borderBottom: GHN_HAIRLINE, padding: '20px 0', display: 'flex', gap: 16, alignItems: 'flex-start' }}
                             >
-                                {/* Number */}
-                                <div
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.06em',
-                                        color: GH.ink60,
-                                        fontVariantNumeric: 'tabular-nums',
-                                        paddingTop: 2,
-                                    }}
-                                >
-                                    {String(idx + 1).padStart(3, '0')}
-                                </div>
-
-                                {/* Body */}
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 10, flexWrap: 'wrap' }}>
-                                        <div
+                                <div style={{ flex: '0 1 72ch', minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
+                                        {client ? (
+                                            <Link
+                                                to={`/crm/clients/${client.id}`}
+                                                style={{ fontSize: 16, fontWeight: 600, color: GH.ink, textDecoration: 'underline', textDecorationThickness: 1, textUnderlineOffset: 3 }}
+                                            >
+                                                {client.name}
+                                            </Link>
+                                        ) : (
+                                            <span style={{ fontSize: 16, fontWeight: 600, color: GH.ink60 }}>Клиент удалён</span>
+                                        )}
+                                        <span style={META}>
+                                            {formatDayMonth(created, { withYear: 'auto', ...TZ })} · {formatTime(created, TZ)}
+                                            {note.sessionId ? ' · к сессии' : ''}
+                                        </span>
+                                    </div>
+                                    {hidden ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setRevealed(prev => new Set(prev).add(note.id))}
                                             style={{
-                                                fontFamily: GH_SANS,
-                                                fontSize: 18,
-                                                fontWeight: 700,
-                                                letterSpacing: '-0.01em',
-                                                color: GH.ink,
+                                                display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 32, padding: 0,
+                                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                                fontSize: 14, color: GH.ink60,
                                             }}
                                         >
-                                            {client?.name || '— Неизвестный клиент'}
-                                        </div>
-                                        <div style={{ ...GHN_MONO_LABEL, color: GH.ink60 }}>
-                                            {formatDayMonth(note.createdAt, { withYear: 'auto' })} · {formatTime(note.createdAt)}
-                                        </div>
-                                    </div>
-                                    <div
-                                        style={{
-                                            fontFamily: GH_SANS,
-                                            fontSize: 15,
-                                            lineHeight: 1.55,
-                                            color: GH.ink,
-                                            whiteSpace: 'pre-wrap',
-                                        }}
-                                    >
-                                        {note.content}
-                                    </div>
-                                    {note.tags && (
-                                        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                                            {note.tags.split(',').map((tag) => {
-                                                const trimmed = tag.trim();
-                                                if (!trimmed) return null;
-                                                return (
-                                                    <span
-                                                        key={trimmed}
-                                                        style={{
-                                                            fontFamily: GH_MONO,
-                                                            fontSize: 12,
-                                                            letterSpacing: '0.06em',
-                                                            textTransform: 'uppercase',
-                                                            color: GH.ink,
-                                                            border: `1px solid ${GH.ink}`,
-                                                            padding: '4px 8px',
-                                                        }}
-                                                    >
-                                                        {trimmed}
-                                                    </span>
-                                                );
-                                            })}
+                                            <Eye size={14} aria-hidden="true" /> Текст скрыт · Показать
+                                        </button>
+                                    ) : (
+                                        <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: GH.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                            {note.content}
+                                        </p>
+                                    )}
+                                    {tags.length > 0 && (
+                                        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                                            {tags.map((tag) => (
+                                                <span
+                                                    key={tag}
+                                                    style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 8, background: GH.sunken, color: GH.ink80 }}
+                                                >
+                                                    {tag}
+                                                </span>
+                                            ))}
                                         </div>
                                     )}
                                 </div>
 
-                                {/* Delete */}
-                                <button
-                                    onClick={() => onDelete(note.id)}
-                                    style={{
-                                        background: 'transparent',
-                                        border: `1px solid ${GH.ink10}`,
-                                        width: 36,
-                                        height: 36,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        color: GH.ink60,
-                                        transition: 'all 150ms',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.borderColor = GH.danger;
-                                        e.currentTarget.style.color = GH.danger;
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.borderColor = GH.ink10;
-                                        e.currentTarget.style.color = GH.ink60;
-                                    }}
-                                    title="Удалить заметку"
-                                    aria-label="Удалить заметку"
-                                >
-                                    <Trash2 style={{ width: 14, height: 14 }} />
-                                </button>
-                            </div>
+                                {canCreate && (
+                                    <button
+                                        onClick={() => onDelete(note.id)}
+                                        style={{
+                                            background: 'transparent',
+                                            border: `1px solid ${GH.ink10}`,
+                                            width: 36,
+                                            height: 36,
+                                            flexShrink: 0,
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: GH.ink60,
+                                            transition: 'border-color 150ms, color 150ms',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.borderColor = GH.danger;
+                                            e.currentTarget.style.color = GH.danger;
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.borderColor = GH.ink10;
+                                            e.currentTarget.style.color = GH.ink60;
+                                        }}
+                                        title="Удалить заметку"
+                                        aria-label={client ? `Удалить заметку о клиенте ${client.name}` : 'Удалить заметку'}
+                                    >
+                                        <Trash2 style={{ width: 14, height: 14 }} />
+                                    </button>
+                                )}
+                            </article>
                         );
                     })}
                 </div>
             )}
 
-            {/* Footer mono signature */}
-            <div style={{ ...GHN_MONO_LABEL, textAlign: 'center', padding: '40px 0 20px', color: GH.ink60 }}>
-                Unbox · Индекс заметок · {new Date().getFullYear()}
-            </div>
+            <NoteSheet
+                open={showForm}
+                clients={activeClients}
+                defaultClient={filterClient}
+                onSave={onCreate}
+                onClose={() => setShowForm(false)}
+            />
         </div>
     );
 }
 
-// ── Grid House note form ──
-function GridHouseNoteForm({
+// ── Новая заметка — на общем Sheet ──
+function NoteSheet({
+    open,
     clients,
     defaultClient,
     onSave,
-    onCancel,
+    onClose,
 }: {
+    open: boolean;
     clients: CrmClient[];
     defaultClient?: string;
     onSave: (data: CrmNoteCreate) => Promise<void>;
-    onCancel: () => void;
+    onClose: () => void;
 }) {
     const [clientId, setClientId] = useState(defaultClient || '');
     const [content, setContent] = useState('');
     const [tags, setTags] = useState('');
     const [saving, setSaving] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!clientId || !content.trim()) return;
+    // Открыли — с чистого листа, клиент из фильтра.
+    useEffect(() => {
+        if (!open) return;
+        setClientId(defaultClient || '');
+        setContent('');
+        setTags('');
+    }, [open, defaultClient]);
+
+    const handleSubmit = async () => {
+        if (!clientId || !content.trim() || saving) return;
         setSaving(true);
         try {
             await onSave({ clientId, content: content.trim(), tags: tags || undefined });
-        } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
+        } catch {
+            // Ошибку уже показал стор (crmStore.createNote) — второй тост не нужен.
         } finally {
             setSaving(false);
         }
     };
 
-    const fieldStyle: React.CSSProperties = {
-        width: '100%',
-        padding: '10px 0',
-        border: 'none',
-        borderBottom: `2px solid ${GH.ink}`,
-        outline: 'none',
-        background: 'transparent',
-        fontFamily: GH_SANS,
-        fontSize: 15,
-        color: GH.ink,
-    };
-
     return (
-        <form onSubmit={handleSubmit}>
-            <div style={{ display: 'grid', gap: 24 }}>
-                <div>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 6 }}>Клиент *</div>
-                    <select
-                        value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
-                        required
-                        style={{ ...fieldStyle, cursor: 'pointer' }}
-                    >
-                        <option value="">— Выберите —</option>
+        <Sheet
+            open={open}
+            onClose={onClose}
+            title="Новая заметка"
+            description="Видите только вы. Хранится зашифрованной."
+            width={560}
+            footer={
+                <>
+                    <Button loading={saving} disabled={!clientId || !content.trim()} onClick={handleSubmit}>Сохранить заметку</Button>
+                    <Button variant="secondary" onClick={onClose}>Не сохранять</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'grid', gap: 16 }}>
+                <Field label="Клиент" required>
+                    <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                        <option value="">Выберите клиента</option>
                         {clients.map((c) => (
                             <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
-                    </select>
-                </div>
-                <div>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 6 }}>Содержание *</div>
-                    <textarea
+                    </Select>
+                </Field>
+                <Field label="Текст" required>
+                    <TextArea
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
-                        rows={4}
-                        required
-                        placeholder="Текст заметки…"
-                        style={{ ...fieldStyle, resize: 'vertical', fontFamily: GH_SANS }}
+                        rows={6}
+                        placeholder="Что было на сессии, домашнее задание, наблюдения"
                     />
-                </div>
-                <div>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 6 }}>Теги · через запятую</div>
-                    <input
-                        type="text"
-                        value={tags}
-                        onChange={(e) => setTags(e.target.value)}
-                        placeholder="важное, запрос, прогресс"
-                        style={fieldStyle}
-                    />
-                </div>
+                </Field>
+                <Field label="Теги" hint="Через запятую: важное, запрос, прогресс" optional>
+                    <Input value={tags} onChange={(e) => setTags(e.target.value)} />
+                </Field>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 28, paddingTop: 16, borderTop: GHN_HAIRLINE }}>
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    style={{
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        padding: '12px 20px',
-                        background: 'transparent',
-                        color: GH.ink60,
-                        border: `1px solid ${GH.ink10}`,
-                        cursor: 'pointer',
-                    }}
-                >
-                    Отмена
-                </button>
-                <button
-                    type="submit"
-                    disabled={saving || !clientId || !content.trim()}
-                    style={{
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        padding: '12px 22px',
-                        background: GH.ink,
-                        color: GH.paper,
-                        border: 'none',
-                        cursor: saving ? 'default' : 'pointer',
-                        opacity: saving || !clientId || !content.trim() ? 0.5 : 1,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 10,
-                    }}
-                >
-                    {saving ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Check style={{ width: 14, height: 14 }} />}
-                    Создать
-                </button>
-            </div>
-        </form>
+        </Sheet>
     );
 }
