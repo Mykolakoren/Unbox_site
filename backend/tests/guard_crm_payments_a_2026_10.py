@@ -541,49 +541,57 @@ DETAIL = "src/pages/crm/CrmClientDetail.tsx"
 
 def test_front_session_panel_sends_price_currency_account():
     src = _code(DETAIL)
-    i = src.index("Правка цены и статуса")
-    panel = src[i:src.index("Удалить сессию", i)]
-    call = re.search(r"handleUpdateSession\(session\.id, \{[^}]*price[^}]*\}\)", panel, re.S)
-    assert call, "панель правки не шлёт цену"
-    assert "currency:" in call.group(0) and "account:" in call.group(0), \
-        "панель правки сессии снова шлёт не всё: нужны price, currency и account"
+    i = src.index("Счёт для оплаты")
+    panel = src[src.rfind("<Field", 0, i - 800):src.index("Удалить сессию", i)]
+    call = re.search(r"handleUpdateSession\(session\.id, \{[^}]*\}\)", panel, re.S)
+    assert call, "панель правки не сохраняет сессию"
+    for key in ("price:", "currency:", "account:"):
+        assert key in call.group(0), f"панель правки сессии снова не шлёт {key[:-1]}: нужны price, currency и account"
     assert "editSessionCurrency" in panel and "CURRENCIES" in src, "в панели нет выбора валюты"
-    assert "AccountSelect" in panel
+    assert "AccountSelect" in panel and "SessionPaymentBlock" in panel, "в панели нет счёта или блока «Оплата»"
     api = _code("src/api/crm.ts")
     upd = api[api.index("export interface CrmSessionUpdate"):api.index("export interface CrmSettings")]
     assert "currency?: string" in upd and "account?: string" in upd, "CrmSessionUpdate без currency/account"
     sess = api[api.index("export interface CrmSession {"):api.index("export interface CrmSessionCreate")]
     assert "paidAmount" in sess and "remaining" in sess, "CrmSession не знает про внесённое/остаток"
+    # Второй десктопный редактор (список сессий) тоже не теряет валюту.
+    ses = _code("src/pages/crm/CrmSessions.tsx")
+    assert "updateData.currency = currency" in ses, "форма сессии в «Сессиях» теряет валюту"
+
+
+BLOCK = "src/components/crm/SessionPaymentBlock.tsx"
 
 
 def test_front_payment_block_edit_and_topup():
-    src = _code(DETAIL)
-    assert "updatePayment" in src, "блок «Оплата» не вызывает правку платежа"
-    assert "Оплата:" in src and "Изменить" in src
-    assert "Цена и оплата не совпадают" in src, "нет предупреждения о расхождении цены и оплаты"
-    assert "Доплатить" in src and "createPayment" in src, "нет кнопки «Доплатить»"
-    assert "Оплачено ${" in _src(DETAIL) or "Оплачено " in src, "нет подписи частичной оплаты"
-    assert "долг " in src
+    blk = _code(BLOCK)
+    assert "crmApi.updatePayment" in blk, "блок «Оплата» не вызывает правку платежа"
+    assert "Оплата:" in blk and "Изменить" in blk
+    assert "Цена и оплата не совпадают" in blk, "нет предупреждения о расхождении цены и оплаты"
+    assert "Доплатить" in blk and "crmApi.createPayment" in blk and "sessionId: session.id" in blk, \
+        "нет кнопки «Доплатить» через POST /payments"
+    assert "Оплачено ${formatMoney(partial.paid" in blk and "долг" in blk, "нет подписи частичной оплаты"
     api = _code("src/api/crm.ts")
     assert re.search(r"updatePayment:[^=]*=>[\s\S]{0,200}api\.patch\(`/crm/payments/\$\{", api), \
         "в crmApi нет PATCH /crm/payments/{id}"
-    # Общие компоненты и форматтер, не самописные
-    for need in ("from '../../components/ui/Sheet'", "from '../../components/ui/Button'",
-                 "from '../../components/ui/Field'", "formatMoney"):
-        assert need in src, f"блок оплаты не использует {need}"
+    for need in ("'../ui/Sheet'", "'../ui/Button'", "'../ui/Field'", "formatMoney", "kind=\"money\""):
+        assert need in blk, f"блок оплаты не использует {need}"
+    assert "SessionPaymentBlock" in _code(DETAIL), "блок «Оплата» не подключён к карточке клиента"
 
 
 def test_front_debt_uses_remaining_not_full_price():
+    helper = _code("src/utils/sessionMoney.ts")
+    assert "s.remaining != null ? s.remaining" in helper, "общий расчёт долга не читает remaining"
     for rel in (DETAIL, "src/components/crm/UnpaidSessionsSheet.tsx", "src/pages/crm/CrmSessions.tsx",
                 "src/pages/crm/CrmFinances.tsx", "src/pages/mobile/crm/MobileCrmClient.tsx"):
-        assert "remaining" in _code(rel), f"{rel}: долг считается без остатка по сессии (remaining)"
+        assert "sessionDebt" in _code(rel), f"{rel}: долг считается без остатка по сессии (sessionDebt)"
 
 
 def test_front_mobile_has_currency_and_payment_edit():
     src = _code("src/pages/mobile/crm/SessionActionSheet.tsx")
-    assert "currency" in src[src.index("function PriceForm"):], "мобильная форма цены без валюты"
-    assert "updatePayment" in src, "мобильная шторка сессии не правит платёж"
-    assert "Цена и оплата не совпадают" in src
+    form = src[src.index("function PriceForm"):src.index("function NotesForm") if "function NotesForm" in src else None]
+    assert "Валюта" in form and "Счёт" in form, "мобильная форма цены без валюты/счёта"
+    assert "currency: currencyRaw, account: accountRaw" in src, "мобильная форма не шлёт валюту и счёт"
+    assert "SessionPaymentBlock" in src, "мобильная шторка сессии не показывает блок «Оплата»"
 
 
 if __name__ == "__main__":
