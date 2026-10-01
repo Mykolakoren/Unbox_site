@@ -547,9 +547,12 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     const activeCount = bookings.filter((b) => b.status === 'confirmed').length;
     const pendingCount = bookings.filter((b) => b.status === 'pending_approval').length;
 
+    // 'completed' — прошедшие: сервер отдаёт прошедшую confirmed как completed
+    // (enrich_booking_status), и под «Подтверждена» их не найти. Подпись — из
+    // словаря статусов («Прошла»), как в строках таблицы.
     const statusOptions = [
         { value: 'all', label: 'Все' },
-        ...(['pending_approval', 'confirmed', 'cancelled', 're-rented'] as const)
+        ...(['pending_approval', 'confirmed', 'completed', 'cancelled', 're-rented'] as const)
             .map(v => ({ value: v, label: statusLabel('booking', v, 'staff') })),
     ];
 

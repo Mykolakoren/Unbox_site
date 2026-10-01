@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, User as UserIcon, Calendar, MapPin, BookOpen, ArrowRight } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import { ADMIN_ROLES } from '../../utils/permissions';
 import { COLOR, FONT, SHADOW, Z } from '../../design/tokens';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
@@ -37,6 +38,16 @@ export function openCmdK(): void {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
+/**
+ * Кто может открыть поиск (доработка волны 4): только админ, старший админ
+ * и владелец — тот же ADMIN_ROLES, что пускает в /admin. Провайдер висит на
+ * всём приложении, и раньше ⌘K у клиента открывал оверлей и тянул список
+ * пользователей (сервер отвечал 403, но запрос уходил).
+ */
+function isCmdKRole(role: string | null | undefined): boolean {
+    return ADMIN_ROLES.includes(role ?? '');
+}
+
 interface ResultItem {
     id: string;
     kind: 'user' | 'crm_client' | 'cabinet' | 'location' | 'booking';
@@ -54,18 +65,23 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
     const users = useUserStore(s => s.users);
     const bookings = useUserStore(s => s.bookings);
     const fetchUsers = useUserStore(s => s.fetchUsers);
+    const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
+    const isStaff = isCmdKRole(useUserStore(s => s.currentUser?.role));
     const clients = useCrmStore(s => s.clients);
 
     useEffect(() => {
-        if (open) {
+        // Не сотрудник админки — ничего не открываем и не грузим (доработка волны 4).
+        if (open && isStaff) {
             setQ('');
             setTimeout(() => inputRef.current?.focus(), 30);
             // Открыли поиск со страницы, где клиенты ещё не загружены
             // (например, «Кабинеты») — подгружаем, иначе «ничего не найдено».
             if (users.length === 0) fetchUsers();
+            // То же с бронями: без них раздел «Бронь» в поиске всегда пуст.
+            if (bookings.length === 0) fetchAllBookings();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open]);
+    }, [open, isStaff]);
 
     const results = useMemo(() => {
         const needle = q.trim().toLowerCase();
@@ -171,7 +187,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
         return out.sort((a, b) => b.score - a.score).slice(0, 30);
     }, [q, users, bookings, clients]);
 
-    if (!open) return null;
+    if (!open || !isStaff) return null;
 
     const go = (href: string) => {
         onClose();
@@ -334,14 +350,17 @@ export function CmdKProvider() {
     const [open, setOpen] = useState(false);
 
     useEffect(() => {
+        // Роль читаем в момент нажатия: провайдер смонтирован на всё
+        // приложение, и у клиента/специалиста ⌘K остаётся браузерным.
+        const allowed = () => isCmdKRole(useUserStore.getState().currentUser?.role);
         const onKey = (e: KeyboardEvent) => {
             const isCombo = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K');
-            if (isCombo) {
+            if (isCombo && allowed()) {
                 e.preventDefault();
                 setOpen(o => !o);
             }
         };
-        const onOpen = () => setOpen(true);
+        const onOpen = () => { if (allowed()) setOpen(true); };
         window.addEventListener('keydown', onKey);
         window.addEventListener(OPEN_EVENT, onOpen);
         return () => {

@@ -159,6 +159,10 @@ def find_booking_conflicts(
     return out
 
 
+# Самый длинный период «Закрыть кабинет» за один запрос, дней (date_to - date_from).
+MAX_BLOCK_RANGE_DAYS = 366
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────
 @router.post("/", response_model=List[MaintenanceRead])
 def create_blocks(
@@ -179,6 +183,14 @@ def create_blocks(
             raise HTTPException(400, "date_to must be YYYY-MM-DD")
     if date_to < date_from:
         raise HTTPException(400, "date_to is before date_from")
+    # Волна 4 (доработка): потолок периода — год. Опечатка в годе («2062»)
+    # раньше создавала десятки тысяч блоков одним запросом и вешала сервер.
+    if (date_to - date_from).days > MAX_BLOCK_RANGE_DAYS:
+        raise HTTPException(
+            400,
+            f"Слишком длинный период: не больше {MAX_BLOCK_RANGE_DAYS} дней за раз. "
+            "Проверьте даты «с» и «по» или закройте кабинет несколькими частями.",
+        )
 
     try:
         h, m = data.start_time.split(":")
