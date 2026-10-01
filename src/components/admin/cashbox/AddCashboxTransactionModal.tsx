@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { SUBSCRIPTION_PLANS } from '../../../utils/data';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Banknote, CreditCard, Landmark, AlertTriangle } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -80,6 +80,8 @@ const ACCOUNTS = [
 export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultBranch }: Props) {
     const { createTransaction, categories } = useCashboxStore();
     const role = useUserStore(s => s.currentUser?.role);
+    // X4-05: подписи связаны с полями (тап по «Сумма» ставит курсор, диктор называет поле).
+    const fid = useId();
     const { confirm } = useConfirmDialog();
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('income');
     const [amount, setAmount] = useState('');
@@ -357,8 +359,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
 
                     {/* Amount */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Сумма, ₾</label>
+                        <label htmlFor={`${fid}-amount`} className="block text-sm font-medium text-gray-700 mb-1.5">Сумма, ₾</label>
                         <input
+                            id={`${fid}-amount`}
                             type="number"
                             step="0.01"
                             value={amount}
@@ -371,8 +374,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
 
                     {/* Date */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Дата операции</label>
+                        <label htmlFor={`${fid}-date`} className="block text-sm font-medium text-gray-700 mb-1.5">Дата операции</label>
                         <input
+                            id={`${fid}-date`}
                             type="datetime-local"
                             value={txDate}
                             onChange={e => setTxDate(e.target.value)}
@@ -439,8 +443,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                     {/* Category (not for transfers) */}
                     {type !== 'transfer' && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Категория</label>
+                            <label htmlFor={`${fid}-cat`} className="block text-sm font-medium text-gray-700 mb-1.5">Категория</label>
                             <select
+                                id={`${fid}-cat`}
                                 value={categoryId}
                                 onChange={e => {
                                     setCategoryId(e.target.value);
@@ -504,8 +509,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
 
                         return (
                             <div className="relative">
-                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
+                                <label htmlFor={`${fid}-client`} className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
                                 <input
+                                    id={`${fid}-client`}
                                     ref={clientInputRef}
                                     type="text"
                                     placeholder="Начните вводить имя или email..."
@@ -583,8 +589,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                         (общие расходы по проекту), но теперь это видимое
                         решение, а не молчаливое значение по умолчанию. */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Филиал</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div id={`${fid}-branch`} className="block text-sm font-medium text-gray-700 mb-1.5">Филиал</div>
+                        <div className="grid grid-cols-2 gap-2" role="group" aria-labelledby={`${fid}-branch`}>
                             {BRANCHES.map(b => (
                                 <button
                                     key={b.id}
@@ -609,8 +615,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
 
                     {/* Description */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Описание</label>
+                        <label htmlFor={`${fid}-desc`} className="block text-sm font-medium text-gray-700 mb-1.5">Описание</label>
                         <textarea
+                            id={`${fid}-desc`}
                             value={description}
                             onChange={e => setDescription(e.target.value)}
                             placeholder="Комментарий к операции..."
