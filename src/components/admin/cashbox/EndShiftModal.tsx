@@ -209,70 +209,10 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Expected cash balance — uses the SAME number the backend
-                        will compare against on submit (preview.expected),
-                        not the lifetime cash sum. They drift apart when past
-                        shifts ended with un-reconciled discrepancies, and the
-                        old layout silently showed the wrong number which
-                        admins then typed verbatim → phantom discrepancy. */}
-                    <div className="bg-gray-50 rounded-xl px-4 py-3">
-                        <div className="text-xs text-gray-500 mb-0.5">
-                            Ожидаемый остаток наличных {selectedBranch && <span className="text-ink-60">· {selectedBranch}</span>}
-                        </div>
-                        <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
-                            {!selectedBranch
-                                ? <span className="text-ink-60 text-base font-medium">Выберите филиал ↑</span>
-                                : loadingBranchCash || !preview
-                                    ? <><Loader2 size={18} className="animate-spin" /> <span className="text-ink-60 text-base">Загружаем…</span></>
-                                    : <span className="num">{formatGel(expectedBalance)}</span>}
-                        </div>
-                        {/* Drift warning: if total cash flow ever ≠ algorithm's
-                            running expected, surface it so the admin knows
-                            their till is "supposed" to physically have one
-                            number while history says another. Past
-                            un-reconciled discrepancies live here. */}
-                        {preview && Math.abs(drift) >= 0.01 && (
-                            <div className="mt-1 text-xs text-[var(--status-pending-fg)] leading-snug flex items-start gap-1.5">
-                                <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
-                                <span>Сумма по истории ({formatGel(lifetimeBalance)}) расходится с ожидаемой на {formatGel(drift, { sign: true })} — накопилось из прошлых незакрытых расхождений.</span>
-                            </div>
-                        )}
-                        {/* Excel #13 — backend breakdown so the admin can audit
-                            where the expected figure came from. If the totals
-                            don't match the display above, a backdated tx in
-                            this branch's period is the usual culprit.
-                            Note: API transformer converts snake_case → camelCase,
-                            so we read `startingBalance`, not `starting_balance`
-                            (root cause of the Safari crash admins reported). */}
-                        {preview && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-500 leading-relaxed">
-                                <div className="flex justify-between">
-                                    <span>Остаток с прошлой смены</span>
-                                    <span className="num">{formatGel(Number(preview.startingBalance ?? 0))}</span>
-                                </div>
-                                <div className="flex justify-between text-[var(--status-ok-fg)]">
-                                    <span>+ Приход за смену</span>
-                                    <span className="num">{formatGel(Number(preview.cashIn ?? 0))}</span>
-                                </div>
-                                <div className="flex justify-between text-[var(--status-danger-fg)]">
-                                    <span>− Расход за смену</span>
-                                    <span className="num">{formatGel(Number(preview.cashOut ?? 0))}</span>
-                                </div>
-                                <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
-                                    <span>= Ожидается</span>
-                                    <span className="num">{formatGel(Number(preview.expected ?? 0))}</span>
-                                </div>
-                                <div className="text-ink-60 mt-1">
-                                    Движений за период: {preview.txCount ?? 0}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
                     {/* Actual balance */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                            Фактически в кассе (₾)
+                            Сколько наличных в кассе сейчас (₾)
                         </label>
                         <input
                             type="number"
@@ -284,6 +224,80 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                             autoFocus
                         />
                     </div>
+
+                    {/* В4 (решение владельца 01.10) — слепой пересчёт: сначала админ
+                        считает наличные и вводит факт, и только ПОСЛЕ этого видит
+                        ожидаемую сумму вместе с расхождением. Раньше ожидаемая стояла
+                        первой — её переписывали в поле, и недостача пряталась.
+                        Отправка смены (handleSubmit) не менялась — только порядок показа. */}
+                    {!hasAmount && (
+                        <p className="text-xs text-ink-60 leading-snug -mt-2">
+                            Пересчитайте наличные и введите сумму. Ожидаемый остаток и расхождение покажем после ввода.
+                        </p>
+                    )}
+                    {hasAmount && (
+                        <>
+                        {/* Expected cash balance — uses the SAME number the backend
+                            will compare against on submit (preview.expected),
+                            not the lifetime cash sum. They drift apart when past
+                            shifts ended with un-reconciled discrepancies, and the
+                            old layout silently showed the wrong number which
+                            admins then typed verbatim → phantom discrepancy. */}
+                        <div className="bg-gray-50 rounded-xl px-4 py-3">
+                            <div className="text-xs text-gray-500 mb-0.5">
+                                Ожидаемый остаток наличных {selectedBranch && <span className="text-ink-60">· {selectedBranch}</span>}
+                            </div>
+                            <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
+                                {!selectedBranch
+                                    ? <span className="text-ink-60 text-base font-medium">Выберите филиал ↑</span>
+                                    : loadingBranchCash || !preview
+                                        ? <><Loader2 size={18} className="animate-spin" /> <span className="text-ink-60 text-base">Загружаем…</span></>
+                                        : <span className="num">{formatGel(expectedBalance)}</span>}
+                            </div>
+                            {/* Drift warning: if total cash flow ever ≠ algorithm's
+                                running expected, surface it so the admin knows
+                                their till is "supposed" to physically have one
+                                number while history says another. Past
+                                un-reconciled discrepancies live here. */}
+                            {preview && Math.abs(drift) >= 0.01 && (
+                                <div className="mt-1 text-xs text-[var(--status-pending-fg)] leading-snug flex items-start gap-1.5">
+                                    <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+                                    <span>Сумма по истории ({formatGel(lifetimeBalance)}) расходится с ожидаемой на {formatGel(drift, { sign: true })} — накопилось из прошлых незакрытых расхождений.</span>
+                                </div>
+                            )}
+                            {/* Excel #13 — backend breakdown so the admin can audit
+                                where the expected figure came from. If the totals
+                                don't match the display above, a backdated tx in
+                                this branch's period is the usual culprit.
+                                Note: API transformer converts snake_case → camelCase,
+                                so we read `startingBalance`, not `starting_balance`
+                                (root cause of the Safari crash admins reported). */}
+                            {preview && (
+                                <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-500 leading-relaxed">
+                                    <div className="flex justify-between">
+                                        <span>Остаток с прошлой смены</span>
+                                        <span className="num">{formatGel(Number(preview.startingBalance ?? 0))}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[var(--status-ok-fg)]">
+                                        <span>+ Приход за смену</span>
+                                        <span className="num">{formatGel(Number(preview.cashIn ?? 0))}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[var(--status-danger-fg)]">
+                                        <span>− Расход за смену</span>
+                                        <span className="num">{formatGel(Number(preview.cashOut ?? 0))}</span>
+                                    </div>
+                                    <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
+                                        <span>= Ожидается</span>
+                                        <span className="num">{formatGel(Number(preview.expected ?? 0))}</span>
+                                    </div>
+                                    <div className="text-ink-60 mt-1">
+                                        Движений за период: {preview.txCount ?? 0}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        </>
+                    )}
 
                     {/* Discrepancy indicator */}
                     {discrepancy !== null && (
