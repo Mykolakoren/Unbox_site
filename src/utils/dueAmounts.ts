@@ -97,3 +97,25 @@ export function dueLabel(info: DueInfo | undefined): string {
     if (info.due < info.price) return `к оплате ${fmt(info.due)} ₾ из ${fmt(info.price)}`;
     return `к оплате ${fmt(info.due)} ₾`;
 }
+
+/**
+ * Какой знак рисовать у брони в клетке шахматки (01.10): «✓» читали как «деньги
+ * получены», а у ещё не списанной брони с плюсом на балансе денег никто не брал.
+ *  • owes    — due > 0: «к оплате N ₾», красный;
+ *  • paid    — due ≤ 0 и бронь уже списана с баланса: «✓ оплачено»;
+ *  • covered — due ≤ 0, но ещё НЕ списана (charged === false): «с баланса»,
+ *              другой знак (не галочка), деньги спишутся за сутки до начала;
+ *  • null    — записи нет (абонемент, обслуживание, прощённая): ничего.
+ * Только выбор знака — суммы считает computeDueByBooking.
+ */
+export type DueMarkKind = 'owes' | 'paid' | 'covered';
+
+export function dueMarkKind(info: DueInfo | undefined | null): DueMarkKind | null {
+    if (!info) return null;
+    if (info.due > 0) return 'owes';
+    return info.charged === false ? 'covered' : 'paid';
+}
+
+/** Подпись знака «с баланса» (в плитке — коротко) и подробный текст для title/aria-label. */
+export const COVERED_SHORT = 'с баланса';
+export const COVERED_HINT = 'Покрыто балансом клиента: деньги спишутся с баланса за сутки до начала';

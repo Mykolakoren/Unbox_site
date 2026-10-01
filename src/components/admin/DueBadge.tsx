@@ -1,7 +1,8 @@
-import { AlertCircle, AlertTriangle, Check } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Check, CircleDashed } from 'lucide-react';
 import clsx from 'clsx';
 import { formatGel } from '../../utils/format';
 import { statusLabel } from '../../design/statuses';
+import { COVERED_HINT } from '../../utils/dueAmounts';
 
 /**
  * DueBadge — «к оплате 36 ₾» / «✓ оплачено» у брони (волна 4, решение В2).
@@ -12,8 +13,9 @@ import { statusLabel } from '../../design/statuses';
  *    текст --status-danger-fg «к оплате 36 ₾»;
  *  - оплачено (due ≤ 0, запись в dueMap есть) — спокойный ok-тон «✓ оплачено»;
  *    если бронь ещё НЕ списана (charged = false), а взять нечего — значит, её
- *    заранее покрывает плюс на балансе: пишем «покрыто балансом», а не
- *    «оплачено» (денег за неё никто не вносил, их спишут с баланса);
+ *    заранее покрывает плюс на балансе: пишем «покрыто балансом» нейтральным
+ *    тоном и контурным кружком вместо «✓» (денег за неё никто не вносил, их
+ *    спишут с баланса за сутки до начала — как в клетке шахматки);
  *  - прошла, но так и не списана (uncharged, сбой крона) — нейтрально-
  *    предупреждающий тон pending «не списана»: проверить, не долг;
  *  - записи нет (абонемент, обслуживание, прощённая) — ничего не рисуем.
@@ -66,12 +68,20 @@ export function DueBadge({
         );
     }
     if (!paid) return null;
-    const label = charged === false ? 'покрыто балансом' : paidLabel;
+    // Ещё не списана, а взять нечего — покрыта плюсом на балансе: другой знак
+    // (контурный кружок, нейтральный тон), не «✓» — денег за неё никто не вносил.
+    const covered = charged === false;
+    const label = covered ? 'покрыто балансом' : paidLabel;
     return (
-        <span className={clsx('ui-badge', 'ui-badge--ok', variant === 'dot' && 'ui-badge--dot', className)}>
+        <span
+            className={clsx('ui-badge', covered ? 'ui-badge--muted' : 'ui-badge--ok', variant === 'dot' && 'ui-badge--dot', className)}
+            title={covered ? COVERED_HINT : undefined}
+        >
             {variant === 'dot'
                 ? <span className="ui-badge__dot" aria-hidden="true" />
-                : <Check size={14} strokeWidth={2.25} aria-hidden="true" />}
+                : covered
+                    ? <CircleDashed size={14} strokeWidth={2.25} aria-hidden="true" />
+                    : <Check size={14} strokeWidth={2.25} aria-hidden="true" />}
             {label}
         </span>
     );
