@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, BookOpen, Clock, Wallet, Sparkles, Sun, ListChecks } from 'lucide-react';
 import { DesktopLink } from './DesktopLink';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
 
 type SectionId = 'pricing' | 'rules' | 'morning' | 'day' | 'evening';
 
@@ -34,7 +35,8 @@ export function MobileAdminKB() {
     const [expandedId, setExpandedId] = useState<SectionId | null>(null);
 
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
+        <div style={{ padding: '0 16px 90px' }}>
+            <MobilePageHeader title="База знаний" fallbackTo="/m/admin/dashboard" />
             <div style={{
                 fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
                 textTransform: 'uppercase', color: 'var(--color-ink-60)',

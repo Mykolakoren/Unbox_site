@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, MapPin, Wrench, Bell, X, Check, Power } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, Trash2, MapPin, Wrench, Bell, Check, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBookingStore } from '../../../store/bookingStore';
 import { useUserStore } from '../../../store/userStore';
 import { resourcesApi } from '../../../api/resources';
 import { waitlistApi } from '../../../api/waitlist';
-import { api } from '../../../api/client';
+import { maintenanceApi, isMaintenanceConflict, type MaintenanceBlock, type MaintenanceConflict } from '../../../api/maintenance';
 import type { Resource } from '../../../types';
 import type { WaitlistEntry } from '../../../store/types';
 import { LOCATIONS, RESOURCES } from '../../../utils/data';
-import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
+import { batumiDayKey } from '../../../utils/adminToday';
+import { toastApiError } from '../../../utils/errors';
+import { Sheet } from '../../../components/ui/Sheet';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { MaintenanceConflictSheet } from '../../../components/admin/MaintenanceConflictSheet';
 import { Button } from '../../../components/ui/Button';
 import { Chip, Segmented } from '../../../components/ui/Chip';
 import { Field, Input, Select } from '../../../components/ui/Field';
@@ -20,17 +25,7 @@ import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDateLabel, formatDayMonth, formatGel } from '../../../utils/format';
 
 type Tab = 'cabinets' | 'maintenance' | 'waitlist';
-
-interface MaintenanceBlock {
-    id: string;
-    resourceId: string;
-    locationId: string;
-    date: string;
-    startTime: string;
-    duration: number;
-    reason: string;
-    createdAt: string;
-}
+const TABS: Tab[] = ['cabinets', 'maintenance', 'waitlist'];
 
 /** 1 кабинет, 2 кабинета, 5 кабинетов. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -52,12 +47,22 @@ function plural(n: number, one: string, few: string, many: string): string {
  * Wave 1: общие Chip/Segmented/Button/Field, токены вместо hex, окна
  * подтверждения вместо confirm(). Кнопки переключателей называют действие
  * («Выключить» / «Включить»), а не текущее состояние («Вкл»).
+ *
+ * Волна 4: заголовок и «←» (MobilePageHeader), вкладка из ?tab= (ссылки
+ * /admin/maintenance с телефона ведут сюда). Выключение кабинета — с
+ * вопросом, включение — сразу. «Закрыть кабинет» — через maintenanceApi:
+ * поверх брони клиента сервер отвечает 409, и мы показываем список броней
+ * (MaintenanceConflictSheet, решение В1) — сами ничего не отменяем.
  */
 export function MobileAdminCabinets() {
-    const [tab, setTab] = useState<Tab>('cabinets');
+    const [params, setParams] = useSearchParams();
+    const fromUrl = params.get('tab') as Tab | null;
+    const tab: Tab = fromUrl && TABS.includes(fromUrl) ? fromUrl : 'cabinets';
+    const setTab = (t: Tab) => setParams(t === 'cabinets' ? {} : { tab: t }, { replace: true });
 
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
+        <div style={{ padding: '0 16px 90px' }}>
+            <MobilePageHeader title="Кабинеты" fallbackTo="/m/admin/dashboard" />
             <Segmented<Tab>
                 aria-label="Раздел"
                 className="mb-4"
@@ -96,16 +101,18 @@ function CabinetsTab() {
         const next = !(loc.isActive !== false);
         const childrenAffected = resources.filter(r => r.locationId === loc.id);
         const n = childrenAffected.length;
-        const ok = await confirm({
-            title: `${next ? 'Включить' : 'Выключить'} локацию «${loc.name}»?`,
-            body: next
-                ? 'Кабинеты внутри останутся как есть — нужные включите вручную.'
-                : `${n} ${plural(n, 'кабинет станет скрытым', 'кабинета станут скрытыми', 'кабинетов станут скрытыми')} — клиенты не смогут их бронировать.`,
-            confirmLabel: next ? 'Включить локацию' : 'Выключить локацию',
-            cancelLabel: 'Оставить как есть',
-            tone: next ? 'default' : 'danger',
-        });
-        if (!ok) return;
+        // Волна 4: спрашиваем только при выключении; включение — сразу
+        // (кабинеты внутри останутся как есть — нужные включают вручную).
+        if (!next) {
+            const ok = await confirm({
+                title: `Выключить локацию «${loc.name}»?`,
+                body: `${n} ${plural(n, 'кабинет станет скрытым', 'кабинета станут скрытыми', 'кабинетов станут скрытыми')} — клиенты не смогут их бронировать.`,
+                confirmLabel: 'Выключить локацию',
+                cancelLabel: 'Оставить как есть',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setUpdating(loc.id);
         try {
             const { locationsApi } = await import('../../../api/locations');
@@ -119,7 +126,7 @@ function CabinetsTab() {
             }
             await fetchLocations();
             await fetchResources();
-            toast.success(next ? 'Локация включена' : 'Локация и кабинеты скрыты');
+            toast.success(next ? 'Локация включена — нужные кабинеты включите вручную' : 'Локация и кабинеты скрыты');
         } catch {
             toast.error('Не удалось переключить локацию. Попробуйте ещё раз');
         } finally {
@@ -142,6 +149,18 @@ function CabinetsTab() {
 
     const toggleActive = async (r: Resource) => {
         const next = !(r.isActive !== false);
+        // Выключение — с вопросом (G9-09): промах выключал кабинет из брони.
+        // Включение — сразу, вреда от него нет.
+        if (!next) {
+            const ok = await confirm({
+                title: `Выключить «${r.name}»?`,
+                body: 'Клиенты перестанут видеть кабинет при бронировании. Уже сделанные брони останутся.',
+                confirmLabel: 'Выключить кабинет',
+                cancelLabel: 'Оставить включённым',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setUpdating(r.id);
         try {
             await resourcesApi.update(r.id, { isActive: next });
@@ -283,11 +302,8 @@ function MaintenanceTab() {
     const load = async () => {
         setLoading(true);
         try {
-            const today = new Date().toISOString().slice(0, 10);
-            const { data } = await api.get<MaintenanceBlock[]>('/maintenance-blocks', {
-                params: { date_from: today },
-            });
-            setBlocks(data);
+            // «Сегодня» — по Батуми (toISOString с 00:00 до 04:00 давал «вчера»).
+            setBlocks(await maintenanceApi.list({ dateFrom: batumiDayKey() }));
             setFailed(false);
         } catch {
             setFailed(true);
@@ -307,11 +323,28 @@ function MaintenanceTab() {
         });
         if (!ok) return;
         try {
-            await api.delete(`/maintenance-blocks/${id}`);
+            await maintenanceApi.remove(id);
             setBlocks(prev => prev.filter(b => b.id !== id));
             toast.success('Блокировка снята');
-        } catch {
-            toast.error('Не удалось снять блокировку. Попробуйте ещё раз');
+        } catch (e) {
+            toastApiError(e, 'Не удалось снять блокировку. Попробуйте ещё раз');
+        }
+    };
+
+    const handleDeleteGroup = async (groupId: string, n: number) => {
+        const ok = await confirm({
+            title: 'Снять всю серию?',
+            body: `Снимем ${n} ${plural(n, 'блокировку', 'блокировки', 'блокировок')} этой серии. Брони клиентов не трогаем.`,
+            confirmLabel: 'Снять серию',
+            cancelLabel: 'Оставить',
+        });
+        if (!ok) return;
+        try {
+            const { deleted } = await maintenanceApi.removeGroup(groupId);
+            toast.success(`Серия снята: ${deleted} ${plural(deleted, 'блокировка', 'блокировки', 'блокировок')}`);
+            await load();
+        } catch (e) {
+            toastApiError(e, 'Не удалось снять серию. Попробуйте ещё раз');
         }
     };
 
@@ -322,6 +355,11 @@ function MaintenanceTab() {
             (out[k] ||= []).push(b);
         }
         return out;
+    }, [blocks]);
+    const seriesSize = useMemo(() => {
+        const m = new Map<string, number>();
+        for (const b of blocks) if (b.recurringGroupId) m.set(b.recurringGroupId, (m.get(b.recurringGroupId) || 0) + 1);
+        return m;
     }, [blocks]);
 
     return (
@@ -351,6 +389,7 @@ function MaintenanceTab() {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                 {groups[date].map(b => {
                                     const res = RESOURCES.find(r => r.id === b.resourceId);
+                                    const n = b.recurringGroupId ? seriesSize.get(b.recurringGroupId) || 0 : 0;
                                     return (
                                         <div key={b.id} style={{
                                             background: 'var(--color-card)',
@@ -374,8 +413,18 @@ function MaintenanceTab() {
                                                 </div>
                                                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                                     {b.reason || 'Без описания'}
+                                                    {n > 1 && ` · серия из ${n}`}
                                                 </div>
                                             </div>
+                                            {n > 1 && b.recurringGroupId && (
+                                                <Button
+                                                    variant="quiet"
+                                                    size="touch"
+                                                    onClick={() => handleDeleteGroup(b.recurringGroupId!, n)}
+                                                >
+                                                    Снять серию
+                                                </Button>
+                                            )}
                                             <button
                                                 onClick={() => handleDelete(b.id)}
                                                 style={iconBtn('var(--status-danger-fg)')}
@@ -415,76 +464,94 @@ function addMinTime(time: string, mins: number): string {
 
 function CreateMaintenanceSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
     const [resourceId, setResourceId] = useState(RESOURCES[0]?.id || '');
-    const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+    const [date, setDate] = useState(batumiDayKey());
     const [dateTo, setDateTo] = useState('');
     const [startTime, setStartTime] = useState('10:00');
     const [duration, setDuration] = useState(60);
     const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
+    // В1: поверх броней клиентов не закрываем — показываем список (409).
+    const [conflicts, setConflicts] = useState<MaintenanceConflict[] | null>(null);
 
     const resource = RESOURCES.find(r => r.id === resourceId);
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            await api.post('/maintenance-blocks/', {
-                resource_id: resourceId,
-                location_id: resource?.locationId || 'unbox_one',
-                date_from: date,
-                date_to: dateTo || undefined,
-                start_time: startTime,
+            await maintenanceApi.create({
+                resourceId,
+                locationId: resource?.locationId || 'unbox_one',
+                dateFrom: date,
+                dateTo: dateTo || null,
+                startTime,
                 duration,
                 reason,
             });
             toast.success('Кабинет закрыт');
             await onCreated();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось закрыть кабинет. Проверьте поля и попробуйте ещё раз');
+        } catch (e) {
+            // Раньше detail уходил прямо в toast.error — на 409 это объект,
+            // и React падал (#31). Теперь конфликт — шторкой со списком.
+            if (isMaintenanceConflict(e)) setConflicts(e.conflicts);
+            else toastApiError(e, 'Не удалось закрыть кабинет. Проверьте поля и попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <BottomSheet onClose={onClose} title="Закрыть кабинет">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
-                <Field label="Кабинет">
-                    <Select value={resourceId} onChange={e => setResourceId(e.target.value)}>
-                        {RESOURCES.filter(r => r.isActive !== false).map(r => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                        ))}
-                    </Select>
-                </Field>
-                <Field label="Дата">
-                    <Input kind="date" value={date} onChange={e => setDate(e.target.value)} />
-                </Field>
-                <Field label="Дата окончания" optional hint="Для серии — закроем каждый день до этой даты">
-                    <Input kind="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-                </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <Field label="Начало">
-                        <Input kind="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+        <>
+            <Sheet
+                open
+                onClose={onClose}
+                title="Закрыть кабинет"
+                description="Слот будет занят и не появится в свободных. Поверх броней клиентов закрыть нельзя."
+                footer={
+                    <Button
+                        block
+                        loading={saving}
+                        icon={<Check size={16} aria-hidden="true" />}
+                        onClick={handleSave}
+                    >
+                        Закрыть кабинет
+                    </Button>
+                }
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <Field label="Кабинет">
+                        <Select value={resourceId} onChange={e => setResourceId(e.target.value)}>
+                            {RESOURCES.filter(r => r.isActive !== false).map(r => (
+                                <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                        </Select>
                     </Field>
-                    <Field label="Длительность">
-                        <Input kind="integer" suffix="мин" value={duration} onChange={e => setDuration(Number(e.target.value))} />
+                    <Field label="Дата">
+                        <Input kind="date" value={date} onChange={e => setDate(e.target.value)} />
+                    </Field>
+                    <Field label="Дата окончания" optional hint="Для серии — закроем каждый день до этой даты">
+                        <Input kind="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                    </Field>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <Field label="Начало">
+                            <Input kind="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                        </Field>
+                        <Field label="Длительность">
+                            <Input kind="integer" suffix="мин" value={duration} onChange={e => setDuration(Number(e.target.value))} />
+                        </Field>
+                    </div>
+                    <Field label="Причина" hint="Видно в шахматке">
+                        <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Уборка, ремонт, мероприятие…" />
                     </Field>
                 </div>
-                <Field label="Причина" hint="Видно в шахматке">
-                    <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Уборка, ремонт, мероприятие…" />
-                </Field>
-            </div>
-
-            <div style={SHEET_FOOTER}>
-                <Button
-                    block
-                    loading={saving}
-                    icon={<Check size={16} aria-hidden="true" />}
-                    onClick={handleSave}
-                >
-                    Закрыть кабинет
-                </Button>
-            </div>
-        </BottomSheet>
+            </Sheet>
+            <MaintenanceConflictSheet
+                open={!!conflicts}
+                onClose={() => setConflicts(null)}
+                conflicts={conflicts ?? []}
+                linkFor={c => `/m/admin/bookings?day=${c.date}`}
+                resourceName={id => RESOURCES.find(r => r.id === id)?.name || id}
+            />
+        </>
     );
 }
 
@@ -530,7 +597,7 @@ function WaitlistTab() {
         }
     };
 
-    const userName = (uid: string) => users.find(u => u.email === uid)?.name || uid;
+    const userName = (uid: string) => users.find(u => u.email === uid || String(u.id) === uid)?.name || uid;
 
     return (
         <div>
@@ -571,8 +638,8 @@ function WaitlistTab() {
                                         try {
                                             const r = await waitlistApi.notifyEntry(e.id);
                                             toast.success(`Уведомление отправлено${r.notified ? ` (${r.notified})` : ''}`);
-                                        } catch (err: any) {
-                                            toast.error(err?.response?.data?.detail || 'Не удалось отправить уведомление');
+                                        } catch (err) {
+                                            toastApiError(err, 'Не удалось отправить уведомление');
                                         }
                                     }}
                                     style={iconBtn('var(--color-ink)')}
@@ -616,35 +683,4 @@ function iconBtn(color: string): React.CSSProperties {
         width: 44, height: 44, flexShrink: 0,
         display: 'grid', placeItems: 'center', borderRadius: 8,
     };
-}
-
-function BottomSheet({ onClose, title, children }: { onClose: () => void; title: string; children: React.ReactNode }) {
-    return (
-        <div onClick={onClose} role="dialog" aria-modal="true" aria-label={title} style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(15,15,16,0.45)',
-            // Было 100 — как у нижнего меню, и меню закрывало «Закрыть кабинет».
-            zIndex: Z_SHEET,
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        }}>
-            <div onClick={e => e.stopPropagation()} style={{
-                width: '100%', maxWidth: 480, maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
-                overscrollBehavior: 'contain',
-                background: 'var(--color-card)',
-                borderTopLeftRadius: 16, borderTopRightRadius: 16,
-                // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER
-                // (главная кнопка шторки прилипает к низу).
-                padding: '8px 16px 0',
-                boxShadow: 'var(--shadow-pop)',
-            }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <h2 style={{ fontWeight: 600, fontSize: 20, margin: 0 }}>{title}</h2>
-                    <button onClick={onClose} aria-label="Закрыть" style={iconBtn('var(--color-ink-60)')}>
-                        <X size={20} aria-hidden="true" />
-                    </button>
-                </div>
-                {children}
-            </div>
-        </div>
-    );
 }

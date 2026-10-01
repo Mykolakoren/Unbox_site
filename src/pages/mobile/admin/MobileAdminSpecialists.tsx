@@ -9,6 +9,8 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { DesktopLink } from './DesktopLink';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 
 interface SpecialistRow {
     id: string;
@@ -47,6 +49,7 @@ export function MobileAdminSpecialists() {
     const [q, setQ] = useState('');
     const [filter, setFilter] = useState<'all' | 'pending' | 'verified'>('all');
     const [failed, setFailed] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         setLoading(true);
@@ -83,6 +86,25 @@ export function MobileAdminSpecialists() {
     }, [rows, q, filter]);
 
     const handleVerify = async (r: SpecialistRow, next: boolean) => {
+        // Волна 4 (G9-09): публикация новой анкеты (одобрение заявки) и скрытие
+        // с сайта — с вопросом. Повторное открытие уже проверенной — сразу.
+        const approving = next && r.applicationStatus === 'pending';
+        if (!next || approving) {
+            const name = `${r.firstName} ${r.lastName}`.trim();
+            const ok = await confirm(approving ? {
+                title: `Опубликовать анкету «${name}»?`,
+                body: 'Заявка будет одобрена, анкета появится в каталоге на сайте. Проверили документы и текст?',
+                confirmLabel: 'Одобрить и опубликовать',
+                cancelLabel: 'Ещё не проверено',
+            } : {
+                title: `Скрыть «${name}» с сайта?`,
+                body: 'Анкета пропадёт из каталога специалистов. Вернуть можно кнопкой «Опубликовать».',
+                confirmLabel: 'Скрыть с сайта',
+                cancelLabel: 'Оставить',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setBusyId(r.id);
         try {
             const endpoint = r.applicationStatus === 'pending' && next
@@ -105,7 +127,8 @@ export function MobileAdminSpecialists() {
     const pendingCount = rows.filter(r => r.applicationStatus === 'pending').length;
 
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
+        <div style={{ padding: '0 16px 90px' }}>
+            <MobilePageHeader title="Специалисты" fallbackTo="/m/admin/dashboard" />
             {pendingCount > 0 && filter !== 'pending' && (
                 <button
                     onClick={() => setFilter('pending')}

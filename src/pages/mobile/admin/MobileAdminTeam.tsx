@@ -7,6 +7,8 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { DesktopLink } from './DesktopLink';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 
 const ROLE_LABEL: Record<string, string> = {
     founder: 'Основатель',
@@ -30,6 +32,7 @@ export function MobileAdminTeam() {
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [failed, setFailed] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         setLoading(true);
@@ -58,6 +61,17 @@ export function MobileAdminTeam() {
     }, [members]);
 
     const handleToggle = async (m: TeamMember) => {
+        // Волна 4 (G9-09): выключение — с вопросом, включение — сразу.
+        if (m.isActive) {
+            const ok = await confirm({
+                title: `Выключить «${m.name}»?`,
+                body: 'Сотрудник пропадёт со страницы «Команда» на сайте. Включить обратно можно в любой момент.',
+                confirmLabel: 'Выключить',
+                cancelLabel: 'Оставить',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setBusyId(m.id);
         try {
             await teamApi.update(m.id, { is_active: !m.isActive });
@@ -71,7 +85,8 @@ export function MobileAdminTeam() {
     };
 
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
+        <div style={{ padding: '0 16px 90px' }}>
+            <MobilePageHeader title="Команда" fallbackTo="/m/admin/dashboard" />
             <div style={{
                 fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
                 textTransform: 'uppercase', color: 'var(--color-ink-60)',
