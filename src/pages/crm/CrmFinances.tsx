@@ -412,13 +412,13 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                     >
                                         {client.name}
                                     </Link>
-                                    <span style={{ fontSize: 13, color: GH.ink60, whiteSpace: 'nowrap' }}>
+                                    <span style={{ fontSize: 13, color: GH.ink60, whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>
                                         {count} {sessionsWord(count)}
                                     </span>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: GH.danger, whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
                                         {formatMoney(total, { currency: client.currency })}
                                     </span>
-                                    <span style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                                    <span style={{ display: 'flex', gap: 8, marginLeft: 'auto', minWidth: 250, justifyContent: 'flex-end' }}>
                                         {tg && (
                                             <a
                                                 href={tg}

@@ -437,7 +437,7 @@ function ClientsTable({
                             {client.nextSessionDate
                                 ? nextLabel(client.nextSessionDate)
                                 : client.isActive && hasPast
-                                    ? <span style={{ color: STATUS.pending.fg, fontFamily: GH_SANS, fontWeight: 500 }}>Не записан</span>
+                                    ? <span style={{ color: STATUS.pending.fg, fontFamily: GH_SANS, fontWeight: 500, wordSpacing: 'normal' }}>Не записан</span>
                                     : <span style={{ color: GH.ink60 }}>—</span>}
                         </div>
 
@@ -689,7 +689,7 @@ function MergeSheet({
                 {contactGroup('Telegram', 'mergeTelegram', allTelegrams, telegramSource, setTelegramSource, <Send size={14} />)}
 
                 <p style={{ margin: 0, padding: 12, borderRadius: 8, background: STATUS.danger.bg, color: STATUS.danger.fg, fontSize: 14 }}>
-                    {removed > 0 && <>Удалятся {ruCountWord(removed, ['карточка', 'карточки', 'карточек'])}. </>}
+                    {removed > 0 && <>{removed % 10 === 1 && removed % 100 !== 11 ? 'Удалится' : 'Удалятся'} {ruCountWord(removed, ['карточка', 'карточки', 'карточек'])}. </>}
                     Сессии, платежи и заметки перенесём в основную. Отменить объединение нельзя.
                 </p>
             </div>
