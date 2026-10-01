@@ -1,28 +1,13 @@
 import { Outlet, useNavigate, Navigate, useLocation, Link } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { loginPathWithRedirect } from '../../utils/loginRedirect';
-import { SidebarLayout } from '../../components/SidebarLayout';
 import { QuickActionsFab, type QuickAction } from '../../components/ui/QuickActionsFab';
 import {
-    Settings,
-    ArrowLeft,
-    LayoutDashboard,
-    Users,
     Calendar,
-    Wallet,
-    StickyNote,
     Loader2,
-    BookOpen,
-    Clock,
-    UserCircle,
-    User as UserIcon,
-    Shield,
     UserPlus,
     Plus,
     ExternalLink,
-    FileText,
-    CreditCard,
-    Gift,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
@@ -31,66 +16,13 @@ import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import { useCrmStore } from '../../store/crmStore';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { User } from '../../store/types';
-import clsx from 'clsx';
-
-const CRM_TABS = [
-    { icon: LayoutDashboard, label: 'Дашборд',         path: '/crm',                exact: true },
-    { icon: Users,           label: 'Клиенты',         path: '/crm/clients' },
-    { icon: Calendar,        label: 'Сессии',          path: '/crm/sessions' },
-    { icon: BookOpen,        label: 'Бронирования',    path: '/crm/bookings' },
-    { icon: Wallet,          label: 'Финансы',         path: '/crm/finances' },
-    { icon: StickyNote,      label: 'Заметки',         path: '/crm/notes' },
-    { icon: Clock,           label: 'Расписание',      path: '/crm/schedule' },
-    { icon: UserCircle,      label: 'Моя анкета',      path: '/crm/profile' },
-    { icon: Settings,        label: 'Настройки',       path: '/crm/settings' },
-    // Owner 2026-06-05: Личный кабинет — спец иногда хочет глянуть свои
-    // абонементы, бонусы, баланс (как обычный клиент). Раньше для этого
-    // надо было жать «Мой CRM» toggle в /dashboard sidebar, что путало
-    // (вёл обратно сюда). Прямая ссылка убирает context-switching.
-    { icon: UserIcon,        label: 'Личный кабинет',  path: '/dashboard',          exact: true },
-    // Legal: surfaced in CRM nav so specialists who book on behalf of
-    // clients (and so accept the public offer for them) have one click
-    // to the rules page.
-    { icon: FileText,        label: 'Правила',         path: '/booking-rules' },
-];
-
-function CrmTopTabs() {
-    const location = useLocation();
-
-    const isActive = (path: string, exact?: boolean) => {
-        if (exact) return location.pathname === path;
-        return location.pathname.startsWith(path);
-    };
-
-    return (
-        <div className="mb-6 -mt-2">
-            <nav className="flex gap-1 bg-card/70 backdrop-blur rounded-2xl p-1.5 border border-white/80 shadow-sm overflow-x-auto scrollbar-hide md:w-fit">
-                {CRM_TABS.map(tab => {
-                    const active = isActive(tab.path, tab.exact);
-                    return (
-                        <Link
-                            key={tab.path}
-                            to={tab.path}
-                            className={clsx(
-                                'flex items-center gap-1.5 md:gap-2 px-2.5 md:px-4 py-2 rounded-xl text-sm font-medium transition-all shrink-0',
-                                active
-                                    ? 'bg-unbox-green text-white shadow-md shadow-unbox-green/25'
-                                    : 'text-ink-60 hover:text-unbox-dark hover:bg-unbox-light/60'
-                            )}
-                        >
-                            <tab.icon size={15} />
-                            <span className="hidden sm:inline">{tab.label}</span>
-                        </Link>
-                    );
-                })}
-            </nav>
-        </div>
-    );
-}
 
 export function CrmLayout() {
     const { currentUser } = useUserStore();
     const { fetchPaymentAccounts } = useCrmStore();
+    // «Просмотр как специалист» (админ смотрит чужой кабинет): кнопки
+    // создания прячем — записывать за другого отсюда нельзя.
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     const navigate = useNavigate();
     const location = useLocation();
     const hasToken = Boolean(localStorage.getItem('token'));
@@ -106,13 +38,17 @@ export function CrmLayout() {
             .catch(() => setCalendarId(null));
     }, [currentUser]);
 
+    // Быстрые действия сразу открывают формы (G5-13): «?new=1» — шторка
+    // «Новая сессия» на странице сессий, а не просто список.
     const quickActions: QuickAction[] = [
-        { label: 'Добавить клиента', sub: 'Создать карточку', path: '/crm/clients', icon: UserPlus },
-        { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions', icon: Calendar },
+        ...(viewingOther ? [] : [
+            { label: 'Новый клиент', sub: 'Создать карточку', path: '/crm/clients?new=1', icon: UserPlus },
+            { label: 'Новая сессия', sub: 'Записать встречу', path: '/crm/sessions?new=1', icon: Calendar },
+        ]),
         { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/crm/bookings', icon: Plus },
         {
-            label: 'Открыть Google Calendar',
-            sub: calendarId ? 'Ваш личный календарь' : 'Google Calendar',
+            label: 'Открыть Google Календарь',
+            sub: calendarId ? 'Ваш личный календарь' : 'Google Календарь',
             href: calendarId
                 ? `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(calendarId)}`
                 : 'https://calendar.google.com/calendar/u/0/r',
@@ -153,8 +89,9 @@ export function CrmLayout() {
     // Show loading while checking access
     if (accessLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50/80">
-                <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
+            <div role="status" aria-busy="true" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: GH.paper }}>
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: GH.accent }} aria-hidden="true" />
+                <span className="sr-only">Открываем кабинет…</span>
             </div>
         );
     }
@@ -164,75 +101,62 @@ export function CrmLayout() {
         return <CrmApplyPage />;
     }
 
-    // Sidebar shows only general items — CRM sections are in the top tabs
-    const sidebarNavItems = [
-        { icon: Settings, label: 'Настройки', path: '/crm/settings' },
-    ];
-
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
 
-    const customBottomContent = (
-        <div className="space-y-1">
-            {isAdmin && (
-                <button
-                    onClick={() => navigate('/admin')}
-                    className="flex items-center gap-2 text-sm text-unbox-green hover:bg-unbox-green/10 transition-colors w-full px-3 py-2 rounded-xl font-semibold"
-                >
-                    <Shield size={16} />
-                    Админка
-                </button>
-            )}
-            <button
-                onClick={() => navigate('/dashboard')}
-                className="flex items-center gap-2 text-sm text-ink-60 hover:text-gray-700 transition-colors w-full px-3 py-2"
-            >
-                <ArrowLeft size={16} />
-                К бронированиям
-            </button>
-        </div>
-    );
-
+    // Старая оболочка на SidebarLayout (вкладки CrmTopTabs) не рендерилась
+    // с апреля — удалена в волне 3. Grid House — единственная оболочка.
     return <GridHouseCrmShell isAdmin={isAdmin} currentUser={currentUser} quickActions={quickActions} />;
-
-    // Legacy SidebarLayout-based CRM shell removed; Grid House is the only layout.
-    // eslint-disable-next-line no-unreachable
-    return (
-        <SidebarLayout navItems={sidebarNavItems} customBottomContent={customBottomContent}>
-            <CrmTopTabs />
-            <Outlet />
-            <QuickActionsFab actions={quickActions} />
-        </SidebarLayout>
-    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// GRID HOUSE CRM shell — separate, isolated layout for the ?design=grid flag.
-// No shared CSS with the default shell. All inline styles. Delete this whole
-// block to revert.
+// GRID HOUSE CRM shell.
 // ─────────────────────────────────────────────────────────────────────────
 
-const GH_NAV = [
-    { label: 'Дашборд',         path: '/crm',                exact: true },
-    { label: 'Клиенты',         path: '/crm/clients' },
-    { label: 'Сессии',          path: '/crm/sessions' },
-    { label: 'Бронирования',    path: '/crm/bookings' },
-    { label: 'Слежу за слотами', path: '/crm/waitlist' },
-    { label: 'Финансы',         path: '/crm/finances' },
-    { label: 'Заметки',         path: '/crm/notes' },
-    { label: 'Расписание',      path: '/crm/schedule' },
-    { label: 'Анкета',          path: '/crm/profile' },
-    { label: 'Настройки',       path: '/crm/settings' },
-    { label: 'Правила',         path: '/booking-rules' },
-];
+/**
+ * Меню — четыре группы (решение владельца В4, 01.10): «Работа / Кабинеты /
+ * Деньги / Я». Без номеров 01–11 (G5-18): номер ничего не говорит, а
+ * пятнадцать плоских пунктов не читались. Личные ссылки (абонемент,
+ * бонусы, личные данные) раньше висели отдельным рядом значков —
+ * теперь в своих группах. «Шахматка» живёт только в «Бронированиях».
+ */
+interface NavItem { label: string; path: string; exact?: boolean }
+interface NavGroup { title: string; items: NavItem[] }
 
-/** Личные функции спеца — компактный row с иконками над nav. Эти штуки
- *  нужны редко, но регулярно (счёт абонемента, бонусы, профиль). Раньше
- *  пункт «Личный кабинет» в sidebar открывал весь /dashboard шелл — теперь
- *  3 точечных шортката без смены контекста. */
-const PERSONAL_LINKS: Array<{ label: string; Icon: React.ElementType; path: string }> = [
-    { label: 'Абонемент', Icon: CreditCard, path: '/crm/subscription' },
-    { label: 'Бонусы',    Icon: Gift,       path: '/crm/bonuses' },
-    { label: 'Профиль',   Icon: UserCircle, path: '/crm/account' },
+const CRM_NAV_GROUPS: NavGroup[] = [
+    {
+        title: 'Работа',
+        items: [
+            { label: 'Дашборд', path: '/crm', exact: true },
+            { label: 'Клиенты', path: '/crm/clients' },
+            { label: 'Сессии', path: '/crm/sessions' },
+            { label: 'Заметки', path: '/crm/notes' },
+        ],
+    },
+    {
+        title: 'Кабинеты',
+        items: [
+            { label: 'Бронирования', path: '/crm/bookings' },
+            { label: 'Слежу за слотами', path: '/crm/waitlist' },
+            { label: 'Правила', path: '/booking-rules' },
+        ],
+    },
+    {
+        title: 'Деньги',
+        items: [
+            { label: 'Финансы', path: '/crm/finances' },
+            { label: 'Абонемент', path: '/crm/subscription' },
+            { label: 'Бонусы', path: '/crm/bonuses' },
+        ],
+    },
+    {
+        title: 'Я',
+        items: [
+            { label: 'Анкета', path: '/crm/profile' },
+            { label: 'Часы приёма', path: '/crm/schedule' },
+            { label: 'Настройки', path: '/crm/settings' },
+            { label: 'Личные данные', path: '/crm/account' },
+        ],
+    },
 ];
 
 function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: boolean; currentUser: User; quickActions: QuickAction[] }) {
@@ -248,14 +172,26 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
         return () => window.removeEventListener('resize', onResize);
     }, []);
 
+    // Открытое меню на узком окне закрывается по Esc.
+    useEffect(() => {
+        if (!isMobileOpen) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsMobileOpen(false); };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [isMobileOpen]);
+
     const isActive = (path: string, exact?: boolean) => {
         if (exact) return location.pathname === path;
         if (path === '/crm' && location.pathname !== '/crm') return false;
         return location.pathname.startsWith(path);
     };
 
-    const activeIndex = GH_NAV.findIndex(t => isActive(t.path, t.exact));
-    const activeTab = activeIndex >= 0 ? GH_NAV[activeIndex] : GH_NAV[0];
+    let activeGroup: NavGroup | null = null;
+    let activeItem: NavItem | null = null;
+    for (const g of CRM_NAV_GROUPS) {
+        const hit = g.items.find(t => isActive(t.path, t.exact));
+        if (hit) { activeGroup = g; activeItem = hit; break; }
+    }
 
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
@@ -267,9 +203,13 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
     };
 
     const SIDEBAR_WIDTH = 260;
+    const sidebarHidden = isNarrow && !isMobileOpen;
 
     const sidebar = (
         <aside
+            aria-label="Меню CRM"
+            // Спрятанное за край меню не должно ловить Tab.
+            inert={sidebarHidden || undefined}
             style={{
                 width: `${SIDEBAR_WIDTH}px`,
                 background: GH.paper,
@@ -281,14 +221,14 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                 display: 'flex',
                 flexDirection: 'column',
                 zIndex: 20,
-                transform: isNarrow && !isMobileOpen ? 'translateX(-100%)' : 'translateX(0)',
+                transform: sidebarHidden ? 'translateX(-100%)' : 'translateX(0)',
                 transition: 'transform 0.25s ease',
             }}
         >
             {/* Brand */}
             <div
                 style={{
-                    padding: '22px 24px 18px',
+                    padding: '20px 24px 16px',
                     borderBottom: `1px solid ${GH.ink}`,
                     display: 'flex',
                     alignItems: 'baseline',
@@ -298,8 +238,8 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                 <Link to="/" style={{ textDecoration: 'none', color: GH.ink }}>
                     <div style={{
                         fontFamily: GH_SANS,
-                        fontSize: '22px',
-                        fontWeight: 700,
+                        fontSize: '20px',
+                        fontWeight: 600,
                         letterSpacing: '-0.02em',
                         lineHeight: 1,
                     }}>
@@ -322,7 +262,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
             {currentUser && (
                 <div
                     style={{
-                        padding: '16px 24px',
+                        padding: '14px 24px',
                         borderBottom: `1px solid ${GH.ink10}`,
                     }}
                 >
@@ -330,7 +270,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                     <div style={monoLabel}>{currentUser.role === 'specialist' ? 'Специалист' : currentUser.role === 'owner' || currentUser.role === 'senior_admin' ? 'Админ' : 'Оператор'}</div>
                     <div style={{
                         fontFamily: GH_SANS,
-                        fontSize: '15px',
+                        fontSize: '14px',
                         fontWeight: 600,
                         marginTop: '4px',
                         color: GH.ink,
@@ -358,136 +298,94 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                 </div>
             )}
 
-            {/* Personal toolbar — 3 шортката на личные функции
-                (Абонемент / Бонусы / Профиль). Раньше всё это было только
-                через /dashboard, требовало смены шелла. Теперь — без выхода
-                из CRM. */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 1,
-                borderBottom: `1px solid ${GH.ink10}`,
-                background: GH.ink10,
-            }}>
-                {PERSONAL_LINKS.map(({ label, Icon, path }) => (
-                    <Link
-                        key={path}
-                        to={path}
-                        onClick={() => setIsMobileOpen(false)}
-                        title={label}
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 4,
-                            padding: '10px 0',
-                            background: GH.paper,
-                            color: GH.ink60,
-                            textDecoration: 'none',
-                            transition: 'color 0.12s, background 0.12s',
-                        }}
-                        onMouseEnter={e => {
-                            e.currentTarget.style.background = GH.ink5;
-                            e.currentTarget.style.color = GH.ink;
-                        }}
-                        onMouseLeave={e => {
-                            e.currentTarget.style.background = GH.paper;
-                            e.currentTarget.style.color = GH.ink60;
-                        }}
-                    >
-                        <Icon size={16} />
-                        <span style={{
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                        }}>
-                            {label}
-                        </span>
-                    </Link>
-                ))}
-            </div>
-
-            {/* Nav */}
-            <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-                {GH_NAV.map((tab, idx) => {
-                    const active = isActive(tab.path, tab.exact);
+            {/* Nav — четыре группы (В4) */}
+            <nav aria-label="Разделы CRM" style={{ flex: 1, overflowY: 'auto', padding: '4px 0 12px' }}>
+                {CRM_NAV_GROUPS.map(group => {
+                    const headId = `crm-nav-${group.title}`;
                     return (
-                        <Link
-                            key={tab.path}
-                            to={tab.path}
-                            onClick={() => setIsMobileOpen(false)}
-                            style={{
-                                display: 'grid',
-                                gridTemplateColumns: '44px 1fr',
-                                alignItems: 'center',
-                                padding: '14px 24px',
-                                borderBottom: `1px solid ${GH.ink10}`,
-                                textDecoration: 'none',
-                                background: active ? GH.ink : 'transparent',
-                                color: active ? GH.paper : GH.ink,
-                                transition: 'background 0.12s',
-                            }}
-                            onMouseEnter={e => {
-                                if (!active) (e.currentTarget as HTMLAnchorElement).style.background = GH.ink5;
-                            }}
-                            onMouseLeave={e => {
-                                if (!active) (e.currentTarget as HTMLAnchorElement).style.background = 'transparent';
-                            }}
-                        >
-                            <span style={{
-                                fontFamily: GH_MONO,
-                                fontSize: '12px',
-                                letterSpacing: '0.06em',
-                                color: active ? 'rgba(250,250,247,0.6)' : GH.ink60,
-                            }}>
-                                {String(idx + 1).padStart(2, '0')}
-                            </span>
-                            <span style={{
-                                fontFamily: GH_SANS,
-                                fontSize: '14px',
-                                fontWeight: active ? 600 : 500,
-                                letterSpacing: '-0.005em',
-                            }}>
-                                {tab.label}
-                            </span>
-                        </Link>
+                        <div key={group.title} style={{ marginTop: 12 }}>
+                            <div id={headId} style={{ ...monoLabel, padding: '4px 24px 6px' }}>
+                                {group.title}
+                            </div>
+                            <ul aria-labelledby={headId} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                                {group.items.map(tab => {
+                                    const active = isActive(tab.path, tab.exact);
+                                    return (
+                                        <li key={tab.path}>
+                                            <Link
+                                                to={tab.path}
+                                                aria-current={active ? 'page' : undefined}
+                                                onClick={() => setIsMobileOpen(false)}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    minHeight: 40,
+                                                    padding: '0 24px',
+                                                    textDecoration: 'none',
+                                                    fontFamily: GH_SANS,
+                                                    fontSize: '14px',
+                                                    fontWeight: active ? 600 : 500,
+                                                    background: active ? GH.ink : 'transparent',
+                                                    color: active ? GH.paper : GH.ink,
+                                                    transition: 'background 0.12s',
+                                                }}
+                                                onMouseEnter={e => {
+                                                    if (!active) (e.currentTarget as HTMLAnchorElement).style.background = GH.ink5;
+                                                }}
+                                                onMouseLeave={e => {
+                                                    if (!active) (e.currentTarget as HTMLAnchorElement).style.background = 'transparent';
+                                                }}
+                                            >
+                                                {tab.label}
+                                            </Link>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
                     );
                 })}
             </nav>
 
             {/* Footer actions */}
-            <div style={{ borderTop: `1px solid ${GH.ink}`, padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ borderTop: `1px solid ${GH.ink}`, padding: '12px 24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {isAdmin && (
                     <button
+                        type="button"
                         onClick={() => navigate('/admin')}
                         style={{
-                            ...monoLabel,
+                            fontFamily: GH_SANS,
+                            fontSize: 14,
+                            fontWeight: 500,
                             color: GH.ink,
                             background: 'none',
                             border: 'none',
                             padding: 0,
+                            minHeight: 36,
                             textAlign: 'left',
                             cursor: 'pointer',
                         }}
                     >
-                        → АДМИНКА
+                        Админка →
                     </button>
                 )}
                 <button
+                    type="button"
                     onClick={() => { logout(); window.location.href = '/login'; }}
                     style={{
-                        ...monoLabel,
+                        fontFamily: GH_SANS,
+                        fontSize: 14,
+                        fontWeight: 500,
                         color: GH.danger,
                         background: 'none',
                         border: 'none',
                         padding: 0,
+                        minHeight: 36,
                         textAlign: 'left',
                         cursor: 'pointer',
                     }}
                 >
-                    ↳ ВЫЙТИ
+                    Выйти
                 </button>
             </div>
         </aside>
@@ -506,6 +404,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
             {isNarrow && isMobileOpen && (
                 <div
                     onClick={() => setIsMobileOpen(false)}
+                    aria-hidden="true"
                     style={{
                         position: 'fixed',
                         inset: 0,
@@ -520,68 +419,56 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                 minHeight: '100vh',
                 background: GH.paper,
             }}>
-                {/* Top bar */}
+                {/* Top bar: где я — группа и раздел, без номеров «01 /» и без
+                    дублирующего «UNBOX · CRM» (G5-19). */}
                 <div style={{
                     borderBottom: `1px solid ${GH.ink}`,
-                    padding: isNarrow ? '14px 20px' : '18px 40px',
+                    padding: isNarrow ? '12px 20px' : '14px 40px',
                     display: 'flex',
-                    justifyContent: 'space-between',
                     alignItems: 'center',
                     gap: '16px',
+                    minHeight: 56,
                     background: GH.paper,
                     position: 'sticky',
                     top: 0,
                     zIndex: 10,
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                        {isNarrow && (
-                            <button
-                                onClick={() => setIsMobileOpen(true)}
-                                aria-label="Открыть меню"
-                                style={{
-                                    background: GH.ink,
-                                    color: GH.paper,
-                                    border: 'none',
-                                    padding: '8px 12px',
-                                    minHeight: 44,
-                                    fontFamily: GH_MONO,
-                                    fontSize: '12px',
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                МЕНЮ
-                            </button>
-                        )}
-                        <div style={{
-                            fontFamily: GH_MONO,
-                            fontSize: '12px',
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            color: GH.ink60,
-                            display: 'flex',
-                            gap: '10px',
-                            flexWrap: 'wrap',
-                        }}>
-                            <span style={{ color: GH.ink60 }}>{String(activeIndex >= 0 ? activeIndex + 1 : 1).padStart(2, '0')}</span>
-                            <span>/</span>
-                            <span style={{ color: GH.ink }}>{activeTab.label.toUpperCase()}</span>
-                        </div>
-                    </div>
+                    {isNarrow && (
+                        <button
+                            type="button"
+                            onClick={() => setIsMobileOpen(true)}
+                            aria-expanded={isMobileOpen}
+                            style={{
+                                background: GH.ink,
+                                color: GH.paper,
+                                border: 'none',
+                                padding: '8px 12px',
+                                minHeight: 44,
+                                fontFamily: GH_SANS,
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            Меню
+                        </button>
+                    )}
                     <div style={{
-                        fontFamily: GH_MONO,
-                        fontSize: '12px',
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
+                        fontFamily: GH_SANS,
+                        fontSize: '14px',
                         color: GH.ink60,
+                        display: 'flex',
+                        gap: '8px',
+                        flexWrap: 'wrap',
                     }}>
-                        UNBOX · CRM
+                        {activeGroup && <span>{activeGroup.title}</span>}
+                        {activeGroup && activeItem && <span aria-hidden="true">/</span>}
+                        {activeItem && <span style={{ color: GH.ink, fontWeight: 500 }}>{activeItem.label}</span>}
                     </div>
                 </div>
 
                 <div style={{
-                    padding: isNarrow ? '32px 20px 80px' : '48px 40px 96px',
+                    padding: isNarrow ? '32px 20px 80px' : '40px 40px 96px',
                     maxWidth: '1360px',
                 }}>
                     <Outlet />
