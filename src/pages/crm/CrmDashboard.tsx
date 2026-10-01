@@ -427,7 +427,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                 <section aria-label="Сессии сегодня">
                     {todayFailed ? (
                         <ErrorBar message="Не удалось загрузить сессии на сегодня" onRetry={loadToday} />
-                    ) : todayList === null ? (
+                    ) : todayList === null || clients === null ? (
                         <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                             <span className="sr-only">Загружаем сессии на сегодня…</span>
                             <Skeleton height={40} radius={0} />
@@ -722,10 +722,14 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     />
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                        // Линии между ячейками — зазором 1 px на фоне ink10: при
+                        // переносе на узком окне сетка остаётся ровной.
+                        gap: 1,
+                        background: GH.ink10,
                         borderBottom: hairline,
                     }}>
-                        {kpiCells.map((cell, idx) => (
+                        {kpiCells.map((cell) => (
                             <Link
                                 key={cell.label}
                                 to={cell.to}
@@ -733,13 +737,12 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 style={{
                                     ...linkStyle,
                                     display: 'block',
-                                    padding: '20px 20px 20px 0',
-                                    paddingLeft: idx === 0 ? 0 : 20,
-                                    borderLeft: idx === 0 ? 'none' : hairline,
+                                    padding: 20,
+                                    background: GH.paper,
                                     transition: 'background 0.12s',
                                 }}
-                                onMouseEnter={(e) => { e.currentTarget.style.background = GH.ink5; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = GH.sunken; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = GH.paper; }}
                             >
                                 <div style={monoLabel}>{cell.label}</div>
                                 <div style={{
