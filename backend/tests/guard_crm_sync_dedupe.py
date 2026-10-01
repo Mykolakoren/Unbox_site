@@ -89,7 +89,7 @@ class _Patch:
             setattr(obj, name, value)
 
 
-def _run_sync(eng, events, master=True):
+def _run_sync(eng, events, master=True, user=None):
     """Прогон роут-функции синка с замоканной выдачей Google."""
     from sqlmodel import Session
     import app.services.crm_calendar as cc
@@ -103,7 +103,7 @@ def _run_sync(eng, events, master=True):
     try:
         with Session(eng) as s:
             return sync_from_calendar(
-                session=s, current_user=_user(master), dry_run=False,
+                session=s, current_user=user or _user(master), dry_run=False,
                 auto_create_clients=False, months_back=0, months_forward=3, past_days=45,
             )
     finally:
@@ -124,7 +124,8 @@ def _seed_client(s, cid="c1", name="Анна Петрова", alias="1234"):
 
 def test_moved_event_relinks_session_without_id():
     """Событие перенесли на 19:40, у клиента сессия 18:00 без id → привязка и
-    сдвиг (вместе с бронью), без новой сессии."""
+    сдвиг сессии без новой сессии. Бронь кабинета синк НЕ двигает (цена не
+    пересчитывается) — только уведомление специалисту."""
     from uuid import uuid4
     from sqlmodel import Session, select
     from app.models.booking import Booking
@@ -153,7 +154,12 @@ def test_moved_event_relinks_session_without_id():
         assert ts.google_event_id == "evNEW", "сессия не привязана к перенесённому событию"
         assert ts.date == d1940, f"сессия не сдвинута: {ts.date} вместо {d1940}"
         b = s.get(Booking, bid)
-        assert b.start_time == "19:40", f"бронь не поехала за сессией: {b.start_time}"
+        assert b.start_time == "18:00" and b.duration == 60 and b.final_price == 20, \
+            "синк сам сдвинул бронь (без пересчёта цены)"
+        from app.models.notification import Notification
+        n = s.exec(select(Notification).where(Notification.type == "booking_conflict")).first()
+        assert n is not None and "перенесите её сами" in n.description, \
+            "нет уведомления «бронь осталась на старом времени»"
     assert res["created"] == 0 and res["relinked"] == 1
 
 
@@ -218,33 +224,49 @@ def test_exact_duplicate_events_do_not_duplicate_sessions():
 
 # ─── B: сирота того же дня → перепривязка ────────────────────────────────
 
-def test_orphan_same_day_is_relinked_not_deleted():
-    """Событие 10:00 удалили и поставили новое на 18:00 того же дня →
-    сессия переезжает (с id нового события), а не удаляется + создаётся."""
+def test_orphan_within_3h_is_relinked_far_is_not():
+    """Событие 17:00 удалили и поставили новое на 19:30 → сирота перепривязана
+    (платёж на месте). Сирота 10:00 и событие 18:00 того же дня — это РАЗНЫЕ
+    встречи (дальше ±3 ч): новая сессия, а ценная сирота только отменена."""
     from sqlmodel import Session, select
     from app.models.therapy_session import TherapySession
     from app.models.therapist_payment import TherapistPayment
 
     eng = _engine()
-    d10 = _day(hour_utc=6)       # 10:00 Тбилиси
-    d18 = _day(hour_utc=14)      # 18:00 Тбилиси
+    d17 = _day(hour_utc=13)
+    d1930 = _day(hour_utc=15, minute=30)
     with Session(eng) as s:
         _seed_client(s)
-        s.add(TherapySession(id="s1", client_id="c1", specialist_id="sp1", date=d10,
+        s.add(TherapySession(id="s1", client_id="c1", specialist_id="sp1", date=d17,
                              google_event_id="evOld", is_paid=True, price=100))
         s.add(TherapistPayment(client_id="c1", specialist_id="sp1", amount=100,
                                date=datetime.now(), session_id="s1"))
         s.commit()
-    res = _run_sync(eng, [_ev("evNew", "Анна Петрова #1234", d18)])
+    res = _run_sync(eng, [_ev("evNew", "Анна Петрова #1234", d1930)])
     with Session(eng) as s:
         rows = s.exec(select(TherapySession)).all()
         assert len(rows) == 1, f"ждали одну сессию, есть {len(rows)}"
-        assert rows[0].id == "s1" and rows[0].google_event_id == "evNew" and rows[0].date == d18, \
-            "сирота не перепривязана к новому событию того же дня"
+        assert rows[0].id == "s1" and rows[0].google_event_id == "evNew" and rows[0].date == d1930, \
+            "сирота не перепривязана к новому событию в пределах 3 ч"
         assert rows[0].status != "CANCELLED_THERAPIST"
-        pay = s.exec(select(TherapistPayment)).first()
-        assert pay.session_id == "s1", "платёж отвязался от сессии"
+        assert s.exec(select(TherapistPayment)).first().session_id == "s1", "платёж отвязался"
     assert res["orphans_cancelled"] == 0
+
+    eng = _engine()
+    d10 = _day(days_ahead=6, hour_utc=6)
+    d18 = _day(days_ahead=6, hour_utc=14)
+    with Session(eng) as s:
+        _seed_client(s)
+        s.add(TherapySession(id="s10", client_id="c1", specialist_id="sp1", date=d10,
+                             google_event_id="evMorning", is_paid=True, price=100))
+        s.commit()
+    _run_sync(eng, [_ev("evEvening", "Анна Петрова #1234", d18)])
+    with Session(eng) as s:
+        s10 = s.get(TherapySession, "s10")
+        assert s10.date == d10 and s10.google_event_id == "evMorning", \
+            "сирота дальше 3 ч склеена с другой встречей того же дня"
+        assert s10.status == "CANCELLED_THERAPIST"
+        assert len(s.exec(select(TherapySession)).all()) == 2
 
 
 # ─── C: защита при удалении ──────────────────────────────────────────────
@@ -308,6 +330,8 @@ def test_orphans_with_value_cancelled_empty_deleted():
         notes = s.exec(select(Notification).where(Notification.type == "calendar_session_cancelled")).all()
         assert len(notes) == 1, "нет (или несколько) уведомлений об отменённых сессиях"
         assert "оплата/бронь сохранены" in notes[0].description
+        assert "кабинет cab1" in notes[0].description and "спишется за 24 ч" in notes[0].description, \
+            "уведомление не называет бронь кабинета и не предупреждает о списании"
     assert res["sessions_cancelled_kept"] == 4 and res["orphans_cancelled"] == 2
 
     # Повторный прогон (крон каждые 20 мин) не плодит уведомления.
@@ -356,6 +380,95 @@ def test_safe_mode_still_holds_deletions():
     with Session(eng) as s:
         assert s.get(TherapySession, "empty") is not None
     assert res["deletions_held"] == 1
+
+
+def test_sync_never_moves_or_reprices_booking():
+    """Сессия с id переехала в Google: брони любых видов (оплаченная,
+    абонементная, неоплаченная, прошедшая) синк не двигает, не меняет
+    длительность и цену; специалист получает уведомление."""
+    from uuid import uuid4
+    from sqlmodel import Session, select
+    from app.models.booking import Booking
+    from app.models.notification import Notification
+    from app.models.therapy_session import TherapySession
+
+    cases = [
+        ("paid", "balance", 3),
+        ("pending", "subscription", 3),
+        ("pending", "balance", 3),
+        ("paid", "balance", -2),   # прошедшая
+    ]
+    for status, method, days in cases:
+        eng = _engine()
+        d = _day(days_ahead=days, hour_utc=14)
+        bid = uuid4()
+        with Session(eng) as s:
+            _seed_client(s)
+            s.add(Booking(id=bid, resource_id="cab1", location_id="loc1",
+                          date=(d + timedelta(hours=4)).replace(hour=0, minute=0),
+                          start_time="18:00", duration=60, status="confirmed",
+                          user_id="sp1@example.com", final_price=20, base_price=20,
+                          payment_method=method, payment_status=status,
+                          charge_amount=20 if status == "paid" else None,
+                          hours_deducted=1 if method == "subscription" else None))
+            s.add(TherapySession(id="s1", client_id="c1", specialist_id="sp1", date=d,
+                                 google_event_id="evA", booking_id=str(bid), is_booked=True))
+            s.commit()
+        # 18:00 → 20:00 (пик) и 60 → 180 мин
+        _run_sync(eng, [_ev("evA", "Анна Петрова #1234", d + timedelta(hours=2), minutes=180)])
+        with Session(eng) as s:
+            b = s.get(Booking, bid)
+            tag = f"{status}/{method}/{days}д"
+            assert b.start_time == "18:00", f"[{tag}] синк сдвинул бронь"
+            assert b.duration == 60, f"[{tag}] синк поменял длительность брони"
+            assert b.final_price == 20 and b.base_price == 20, f"[{tag}] синк поменял цену брони"
+            assert s.get(TherapySession, "s1").date == d + timedelta(hours=2), f"[{tag}] сессия не переехала"
+            n = s.exec(select(Notification).where(Notification.type == "booking_conflict")).all()
+            assert len(n) == 1, f"[{tag}] нет уведомления «перенесите бронь сами»"
+    src = _src("backend/app/api/v1/crm/sync.py")
+    body = src[src.find("def _try_move_linked_booking"):src.find("def _delete_session_safely")]
+    for forbidden in ("booking.duration =", "booking.start_time =", "booking.date =",
+                      "final_price", "check_availability"):
+        assert forbidden not in body.split('"""', 2)[-1], f"синк снова трогает бронь: {forbidden}"
+
+
+def test_sync_cancel_is_restored_when_event_returns():
+    """Синк отменил ценную сессию (событие пропало), событие с тем же id
+    вернулось → статус возвращается (PLANNED / COMPLETED для прошедшей).
+    Ручную отмену специалиста синк не отменяет."""
+    from sqlmodel import Session
+    from app.models.therapy_session import TherapySession
+
+    eng = _engine()
+    fut = _day(days_ahead=4, hour_utc=10)
+    past = _day(days_ahead=-2, hour_utc=10)
+    with Session(eng) as s:
+        _seed_client(s)
+        _seed_client(s, cid="c2", name="Борис Иванов", alias="5678")
+        s.add(TherapySession(id="fut", client_id="c1", specialist_id="sp1", date=fut,
+                             google_event_id="gF", price=80))
+        s.add(TherapySession(id="past", client_id="c1", specialist_id="sp1", date=past,
+                             google_event_id="gP", status="COMPLETED"))
+        s.add(TherapySession(id="manual", client_id="c1", specialist_id="sp1",
+                             date=fut + timedelta(days=1), google_event_id="gM",
+                             status="CANCELLED_THERAPIST", price=80))
+        s.commit()
+    user = _user()
+    other = _ev("gOther", "Борис Иванов #5678", fut + timedelta(days=9))
+    manual_ev = _ev("gM", "Анна Петрова #1234", fut + timedelta(days=1))
+    _run_sync(eng, [other, manual_ev], user=user)
+    with Session(eng) as s:
+        assert s.get(TherapySession, "fut").status == "CANCELLED_THERAPIST"
+        assert s.get(TherapySession, "past").status == "CANCELLED_THERAPIST", \
+            "проведённая сессия (долг клиента) должна считаться ценной"
+    _run_sync(eng, [other, manual_ev,
+                    _ev("gF", "Анна Петрова #1234", fut),
+                    _ev("gP", "Анна Петрова #1234", past)], user=user)
+    with Session(eng) as s:
+        assert s.get(TherapySession, "fut").status == "PLANNED", "вернувшееся событие не сняло отмену"
+        assert s.get(TherapySession, "past").status == "COMPLETED", "прошедшая не вернулась в «Проведена»"
+        assert s.get(TherapySession, "manual").status == "CANCELLED_THERAPIST", \
+            "синк отменил ручную отмену специалиста"
 
 
 # ─── D: перенос брони двигает событие ───────────────────────────────────
