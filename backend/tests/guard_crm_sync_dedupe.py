@@ -737,6 +737,52 @@ def test_frontend_handles_near_conflict_and_calendar_warning():
         "предупреждение календаря при переносе не показывается"
 
 
+def test_static_calendar_calls_are_gated():
+    """Ревизор регрессий 01.10: Google зовём только при подключённом календаре;
+    продление серии пушит под `if ext_crm_calendar_id`; заявка с сайта — в UTC;
+    перенос сессии без id ставит в календарь только будущие PLANNED."""
+    sch = _src("backend/app/api/v1/specialist_schedule.py")
+    assert "tbilisi_naive_to_utc_naive(" in sch, "заявка с сайта не переводит время в UTC"
+
+    rts = _src("backend/app/api/v1/bookings/routes.py")
+    ext = rts[rts.find("ext_crm_calendar_id = None"):rts.find("def dismiss_series_end_reminder")]
+    g, c = ext.find("if ext_crm_calendar_id:"), ext.find("_crm_push_ext(")
+    assert 0 < g < c, "продление серии зовёт Google без проверки календаря"
+
+    push = rts[rts.find("def _push_session_moves_to_gcal("):rts.find("def _push_session_moves_to_gcal_bg(")]
+    g, c = push.find("if not cal_id:"), push.find("_move_ev(")
+    assert 0 < g < c and "continue" in push[g:g + 60], \
+        "_push_session_moves_to_gcal зовёт Google без calendar_id"
+
+    ses = _src("backend/app/api/v1/crm/sessions.py")
+    cs = ses[ses.find("def create_session("):ses.find("def update_session(")]
+    g = cs.find("if calendar_id:")
+    for call in ("create_or_link_event(", "create_calendar_event("):
+        c = cs.find(call)
+        assert 0 < g < c, f"create_session: {call} вне `if calendar_id:`"
+
+    us = ses[ses.find("def update_session("):ses.find("def delete_session(")]
+    g, c = us.find("if ts.google_event_id and _cal_id:"), us.find("update_calendar_event(")
+    assert 0 < g < c, "update_session: patch события без calendar_id"
+    m = us.find("move_or_attach_event(")
+    gate = us.rfind("if (", 0, m)
+    block = us[gate:m]
+    assert "_cal_id" in block, "update_session: перенос без id зовёт Google без calendar_id"
+    assert 'ts.status == "PLANNED"' in block and "ts.date > datetime.utcnow()" in block, \
+        "update_session: в календарь снова уходят прошедшие/проведённые сессии"
+
+
+def test_series_asks_once_for_near_conflicts():
+    """Серия из шахматки: один вопрос «Применить ко всем датам?», а не по
+    вопросу на каждую дату."""
+    util = _src("src/utils/crmCalendarConflict.ts")
+    assert "Применить этот ответ ко всем датам серии?" in util and "series.decision = decision" in util
+    chess = _src("src/components/crm/CrmChessboardView.tsx")
+    loop = chess[chess.find("// Recurring strategy"):]
+    assert "const seriesCalendarChoice: SeriesCalendarChoice = {}" in loop and \
+        "}, seriesCalendarChoice);" in loop, "цикл серии не делится одним ответом на конфликты"
+
+
 # ─── H: RRULE с timeZone ─────────────────────────────────────────────────
 
 def test_recurring_event_has_timezone():
