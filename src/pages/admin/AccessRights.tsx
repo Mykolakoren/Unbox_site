@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
+import { userCanAccessRights } from '../../utils/permissions';
 import { PermissionsEditor } from '../../components/admin/PermissionsEditor';
 import type { User } from '../../store/types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -25,6 +27,8 @@ import { ruCountWord } from '../../utils/plural';
  * PermissionsEditor (список прав и сохранение) тот же.
  */
 
+const RIGHTS_HINT = 'Кто из команды что может делать в админке. Права роли выдаются сами, здесь — то, что добавлено сверх роли.';
+
 const STAFF_ROLES = ['owner', 'senior_admin', 'admin'];
 const ROLE_ORDER: Record<string, number> = { owner: 0, senior_admin: 1, admin: 2, specialist: 3 };
 
@@ -40,7 +44,23 @@ function roleLabel(role?: string) {
 
 const RIGHTS: [string, string, string] = ['право', 'права', 'прав'];
 
-export function AdminAccessRights() {
+/**
+ * Волна 4 (доработка): страницу закрывает та же проверка, что прячет пункт
+ * меню (userCanAccessRights — владелец и старший админ). Раньше по прямой
+ * ссылке /admin/access-rights таблица открывалась любому админу (сохранить
+ * права не дал бы сервер, но видеть их он не должен).
+ *
+ * embedded — страница внутри мобильной обёртки (MobileAdminAccessRights):
+ * у той своя шапка с H1, второй заголовок не рисуем — только пояснение.
+ */
+export function AdminAccessRights({ embedded = false, deniedTo = '/admin' }: { embedded?: boolean; deniedTo?: string } = {}) {
+    const currentUser = useUserStore(s => s.currentUser);
+    if (!currentUser) return null;
+    if (!userCanAccessRights(currentUser)) return <Navigate to={deniedTo} replace />;
+    return <AccessRightsPage embedded={embedded} />;
+}
+
+function AccessRightsPage({ embedded }: { embedded: boolean }) {
     const users = useUserStore(s => s.users);
     const fetchUsers = useUserStore(s => s.fetchUsers);
     const currentUser = useUserStore(s => s.currentUser);
@@ -82,10 +102,11 @@ export function AdminAccessRights() {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
-            <PageHeader
-                title="Права доступа"
-                description="Кто из команды что может делать в админке. Права роли выдаются сами, здесь — то, что добавлено сверх роли."
-            />
+            {embedded ? (
+                <p style={{ fontSize: 14, color: GH.ink60, margin: '0 0 16px' }}>{RIGHTS_HINT}</p>
+            ) : (
+                <PageHeader title="Права доступа" description={RIGHTS_HINT} />
+            )}
 
             <div style={{ maxWidth: 420, marginBottom: 16 }}>
                 <Field label="Найти сотрудника или пользователя">

@@ -56,3 +56,17 @@ export function canBookCabinets(user: Pick<User, 'role'> | null | undefined): bo
     if (!user) return false;
     return CAN_BOOK_ROLES.includes((user.role || '').toLowerCase());
 }
+
+/** Раздел «Финансы» / касса (волна 4, доработка): право управлять кассой или
+ *  смотреть отчёты. Раньше проверка жила только в AdminLayout и прятала пункт
+ *  меню — теперь ею же закрыты сама страница, вкладка «Касса» и кнопки
+ *  пополнения на телефоне. Логику не менять без решения владельца. */
+export function userCanAccessFinance(user: User | null | undefined): boolean {
+    return hasPermission(user, 'finance.manage_cashbox')
+        || hasPermission(user, 'finance.view_reports');
+}
+
+/** «Права доступа» — только владелец и старший админ (как было в AdminLayout). */
+export function userCanAccessRights(user: Pick<User, 'role'> | null | undefined): boolean {
+    return user?.role === 'owner' || user?.role === 'senior_admin';
+}

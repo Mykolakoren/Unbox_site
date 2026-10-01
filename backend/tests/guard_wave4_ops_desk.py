@@ -81,16 +81,26 @@ CAB_TOGGLE_LOCATION_FP = "b1944aa33f4b79ffa9b143d5b8dcecc65159993fd95e55072f45ae
 RESOURCE_SAVE_FP = "954ecc7302b2dbf5771f4d13984a7e8552a495086ef29c9122967c9e35567519"
 
 # Проверки ролей в оболочке — дословно (НЕЛЬЗЯ пакета D).
+# 01.10 (доработка волны 4): canAccessRights / canAccessFinance вынесены
+# дословно в utils/permissions.ts (userCanAccessRights / userCanAccessFinance),
+# чтобы ими же закрыть сами страницы. Тела хелперов сверяются ниже (HELPER_LINES).
 ROLE_LINES = (
-    "const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';",
-    "const canAccessFinance = hasPermission(currentUser, 'finance.manage_cashbox')\n"
-    "        || hasPermission(currentUser, 'finance.view_reports');",
+    "const canAccessRights = userCanAccessRights(currentUser);",
+    "const canAccessFinance = userCanAccessFinance(currentUser);",
     "const canSeeAnalytics = (currentUser?.email || '').toLowerCase() === 'koren.nikolas@gmail.com';",
     "const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];",
     "if (!ADMIN_ROLES.includes(currentUser.role ?? '')) return <Navigate to=\"/\" replace />;",
     "...(canSeeAnalytics ? [{ path: '/admin/analytics'",
     "...(canAccessRights ? [{ path: '/admin/access-rights'",
     "...(canAccessFinance ? [{ path: '/admin/finance'",
+)
+# Та же логика, что раньше стояла в AdminLayout, — дословно.
+HELPER_LINES = (
+    "export function userCanAccessFinance(user: User | null | undefined): boolean {\n"
+    "    return hasPermission(user, 'finance.manage_cashbox')\n"
+    "        || hasPermission(user, 'finance.view_reports');\n}",
+    "export function userCanAccessRights(user: Pick<User, 'role'> | null | undefined): boolean {\n"
+    "    return user?.role === 'owner' || user?.role === 'senior_admin';\n}",
 )
 
 
@@ -145,6 +155,9 @@ def test_role_checks_unchanged():
     for line in ROLE_LINES:
         assert line in src, f"проверка ролей в оболочке изменилась: {line[:70]}…"
     assert "loginPathWithRedirect(" in src
+    perms = _read("src/utils/permissions.ts")
+    for line in HELPER_LINES:
+        assert line in perms, f"общая проверка прав изменилась: {line[:70]}…"
 
 
 def test_permissions_list_and_saving_unchanged():

@@ -9,7 +9,7 @@ import {
 import { useUserStore } from '../../store/userStore';
 import { NotificationBell } from '../../components/admin/NotificationBell';
 import { openCmdK } from '../../components/admin/CmdKSearch';
-import { hasPermission } from '../../utils/permissions';
+import { userCanAccessFinance, userCanAccessRights } from '../../utils/permissions';
 import { loginPathWithRedirect } from '../../utils/loginRedirect';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -68,9 +68,10 @@ export function AdminLayout() {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
-    const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
-    const canAccessFinance = hasPermission(currentUser, 'finance.manage_cashbox')
-        || hasPermission(currentUser, 'finance.view_reports');
+    // Проверки общие с самими страницами (utils/permissions): меню прячет
+    // пункт, а страница без права уводит на /admin.
+    const canAccessRights = userCanAccessRights(currentUser);
+    const canAccessFinance = userCanAccessFinance(currentUser);
     // Аналитика — строго персонально владельцу (не роль, конкретный аккаунт).
     const canSeeAnalytics = (currentUser?.email || '').toLowerCase() === 'koren.nikolas@gmail.com';
 

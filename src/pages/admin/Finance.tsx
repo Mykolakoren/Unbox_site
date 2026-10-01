@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Navigate } from 'react-router-dom';
 import { Plus, ChevronLeft, ChevronRight, CalendarDays, X, Sun, Check, AlertTriangle, MoreHorizontal, ChevronDown } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
@@ -8,6 +9,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../store/cashboxStore';
 import { useUserStore } from '../../store/userStore';
+import { userCanAccessFinance } from '../../utils/permissions';
 import { BalanceCard } from '../../components/admin/cashbox/BalanceCard';
 import { CashboxTransactionTable } from '../../components/admin/cashbox/CashboxTransactionTable';
 import { AddCashboxTransactionModal } from '../../components/admin/cashbox/AddCashboxTransactionModal';
@@ -77,7 +79,20 @@ function rangeLabel(from: Date, to: Date): string {
     return `${formatDayMonthShort(from, { withYear: 'auto' })} – ${formatDayMonthShort(to, { withYear: 'auto' })}`;
 }
 
+/**
+ * Волна 4 (доработка): страницу закрывает та же проверка, что прячет пункт
+ * меню (userCanAccessFinance). Раньше без права пункт пропадал, но по прямой
+ * ссылке /admin/finance касса открывалась. Обёртка — чтобы без права не
+ * запускались хуки и запросы самой страницы.
+ */
 export function AdminFinance() {
+    const currentUser = useUserStore(s => s.currentUser);
+    if (!currentUser) return null;
+    if (!userCanAccessFinance(currentUser)) return <Navigate to="/admin" replace />;
+    return <AdminFinancePage />;
+}
+
+function AdminFinancePage() {
     const [tab, setTab] = useState<Tab>('transactions');
     const [showAddTx, setShowAddTx] = useState(false);
     const [showEndShift, setShowEndShift] = useState(false);
