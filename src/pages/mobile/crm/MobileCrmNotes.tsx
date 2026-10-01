@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, EyeOff } from 'lucide-react';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { crmApi, type CrmNote, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { Chip } from '../../../components/ui/Chip';
+import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
@@ -19,13 +21,31 @@ import { formatDayMonth, formatTime } from '../../../utils/format';
  *
  * Wave 1: сбой загрузки больше не выглядит как «Заметок пока нет»;
  * скелетон вместо «Загружаю…»; дата — по Батуми через format.ts.
+ *
+ * Волна 3 (G6-25): лента не раскрывает конфиденциальный текст целиком —
+ * две строки, а «Скрывать текст» прячет его совсем (имя и дата остаются).
+ * Выбор помним на этом телефоне (localStorage — удобство, не данные).
  */
+const HIDE_KEY = 'unbox.mcrm.notes.hideText';
+
+function readHide(): boolean {
+    try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; }
+}
 export function MobileCrmNotes() {
     const [notes, setNotes] = useState<CrmNote[]>([]);
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
+    const [hideText, setHideText] = useState(readHide);
     const { clients, fetchClients } = useCrmStore();
+    useDocumentTitle('Заметки · Psy-CRM');
+    const toggleHide = () => {
+        setHideText(v => {
+            const next = !v;
+            try { localStorage.setItem(HIDE_KEY, next ? '1' : '0'); } catch { /* приватный режим — просто не запомним */ }
+            return next;
+        });
+    };
 
     const loadNotes = () => {
         setLoading(true);
@@ -51,7 +71,7 @@ export function MobileCrmNotes() {
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         const sorted = [...notes].sort((a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            parseUTC(b.createdAt).getTime() - parseUTC(a.createdAt).getTime()
         );
         if (!q) return sorted;
         return sorted.filter(n => {
@@ -100,6 +120,14 @@ export function MobileCrmNotes() {
                         }}
                     />
                 </div>
+                <Chip
+                    selected={hideText}
+                    onClick={toggleHide}
+                    icon={<EyeOff size={16} aria-hidden="true" />}
+                    style={{ marginTop: 8 }}
+                >
+                    Скрывать текст
+                </Chip>
             </div>
 
             {failed && !loading && (
@@ -119,7 +147,7 @@ export function MobileCrmNotes() {
                     {query ? (
                         <EmptyState compact title="Ничего не нашлось" hint="Попробуйте другое слово или имя." />
                     ) : (
-                        <EmptyState compact title="Заметок пока нет" hint="Заметку можно добавить в шторке сессии." />
+                        <EmptyState compact title="Заметок пока нет" hint="Заметку можно добавить в шторке сессии или в карточке клиента («+ Заметка»)." />
                     )}
                 </div>
             )}
@@ -152,17 +180,23 @@ export function MobileCrmNotes() {
                                     {formatDayMonth(created, { timeZone: BATUMI_TZ })}, {formatTime(created, { timeZone: BATUMI_TZ })}
                                 </span>
                             </div>
-                            <div style={{
-                                fontSize: 14,
-                                color: 'var(--color-ink-80)',
-                                lineHeight: 1.4,
-                                overflow: 'hidden',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 4,
-                                WebkitBoxOrient: 'vertical',
-                            }}>
-                                {n.content}
-                            </div>
+                            {hideText ? (
+                                <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
+                                    Текст скрыт — откройте карточку клиента
+                                </div>
+                            ) : (
+                                <div style={{
+                                    fontSize: 14,
+                                    color: 'var(--color-ink-80)',
+                                    lineHeight: 1.4,
+                                    overflow: 'hidden',
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                }}>
+                                    {n.content}
+                                </div>
+                            )}
                         </Link>
                     );
                 })}

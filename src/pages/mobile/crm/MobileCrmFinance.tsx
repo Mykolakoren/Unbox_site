@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, AlertCircle, Calendar, ChevronRight, ChevronLeft } from 'lucide-react';
-import { format } from 'date-fns';
+import { Calendar, ChevronRight, ChevronLeft } from 'lucide-react';
 import { crmApi, type CrmDashboard } from '../../../api/crm';
-import { useCrmStore } from '../../../store/crmStore';
 import { useCrmDataVersion } from './crmDataVersion';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -11,24 +9,30 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel, formatMoney, formatMonthLabel } from '../../../utils/format';
+import { tbilisiToday } from '../../../utils/crmNextSession';
+import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
+import { usePullToRefresh } from '../usePullToRefresh';
+import { PullIndicator } from '../PullIndicator';
+
+/** Прокручивается документ, а не <main> оболочки — его и проверяем. */
+const docScroller = () => (document.scrollingElement as HTMLElement | null);
 
 /**
- * Mobile CRM Финансы — money snapshot for the active specialist.
+ * Psy-CRM на телефоне — «Финансы».
  *
- *   Top: month revenue + total debt strip.
- *   Middle: month picker (current + 5 back).
- *   Bottom: debt by client, tap → client detail.
- *
- * Tap a debt row to jump to /m/crm/clients/<id> where the specialist can
- * mark sessions paid or record a payment.
- *
- * Wave 1: заголовок «Финансы», стрелки месяца — значки 44 px с подписью для
- * диктора, светлая полоса итогов (долг — красным токеном), суммы —
- * formatGel/formatMoney («140 ₾», а не «140 GEL»), «Ср. чек» → «Средний чек».
+ * Волна 3 (G6-16, решение В1):
+ *   - блок месяца: «Касса · с долгами» — все оплаты, датированные месяцем
+ *     (в т.ч. оплата старых долгов), и число сессий месяца. «Средний чек»
+ *     убран: сервер его не считает, всегда было «—»;
+ *   - «Долги сейчас» — отдельный раздел ВНЕ выбора месяца: общий долг,
+ *     сколько сессий без оплаты, список должников (тап — карточка клиента,
+ *     там «Отметить оплату»). Листание месяцев их не меняет — так честно;
+ *   - сбой загрузки — ErrorBar и «—», не «0 ₾» и не «Нет задолженностей»;
+ *   - потянуть вниз — обновить.
+ * Месяц считается по Батуми.
  */
 export function MobileCrmFinance() {
     const navigate = useNavigate();
-    const { clients, fetchClients } = useCrmStore();
     const [monthOffset, setMonthOffset] = useState(0);
     // Данные храним вместе с месяцем, за который они пришли: при смене
     // месяца цифры прошлого не показываются под новым заголовком.
@@ -37,31 +41,39 @@ export function MobileCrmFinance() {
     // Сбой загрузки — отдельное состояние. Раньше при ошибке экран рисовал
     // «0 ₾» и «Нет задолженностей», и казалось, что все расплатились.
     const [failed, setFailed] = useState(false);
-    const [retryTick, setRetryTick] = useState(0);
     const dataVersion = useCrmDataVersion();
+    useDocumentTitle('Финансы · Psy-CRM');
 
-    const monthDate = useMemo(() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + monthOffset, 1);
-        return d;
+    // Месяц по Батуми: «2026-10» + сдвиг.
+    const monthParam = useMemo(() => {
+        const [y, m] = tbilisiToday().split('-').map(Number);
+        const idx = y * 12 + (m - 1) + monthOffset;
+        return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
     }, [monthOffset]);
 
-    const monthParam = useMemo(() => format(monthDate, 'yyyy-MM'), [monthDate]);
-
-    useEffect(() => {
-        if (clients.length === 0) fetchClients().catch(() => {});
-    }, [clients.length, fetchClients]);
-
-    useEffect(() => {
-        let cancelled = false;
+    // Номер запроса: ответ за прошлый месяц не перезапишет выбранный.
+    const reqSeq = useRef(0);
+    const load = useCallback(async () => {
+        const seq = ++reqSeq.current;
         setLoading(true);
         setFailed(false);
-        crmApi.getDashboard(undefined, monthParam)
-            .then(d => { if (!cancelled) setLoaded({ month: monthParam, data: d }); })
-            .catch(() => { if (!cancelled) setFailed(true); })
-            .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
-    }, [monthParam, retryTick, dataVersion]);
+        try {
+            const d = await crmApi.getDashboard(undefined, monthParam);
+            if (seq === reqSeq.current) setLoaded({ month: monthParam, data: d });
+        } catch {
+            if (seq === reqSeq.current) setFailed(true);
+        } finally {
+            if (seq === reqSeq.current) setLoading(false);
+        }
+    }, [monthParam]);
+
+    useEffect(() => { load(); }, [load, dataVersion]);
+
+    const [refreshing, setRefreshing] = useState(false);
+    const pull = usePullToRefresh(async () => {
+        setRefreshing(true);
+        try { await load(); } finally { setRefreshing(false); }
+    }, 70, docScroller);
 
     const dashboard = !failed && loaded?.month === monthParam ? loaded.data : null;
     const pending = loading && !dashboard;
@@ -71,173 +83,178 @@ export function MobileCrmFinance() {
         return [...dashboard.debtByClient].sort((a, b) => b.totalDebt - a.totalDebt);
     }, [dashboard]);
 
+    const byCurrency = (m?: Record<string, number>) => {
+        const entries = Object.entries(m ?? {}).filter(([, v]) => v > 0);
+        return entries.length > 1 ? entries.map(([cur, v]) => formatMoney(v, { currency: cur })).join(' + ') : '';
+    };
+
     return (
         <div style={{ padding: '14px 14px 90px' }}>
+            <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
             <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 2px 12px' }}>
                 Финансы
             </h1>
 
-            {/* Month picker */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <Button
-                    variant="secondary"
-                    size="touch"
-                    icon={<ChevronLeft size={20} aria-hidden="true" />}
-                    aria-label="Предыдущий месяц"
-                    onClick={() => setMonthOffset(o => o - 1)}
-                />
-                <div style={{
-                    flex: 1, textAlign: 'center', padding: '0 10px',
-                    minHeight: 44,
-                    border: '1px solid var(--color-ink-08)', borderRadius: 8,
-                    fontSize: 14, fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                }}>
-                    <Calendar size={16} color={COLOR.ink60} aria-hidden="true" />
-                    {formatMonthLabel(monthDate, { capitalize: true })}
-                </div>
-                <Button
-                    variant="secondary"
-                    size="touch"
-                    icon={<ChevronRight size={20} aria-hidden="true" />}
-                    aria-label="Следующий месяц"
-                    disabled={monthOffset >= 0}
-                    onClick={() => setMonthOffset(o => o + 1)}
-                />
-            </div>
-
-            {/* Top totals strip */}
-            <div style={{
-                background: 'var(--color-sunken)',
-                color: 'var(--color-ink)',
-                borderRadius: 14,
-                padding: '14px 16px',
-                marginBottom: 14,
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 10,
-            }}>
-                <TotalCell
-                    icon={<TrendingUp size={14} aria-hidden="true" />}
-                    label="Доход за месяц"
-                    value={dashboard?.revenueThisMonth}
-                    loading={pending}
-                />
-                <TotalCell
-                    icon={<AlertCircle size={14} aria-hidden="true" />}
-                    label="Долг (всего)"
-                    value={dashboard?.totalActiveDebt}
-                    loading={pending}
-                    warning
-                />
-            </div>
-
             {failed && !loading && (
                 <ErrorBar
                     message="Не удалось загрузить финансы"
-                    onRetry={() => setRetryTick(t => t + 1)}
+                    onRetry={() => load()}
                     className="mb-3"
                 />
             )}
 
-            {/* Secondary metrics */}
-            {dashboard && (
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 6,
-                    marginBottom: 14,
-                }}>
-                    <MiniMetric label="Сессий" value={dashboard.sessionsThisMonth} />
-                    <MiniMetric label="Не оплачено" value={dashboard.unpaidSessions} />
-                    <MiniMetric label="Средний чек" value={dashboard.avgCheck} money />
+            {/* ── Месяц ─────────────────────────────────────────────── */}
+            <section aria-labelledby="crm-fin-month" style={{ marginBottom: 20 }}>
+                <h2 id="crm-fin-month" style={sectionTitle}>Месяц</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <Button
+                        variant="secondary"
+                        size="touch"
+                        icon={<ChevronLeft size={20} aria-hidden="true" />}
+                        aria-label="Предыдущий месяц"
+                        onClick={() => setMonthOffset(o => o - 1)}
+                    />
+                    <div style={{
+                        flex: 1, textAlign: 'center', padding: '0 10px',
+                        minHeight: 44,
+                        border: '1px solid var(--color-ink-08)', borderRadius: 8,
+                        fontSize: 14, fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    }}>
+                        <Calendar size={16} color={COLOR.ink60} aria-hidden="true" />
+                        {formatMonthLabel(`${monthParam}-15`, { capitalize: true })}
+                    </div>
+                    <Button
+                        variant="secondary"
+                        size="touch"
+                        icon={<ChevronRight size={20} aria-hidden="true" />}
+                        aria-label="Следующий месяц"
+                        disabled={monthOffset >= 0}
+                        onClick={() => setMonthOffset(o => o + 1)}
+                    />
                 </div>
-            )}
+                <div style={totalsCard}>
+                    <TotalCell
+                        label="Касса · с долгами"
+                        hint="Все оплаты за месяц, вместе с оплатой старых долгов"
+                        value={dashboard?.revenueThisMonth}
+                        extra={byCurrency(dashboard?.revenueByCurrency)}
+                        loading={pending}
+                        money
+                    />
+                    <TotalCell
+                        label="Сессий за месяц"
+                        value={dashboard?.sessionsThisMonth}
+                        loading={pending}
+                    />
+                </div>
+            </section>
 
-            {/* Debt by client */}
-            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8 }}>
-                Должники{dashboard ? ` · ${debts.length}` : ''}
-            </div>
-            {pending ? (
-                <SkeletonList count={3} label="Загружаем должников" cardHeight={56} />
-            ) : !dashboard ? (
-                // Сбой: не пишем «Нет задолженностей» — мы этого не знаем.
-                <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-ink-60)', fontSize: 14 }}>
-                    —
+            {/* ── Долги сейчас — не зависят от месяца ───────────────── */}
+            <section aria-labelledby="crm-fin-debts">
+                <h2 id="crm-fin-debts" style={sectionTitle}>Долги сейчас</h2>
+                <div style={{ ...totalsCard, marginBottom: 10 }}>
+                    <TotalCell
+                        label="Долг всего"
+                        value={dashboard?.totalActiveDebt}
+                        extra={byCurrency(dashboard?.debtByCurrency)}
+                        loading={pending}
+                        money
+                        warning
+                    />
+                    <TotalCell
+                        label="Сессий без оплаты"
+                        value={dashboard?.unpaidSessions}
+                        loading={pending}
+                    />
                 </div>
-            ) : debts.length === 0 ? (
-                <EmptyState compact title="Нет задолженностей" hint="Все клиенты рассчитались." />
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {debts.map(d => (
-                        <button
-                            key={d.clientId}
-                            onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
-                            className="press"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                padding: '11px 12px',
-                                minHeight: 56,
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 10,
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                                width: '100%',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            <div style={{
-                                width: 36, height: 36, borderRadius: 9,
-                                background: 'var(--status-danger-bg)',
-                                color: 'var(--status-danger-fg)',
-                                display: 'grid', placeItems: 'center',
-                                fontSize: 14, fontWeight: 600,
-                                flexShrink: 0,
-                            }}>
-                                {initials(d.clientName)}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {d.clientName}
+                {pending ? (
+                    <SkeletonList count={3} label="Загружаем должников" cardHeight={56} />
+                ) : !dashboard ? (
+                    // Сбой: не пишем «Нет задолженностей» — мы этого не знаем.
+                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-ink-60)', fontSize: 14 }}>
+                        —
+                    </div>
+                ) : debts.length === 0 ? (
+                    <EmptyState compact title="Нет задолженностей" hint="Все клиенты рассчитались." />
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {debts.map(d => (
+                            <button
+                                key={d.clientId}
+                                onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
+                                className="press"
+                                aria-label={`${d.clientName}: долг ${formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })} — открыть карточку`}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    padding: '11px 12px',
+                                    minHeight: 56,
+                                    background: 'var(--color-card)',
+                                    border: '1px solid var(--color-ink-08)',
+                                    borderRadius: 10,
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    width: '100%',
+                                    fontFamily: 'inherit',
+                                }}
+                            >
+                                <div style={{
+                                    width: 36, height: 36, borderRadius: 9,
+                                    background: 'var(--status-danger-bg)',
+                                    color: 'var(--status-danger-fg)',
+                                    display: 'grid', placeItems: 'center',
+                                    fontSize: 14, fontWeight: 600,
+                                    flexShrink: 0,
+                                }}>
+                                    {initials(d.clientName)}
                                 </div>
-                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                    Не оплачено: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {d.clientName}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
+                                        Без оплаты: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="num" style={{
-                                fontSize: 14,
-                                fontWeight: 600,
-                                color: 'var(--status-danger-fg)',
-                                textAlign: 'right',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                {formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })}
-                            </div>
-                            <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" style={{ flexShrink: 0 }} />
-                        </button>
-                    ))}
-                </div>
-            )}
+                                <div className="num" style={{
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: 'var(--status-danger-fg)',
+                                    textAlign: 'right',
+                                    whiteSpace: 'nowrap',
+                                }}>
+                                    {formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })}
+                                </div>
+                                <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" style={{ flexShrink: 0 }} />
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </section>
         </div>
     );
 }
 
 function TotalCell({
-    icon, label, value, loading, warning,
+    label, hint, value, extra, loading, warning, money,
 }: {
-    icon: React.ReactNode;
     label: string;
+    hint?: string;
     value?: number;
+    extra?: string;
     loading?: boolean;
     warning?: boolean;
+    money?: boolean;
 }) {
+    const shown = loading ? '…'
+        : value === undefined || value === null ? '—'
+        : money ? formatGel(value) : String(Math.round(value));
     return (
         <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 4 }}>
-                {icon} {label}
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
+                {label}
             </div>
             <div className="num" style={{
                 fontSize: 20,
@@ -245,31 +262,32 @@ function TotalCell({
                 color: warning && (value ?? 0) > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
                 lineHeight: 1.1,
             }}>
-                {loading ? '…' : value === undefined || value === null ? '—' : formatGel(value)}
+                {shown}
             </div>
+            {extra && !loading && (
+                <div className="num" style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 4 }}>{extra}</div>
+            )}
+            {hint && (
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 4, lineHeight: 1.35 }}>{hint}</div>
+            )}
         </div>
     );
 }
 
-function MiniMetric({ label, value, money }: { label: string; value: number | undefined; money?: boolean }) {
-    return (
-        <div style={{
-            background: 'var(--color-card)',
-            border: '1px solid var(--color-ink-08)',
-            borderRadius: 10,
-            padding: '9px 10px 10px',
-        }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 2 }}>
-                {label}
-            </div>
-            <div className="num" style={{
-                fontSize: 16, fontWeight: 600, color: 'var(--color-ink)',
-            }}>
-                {value === undefined || value === null ? '—' : money ? formatGel(value) : value.toFixed(0)}
-            </div>
-        </div>
-    );
-}
+const sectionTitle: React.CSSProperties = {
+    margin: '0 2px 8px', fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+    textTransform: 'uppercase', color: 'var(--color-ink-60)',
+};
+
+const totalsCard: React.CSSProperties = {
+    background: 'var(--color-sunken)',
+    color: 'var(--color-ink)',
+    borderRadius: 14,
+    padding: '14px 16px',
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 12,
+};
 
 function initials(name: string): string {
     return name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('') || '?';

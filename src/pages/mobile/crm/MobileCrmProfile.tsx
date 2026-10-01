@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Upload, Save, X, Plane, CalendarClock, ChevronRight, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, API_URL } from '../../../api/client';
 import { compressImage } from '../../../utils/imageCompress';
@@ -12,6 +12,10 @@ import { Input, TextArea } from '../../../components/ui/Field';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { formatDayMonth } from '../../../utils/format';
+import { tbilisiToday } from '../../../utils/crmNextSession';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
+import { COLOR, Z } from '../../../design/tokens';
 
 /**
  * Mobile CRM — specialist's own public profile editor.
@@ -24,6 +28,10 @@ import { formatDayMonth } from '../../../utils/format';
  * Wave 1: общие поля (Input/TextArea, 44 px, подпись для диктора), форматы —
  * Chip, кнопки — Button; крестик специализации — зона 44 px (был 13 px);
  * даты отпуска — «до 5 октября», а не «до 2026-10-05».
+ *
+ * Волна 3 (G6-20): одна кнопка сохранения — липкая полоса «Есть изменения ·
+ * Сохранить», появляется только при правках. Уход с несохранёнными правками
+ * (вкладка внизу, ссылка, закрытие страницы) — с вопросом.
  */
 interface ProfileData {
     firstName: string;
@@ -37,6 +45,15 @@ interface ProfileData {
     sessionDurationMin: number;
 }
 
+/** Поля, которые уходят в PATCH /specialists/me — по ним и считаем «есть изменения». */
+function snapshot(p: ProfileData | null): string {
+    if (!p) return '';
+    return JSON.stringify([
+        p.firstName, p.lastName, p.photoUrl || null, p.tagline, p.bio,
+        p.specializations, p.formats, p.basePriceGel, p.sessionDurationMin,
+    ]);
+}
+
 const FORMAT_OPTIONS = [
     { id: 'ONLINE', label: 'Онлайн' },
     { id: 'OFFLINE_UNBOX_ONE', label: 'Unbox One' },
@@ -46,19 +63,59 @@ const FORMAT_OPTIONS = [
 
 export function MobileCrmProfile() {
     const [profile, setProfile] = useState<ProfileData | null>(null);
+    // Что лежит на сервере — с ним сравниваем правки.
+    const [savedSnap, setSavedSnap] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [specInput, setSpecInput] = useState('');
+    const navigate = useNavigate();
+    const location = useLocation();
+    const { confirm } = useConfirmDialog();
+    useDocumentTitle('Анкета · Psy-CRM');
 
     useEffect(() => {
         api.get('/specialists/me')
-            .then(r => setProfile(r.data))
+            .then(r => { setProfile(r.data); setSavedSnap(snapshot(r.data)); })
             .catch(() => toast.error('Не удалось загрузить анкету'))
             .finally(() => setLoading(false));
     }, []);
 
+    const dirty = useMemo(() => !!profile && snapshot(profile) !== savedSnap, [profile, savedSnap]);
+
+    // Закрыть/перезагрузить страницу с правками — браузер спросит сам.
+    useEffect(() => {
+        if (!dirty) return;
+        const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }, [dirty]);
+
+    // Уход по ссылке внутри приложения (вкладки внизу, «Часы приёма») —
+    // спрашиваем. Ловим клик раньше роутера (фаза захвата).
+    useEffect(() => {
+        if (!dirty) return;
+        const onClick = (e: MouseEvent) => {
+            if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+            if (!a || a.target === '_blank') return;
+            const url = new URL(a.href, window.location.href);
+            if (url.origin !== window.location.origin || url.pathname === location.pathname) return;
+            e.preventDefault();
+            e.stopPropagation();
+            confirm({
+                title: 'Уйти без сохранения?',
+                body: 'Правки анкеты пропадут.',
+                confirmLabel: 'Уйти без сохранения',
+                cancelLabel: 'Остаться',
+                tone: 'danger',
+            }).then(ok => { if (ok) navigate(url.pathname + url.search); });
+        };
+        document.addEventListener('click', onClick, true);
+        return () => document.removeEventListener('click', onClick, true);
+    }, [dirty, confirm, navigate, location.pathname]);
+
     const save = async () => {
-        if (!profile) return;
+        if (!profile || saving) return;
         setSaving(true);
         try {
             const r = await api.patch('/specialists/me', {
@@ -73,6 +130,7 @@ export function MobileCrmProfile() {
                 sessionDurationMin: profile.sessionDurationMin,
             });
             setProfile(r.data);
+            setSavedSnap(snapshot(r.data));
             toast.success('Анкета сохранена');
         } catch {
             toast.error('Ошибка при сохранении');
@@ -307,20 +365,40 @@ export function MobileCrmProfile() {
 
             <VacationSection />
 
-            {/* Save — sticky-ish at bottom of content */}
-            <div style={{ padding: '8px 16px 0' }}>
-                <Button
-                    block
-                    loading={saving}
-                    icon={<Save size={16} aria-hidden="true" />}
-                    onClick={save}
-                >
-                    Сохранить анкету
-                </Button>
-            </div>
+            {/* Одна кнопка сохранения: липкая полоса над вкладками, только при правках. */}
+            {dirty && (
+                <div role="region" aria-label="Несохранённые изменения" style={stickyBar}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600 }}>Есть изменения</span>
+                    <Button
+                        loading={saving}
+                        icon={<Save size={16} aria-hidden="true" />}
+                        onClick={save}
+                    >
+                        Сохранить
+                    </Button>
+                </div>
+            )}
         </div>
     );
 }
+
+// Над нижними вкладками оболочки (их высота ~64 px + вырез iPhone).
+const stickyBar: React.CSSProperties = {
+    position: 'fixed',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    bottom: 'calc(64px + env(safe-area-inset-bottom, 0px))',
+    width: '100%',
+    maxWidth: 480,
+    zIndex: Z.sticky,
+    background: COLOR.card,
+    borderTop: `1px solid ${COLOR.ink10}`,
+    boxShadow: 'var(--shadow-pop)',
+    padding: '8px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
     return (
@@ -359,7 +437,7 @@ function PhotoUpload({ onUploaded, hasPhoto }: { onUploaded: (url: string) => vo
             });
             const baseUrl = (API_URL || '').replace('/api/v1', '');
             onUploaded(`${baseUrl}${res.data.url}`);
-            toast.success('Фото загружено — не забудьте сохранить анкету');
+            toast.success('Фото загружено — нажмите «Сохранить» внизу');
         } catch (err: unknown) {
             const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить фото. Попробуйте ещё раз');
@@ -447,7 +525,7 @@ function VacationSection() {
                         kind="date"
                         aria-label="Дата возвращения"
                         value={date}
-                        min={new Date().toISOString().slice(0, 10)}
+                        min={tbilisiToday()}
                         onChange={e => setDate(e.target.value)}
                         style={{ flex: 1 }}
                     />
