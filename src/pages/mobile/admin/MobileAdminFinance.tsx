@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, TrendingUp, TrendingDown, Wallet, X, Check, Lock, Trash2, ChevronLeft, ChevronRight, CalendarCheck } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Wallet, Check, Lock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MobileCloseShiftSheet } from './MobileCloseShiftSheet';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -8,7 +8,9 @@ import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi, type CashboxPeriodSummary } from '../../../api/cashbox';
 import { useUserStore } from '../../../store/userStore';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
-import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
+import { Sheet } from '../../../components/ui/Sheet';
+import { undoToast } from '../../../components/ui/undoToast';
+import { toastApiError } from '../../../utils/errors';
 import { Button } from '../../../components/ui/Button';
 import { Chip, Segmented } from '../../../components/ui/Chip';
 import { Field, Input, Select } from '../../../components/ui/Field';
@@ -68,28 +70,29 @@ function getRange(period: Period, offset: number): { from: Date; to: Date; label
 }
 
 /**
- * Mobile admin Финансы — compact one-pager.
+ * Mobile admin «Касса» — compact one-pager.
  *
- * Sections (top to bottom):
- *   1. Branch chip + period selector
- *   2. Balance cards by method (cash / TBC / BOG) — branch-scoped
- *   3. Period totals (доход / расход / разница) — сервер, /cashbox/summary
- *   4. Recent transactions list (last 100 in range)
- *   5. FAB → quick add transaction sheet
- *
- * No charts, no shifts, no categories management — those stay on desktop.
- * Goal is "глянул баланс, добавил расход на 5₾, ушёл" in under 30 seconds.
- *
- * Wave 1: общие Chip/Segmented/Button/Field/Money, суммы — formatGel (было
- * toFixed(0): 94,5 ₾ показывались как 95), стрелки периода 44 px, удаление
- * операции — через окно подтверждения, а не confirm().
+ * Волна 4 (G9-10, решения В4/В5): порядок экрана —
+ *   1. «Сейчас в кассе» — остатки выбранного филиала. От периода НЕ зависят,
+ *      поэтому стоят выше переключателя периода (раньше «9065 ₾ наличными»
+ *      под подписью «Сегодня» читали как «пришло сегодня»);
+ *   2. период «‹ 29 сентября ›» + «Сегодня» (возврат к текущему);
+ *   3. «+ доход / − расход / = разница» с подписью периода — сервер,
+ *      /cashbox/summary (getPeriodSummary, по всем операциям);
+ *   4. «Закрыть смену» — всегда видна; при «Все» сначала спросим филиал;
+ *   5. операции периода (последние 100), «+» — новая операция.
+ * Филиал по умолчанию в новой операции — выбранный фильтр кассы, иначе не
+ * предвыбран (раньше было 'Unbox One' даже при «Все», а в пополнении — Uni).
+ * После записи своей операции — тост «Вернуть» на 5 с (В5): сервер даёт
+ * админу удалить сегодняшнюю операцию (DELETE /cashbox/transactions/{id};
+ * старое — только senior/owner).
  */
 export function MobileAdminFinance() {
     const {
         balances, fetchBalance,
         transactions, fetchTransactions, isLoading,
         categories, fetchCategories,
-        createTransaction, updateTransaction, deleteTransaction,
+        updateTransaction, deleteTransaction,
     } = useCashboxStore();
     const currentUser = useUserStore(s => s.currentUser);
 
@@ -101,6 +104,8 @@ export function MobileAdminFinance() {
     const canEditTx = (_t: { date: string }) => currentUser?.role === 'owner';
     const [showAdd, setShowAdd] = useState(false);
     const [closeShiftOpen, setCloseShiftOpen] = useState(false);
+    // «Закрыть смену» при «Все» — сначала выбрать филиал (каждый филиал — своя смена).
+    const [pickShiftBranch, setPickShiftBranch] = useState(false);
 
     const range = useMemo(() => getRange(period, offset), [period, offset]);
     const branchParam = branch === 'all' ? undefined : branch;
@@ -182,14 +187,45 @@ export function MobileAdminFinance() {
     }, [scopedTransactions]);
 
     const totals = summary ?? (summaryFailed && !isLoading ? fallbackTotals : null);
+    const periodCaption = period === 'day'
+        ? (offset === 0 ? 'за сегодня' : offset === -1 ? 'за вчера' : `за ${range.label}`)
+        : period === 'week'
+            ? (offset === 0 ? 'за эту неделю' : offset === -1 ? 'за прошлую неделю' : `за ${range.label}`)
+            : `за ${range.label.toLowerCase()}`;
+
+    /** Своя операция: запись + тост «Вернуть» 5 с (В5). Поля — как раньше. */
+    const createWithUndo = async (payload: AddPayload) => {
+        let created: { id: string } | null = null;
+        try {
+            created = await cashboxApi.createTransaction(payload);
+        } catch (e) {
+            toastApiError(e, 'Не удалось записать операцию');
+            throw e;
+        }
+        setShowAdd(false);
+        await reloadAll();
+        const id = created?.id;
+        const what = `${payload.type === 'income' ? 'Доход' : 'Расход'} ${formatGel(payload.amount)} записан`;
+        if (!id) { toast.success(what); return; }
+        undoToast(what, async () => {
+            try {
+                await cashboxApi.deleteTransaction(id);
+                toast.success('Операция удалена');
+            } catch (e) {
+                toastApiError(e, 'Не получилось вернуть — попросите старшего админа удалить операцию');
+            } finally {
+                await reloadAll();
+            }
+        });
+    };
 
     return (
-        <div style={{ padding: '14px 14px 80px' }}>
-            <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 2px 12px', color: 'var(--color-ink)' }}>
-                Финансы
+        <div style={{ padding: '14px 16px 96px' }}>
+            <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 0 12px', color: 'var(--color-ink)' }}>
+                Касса
             </h1>
 
-            {/* Branch chips */}
+            {/* Филиал — один фильтр на весь экран. */}
             <div role="group" aria-label="Филиал" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
                 {BRANCHES.map(b => (
                     <Chip
@@ -203,110 +239,108 @@ export function MobileAdminFinance() {
                 ))}
             </div>
 
-            {/* Period segmented control + range label */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+            {/* 1. Сейчас в кассе — не зависит от периода. */}
+            <section aria-label="Сейчас в кассе" style={{ marginBottom: 16 }}>
+                <SectionTitle>Сейчас в кассе · {branch === 'all' ? 'все филиалы' : branch}</SectionTitle>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 6,
+                }}>
+                    {/* axios-интерсептор клиента конвертит snake_case → camelCase
+                        автоматически (см. api/client.ts). Поэтому реально
+                        прилетает cardTbc/cardBog, а не card_tbc/card_bog. */}
+                    <BalanceTile label="Наличные" value={balances.cash} />
+                    <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
+                    <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
+                </div>
+            </section>
+
+            {/* 2. Период. */}
+            <section aria-label="Итоги периода" style={{ marginBottom: 14 }}>
+                <SectionTitle>Итоги периода</SectionTitle>
                 <Segmented<Period>
                     aria-label="Период"
-                    className="flex-1"
                     options={(['day', 'week', 'month'] as Period[]).map(p => ({ value: p, label: PERIOD_LABEL[p] }))}
                     value={period}
                     onChange={p => { setPeriod(p); setOffset(0); }}
                 />
-                <Button
-                    variant="quiet"
-                    size="touch"
-                    icon={<ChevronLeft size={20} aria-hidden="true" />}
-                    aria-label="Предыдущий период"
-                    onClick={() => setOffset(o => o - 1)}
-                />
-                <Button
-                    variant="quiet"
-                    size="touch"
-                    icon={<CalendarCheck size={18} aria-hidden="true" />}
-                    aria-label="К текущему периоду"
-                    disabled={offset === 0}
-                    onClick={() => setOffset(0)}
-                />
-                <Button
-                    variant="quiet"
-                    size="touch"
-                    icon={<ChevronRight size={20} aria-hidden="true" />}
-                    aria-label="Следующий период"
-                    disabled={offset >= 0}
-                    onClick={() => setOffset(o => o + 1)}
-                />
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 12 }}>{range.label}</div>
-
-            {/* Balance cards by method */}
-            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 6 }}>Сейчас в кассе</div>
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 6,
-                marginBottom: 14,
-            }}>
-                {/* axios-интерсептор клиента конвертит snake_case → camelCase
-                    автоматически (см. api/client.ts:59). Поэтому реально
-                    прилетает cardTbc/cardBog, а не card_tbc/card_bog. Тип
-                    CashboxBalances в api/cashbox.ts описан в snake_case
-                    (отражает форму бэка), но рантайм-ключи camel.
-                    Тот же fallback-паттерн использует десктопный
-                    BalanceCard.tsx — оставляем оба варианта чтобы код
-                    не сломался если/когда исправим тип. */}
-                <BalanceTile label="Наличные" value={balances.cash} />
-                <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
-                <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
-            </div>
-
-            {/* Period totals strip. Wave 1: светлая полоса вместо чёрной —
-                минус теперь красный токеном, а не коралловым #FF8B7A. */}
-            <div style={{
-                background: 'var(--color-sunken)',
-                color: 'var(--color-ink)',
-                borderRadius: 12,
-                padding: '12px 14px',
-                marginBottom: 14,
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 8,
-            }}>
-                <TotalCell icon={<TrendingUp size={14} aria-hidden="true" />} label="Доход" value={totals?.income} positive />
-                <TotalCell icon={<TrendingDown size={14} aria-hidden="true" />} label="Расход" value={totals?.expense} />
-                <TotalCell icon={<Wallet size={14} aria-hidden="true" />} label="Разница" value={totals?.net} positive={!totals || totals.net >= 0} />
-            </div>
-            {summary && summary.adjustmentCount > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: -8, marginBottom: 14, lineHeight: 1.4 }}>
-                    Корректировки (не деньги):
-                    {summary.adjustmentIncome > 0 && ` ${formatGel(summary.adjustmentIncome, { sign: true })}`}
-                    {summary.adjustmentExpense > 0 && ` ${formatGel(-summary.adjustmentExpense)}`}
-                    {' '}· в итоги не входят
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '8px 0' }}>
+                    <Button
+                        variant="quiet"
+                        size="touch"
+                        icon={<ChevronLeft size={20} aria-hidden="true" />}
+                        aria-label="Предыдущий период"
+                        onClick={() => setOffset(o => o - 1)}
+                    />
+                    <div style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }} aria-live="polite">
+                        {range.label}
+                    </div>
+                    <Button
+                        variant="quiet"
+                        size="touch"
+                        icon={<ChevronRight size={20} aria-hidden="true" />}
+                        aria-label="Следующий период"
+                        disabled={offset >= 0}
+                        onClick={() => setOffset(o => o + 1)}
+                    />
+                    {offset !== 0 && (
+                        <Button variant="secondary" size="touch" onClick={() => setOffset(0)}>
+                            {period === 'day' ? 'Сегодня' : period === 'week' ? 'Эта неделя' : 'Этот месяц'}
+                        </Button>
+                    )}
                 </div>
-            )}
-            {!summary && summaryFailed && listTruncated && (
-                <div style={{ fontSize: 12, color: 'var(--status-pending-fg)', marginTop: -8, marginBottom: 14, lineHeight: 1.4 }}>
-                    Итоги посчитаны по последним {TX_LIMIT} операциям — могут быть неполными.
+
+                {/* 3. + доход / − расход / = разница. */}
+                <div style={{
+                    background: 'var(--color-sunken)',
+                    color: 'var(--color-ink)',
+                    borderRadius: 12,
+                    padding: '12px 14px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 8,
+                }}>
+                    <TotalCell icon={<TrendingUp size={14} aria-hidden="true" />} label="+ доход" value={totals?.income} positive />
+                    <TotalCell icon={<TrendingDown size={14} aria-hidden="true" />} label="− расход" value={totals?.expense} />
+                    <TotalCell icon={<Wallet size={14} aria-hidden="true" />} label="= разница" value={totals?.net} positive={!totals || totals.net >= 0} />
                 </div>
-            )}
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6, lineHeight: 1.4 }}>
+                    {periodCaption}{branch === 'all' ? ', все филиалы' : `, ${branch}`}
+                    {summary && summary.adjustmentCount > 0 && (
+                        <>
+                            {' '}· корректировки (не деньги):
+                            {summary.adjustmentIncome > 0 && ` ${formatGel(summary.adjustmentIncome, { sign: true })}`}
+                            {summary.adjustmentExpense > 0 && ` ${formatGel(-summary.adjustmentExpense)}`}
+                            {' '}— в итоги не входят
+                        </>
+                    )}
+                </div>
+                {!summary && summaryFailed && listTruncated && (
+                    <div style={{ fontSize: 12, color: 'var(--status-pending-fg)', marginTop: 4, lineHeight: 1.4 }}>
+                        Итоги посчитаны по последним {TX_LIMIT} операциям — могут быть неполными.
+                    </div>
+                )}
+            </section>
 
-            {/* Close shift — только когда выбрана конкретная локация
-                (нельзя закрыть «все» сразу — каждая локация = своя смена). */}
-            {branch !== 'all' && (
-                <Button
-                    variant="secondary"
-                    block
-                    icon={<Lock size={16} aria-hidden="true" />}
-                    onClick={() => setCloseShiftOpen(true)}
-                    style={{ marginBottom: 14 }}
-                >
-                    Закрыть смену · {branch}
-                </Button>
-            )}
+            {/* 4. Закрыть смену — всегда видна (G9-10). При «Все» — сначала филиал. */}
+            <Button
+                variant="secondary"
+                block
+                icon={<Lock size={16} aria-hidden="true" />}
+                onClick={() => {
+                    if (branch === 'all') setPickShiftBranch(true);
+                    else setCloseShiftOpen(true);
+                }}
+                style={{ marginBottom: 16 }}
+            >
+                {branch === 'all' ? 'Закрыть смену' : `Закрыть смену · ${branch}`}
+            </Button>
 
-            {/* Transactions */}
-            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8 }}>
+            {/* 5. Операции. */}
+            <SectionTitle>
                 Операции · {listTruncated ? `последние ${scopedTransactions.length}` : scopedTransactions.length}
-            </div>
+            </SectionTitle>
             {isLoading ? (
                 <SkeletonList count={4} label="Загружаем операции" cardHeight={56} />
             ) : scopedTransactions.length === 0 ? (
@@ -329,7 +363,7 @@ export function MobileAdminFinance() {
                 style={{
                     position: 'fixed',
                     bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-                    right: 'max(14px, calc((100vw - 480px) / 2 + 14px))',
+                    right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
                     width: 56, height: 56,
                     borderRadius: 28,
                     background: 'var(--color-ink)',
@@ -352,12 +386,9 @@ export function MobileAdminFinance() {
                     onClose={() => setShowAdd(false)}
                     onSubmit={async (payload) => {
                         try {
-                            await createTransaction(payload);
-                            setShowAdd(false);
-                            // Refresh balances + list + totals
-                            await reloadAll();
+                            await createWithUndo(payload);
                         } catch {
-                            /* toast already shown by store */
+                            /* тост уже показан */
                         }
                     }}
                 />
@@ -391,6 +422,30 @@ export function MobileAdminFinance() {
                 />
             )}
 
+            <Sheet
+                open={pickShiftBranch}
+                onClose={() => setPickShiftBranch(false)}
+                title="Какой филиал закрываем?"
+                description="У каждого филиала своя смена и своя касса."
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {BRANCHES.filter(b => b !== 'all').map(b => (
+                        <Button
+                            key={b}
+                            variant="secondary"
+                            block
+                            onClick={() => {
+                                setPickShiftBranch(false);
+                                setBranch(b);
+                                setCloseShiftOpen(true);
+                            }}
+                        >
+                            {b}
+                        </Button>
+                    ))}
+                </div>
+            </Sheet>
+
             {closeShiftOpen && branch !== 'all' && (
                 <MobileCloseShiftSheet
                     branch={branch}
@@ -403,6 +458,14 @@ export function MobileAdminFinance() {
                     }}
                 />
             )}
+        </div>
+    );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+    return (
+        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8 }}>
+            {children}
         </div>
     );
 }
@@ -511,7 +574,6 @@ function TransactionRow({ tx, onTap }: {
         </div>
     );
 }
-
 // ── Add Transaction Sheet ──────────────────────────────────────────────────
 
 interface AddPayload {
@@ -522,6 +584,9 @@ interface AddPayload {
     category_id?: string;
     description?: string;
 }
+
+/** «Uni» / «One» / «Neo School» — коротко для кнопки. */
+const shortBranch = (b: string) => b.replace(/^Unbox\s+/, '');
 
 function AddTransactionSheet({
     branch: initialBranch,
@@ -543,7 +608,9 @@ function AddTransactionSheet({
     const [type, setType] = useState<'income' | 'expense'>(initial?.type ?? 'expense');
     const [amount, setAmount] = useState(initial ? String(initial.amount) : '');
     const [method, setMethod] = useState(initial?.paymentMethod ?? 'cash');
-    const [branch, setBranch] = useState<string>(initial?.branch || initialBranch || 'Unbox One');
+    // Одно умолчание филиала (G9-12): выбранный фильтр кассы, иначе не
+    // предвыбран — раньше подставлялся 'Unbox One' даже при «Все».
+    const [branch, setBranch] = useState<string>(initial?.branch || initialBranch || '');
     const [categoryId, setCategoryId] = useState<string>(initial?.categoryId ?? '');
     const [description, setDescription] = useState(initial?.description ?? '');
     const [saving, setSaving] = useState(false);
@@ -553,6 +620,7 @@ function AddTransactionSheet({
     // Сумма — общий разбор («1 280,50» → 1280.5; «12abc» — ошибка под полем).
     const parsedAmount = parseMoneyInput(amount);
     const amountError = !isMoneyInputBlank(amount) && parsedAmount === null ? MONEY_INPUT_ERROR : undefined;
+    const needBranch = !isEdit && !branch;
 
     // Flatten categories for the picker, scoped to the chosen type.
     const flatCats = useMemo(() => {
@@ -575,6 +643,10 @@ function AddTransactionSheet({
         const n = parsedAmount;
         if (n === null || n <= 0) {
             toast.error('Введите сумму больше 0');
+            return;
+        }
+        if (needBranch) {
+            toast.error('Выберите филиал — иначе операция не попадёт в остаток кассы');
             return;
         }
         setSaving(true);
@@ -608,121 +680,36 @@ function AddTransactionSheet({
     };
 
     const title = isEdit ? 'Изменить операцию' : 'Новая операция';
+    // Сводка на главной кнопке (В5): «Записать расход 50 ₾ · Наличные · Uni».
+    const ctaLabel = isEdit
+        ? 'Сохранить'
+        : [
+            `Записать ${type === 'income' ? 'доход' : 'расход'}${parsedAmount ? ` ${formatGel(parsedAmount)}` : ''}`,
+            METHOD_LABEL[method] || method,
+            branch ? shortBranch(branch) : '',
+        ].filter(Boolean).join(' · ');
 
     return (
-        <div
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            aria-label={title}
-            style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(15,15,16,0.45)',
-                // Было 100 — как у нижнего меню, и меню (оно в DOM позже)
-                // закрывало кнопку «Сохранить».
-                zIndex: Z_SHEET,
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'center',
-            }}
-        >
-            <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    width: '100%',
-                    maxWidth: 480,
-                    background: 'var(--color-card)',
-                    borderTopLeftRadius: 16,
-                    borderTopRightRadius: 16,
-                    // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER.
-                    padding: '8px 16px 0',
-                    boxShadow: 'var(--shadow-pop)',
-                    // Форма длинная: на коротком экране прокручивается внутри,
-                    // а кнопки прилипают к низу.
-                    maxHeight: SHEET_MAX_HEIGHT,
-                    overflowY: 'auto',
-                    overscrollBehavior: 'contain',
-                }}
-            >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <h2 style={{ fontWeight: 600, fontSize: 20, margin: 0 }}>{title}</h2>
-                    <button
-                        onClick={onClose}
-                        aria-label="Закрыть"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-ink-60)', width: 44, height: 44, display: 'grid', placeItems: 'center' }}
-                    >
-                        <X size={20} aria-hidden="true" />
-                    </button>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
-                    {/* Type toggle */}
-                    <Segmented<'income' | 'expense'>
-                        aria-label="Тип операции"
-                        options={[
-                            { value: 'expense', label: 'Расход' },
-                            { value: 'income', label: 'Доход' },
-                        ]}
-                        value={type}
-                        onChange={t => { setType(t); setCategoryId(''); }}
-                    />
-
-                    <Field label="Сумма" error={amountError}>
-                        <Input
-                            kind="money"
-                            suffix="₾"
-                            value={amount}
-                            onChange={e => setAmount(e.target.value)}
-                            autoFocus
-                            placeholder="0"
-                        />
-                    </Field>
-
-                    <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Способ оплаты</div>
-                        <Segmented
-                            aria-label="Способ оплаты"
-                            options={['cash', 'card_tbc', 'card_bog'].map(m => ({ value: m, label: METHOD_LABEL[m] }))}
-                            value={method}
-                            onChange={setMethod}
-                        />
-                    </div>
-
-                    <Field label="Филиал">
-                        <Select value={branch} onChange={e => setBranch(e.target.value)}>
-                            {['Unbox One', 'Unbox Uni', 'Neo School'].map(b => (
-                                <option key={b} value={b}>{b}</option>
-                            ))}
-                        </Select>
-                    </Field>
-
-                    <Field label="Категория">
-                        <Select value={categoryId} onChange={e => setCategoryId(e.target.value)}>
-                            <option value="">Без категории</option>
-                            {flatCats.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </Select>
-                    </Field>
-
-                    <Field label="Комментарий" optional>
-                        <Input
-                            value={description}
-                            onChange={e => setDescription(e.target.value)}
-                        />
-                    </Field>
-                </div>
-
-                <div style={SHEET_FOOTER}>
+        <Sheet
+            open
+            onClose={onClose}
+            title={title}
+            footer={
+                <>
                     <Button
                         block
                         loading={saving}
-                        disabled={!parsedAmount}
+                        disabled={!parsedAmount || needBranch}
                         icon={<Check size={16} aria-hidden="true" />}
                         onClick={handleSave}
                     >
-                        Сохранить
+                        {ctaLabel}
                     </Button>
+                    {needBranch && !!parsedAmount && (
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', textAlign: 'center' }}>
+                            Выберите филиал
+                        </div>
+                    )}
 
                     {/* Удаление — только в режиме редактирования */}
                     {isEdit && onDelete && (
@@ -733,13 +720,72 @@ function AddTransactionSheet({
                             disabled={saving}
                             icon={<Trash2 size={16} aria-hidden="true" />}
                             onClick={handleDelete}
-                            style={{ marginTop: 8, color: 'var(--status-danger-fg)' }}
+                            style={{ color: 'var(--status-danger-fg)' }}
                         >
                             Удалить операцию
                         </Button>
                     )}
+                </>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Type toggle */}
+                <Segmented<'income' | 'expense'>
+                    aria-label="Тип операции"
+                    options={[
+                        { value: 'expense', label: 'Расход' },
+                        { value: 'income', label: 'Доход' },
+                    ]}
+                    value={type}
+                    onChange={t => { setType(t); setCategoryId(''); }}
+                />
+
+                <Field label="Сумма" error={amountError}>
+                    <Input
+                        kind="money"
+                        suffix="₾"
+                        value={amount}
+                        onChange={e => setAmount(e.target.value)}
+                        autoFocus
+                        placeholder="0"
+                    />
+                </Field>
+
+                <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Способ оплаты</div>
+                    <Segmented
+                        aria-label="Способ оплаты"
+                        options={['cash', 'card_tbc', 'card_bog'].map(m => ({ value: m, label: METHOD_LABEL[m] }))}
+                        value={method}
+                        onChange={setMethod}
+                    />
                 </div>
+
+                <Field label="Филиал">
+                    <Select value={branch} onChange={e => setBranch(e.target.value)}>
+                        {!branch && <option value="">Выберите филиал</option>}
+                        {['Unbox One', 'Unbox Uni', 'Neo School'].map(b => (
+                            <option key={b} value={b}>{b}</option>
+                        ))}
+                    </Select>
+                </Field>
+
+                <Field label="Категория">
+                    <Select value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+                        <option value="">Без категории</option>
+                        {flatCats.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </Select>
+                </Field>
+
+                <Field label="Комментарий" optional>
+                    <Input
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                    />
+                </Field>
             </div>
-        </div>
+        </Sheet>
     );
 }

@@ -208,21 +208,14 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                 background: 'var(--color-sunken)', borderRadius: 12, padding: '14px 16px',
                 display: 'flex', flexDirection: 'column', gap: 12,
             }}>
-                <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink-60)' }}>
-                        По системе в кассе должно быть
-                    </div>
-                    <div className="num" style={{ fontSize: 20, fontWeight: 600, marginTop: 2 }}>
-                        {formatGel(expected)}
-                    </div>
-                    {previewError && (
-                        <div style={{ fontSize: 12, color: 'var(--status-danger-fg)', marginTop: 4 }}>
-                            {previewError}
-                        </div>
-                    )}
-                </div>
-
-                <Field label="Фактически в кассе" error={amountError}>
+                {/* В4 (владелец 01.10): слепой пересчёт. Сначала админ вводит,
+                    сколько насчитал, и только потом видит, сколько ждала система,
+                    и расхождение — иначе соблазн переписать подсказанную цифру. */}
+                <Field
+                    label="Сколько наличных в кассе — пересчитайте"
+                    error={amountError}
+                    hint={hasAmount ? undefined : 'Ожидаемую сумму покажем после ввода'}
+                >
                     <Input
                         kind="money"
                         suffix="₾"
@@ -233,16 +226,27 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                 </Field>
 
                 {hasAmount && (
-                    <div style={{
-                        display: 'flex', justifyContent: 'space-between',
-                        fontSize: 14,
-                        color: hasDrift ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)',
-                        fontWeight: 600,
-                    }}>
-                        <span>Расхождение</span>
-                        <span className="num">
-                            {formatGel(drift, { sign: true })}
-                        </span>
+                    <div aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: 'var(--color-ink-80)' }}>
+                            <span>По системе должно быть</span>
+                            <span className="num" style={{ fontWeight: 600 }}>{formatGel(expected)}</span>
+                        </div>
+                        {previewError && (
+                            <div style={{ fontSize: 12, color: 'var(--status-danger-fg)' }}>
+                                {previewError}
+                            </div>
+                        )}
+                        <div style={{
+                            display: 'flex', justifyContent: 'space-between',
+                            fontSize: 14,
+                            color: hasDrift ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)',
+                            fontWeight: 600,
+                        }}>
+                            <span>Расхождение</span>
+                            <span className="num">
+                                {formatGel(drift, { sign: true })}
+                            </span>
+                        </div>
                     </div>
                 )}
 
