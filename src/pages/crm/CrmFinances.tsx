@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
-    ChevronLeft, ChevronRight, Loader2, Plus, Check, X, Calendar,
+    ChevronLeft, ChevronRight, Loader2, Plus, Check, X, Calendar, Send,
 } from 'lucide-react';
 import {
     format,
@@ -20,13 +20,24 @@ import { formatMoney, formatGel, formatDayMonth, formatMonthLabel, formatTime } 
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { ruPlural } from '../../utils/plural';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
 function sessionsWord(n: number): string {
-    const m10 = n % 10, m100 = n % 100;
-    if (m10 === 1 && m100 !== 11) return 'сессия';
-    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
-    return 'сессий';
+    return ruPlural(n, ['сессия', 'сессии', 'сессий']);
+}
+
+/** Ссылка «Написать» в Telegram, если он у клиента есть (G5-20). */
+function telegramHref(client: CrmClient): string | null {
+    const tg = (client.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '');
+    if (!tg) return null;
+    if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(tg)) return `https://t.me/${tg}`;
+    const digits = tg.replace(/[^\d]/g, '');
+    return digits.length >= 7 ? `https://t.me/+${digits}` : null;
 }
 
 type Period = 'day' | 'week' | 'month';
@@ -66,6 +77,13 @@ export function CrmFinances() {
     const [anchor, setAnchor] = useState(new Date());
     const [showForm, setShowForm] = useState(false);
     const [allUnpaidSessions, setAllUnpaidSessions] = useState<CrmSession[]>([]);
+    // Долги не загрузились ≠ долгов нет (X5-states-speed-M3): раньше сбой
+    // молча показывал «0 ₾» и пустой список должников.
+    const [debtLoadFailed, setDebtLoadFailed] = useState(false);
+    const [debtTick, setDebtTick] = useState(0);
+    const [unpaidFor, setUnpaidFor] = useState<CrmClient | null>(null);
+
+    useDocumentTitle('Финансы · Psy-CRM');
 
     const { from, to } = getPeriodRange(anchor, period);
     const dateFrom = format(from, 'yyyy-MM-dd');
@@ -88,8 +106,9 @@ export function CrmFinances() {
             specialistId: viewAsSpecialistId ?? undefined,
         }).then(all => {
             setAllUnpaidSessions(all.filter(s => !s.isPaid));
-        }).catch(() => {});
-    }, [viewAsSpecialistId, payments, sessions]); // refresh when payments/sessions change
+            setDebtLoadFailed(false);
+        }).catch(() => setDebtLoadFailed(true));
+    }, [viewAsSpecialistId, payments, sessions, debtTick]); // refresh when payments/sessions change
 
     const clientMap = useMemo(() => {
         const map = new Map<string, CrmClient>();
@@ -169,7 +188,7 @@ export function CrmFinances() {
     const isThisMonth = period === 'month' && format(anchor, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
 
     return (
-
+            <>
             <GridHouseCrmFinances
                 period={period} setPeriod={setPeriod}
                 anchor={anchor} setAnchor={setAnchor}
@@ -185,7 +204,11 @@ export function CrmFinances() {
                     fetchClients();
                     fetchPayments({ dateFrom, dateTo });
                     fetchSessions({ dateFrom, dateTo });
+                    setDebtTick(t => t + 1);
                 }}
+                debtLoadFailed={debtLoadFailed}
+                canWrite={!viewAsSpecialistId}
+                onMarkPaid={setUnpaidFor}
                 isToday={isToday}
                 isThisMonth={isThisMonth}
                 onCreatePayment={async (data: CrmPaymentCreate) => {
@@ -195,6 +218,21 @@ export function CrmFinances() {
                 }}
                 navigate={navigate}
             />
+            {unpaidFor && (
+                <UnpaidSessionsSheet
+                    open={!!unpaidFor}
+                    onClose={() => setUnpaidFor(null)}
+                    client={unpaidFor}
+                    // Шторка пишет через crmApi и стор не обновляет — перечитываем
+                    // платежи и сессии периода, за ними долги (эффект выше).
+                    onChanged={() => {
+                        fetchPayments({ dateFrom, dateTo });
+                        fetchSessions({ dateFrom, dateTo });
+                        setDebtTick(t => t + 1);
+                    }}
+                />
+            )}
+            </>
         );
 }
 
@@ -221,266 +259,257 @@ type GHFinProps = {
     isThisMonth: boolean;
     onCreatePayment: (data: CrmPaymentCreate) => Promise<void>;
     navigate: (path: string) => void;
+    debtLoadFailed: boolean;
+    /** false — «просмотр как специалист»: записывать нельзя. */
+    canWrite: boolean;
+    onMarkPaid: (client: CrmClient) => void;
 };
 
 function GridHouseCrmFinances(p: GHFinProps) {
     const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
+    const h2: React.CSSProperties = { fontFamily: GH_SANS, fontSize: 20, fontWeight: 600, margin: 0 };
     const periods: { id: Period; label: string }[] = [
         { id: 'day', label: 'День' },
         { id: 'week', label: 'Неделя' },
         { id: 'month', label: 'Месяц' },
     ];
+    const accountLabel = (id?: string) =>
+        id ? (useCrmStore.getState().paymentAccounts.find(a => a.id === id)?.label || id) : '';
+    const kpiLoading = p.loading && !p.payments.length;
 
     return (
-        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-            <div style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(16px, 4vw, 48px)' }}>
-                {/* HEAD */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
-                    <div>
-                        <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · Финансы</div>
-                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
-                            Платежи и долги.
-                        </h1>
-                    </div>
-                    <button
-                        onClick={() => p.setShowForm(true)}
-                        style={{
-                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                            background: GH.ink, color: GH.paper, border: `1px solid ${GH.ink}`, padding: '14px 22px', cursor: 'pointer',
-                            display: 'inline-flex', alignItems: 'center', gap: 8,
-                        }}
-                    >
-                        <Plus size={12} aria-hidden="true" />
+        <div style={{ background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
+            <PageHeader
+                title="Финансы"
+                description="Платежи за период и долги клиентов"
+                actions={p.canWrite && (
+                    // inline-flex у общей кнопки: «+» больше не висит над текстом (G5-20).
+                    <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => p.setShowForm(true)}>
                         Новый платёж
+                    </Button>
+                )}
+            />
+
+            {/* PERIOD BAR */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginBottom: 24, paddingBottom: 16, borderBottom: `1px solid ${GH.ink10}` }}>
+                <div role="group" aria-label="Период" style={{ display: 'flex', border: `1px solid ${GH.ink10}` }}>
+                    {periods.map(pp => {
+                        const active = p.period === pp.id;
+                        return (
+                            <button
+                                key={pp.id}
+                                onClick={() => p.setPeriod(pp.id)}
+                                aria-pressed={active}
+                                style={{
+                                    fontFamily: GH_SANS, fontSize: 14, fontWeight: active ? 600 : 400,
+                                    padding: '0 16px', minHeight: 36,
+                                    background: active ? GH.ink : 'transparent',
+                                    color: active ? GH.paper : GH.ink,
+                                    border: 'none',
+                                    borderRight: `1px solid ${active ? GH.paper : GH.ink10}`,
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                {pp.label}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                        onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, -1))}
+                        aria-label="Предыдущий период"
+                        style={{ width: 36, height: 36, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                        <ChevronLeft size={16} />
+                    </button>
+                    <span aria-live="polite" style={{ fontSize: 15, fontWeight: 600, minWidth: 200, textAlign: 'center' }}>
+                        {formatPeriodLabel(p.anchor, p.period)}
+                    </span>
+                    <button
+                        onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, 1))}
+                        aria-label="Следующий период"
+                        style={{ width: 36, height: 36, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                        <ChevronRight size={16} />
                     </button>
                 </div>
 
-                {/* PERIOD BAR */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 20, marginBottom: 40, paddingBottom: 16, borderBottom: `1px solid ${GH.ink10}` }}>
-                    <div style={{ display: 'flex', border: `1px solid ${GH.ink10}` }}>
-                        {periods.map(pp => {
-                            const active = p.period === pp.id;
+                {!p.isToday && !p.isThisMonth && (
+                    <Button variant="quiet" size="compact" icon={<Calendar size={14} aria-hidden="true" />} onClick={() => p.setAnchor(new Date())}>
+                        Сейчас
+                    </Button>
+                )}
+            </div>
+
+            {p.loadError && (
+                <ErrorBar message="Не удалось загрузить финансы" onRetry={p.onRetry} retrying={p.loading} className="mb-6" />
+            )}
+
+            {/* KPI — один ряд. «Касса · с долгами» — все платежи периода, включая
+                оплату прошлых долгов (решение В1: одно слово на всех экранах). */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 32 }}>
+                {[
+                    { label: 'Касса · с долгами', value: p.stats.revenueLabel, sub: p.stats.revenueGel, hint: 'Все платежи за период, в том числе оплата прошлых долгов' },
+                    { label: 'Долги сейчас', value: p.debtLoadFailed ? '—' : p.stats.debtLabel, sub: p.debtLoadFailed ? 'не загрузились' : `${p.stats.unpaidCount} ${sessionsWord(p.stats.unpaidCount)}${p.stats.debtGel ? ' · ' + p.stats.debtGel : ''}`, danger: !p.debtLoadFailed && p.stats.unpaidCount > 0, hint: 'За всё время, не зависит от периода' },
+                    { label: 'Платежей', value: String(p.stats.totalPayments), sub: null },
+                    { label: 'Сессий', value: String(p.stats.held), sub: null },
+                ].map((k, i) => (
+                    <div key={k.label} title={k.hint} style={{ padding: '16px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none', minWidth: 0 }}>
+                        <div style={{ ...eyebrow, marginBottom: 8 }}>{k.label}</div>
+                        {kpiLoading ? (
+                            <Skeleton height={28} width="70%" radius={0} />
+                        ) : (
+                            <div style={{ fontFamily: GH_MONO, fontSize: 24, fontWeight: 600, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2, color: k.danger ? GH.danger : GH.ink, wordBreak: 'break-word' }}>
+                                {k.value}
+                            </div>
+                        )}
+                        {k.sub && !kpiLoading && <div style={{ fontSize: 13, color: GH.ink60, marginTop: 6, wordBreak: 'break-word' }}>{k.sub}</div>}
+                    </div>
+                ))}
+            </div>
+
+            {/* New Payment Form */}
+            {p.showForm && p.canWrite && (
+                <div style={{ border: `2px solid ${GH.ink}`, padding: 24, marginBottom: 32 }}>
+                    <GHPaymentForm
+                        clients={p.clients}
+                        onSave={p.onCreatePayment}
+                        onCancel={() => p.setShowForm(false)}
+                    />
+                </div>
+            )}
+
+            {/* Долги по клиентам */}
+            {p.debtLoadFailed && (
+                <ErrorBar message="Не удалось загрузить долги клиентов" onRetry={p.onRetry} className="mb-6" />
+            )}
+            {p.debtByClient.length > 0 && (
+                <section aria-labelledby="fin-debts" style={{ marginBottom: 32 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8, marginBottom: 4 }}>
+                        <h2 id="fin-debts" style={h2}>Долги</h2>
+                        <span style={{ fontSize: 13, color: GH.ink60 }}>
+                            {p.debtByClient.length} {ruPlural(p.debtByClient.length, ['клиент', 'клиента', 'клиентов'])}
+                        </span>
+                    </div>
+                    <div>
+                        {p.debtByClient.map(({ client, count, total }) => {
+                            const tg = telegramHref(client);
                             return (
-                                <button
-                                    key={pp.id}
-                                    onClick={() => p.setPeriod(pp.id)}
+                                // flex с переносом: имя гибкое, сумма и кнопки
+                                // справа на компьютере или строкой ниже на узком.
+                                <div
+                                    key={client.id}
                                     style={{
-                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                        padding: '10px 16px',
-                                        background: active ? GH.ink : 'transparent',
-                                        color: active ? GH.paper : GH.ink,
-                                        border: 'none',
-                                        borderRight: `1px solid ${active ? GH.paper : GH.ink10}`,
-                                        cursor: 'pointer',
+                                        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 16px',
+                                        padding: '12px 0', borderBottom: `1px solid ${GH.ink10}`,
                                     }}
                                 >
-                                    {pp.label}
-                                </button>
+                                    <Link
+                                        to={`/crm/clients/${client.id}`}
+                                        style={{ fontSize: 15, fontWeight: 600, color: GH.ink, flex: '1 1 160px', minWidth: 0, wordBreak: 'break-word', textDecoration: 'none' }}
+                                    >
+                                        {client.name}
+                                    </Link>
+                                    <span style={{ fontSize: 13, color: GH.ink60, whiteSpace: 'nowrap' }}>
+                                        {count} {sessionsWord(count)}
+                                    </span>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: GH.danger, whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
+                                        {formatMoney(total, { currency: client.currency })}
+                                    </span>
+                                    <span style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                                        {tg && (
+                                            <a
+                                                href={tg}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="ui-btn ui-btn--quiet ui-btn--compact"
+                                                aria-label={`Написать ${client.name} в Telegram`}
+                                            >
+                                                <Send size={14} aria-hidden="true" /> Написать
+                                            </a>
+                                        )}
+                                        {p.canWrite && (
+                                            <Button size="compact" variant="secondary" onClick={() => p.onMarkPaid(client)}>
+                                                Отметить оплату
+                                            </Button>
+                                        )}
+                                    </span>
+                                </div>
                             );
                         })}
                     </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button
-                            onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, -1))}
-                            aria-label="Предыдущий период"
-                            style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                            <ChevronLeft size={14} />
-                        </button>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', minWidth: 200, textAlign: 'center' }}>
-                            {formatPeriodLabel(p.anchor, p.period)}
-                        </span>
-                        <button
-                            onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, 1))}
-                            aria-label="Следующий период"
-                            style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                            <ChevronRight size={14} />
-                        </button>
-                    </div>
-
-                    {!p.isToday && !p.isThisMonth && (
-                        <button
-                            onClick={() => p.setAnchor(new Date())}
-                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', cursor: 'pointer' }}
-                        >
-                            <Calendar size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                            Сейчас
-                        </button>
-                    )}
-                </div>
-
-                {p.loadError && (
-                    <ErrorBar message="Не удалось загрузить финансы" onRetry={p.onRetry} retrying={p.loading} className="mb-6" />
-                )}
-
-                {/* KPI strip — auto-fit columns: 4-up на десктопе, 2-up на
-                    узком mobile (≤~600px). Раньше было `repeat(4, 1fr)`,
-                    из-за чего на телефоне колонки были по ~80px и числа вроде
-                    "GEL · 14500 RUB · 60 USDT" складывались вертикально и
-                    плохо читались. */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
-                    {[
-                        { label: 'Получено', value: p.stats.revenueLabel, sub: p.stats.revenueGel },
-                        { label: 'Общий долг', value: p.stats.debtLabel, sub: `${p.stats.unpaidCount} ${sessionsWord(p.stats.unpaidCount)}${p.stats.debtGel ? ' · ' + p.stats.debtGel : ''}`, danger: p.stats.unpaidCount > 0 },
-                        { label: 'Платежей', value: String(p.stats.totalPayments), sub: null },
-                        { label: 'Сессий', value: String(p.stats.held), sub: null },
-                    ].map((k, i) => (
-                        <div key={k.label} style={{ padding: '20px 16px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none', minWidth: 0 }}>
-                            <div style={{ ...eyebrow, marginBottom: 10 }}>{k.label}</div>
-                            {p.loading && !p.payments.length ? (
-                                <Skeleton height={28} width="70%" radius={0} />
-                            ) : (
-                                <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(18px, 2.6vw, 32px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color: k.danger ? GH.danger : GH.ink, wordBreak: 'break-word' }}>
-                                    {k.value}
-                                </div>
-                            )}
-                            {k.sub && !(p.loading && !p.payments.length) && <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, marginTop: 8, textTransform: 'uppercase', wordBreak: 'break-word' }}>{k.sub}</div>}
-                        </div>
-                    ))}
-                </div>
-
-                {/* New Payment Form */}
-                {p.showForm && (
-                    <div style={{ border: `2px solid ${GH.ink}`, padding: 28, marginBottom: 40 }}>
-                        <GHPaymentForm
-                            clients={p.clients}
-                            onSave={p.onCreatePayment}
-                            onCancel={() => p.setShowForm(false)}
-                        />
-                    </div>
-                )}
-
-                {/* Debt by client */}
-                {p.debtByClient.length > 0 && (
-                    <section style={{ marginBottom: 40 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 12, marginBottom: 20 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
-                                <span style={{ ...eyebrow, color: GH.danger }}>01 · Задолженности</span>
-                                <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(22px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
-                                    По клиентам.
-                                </h2>
-                            </div>
-                            <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
-                                {p.debtByClient.length}
-                            </span>
-                        </div>
-                        <div>
-                            {p.debtByClient.map(({ client, count, total }, i) => (
-                                // Раньше grid с `60px 1fr 100px 160px` фиксированной
-                                // суммой ~336px не оставлял места имени на узком
-                                // экране, а сумма "2100 GEL" на правом краю
-                                // обрезалась до "2100 GE". Сейчас flex с
-                                // wrap'ом: имя гибкое, сумма всегда видна
-                                // справа на десктопе или в новой строке снизу
-                                // на узком экране.
-                                <div
-                                    key={client.id}
-                                    onClick={() => p.navigate(`/crm/clients/${client.id}`)}
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        flexWrap: 'wrap',
-                                        gap: '8px 14px',
-                                        padding: '14px 0',
-                                        borderBottom: `1px solid ${GH.ink10}`,
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, minWidth: 28 }}>
-                                        {String(i + 1).padStart(2, '0')}
-                                    </span>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: '1 1 140px', minWidth: 0, wordBreak: 'break-word' }}>{client.name}</div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap' }}>
-                                        {count} {sessionsWord(count)}
-                                    </div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-                                        {formatMoney(total, { currency: client.currency })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                )}
-
-                {/* Payments list */}
-                <section style={{ marginBottom: 40 }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 12, marginBottom: 20 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
-                            <span style={{ ...eyebrow }}>{p.debtByClient.length > 0 ? '02' : '01'} · Журнал</span>
-                            <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(22px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
-                                Платежи за период.
-                            </h2>
-                        </div>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
-                            {p.payments.length}
-                        </span>
-                    </div>
-
-                    {p.loading && !p.payments.length ? (
-                        <div role="status" aria-busy="true" style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            <span className="sr-only">Загружаем платежи…</span>
-                            {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
-                        </div>
-                    ) : p.payments.length === 0 ? (
-                        p.loadError ? null : (
-                            <EmptyState
-                                title="За этот период платежей нет"
-                                hint="Выберите другой период или добавьте платёж."
-                                action={{ label: 'Новый платёж', onClick: () => p.setShowForm(true) }}
-                            />
-                        )
-                    ) : (
-                        <div>
-                            {p.payments.map((pay, i) => {
-                                const client = p.clientMap.get(pay.clientId);
-                                return (
-                                    // Тот же fix что и для debt-rows: flex
-                                    // вместо фиксированного 60+1fr+200+140 grid,
-                                    // который на мобильном съедал имя клиента
-                                    // и обрезал сумму справа.
-                                    <div
-                                        key={pay.id}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            flexWrap: 'wrap',
-                                            gap: '8px 14px',
-                                            padding: '14px 0',
-                                            borderBottom: `1px solid ${GH.ink10}`,
-                                        }}
-                                    >
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, minWidth: 32 }}>
-                                            {String(i + 1).padStart(3, '0')}
-                                        </span>
-                                        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-                                            <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, wordBreak: 'break-word' }}>{client?.name || 'Неизвестный'}</div>
-                                            {pay.account && (
-                                                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, marginTop: 3, textTransform: 'uppercase' }}>
-                                                    {pay.account}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
-                                            {formatDayMonth(parseUTC(pay.date), { withYear: 'auto' })} · {formatTime(parseUTC(pay.date))}
-                                        </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-                                            {formatMoney(pay.amount, { currency: pay.currency, sign: true })}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
                 </section>
+            )}
 
-                {/* Footer */}
-                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 32, display: 'flex', justifyContent: 'space-between', ...eyebrow }}>
-                    <span>Unbox · CRM · Финансы · {new Date().getFullYear()}</span>
-                    <span>{formatPeriodLabel(p.anchor, p.period)}</span>
+            {/* Журнал платежей */}
+            <section aria-labelledby="fin-journal" style={{ marginBottom: 32 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8, marginBottom: 4 }}>
+                    <h2 id="fin-journal" style={h2}>Платежи за период</h2>
+                    <span style={{ fontSize: 13, color: GH.ink60 }}>
+                        {p.payments.length} {ruPlural(p.payments.length, ['платёж', 'платежа', 'платежей'])}
+                    </span>
                 </div>
-            </div>
+
+                {p.loading && !p.payments.length ? (
+                    <div role="status" aria-busy="true" style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <span className="sr-only">Загружаем платежи…</span>
+                        {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
+                    </div>
+                ) : p.payments.length === 0 ? (
+                    p.loadError ? null : (
+                        <EmptyState
+                            title="За этот период платежей нет"
+                            hint={p.canWrite ? 'Выберите другой период или добавьте платёж.' : 'Выберите другой период.'}
+                            action={p.canWrite ? { label: 'Новый платёж', onClick: () => p.setShowForm(true) } : undefined}
+                        />
+                    )
+                ) : (
+                    <div>
+                        {p.payments.map((pay) => {
+                            const client = p.clientMap.get(pay.clientId);
+                            const when = parseUTC(pay.date);
+                            const rowStyle: React.CSSProperties = {
+                                display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px 16px',
+                                padding: '12px 0', borderBottom: `1px solid ${GH.ink10}`,
+                                color: GH.ink, textDecoration: 'none',
+                            };
+                            const inner = (
+                                <>
+                                    <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                                        <div style={{ fontSize: 15, fontWeight: 600, wordBreak: 'break-word' }}>{client?.name || 'Клиент удалён'}</div>
+                                        {pay.account && (
+                                            <div style={{ fontSize: 13, color: GH.ink60, marginTop: 2 }}>{accountLabel(pay.account)}</div>
+                                        )}
+                                    </div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 13, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
+                                        {formatDayMonth(when, { withYear: 'auto' })} · {formatTime(when)}
+                                    </div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginLeft: 'auto', whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
+                                        {formatMoney(pay.amount, { currency: pay.currency, sign: true })}
+                                    </div>
+                                </>
+                            );
+                            // Строка журнала ведёт в карточку клиента: там история
+                            // оплат и удаление ошибочного платежа (G5-20).
+                            return client ? (
+                                <Link
+                                    key={pay.id}
+                                    to={`/crm/clients/${client.id}`}
+                                    style={rowStyle}
+                                    onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
+                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                    {inner}
+                                </Link>
+                            ) : (
+                                <div key={pay.id} style={rowStyle}>{inner}</div>
+                            );
+                        })}
+                    </div>
+                )}
+            </section>
         </div>
     );
 }
@@ -513,8 +542,8 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
             // она важнее валюты клиента.
             const accCurrency = useCrmStore.getState().paymentAccounts.find(a => a.id === account)?.currency;
             await onSave({ clientId, amount: Number(amount), currency: accCurrency || selectedClient?.currency, account: account || undefined });
-        } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
+        } catch {
+            // Ошибку уже показал стор (crmStore.createPayment) — второй тост не нужен.
         } finally {
             setSaving(false);
         }
@@ -524,20 +553,15 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
     const hairlineInput: React.CSSProperties = {
         fontFamily: GH_SANS, fontSize: 15, background: 'transparent',
         border: 'none', borderBottom: `1px solid ${GH.ink10}`, padding: '10px 0',
-        outline: 'none', width: '100%', color: GH.ink,
+        width: '100%', color: GH.ink,
     };
 
     return (
         <form onSubmit={handleSubmit}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 24 }}>
-                <div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
-                        Действие · Новый платёж
-                    </div>
-                    <h3 style={{ fontFamily: GH_SANS, fontSize: 28, fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
-                        Добавить платёж.
-                    </h3>
-                </div>
+                <h3 style={{ fontFamily: GH_SANS, fontSize: 20, fontWeight: 600, margin: 0 }}>
+                    Новый платёж
+                </h3>
                 <button
                     type="button"
                     onClick={onCancel}
@@ -550,8 +574,9 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 24, marginBottom: 24 }}>
                 <div>
-                    <label style={labelStyle}>Клиент *</label>
+                    <label htmlFor="fin-pay-client" style={labelStyle}>Клиент *</label>
                     <select
+                        id="fin-pay-client"
                         value={clientId}
                         onChange={e => setClientId(e.target.value)}
                         required
@@ -562,18 +587,20 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                     </select>
                 </div>
                 <div>
-                    <label style={labelStyle}>Сумма *</label>
+                    <label htmlFor="fin-pay-amount" style={labelStyle}>Сумма *</label>
                     <input
+                        id="fin-pay-amount"
                         type="number"
                         value={amount}
                         onChange={e => setAmount(e.target.value)}
                         required
-                        style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                        style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
                     />
                 </div>
                 <div>
-                    <label style={labelStyle}>Счёт</label>
+                    <label htmlFor="fin-pay-account" style={labelStyle}>Счёт</label>
                     <input
+                        id="fin-pay-account"
                         type="text"
                         value={account}
                         onChange={e => setAccount(e.target.value)}
@@ -592,7 +619,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                         background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '14px 20px', cursor: 'pointer',
                     }}
                 >
-                    Отмена
+                    Не добавлять
                 </button>
                 <button
                     type="submit"
