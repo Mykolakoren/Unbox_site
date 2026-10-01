@@ -1,0 +1,1014 @@
+{
+ "1_sale": {
+  "A": {
+   "balance": 50.0,
+   "pool": {
+    "remaining_hours": 23.0,
+    "used_hours": 0.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": []
+  }
+ },
+ "2_create": {
+  "A": {
+   "balance": 50.0,
+   "pool": {
+    "remaining_hours": 21.0,
+    "used_hours": 2.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     5.0,
+     null,
+     1.0
+    ]
+   ]
+  }
+ },
+ "3_settle": {
+  "A": {
+   "balance": 45.0,
+   "pool": {
+    "remaining_hours": 19.0,
+    "used_hours": 4.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "4_cancel": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 20.5,
+    "used_hours": 2.5,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "5_waive": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 22.5,
+    "used_hours": 0.5,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "6_reschedule": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 19.5,
+    "used_hours": 3.5,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     180,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     3.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "7_trim": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 20.0,
+    "used_hours": 3.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:30",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     null,
+     1.5
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "8_shorten": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 17.0,
+    "used_hours": 6.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:30",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     null,
+     1.5
+    ],
+    [
+     "10-06",
+     "10:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "9_split": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 17.0,
+    "used_hours": 6.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:30",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     null,
+     1.5
+    ],
+    [
+     "10-06",
+     "10:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-06",
+     "11:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "10_format": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 18.0,
+    "used_hours": 5.0,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:30",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     null,
+     1.5
+    ],
+    [
+     "10-06",
+     "10:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     31.5,
+     31.5,
+     0.0
+    ],
+    [
+     "10-06",
+     "11:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "11_price": {
+  "A": {
+   "balance": 47.5,
+   "pool": {
+    "remaining_hours": 18.6825,
+    "used_hours": 4.3175,
+    "total_hours": 20.0,
+    "bonus_hours": 3.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "14:00",
+     120,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "waived",
+     0.0,
+     0.0,
+     2.0
+    ],
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:30",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     null,
+     1.5
+    ],
+    [
+     "10-06",
+     "10:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     10.0,
+     10.0,
+     0.3175
+    ],
+    [
+     "10-06",
+     "11:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-08",
+     "12:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     0.0,
+     1.0,
+     1.0
+    ],
+    [
+     "10-09",
+     "20:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "paid",
+     5.0,
+     1.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "12_series": {
+  "B": {
+   "balance": 300.0,
+   "pool": {
+    "remaining_hours": 41.0,
+    "used_hours": 1.0,
+    "total_hours": 40.0,
+    "bonus_hours": 2.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-12",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-19",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ]
+   ]
+  }
+ },
+ "13_multi": {
+  "B": {
+   "balance": 300.0,
+   "pool": {
+    "remaining_hours": 40.0,
+    "used_hours": 2.0,
+    "total_hours": 40.0,
+    "bonus_hours": 2.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "19:00",
+     60,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-10",
+     "19:00",
+     90,
+     "room_2",
+     "confirmed",
+     "subscription",
+     "pending",
+     2.5,
+     null,
+     1.5
+    ],
+    [
+     "10-12",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-19",
+     "18:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ]
+   ]
+  }
+ },
+ "14_hot": {
+  "C": {
+   "balance": 100.0,
+   "pool": {
+    "remaining_hours": 10.0,
+    "used_hours": 0.0,
+    "total_hours": 10.0,
+    "bonus_hours": 0.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_1",
+     "pending_approval",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:00",
+     60,
+     "room_1",
+     "pending_approval",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ]
+   ]
+  }
+ },
+ "15_approve_reject": {
+  "C": {
+   "balance": 100.0,
+   "pool": {
+    "remaining_hours": 9.0,
+    "used_hours": 1.0,
+    "total_hours": 10.0,
+    "bonus_hours": 0.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ]
+   ]
+  }
+ },
+ "16_convert": {
+  "C": {
+   "balance": 120.0,
+   "pool": {
+    "remaining_hours": 7.0,
+    "used_hours": 3.0,
+    "total_hours": 10.0,
+    "bonus_hours": 0.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-05",
+     "19:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ]
+   ]
+  }
+ },
+ "17_topup": {
+  "C": {
+   "balance": 120.0,
+   "pool": {
+    "remaining_hours": 9.5,
+    "used_hours": 3.0,
+    "total_hours": 12.5,
+    "bonus_hours": 0.0
+   },
+   "bookings": [
+    [
+     "10-05",
+     "16:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ],
+    [
+     "10-05",
+     "17:00",
+     60,
+     "room_1",
+     "cancelled",
+     "subscription",
+     "pending",
+     0.0,
+     null,
+     1.0
+    ],
+    [
+     "10-05",
+     "19:00",
+     60,
+     "room_1",
+     "confirmed",
+     "subscription",
+     "paid",
+     0.0,
+     0.0,
+     1.0
+    ]
+   ]
+  }
+ }
+}
