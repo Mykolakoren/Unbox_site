@@ -460,7 +460,14 @@ def _link_appointment_to_crm(
     # Создаём плановую сессию в CRM. is_booked=False — спец сам потом
     # забронирует кабинет (если нужен). is_paid=False — оплата вне сайта.
     h, m = appointment.start_time.split(":")
-    session_dt = datetime.combine(appointment.date, time(int(h), int(m)))
+    # 01.10: дата+время заявки — стенные часы Тбилиси, а колонка
+    # TherapySession.date хранит UTC-naive (как синк календаря и POST
+    # /crm/sessions). Без перевода сессия стояла на 4 часа позже и синк
+    # не узнавал в ней ту же встречу.
+    from app.services.crm_calendar import tbilisi_naive_to_utc_naive
+    session_dt = tbilisi_naive_to_utc_naive(
+        datetime.combine(appointment.date, time(int(h), int(m)))
+    )
 
     therapy = TherapySession(
         specialist_id=user_id_str,

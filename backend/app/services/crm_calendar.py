@@ -275,6 +275,9 @@ def create_or_link_event(
             "action": "conflict",
             "summary": ev.get("summary"),
             "conflict_start": start_dt.isoformat() if start_dt else None,
+            # id «соседнего» события — по нему CRM находит уже существующую
+            # сессию и предлагает перенести её вместо создания второй.
+            "conflict_event_id": ev.get("id"),
         }
     gid = create_calendar_event(
         calendar_id, client_name, alias_code, session_date,

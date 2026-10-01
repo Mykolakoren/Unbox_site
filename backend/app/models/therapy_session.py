@@ -57,6 +57,9 @@ class TherapySessionCreate(SQLModel):
     booking_id: Optional[str] = None
     recurring_group_id: Optional[str] = None  # Stamp every member of a series with the same UUID
     push_to_calendar: bool = False  # If True, create Google Calendar event
+    # 01.10: «почти совпало» в календаре (тот же клиент ±3 ч) → 409; force=True —
+    # специалист подтвердил «всё равно создать» отдельную встречу.
+    force: bool = False
 
 
 class TherapySessionRead(TherapySessionBase):
@@ -64,6 +67,12 @@ class TherapySessionRead(TherapySessionBase):
     specialist_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class TherapySessionUpdateResult(TherapySessionRead):
+    """Ответ PATCH /crm/sessions/{id}: сессия + предупреждение календаря
+    (01.10) — перенос сохранён, но событие в Google не сдвинулось/не создано."""
+    calendar_warning: Optional[str] = None
 
 
 class TherapySessionUpdate(SQLModel):
