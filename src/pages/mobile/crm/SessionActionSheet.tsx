@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     Check, X, MapPin, Calendar, Trash2,
-    Unlink, ChevronRight, AlertTriangle, ArrowLeft,
+    Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock,
 } from 'lucide-react';
 import { crmApi, type CrmSession, type CrmClient, type CrmNote } from '../../../api/crm';
 import { formatBatumi, parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -19,6 +19,8 @@ import { COLOR } from '../../../design/tokens';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 import type { BookingHistoryItem } from '../../../store/types';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/parseMoneyInput';
+import { useCrmStore } from '../../../store/crmStore';
+import { nextSessionLabel } from './crmFlows';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -56,6 +58,9 @@ interface Props {
     onClose: () => void;
     onChange: (updated: CrmSession) => void;
     onDeleted: (id: string) => void;
+    /** Волна 3: первая строка «Записать следующую · вт, 7 окт., 19:00».
+     *  Родитель закрывает эту шторку и открывает NewSessionSheet. */
+    onBookNext?: (session: CrmSession) => void;
 }
 
 type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'delete' | 'cabinet';
@@ -65,7 +70,9 @@ type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'delete' | 'cabinet';
  *  её «переносить» в Заметки. */
 const SITE_REQUEST_MARK = 'Заявка через публичный сайт';
 
-export function SessionActionSheet({ session, client, onClose, onChange, onDeleted }: Props) {
+export function SessionActionSheet({ session, client, onClose, onChange, onDeleted, onBookNext }: Props) {
+    // В «просмотре как специалист» записывать нельзя — строку не показываем.
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     const [mode, setMode] = useState<Mode>('main');
     const [busy, setBusy] = useState(false);
     // Поля шагов живут здесь: кнопка шага — в подвале общей шторки.
@@ -302,6 +309,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     onReschedule={() => openMode('reschedule')}
                     onDelete={() => openMode('delete')}
                     onCabinet={() => openMode('cabinet')}
+                    onBookNext={onBookNext && !viewingOther ? () => onBookNext(session) : undefined}
                 />
             )}
             {mode === 'reschedule' && (
@@ -362,7 +370,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
 
 function Main({
     session, client, busy, notes, legacyNote, onStatus, onPaid, onPrice, onNotes, onReschedule,
-    onDelete, onCabinet,
+    onDelete, onCabinet, onBookNext,
 }: {
     session: CrmSession;
     client?: CrmClient;
@@ -376,8 +384,12 @@ function Main({
     onReschedule: () => void;
     onDelete: () => void;
     onCabinet: () => void;
+    onBookNext?: () => void;
 }) {
     const navigate = useNavigate();
+    // G6-M4: у будущей сессии нет «Прошла» — случайный тап делал завтрашнюю
+    // сессию долгом. Главное действие будущей — «Перенести».
+    const isFuture = parseUTC(session.date).getTime() > Date.now();
     const cabinet = useLinkedBooking(session, false).label;
     const latestNote = notes?.[0]?.content || legacyNote;
     const currency = sessionCurrency(session, client);
@@ -389,9 +401,27 @@ function Main({
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* Волна 3: «записать следующую» — второй тап из трёх
+                (карточка → эта строка → «Записать»). Тот же день недели и
+                время через неделю (utils/crmNextSession, по Батуми). */}
+            {onBookNext && (
+                <Row
+                    icon={<CalendarPlus size={16} aria-hidden="true" />}
+                    label={`Записать следующую · ${nextSessionLabel(session, client)}`}
+                    sub="Тот же день недели и время — можно поменять"
+                    onClick={onBookNext}
+                />
+            )}
             {/* Status quick toggle */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingBottom: 8 }}>
-                {session.status !== 'COMPLETED' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingBottom: 8, paddingTop: onBookNext ? 6 : 0 }}>
+                {session.status !== 'COMPLETED' && isFuture ? (
+                    <ActionTile
+                        icon={<CalendarClock size={18} aria-hidden="true" />}
+                        label="Перенести"
+                        disabled={busy}
+                        onClick={onReschedule}
+                    />
+                ) : session.status !== 'COMPLETED' ? (
                     <ActionTile
                         icon={<Check size={18} aria-hidden="true" />}
                         label="Прошла"
