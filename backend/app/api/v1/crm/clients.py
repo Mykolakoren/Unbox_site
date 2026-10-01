@@ -403,7 +403,11 @@ def update_client(
                 _ts.price = _old_price
             if "currency" in _freeze_fields and not _ts.currency:
                 _ts.currency = _old_currency
-            if "account" in _freeze_fields and not _ts.account:
+            # Счёт замораживаем только у оплаченных: у них он нужен для истории.
+            # У неоплаченной сессии счёт — это «куда примем оплату»: если заморозить
+            # старый, то после смены счёта по умолчанию (Cash → TBC) оплата прошлой
+            # сессии всё равно уходила на Cash (01.10, кейс «Андрей и Надежда»).
+            if "account" in _freeze_fields and not _ts.account and _ts.is_paid:
                 _ts.account = _old_account
             session.add(_ts)
 

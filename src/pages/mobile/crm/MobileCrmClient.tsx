@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     ArrowLeft, Phone, MessageCircle, Mail, Plus, CalendarPlus, MapPin,
-    CheckCircle2, Clock, XCircle, Wallet, FileText, ChevronRight,
+    CheckCircle2, Clock, XCircle, Wallet, FileText, ChevronRight, Pencil,
 } from 'lucide-react';
 import { crmApi, type CrmClient, type CrmSession, type CrmPayment, type CrmNote } from '../../../api/crm';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -17,6 +17,8 @@ import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
 import { Sheet } from '../../../components/ui/Sheet';
 import { Field, TextArea } from '../../../components/ui/Field';
 import { UnpaidSessionsSheet } from '../../../components/crm/UnpaidSessionsSheet';
+import { PaymentEditSheet } from '../../../components/crm/PaymentEditSheet';
+import { accountLabel } from '../../../utils/paymentAccounts';
 import { getStatusDef, statusLabel } from '../../../design/statuses';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { toastApiError } from '../../../utils/errors';
@@ -93,6 +95,8 @@ export function MobileCrmClient() {
     const fetchBookings = useUserStore(s => s.fetchBookings);
     const [activeSheet, setActiveSheet] = useState<CrmSession | null>(null);
     const [unpaidOpen, setUnpaidOpen] = useState(false);
+    // Платёж, который правят карандашом в ленте (то же окно, что в блоке «Оплата» сессии).
+    const [editingPayment, setEditingPayment] = useState<CrmPayment | null>(null);
     const [noteOpen, setNoteOpen] = useState(false);
     // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
     useDocumentTitle('Клиент · Psy-CRM');
@@ -409,6 +413,7 @@ export function MobileCrmClient() {
                                 key={`${item.kind}-${itemId(item)}`}
                                 item={item}
                                 onOpenSession={setActiveSheet}
+                                onEditPayment={viewingOther ? undefined : setEditingPayment}
                             />
                         ))}
                     </div>
@@ -444,6 +449,14 @@ export function MobileCrmClient() {
                 sessions={sessions}
                 onChanged={refresh}
             />
+            {editingPayment && (
+                <PaymentEditSheet
+                    payment={editingPayment}
+                    clientCurrency={client.currency}
+                    onClose={() => setEditingPayment(null)}
+                    onSaved={() => { setEditingPayment(null); refresh(); }}
+                />
+            )}
             <NewNoteSheet
                 open={noteOpen}
                 clientId={client.id}
@@ -563,7 +576,12 @@ function itemId(item: TimelineItem): string {
 }
 
 /** Строка ленты клиента. Сессия — кнопка: открывает шторку сессии. */
-function TimelineRow({ item, onOpenSession }: { item: TimelineItem; onOpenSession: (s: CrmSession) => void }) {
+function TimelineRow({ item, onOpenSession, onEditPayment }: {
+    item: TimelineItem;
+    onOpenSession: (s: CrmSession) => void;
+    /** Карандаш «Изменить оплату» на платеже; нет — «просмотр как специалист». */
+    onEditPayment?: (p: CrmPayment) => void;
+}) {
     // Счёт платежа — человеческим названием («Наличные»), а не id («cash»).
     const paymentAccounts = useCrmStore(s => s.paymentAccounts);
     if (item.kind === 'session') {
@@ -624,9 +642,25 @@ function TimelineRow({ item, onOpenSession }: { item: TimelineItem; onOpenSessio
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                         {formatDayMonth(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
-                        {p.account ? ` · ${paymentAccounts.find(a => a.id === p.account)?.label || p.account}` : ''}
+                        {p.account ? ` · ${accountLabel(p.account, paymentAccounts)}` : ''}
                     </div>
                 </div>
+                {onEditPayment && (
+                    <button
+                        type="button"
+                        onClick={() => onEditPayment(p)}
+                        aria-label={`Изменить оплату ${formatMoney(p.amount || 0, { currency: p.currency || 'GEL' })}`}
+                        title="Изменить оплату"
+                        className="press"
+                        style={{
+                            width: 44, height: 44, margin: '-6px -8px -6px 0', flexShrink: 0,
+                            display: 'grid', placeItems: 'center', background: 'none', border: 'none',
+                            cursor: 'pointer', color: 'var(--color-ink-60)',
+                        }}
+                    >
+                        <Pencil size={15} aria-hidden="true" />
+                    </button>
+                )}
             </div>
         );
     }

@@ -45,6 +45,25 @@ def _sessions_with_money(db: Session, uid: str, sessions, client_id: Optional[st
     return out
 
 
+def _default_payment_account(db: Session, client: TherapistClient, specialist_id: str) -> str:
+    """Счёт оплаты, когда его никто не выбрал (ни в запросе, ни на сессии):
+    счёт клиента «по умолчанию» → счёт его последнего платежа → «Cash».
+    Новых вариантов написания не плодим: берём то, что уже лежит в базе."""
+    acc = (client.default_account or "").strip()
+    if acc:
+        return acc
+    last = db.exec(
+        select(TherapistPayment.account)
+        .where(
+            TherapistPayment.client_id == client.id,
+            TherapistPayment.specialist_id == specialist_id,
+        )
+        .order_by(TherapistPayment.date.desc())
+        .limit(1)
+    ).first()
+    return (last or "").strip() or "Cash"
+
+
 def _top_up_partial_payment(db: Session, ts: TherapySession, client, payment: TherapistPayment) -> float:
     """У сессии уже есть ЧАСТИЧНЫЙ платёж, а её отмечают «оплаченной» целиком:
     дописываем в тот же платёж недостающий остаток (в валюте платежа) и возвращаем
@@ -959,7 +978,16 @@ def quick_pay_session(
         raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     price = ts.price if ts.price is not None else client.base_price or 0
-    account = payload.get("account") or client.default_account
+    # Счёт оплаты: 1) выбранный в запросе («Отметить оплату» со счётом) — он главнее
+    # всего; 2) счёт, уже стоящий на сессии; 3) счёт клиента по умолчанию →
+    # последний счёт его платежа → «Cash». Раньше счёт сессии (замороженный старый)
+    # перебивал и выбор в запросе, и новый счёт клиента: поменяли «по умолчанию»
+    # на TBC, а платёж записался в «Cash».
+    chosen = payload.get("account") if isinstance(payload, dict) else None
+    chosen = chosen.strip() if isinstance(chosen, str) else ""
+    if len(chosen) > 64:
+        raise HTTPException(400, "Название счёта слишком длинное")
+    account = chosen or ts.account or _default_payment_account(session, client, str(current_user.id))
 
     # Update session price if it was NULL (use client's current base_price)
     if ts.price is None and client.base_price:
@@ -971,7 +999,7 @@ def quick_pay_session(
     # или ручная правка) — они главнее текущих значений клиента: сессия в
     # USDT не должна оплатиться в гривнах после смены валюты клиента.
     ts.currency = ts.currency or client.currency
-    ts.account = ts.account or account
+    ts.account = account
 
     # Create payment record only if amount > 0
     if price and price > 0:
@@ -980,7 +1008,7 @@ def quick_pay_session(
             specialist_id=str(current_user.id),
             amount=price,
             currency=ts.currency or client.currency,
-            account=ts.account or account,
+            account=account,
             date=datetime.now(),  # payment date = today, not session date
             session_id=ts.id,
         )
@@ -1069,6 +1097,7 @@ def mark_all_sessions_paid(
     # внесена часть, второй платёж не создаём: дописываем остаток в тот же.
     # Раньше такая сессия роняла «Отметить все» ошибкой уникальности.
     existing_by_session = sb.load_payments_by_session(session, uid)
+    fallback_account = _default_payment_account(session, client, uid)
     for ts in unpaid:
         price = ts.price if ts.price is not None else client.base_price or 0
         # Fill session price from client base_price if NULL
@@ -1078,7 +1107,7 @@ def mark_all_sessions_paid(
         # Freeze currency & account on the session at payment time.
         # 09.09: проставленные на сессии значения главнее клиентских (см. quick-pay).
         ts.currency = ts.currency or client.currency
-        ts.account = ts.account or client.default_account
+        ts.account = ts.account or fallback_account
         _prev = (existing_by_session.get(ts.id) or [None])[0]
         if _prev is not None:
             if _top_up_partial_payment(session, ts, client, _prev):
@@ -1090,7 +1119,7 @@ def mark_all_sessions_paid(
                 specialist_id=uid,
                 amount=price,
                 currency=ts.currency or client.currency,
-                account=ts.account or client.default_account,
+                account=ts.account or fallback_account,
                 # Дата платежа = ДЕНЬ ОПЛАТЫ (как в quick_pay_session), а НЕ дата
                 # сессии. Иначе оплата старого долга задним числом меняла кассу
                 # прошлого месяца, а «касса за месяц» переставала быть кэш-флоу.

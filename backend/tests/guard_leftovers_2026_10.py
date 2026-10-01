@@ -176,7 +176,8 @@ console.log(JSON.stringify({
 def test_mobile_crm_payment_account_label():
     src = _code("src/pages/mobile/crm/MobileCrmClient.tsx")
     assert "` · ${p.account}`" not in src, "история оплат на телефоне снова пишет сырой счёт («cash»)"
-    assert "paymentAccounts.find(a => a.id === p.account)?.label || p.account" in src
+    # 01.10 (счёт платежа ≠ счёт сессии): подпись — общий accountLabel, он узнаёт «Cash»/«TBC» без учёта регистра.
+    assert "accountLabel(p.account, paymentAccounts)" in src, "подпись счёта платежа не по списку счетов"
     assert "fetchPaymentAccounts()" in src, "свои счета специалиста не подгружаются — подпись только по умолчанию"
 
 

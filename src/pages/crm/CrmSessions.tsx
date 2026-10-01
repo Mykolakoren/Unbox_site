@@ -42,6 +42,7 @@ import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
 import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
+import { defaultPaymentAccount } from '../../utils/paymentAccounts';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { sessionDebt, sessionCurrencyOf, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
 
@@ -583,7 +584,12 @@ function SessionEditPanel({
     const [currency, setCurrency] = useState(startCurrency);
     const [clientId, setClientId] = useState(session.clientId);
     const [isPaid, setIsPaid] = useState(session.isPaid);
-    const [account, setAccount] = useState(clientDefaultAccount || 'cash');
+    // Счёт оплаты: уже стоящий на сессии, иначе счёт клиента по умолчанию, иначе наличные.
+    // Это значение уходит в «Отметить оплату» явно и главнее всего, поэтому берём не только
+    // счёт клиента — иначе сессия со своим счётом платилась бы на клиентский.
+    const [account, setAccount] = useState(
+        () => defaultPaymentAccount(useCrmStore.getState().paymentAccounts, session.account ?? clientDefaultAccount),
+    );
     const [saving, setSaving] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {

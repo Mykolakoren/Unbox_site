@@ -542,7 +542,9 @@ DETAIL = "src/pages/crm/CrmClientDetail.tsx"
 def test_front_session_panel_sends_price_currency_account():
     src = _code(DETAIL)
     i = src.index("Счёт для оплаты")
-    panel = src[src.rfind("<Field", 0, i - 800):src.index("Удалить сессию", i)]
+    # 01.10 (счёт платежа ≠ счёт сессии): блок «Оплата» стоит ВЫШЕ формы цены — панель
+    # начинается с него, а не с первого поля формы.
+    panel = src[src.rfind("{isEditing && (() =>", 0, i):src.index("Удалить сессию", i)]
     assert "handleUpdateSession(session.id, patch)" in panel, "панель правки не сохраняет сессию"
     assert "price: parsedEditPrice" in panel, "панель правки сессии не шлёт price"
     assert "patch.currency = editSessionCurrency" in panel and "patch.account = editSessionAccount" in panel, \
@@ -564,8 +566,11 @@ BLOCK = "src/components/crm/SessionPaymentBlock.tsx"
 
 def test_front_payment_block_edit_and_topup():
     blk = _code(BLOCK)
-    assert "crmApi.updatePayment" in blk, "блок «Оплата» не вызывает правку платежа"
-    assert "Оплата:" in blk and "Изменить" in blk
+    # Окно правки платежа вынесено в общий PaymentEditSheet (01.10) — updatePayment вызывает оно.
+    edit = _code("src/components/crm/PaymentEditSheet.tsx")
+    assert "crmApi.updatePayment" in edit, "окно «Изменить оплату» не вызывает правку платежа"
+    assert "PaymentEditSheet" in blk, "блок «Оплата» не открывает общее окно правки платежа"
+    assert "Оплата · счёт, сумма и день платежа правятся здесь" in blk and "Изменить" in blk
     assert "Цена и оплата не совпадают" in blk, "нет предупреждения о расхождении цены и оплаты"
     assert "Доплатить" in blk and "crmApi.createPayment" in blk and "sessionId: session.id" in blk, \
         "нет кнопки «Доплатить» через POST /payments"
@@ -573,8 +578,9 @@ def test_front_payment_block_edit_and_topup():
     api = _code("src/api/crm.ts")
     assert re.search(r"updatePayment:[^=]*=>[\s\S]{0,200}api\.patch\(`/crm/payments/\$\{", api), \
         "в crmApi нет PATCH /crm/payments/{id}"
-    for need in ("'../ui/Sheet'", "'../ui/Button'", "'../ui/Field'", "formatMoney", "kind=\"money\""):
-        assert need in blk, f"блок оплаты не использует {need}"
+    for need in ("'../ui/Sheet'", "'../ui/Button'", "'../ui/Field'", "kind=\"money\""):
+        assert need in edit, f"окно правки оплаты не использует {need}"
+    assert "formatMoney" in blk, "блок оплаты не форматирует деньги общей функцией"
     assert "SessionPaymentBlock" in _code(DETAIL), "блок «Оплата» не подключён к карточке клиента"
 
 
