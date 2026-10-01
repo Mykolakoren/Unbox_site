@@ -281,7 +281,7 @@ export function AdminUserDetails() {
             // Баланс посчитал бэк — подтягиваем свежие данные и сумму оплат.
             await fetchUsers();
             await reloadTotalPaid();
-            toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
+            toast.success(`Баланс пополнен на ${amount} ₾ (${({ cash: 'наличные', tbc: 'карта TBC', bog: 'карта BOG' } as Record<string, string>)[method] || method})`);
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
         }
