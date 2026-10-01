@@ -1,37 +1,58 @@
-import { useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useState, useMemo, useCallback, type CSSProperties } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
 import { AccountSelect } from '../../components/crm/AccountSelect';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
+import { NewSessionSheet } from '../../components/crm/NewSessionSheet';
+import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
-    ArrowLeft, Phone, Mail, Tag, Wallet, Calendar, StickyNote,
-    Plus, Trash2, Check, X, Loader2, Pencil, Send,
-    CheckCheck, RefreshCw, FileText,
+    Phone, Mail, Plus, Trash2, Check, X, Pencil, Send, RefreshCw, StickyNote,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { parseUTC } from '../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
-import { formatMoney, formatDayMonth, formatTime } from '../../utils/format';
+import {
+    formatMoney, formatDayMonth, formatDayMonthShort, formatDateLabel, formatTime, formatTimeRange, formatWeekdayShort,
+} from '../../utils/format';
+import { ruCountWord } from '../../utils/plural';
+import { toastApiError } from '../../utils/errors';
+import { suggestNextSession, toTbilisiNaive, utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { STATUS } from '../../design/tokens';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ErrorBar } from '../../components/ui/ErrorBar';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Sheet } from '../../components/ui/Sheet';
+import { Field, Input, Select, TextArea } from '../../components/ui/Field';
+import { undoToast } from '../../components/ui/undoToast';
 import { statusLabel } from '../../design/statuses';
 
-/** Сумма по частям для крупной цифры: [«1 250», «₾»] — знак валюты мельче. */
-function moneyParts(amount: number, currency?: string): [string, string] {
-    const s = formatMoney(amount, { currency });
-    const i = s.lastIndexOf('\u00A0');
-    return i === -1 ? [s, ''] : [s.slice(0, i), s.slice(i + 1)];
-}
+/**
+ * Карточка клиента Psy-CRM на компьютере — вариант V1 «Что дальше»
+ * (волна 3, пакет C; макет scratchpad/wave3/variants/project/Main.dc.html).
+ *
+ * Сверху то, что нужно перед сессией: следующая встреча (или «Записать на …»),
+ * долг одной строкой (→ UnpaidSessionsSheet). Ниже две колонки: «История»
+ * (сессия вместе с её заметками) и справа «Деньги» строкой текста, последние
+ * оплаты и поле новой заметки. Раньше страница начиналась с «Всего оплачено»
+ * 64 px и повторяла одни и те же цифры трижды (G5-05).
+ *
+ * Деньги здесь не пересчитываются: оплата — handleQuickPay / UnpaidSessionsSheet,
+ * снятие оплаты и удаление платежа — прежние обработчики с прежними вопросами.
+ */
+
+const TZ = { timeZone: BATUMI_TZ };
 
 /** Ширина элемента через ResizeObserver (первый замер — до отрисовки).
  *  Историю сессий раскладываем по ширине её колонки, а не окна: рядом
- *  сайдбар CRM (260 px) и колонка «Финансы». */
+ *  сайдбар CRM (260 px) и колонка «Деньги». */
 function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
     const [el, setEl] = useState<T | null>(null);
     const [w, setW] = useState(0);
@@ -46,32 +67,72 @@ function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, numb
     return [setEl, w];
 }
 
-/** Минимум сетки истории: 140 (дата) + 150 (статус) + 250 (сумма, кнопки) + 2×12. */
-const HISTORY_TABLE_MIN = 580;
+/** Минимум сетки истории: 140 (дата) + 140 (статус) + 240 (сумма, кнопки) + 2×12. */
+const HISTORY_TABLE_MIN = 544;
+const HISTORY_COLUMNS = 'minmax(140px, 1fr) 140px 240px';
 
-/** «5 октября, 09:00» (год — только если не текущий). */
+/** Сколько оплат видно сразу (G5-M4: раньше пятая строка обрезалась скроллом). */
+const PAYMENTS_PREVIEW = 5;
+
+/** «5 октября, 09:00» по Батуми (год — только если не текущий). */
 function dayTime(d: Date | string): string {
-    return `${formatDayMonth(d, { withYear: 'auto' })}, ${formatTime(d)}`;
+    return `${formatDayMonth(d, { withYear: 'auto', ...TZ })}, ${formatTime(d, TZ)}`;
 }
+
+const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
 
 // Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
 const STATUS_LABELS: Record<string, string> = Object.fromEntries(
     ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
 );
 
-// Тот же хук, что в DashboardOverview/LoginPage: карточка клиента была
-// единственным экраном CRM совсем без мобильной ветки — двухколоночная
-// сетка сжимала блок «Финансы» в полосу ~100px (аудит 30.08).
-function useGHNarrow(bp = 768) {
-    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
-    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
-    return n;
+/** «вт, 7 окт.» — коротко для кнопки «Записать на …» (как в NewSessionSheet). */
+function shortDayLabel(ymd: string): string {
+    return `${formatWeekdayShort(ymd, { capitalize: false })}, ${formatDayMonthShort(ymd)}`;
 }
+
+/** Ссылка «Написать»: Telegram, если он есть, иначе телефон. */
+function contactHref(client: CrmClient): { href: string; label: string } | null {
+    const tg = (client.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '');
+    if (tg) {
+        const digits = tg.replace(/[^\d+]/g, '');
+        if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(tg)) return { href: `https://t.me/${tg}`, label: 'Написать в Telegram' };
+        if (/^\+?\d{7,}$/.test(digits)) return { href: `https://t.me/+${digits.replace(/^\+/, '')}`, label: 'Написать в Telegram' };
+    }
+    const phone = (client.phone || '').replace(/[^\d+]/g, '');
+    if (phone.length >= 7) return { href: `tel:${phone}`, label: 'Позвонить' };
+    return null;
+}
+
+/** «280 ₾» или «280 ₾ + 50 $» — по валютам, без пересчёта. */
+function sumByCurrency(items: { amount: number; currency: string }[]): { label: string; single: boolean } {
+    const by = new Map<string, number>();
+    for (const it of items) by.set(it.currency, (by.get(it.currency) ?? 0) + it.amount);
+    const parts = [...by.entries()].filter(([, v]) => v > 0);
+    return {
+        label: parts.map(([cur, v]) => formatMoney(v, { currency: cur })).join(' + '),
+        single: parts.length <= 1,
+    };
+}
+
+const cap: CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
+const hairline = `1px solid ${GH.ink10}`;
+const textLink: CSSProperties = {
+    background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+    fontFamily: GH_SANS, fontSize: 14, fontWeight: 600, color: GH.label,
+    display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 32,
+};
+const chip = (tone: 'ok' | 'muted'): CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', height: 22, padding: '0 8px', borderRadius: 8,
+    fontSize: 12, fontWeight: 600, background: STATUS[tone].bg, color: STATUS[tone].fg,
+});
 
 export function CrmClientDetail() {
     const { clientId } = useParams<{ clientId: string }>();
     const navigate = useNavigate();
     const { updateSession, createNote, deleteNote, paymentAccounts } = useCrmStore();
+    // «Просмотр как специалист» (админ смотрит чужую CRM): кнопки записи прячем.
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     // Одно окно подтверждения на всё, что стирает деньги или записи
     // (аудит 29.09, G5-07/G5-01): раньше часть мест спрашивала через
     // window.confirm, а часть не спрашивала вовсе.
@@ -83,13 +144,11 @@ export function CrmClientDetail() {
     const [payments, setPayments] = useState<CrmPayment[]>([]);
     const [balance, setBalance] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [showNoteForm, setShowNoteForm] = useState(false);
     const [editingSession, setEditingSession] = useState<string | null>(null);
     const [editSessionPrice, setEditSessionPrice] = useState('');
     const [editSessionAccount, setEditSessionAccount] = useState('');
     const [sessionNoteId, setSessionNoteId] = useState<string | null>(null);
     const [sessionNoteText, setSessionNoteText] = useState('');
-    const [sessionNoteTags, setSessionNoteTags] = useState('');
     const [savingSessionNote, setSavingSessionNote] = useState(false);
     const [markingAll, setMarkingAll] = useState(false);
     const [showSyncPicker, setShowSyncPicker] = useState(false);
@@ -108,6 +167,15 @@ export function CrmClientDetail() {
     // Загрузка упала ≠ «клиент не найден»: раньше при сбое сети карточка
     // писала «Клиент не найден», будто его удалили.
     const [loadError, setLoadError] = useState(false);
+    // Волна 3: шторки «Новая сессия», «Долг клиента», «Перенести».
+    const [newSessionOpen, setNewSessionOpen] = useState(false);
+    const [unpaidOpen, setUnpaidOpen] = useState(false);
+    const [rescheduleFor, setRescheduleFor] = useState<CrmSession | null>(null);
+    const [payingId, setPayingId] = useState<string | null>(null);
+    const [showAllPayments, setShowAllPayments] = useState(false);
+    const [pausing, setPausing] = useState(false);
+
+    useDocumentTitle(client ? `${client.name} · Клиенты` : null);
 
     const loadData = useCallback(async () => {
         if (!clientId) return;
@@ -136,6 +204,28 @@ export function CrmClientDetail() {
 
     useEffect(() => { loadData(); }, [loadData]);
 
+    // Тихо перечитать после шторок: они пишут через crmApi и стор не
+    // обновляют — без этого карточка показывала бы старый долг и историю.
+    const reloadQuietly = useCallback(async () => {
+        if (!clientId) return;
+        try {
+            const [c, s, n, p, b] = await Promise.all([
+                crmApi.getClient(clientId),
+                crmApi.getSessions({ clientId }),
+                crmApi.getNotes(clientId),
+                crmApi.getPayments({ clientId }),
+                crmApi.getClientBalance(clientId),
+            ]);
+            setClient(c);
+            setSessions(s);
+            setNotes(n);
+            setPayments(p);
+            setBalance(b);
+        } catch (e) {
+            toastApiError(e, 'Не удалось обновить карточку. Обновите страницу');
+        }
+    }, [clientId]);
+
     const stats = useMemo(() => {
         const completed = sessions.filter(s => s.status === 'COMPLETED').length;
         const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
@@ -146,9 +236,16 @@ export function CrmClientDetail() {
         return { completed, unpaidCount: unpaid.length, debt, totalPaid, paidByCurrency, debtByCurrency };
     }, [sessions, client, balance]);
 
+    // Заметки к сессии — все, а не только последняя: «История» показывает
+    // сессию вместе с её заметками.
     const notesBySession = useMemo(() => {
-        const map = new Map<string, CrmNote>();
-        notes.forEach(n => { if (n.sessionId) map.set(n.sessionId, n); });
+        const map = new Map<string, CrmNote[]>();
+        notes.forEach(n => {
+            if (!n.sessionId) return;
+            const list = map.get(n.sessionId) ?? [];
+            list.push(n);
+            map.set(n.sessionId, list);
+        });
         return map;
     }, [notes]);
 
@@ -164,6 +261,12 @@ export function CrmClientDetail() {
             .sort((a, b) => parseUTC(b.date).getTime() - parseUTC(a.date).getTime()),
         [sessions]
     );
+    // Прошлая состоявшаяся (не отменённая) — от неё «Записать на …».
+    const lastHeld = useMemo(() => pastSessions.find(s => !CANCELLED.has(s.status)) ?? null, [pastSessions]);
+
+    // Долг — тот же отбор, что у UnpaidSessionsSheet и сервера в mark-all-paid:
+    // прошла, не оплачена, не отменена. Шторка покажет ровно эти сессии.
+    const unpaidPast = useMemo(() => pastSessions.filter(s => !s.isPaid && !CANCELLED.has(s.status)), [pastSessions]);
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -207,6 +310,8 @@ export function CrmClientDetail() {
         }
     };
 
+    // Волна 3: «Отметить все» теперь в UnpaidSessionsSheet (тот же markAllPaid
+    // и тот же вопрос). Обработчик оставлен без изменений.
     const handleMarkAllPaid = async () => {
         if (!clientId || !client) return;
         const ok = await askConfirm({
@@ -234,8 +339,8 @@ export function CrmClientDetail() {
             setSessions(prev => prev.map(s => s.id === sessionId ? updated : s));
             setEditingSession(null);
             toast.success('Сессия обновлена');
-        } catch (e: any) {
-            toast.error(e.message || 'Ошибка');
+        } catch {
+            // Ошибку уже показал стор (crmStore.updateSession) — второй тост не нужен.
         }
     };
 
@@ -243,28 +348,30 @@ export function CrmClientDetail() {
         if (!clientId || !sessionNoteText.trim()) return;
         setSavingSessionNote(true);
         try {
-            const note = await createNote({ clientId, sessionId: sId, content: sessionNoteText.trim(), tags: sessionNoteTags || undefined });
+            const note = await createNote({ clientId, sessionId: sId, content: sessionNoteText.trim() });
             setNotes(prev => [note, ...prev]);
             setSessionNoteId(null);
             setSessionNoteText('');
-            setSessionNoteTags('');
             toast.success('Заметка к сессии добавлена');
         } catch {
-            toast.error('Ошибка сохранения заметки');
+            // Ошибку уже показал стор (crmStore.createNote).
         } finally {
             setSavingSessionNote(false);
         }
     };
 
-    const handleAddNote = async (content: string, tags?: string) => {
-        if (!clientId) return;
+    const handleAddNote = async (content: string): Promise<boolean> => {
+        if (!clientId) return false;
         try {
-            const note = await createNote({ clientId, content, tags });
+            // Только createNote: заметки шифруются на сервере. В client.notesText
+            // (не шифруется) терапевтический текст не пишем.
+            const note = await createNote({ clientId, content });
             setNotes(prev => [note, ...prev]);
-            setShowNoteForm(false);
-            toast.success('Заметка добавлена');
-        } catch (e: any) {
-            toast.error(e.message || 'Ошибка');
+            toast.success('Заметка сохранена');
+            return true;
+        } catch {
+            // Ошибку уже показал стор (crmStore.createNote).
+            return false;
         }
     };
 
@@ -305,7 +412,7 @@ export function CrmClientDetail() {
             toast.success('Профиль обновлён');
             if (applyPriceTo !== 'none') loadData();
         } catch (e: any) {
-            toast.error(e.message || 'Ошибка сохранения');
+            toastApiError(e, 'Не удалось сохранить профиль. Проверьте поля и попробуйте ещё раз');
         }
     };
 
@@ -351,19 +458,73 @@ export function CrmClientDetail() {
         }
     };
 
+    // G5-10: пауза вместо точки-выключателя в списке. Мягко (is_active=false),
+    // ничего не удаляется; «Вернуть» в тосте — 5 секунд передумать.
+    const handleTogglePause = async () => {
+        if (!client || pausing) return;
+        const wasActive = client.isActive;
+        const setActive = async (active: boolean) => {
+            if (active) await crmApi.updateClient(client.id, { isActive: true });
+            else await crmApi.deleteClient(client.id); // без permanent — только пауза
+            setClient(c => (c ? { ...c, isActive: active } : c));
+        };
+        setPausing(true);
+        try {
+            await setActive(!wasActive);
+            undoToast(
+                wasActive ? `${client.name} на паузе` : `${client.name} снова в работе`,
+                () => setActive(wasActive).catch(e => toastApiError(e, 'Не удалось вернуть как было')),
+            );
+        } catch (e) {
+            toastApiError(e, wasActive ? 'Не удалось поставить на паузу' : 'Не удалось вернуть в работу');
+        } finally {
+            setPausing(false);
+        }
+    };
+
+    const payOne = async (sessionId: string, account?: string) => {
+        if (payingId) return;
+        setPayingId(sessionId);
+        try {
+            await handleQuickPay(sessionId, account);
+        } finally {
+            setPayingId(null);
+        }
+    };
+
+    const runSync = async () => {
+        if (!clientId) return;
+        setSyncing(true);
+        setShowSyncPicker(false);
+        try {
+            const r = await crmApi.syncClientHistory(clientId, syncMonthsBack, syncMonthsForward);
+            toast.success(`Нашли в календаре: ${r.totalFound}, добавили: ${r.created}`);
+            loadData();
+        } catch (err: any) {
+            toastApiError(err, 'Не удалось синхронизировать с календарём. Попробуйте ещё раз');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     // ── Render ────────────────────────────────────────────────────────────────
 
-    if (loading) {
+    if (loading && !client) {
+        // Скелет шапки и строк вместо крутилки посреди пустой страницы (G5-23).
         return (
-            <div className="flex items-center justify-center h-64" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-                <Loader2 className="w-8 h-8 animate-spin text-ink-60" />
+            <div role="status" aria-busy="true" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <span className="sr-only">Загружаем карточку клиента…</span>
+                <Skeleton height={14} width={160} radius={0} />
+                <Skeleton height={34} width="40%" radius={0} />
+                <Skeleton height={72} radius={0} />
+                {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} height={40} radius={0} />)}
             </div>
         );
     }
 
     if (!client && loadError) {
         return (
-            <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, padding: 32 }}>
+            <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
                 <ErrorBar message="Не удалось загрузить карточку клиента" onRetry={loadData} />
             </div>
         );
@@ -373,9 +534,7 @@ export function CrmClientDetail() {
         return (
             <div className="text-center py-20" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
                 <p className="text-lg font-medium">Клиент не найден</p>
-                <button onClick={() => navigate('/crm/clients')} className="mt-4 text-sm text-unbox-green hover:underline">
-                    Вернуться к списку
-                </button>
+                <Link to="/crm/clients" style={{ ...textLink, marginTop: 16 }}>Вернуться к списку</Link>
             </div>
         );
     }
@@ -387,73 +546,233 @@ export function CrmClientDetail() {
             const res = await crmApi.deleteSession(pendingDelete.id, scope);
             toast.success(
                 scope === 'future' && res.deleted > 1
-                    ? `Удалено ${res.deleted} сессий из серии`
+                    ? `Удалено из серии: ${ruCountWord(res.deleted, ['сессия', 'сессии', 'сессий'])}`
                     : 'Сессия удалена',
             );
             loadData();
-        } catch {
-            toast.error('Ошибка удаления');
+        } catch (e) {
+            toastApiError(e, 'Не удалось удалить сессию. Попробуйте ещё раз');
         }
     };
 
-    return (
+    const next = futureSessions[0] ?? null;
+    const contact = contactHref(client);
+    const suggestion = suggestNextSession({ lastSession: lastHeld, client });
+    const debt = sumByCurrency(unpaidPast.map(s => ({
+        amount: Number(s.price ?? client.basePrice ?? 0) || 0,
+        currency: (s.currency || client.currency || 'GEL').toUpperCase(),
+    })));
+    const paidSessions = sessions.filter(s => s.isPaid).length;
+    const paidEntries = Object.entries(stats.paidByCurrency).filter(([, v]) => v > 0);
+    const paidLabel = paidEntries.length > 0
+        ? paidEntries.map(([cur, amt]) => formatMoney(amt, { currency: cur })).join(' + ')
+        : formatMoney(stats.totalPaid, { currency: client.currency });
+    const sortedPayments = [...payments].sort(
+        (a, b) => parseUTC(b.date || b.createdAt).getTime() - parseUTC(a.date || a.createdAt).getTime(),
+    );
+    const visiblePayments = showAllPayments ? sortedPayments : sortedPayments.slice(0, PAYMENTS_PREVIEW);
 
+    const goBookRoom = (s: CrmSession) => navigate('/dashboard/bookings', {
+        state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
+    });
+
+    return (
         <>
-        <GridHouseCrmClientDetail
-            client={client}
-            sessions={sessions}
-            notes={notes}
-            payments={payments}
-            stats={stats}
-            futureSessions={futureSessions}
-            pastSessions={pastSessions}
-            notesBySession={notesBySession}
-            editingProfile={editingProfile}
-            editForm={editForm}
-            setEditForm={setEditForm}
-            openEditProfile={openEditProfile}
-            handleSaveProfile={handleSaveProfile}
-            setEditingProfile={setEditingProfile}
-            showNoteForm={showNoteForm}
-            setShowNoteForm={setShowNoteForm}
-            handleAddNote={handleAddNote}
-            handleDeleteNote={handleDeleteNote}
-            handleDeletePayment={handleDeletePayment}
-            editingSession={editingSession}
-            setEditingSession={setEditingSession}
-            editSessionPrice={editSessionPrice}
-            setEditSessionPrice={setEditSessionPrice}
-            editSessionAccount={editSessionAccount}
-            setEditSessionAccount={setEditSessionAccount}
-            handleUpdateSession={handleUpdateSession}
-            handleQuickPay={handleQuickPay}
-            handleUnmarkPaid={handleUnmarkPaid}
-            handleMarkAllPaid={handleMarkAllPaid}
-            markingAll={markingAll}
-            sessionNoteId={sessionNoteId}
-            setSessionNoteId={setSessionNoteId}
-            sessionNoteText={sessionNoteText}
-            setSessionNoteText={setSessionNoteText}
-            sessionNoteTags={sessionNoteTags}
-            setSessionNoteTags={setSessionNoteTags}
-            savingSessionNote={savingSessionNote}
-            handleAddSessionNote={handleAddSessionNote}
-            showSyncPicker={showSyncPicker}
-            setShowSyncPicker={setShowSyncPicker}
-            syncMonthsBack={syncMonthsBack}
-            setSyncMonthsBack={setSyncMonthsBack}
-            syncMonthsForward={syncMonthsForward}
-            setSyncMonthsForward={setSyncMonthsForward}
-            syncing={syncing}
-            setSyncing={setSyncing}
-            applyPriceTo={applyPriceTo}
-            setApplyPriceTo={setApplyPriceTo}
-            clientId={clientId!}
-            loadData={loadData}
-            navigate={navigate}
-            paymentAccounts={paymentAccounts}
-            setPendingDelete={setPendingDelete}
-        />
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            <PageHeader
+                back
+                backLabel="Клиенты"
+                backTo="/crm/clients"
+                title={client.name}
+                description={
+                    <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                        {client.aliasCode && <span style={{ fontFamily: GH_MONO, color: GH.ink }}>#{client.aliasCode}</span>}
+                        <span style={chip(client.isActive ? 'ok' : 'muted')}>{client.isActive ? 'В работе' : 'На паузе'}</span>
+                        {client.tags?.map(tag => <span key={tag} style={chip('muted')}>{tag}</span>)}
+                        {client.phone && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={12} aria-hidden="true" />{client.phone}</span>}
+                        {client.telegram && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Send size={12} aria-hidden="true" />{client.telegram}</span>}
+                        {client.email && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mail size={12} aria-hidden="true" />{client.email}</span>}
+                    </span>
+                }
+                actions={
+                    <>
+                        {contact && (
+                            <a href={contact.href} target="_blank" rel="noopener noreferrer" className="ui-btn ui-btn--secondary" aria-label={contact.label}>
+                                <Send size={16} aria-hidden="true" /> Написать
+                            </a>
+                        )}
+                        {!viewingOther && (
+                            <>
+                                <Button variant="secondary" icon={<Pencil size={16} aria-hidden="true" />} onClick={openEditProfile}>Изменить</Button>
+                                <Button variant="quiet" loading={pausing} onClick={handleTogglePause}>
+                                    {client.isActive ? 'Поставить на паузу' : 'Вернуть в работу'}
+                                </Button>
+                            </>
+                        )}
+                    </>
+                }
+            />
+
+            {loadError && (
+                <ErrorBar message="Не удалось обновить карточку" onRetry={loadData} retrying={loading} className="mb-4" />
+            )}
+
+            {/* ── Следующая встреча ── */}
+            <section
+                aria-label="Следующая встреча"
+                style={{ border: `1.5px solid ${GH.ink}`, background: GH.card, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}
+            >
+                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                    <div style={cap}>Следующая встреча</div>
+                    {next ? (
+                        <>
+                            <div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>
+                                {formatDateLabel(parseUTC(next.date), { capitalize: true, ...TZ })}
+                                {' · '}
+                                <span className="num">
+                                    {formatTimeRange(parseUTC(next.date), new Date(parseUTC(next.date).getTime() + (next.durationMinutes || 60) * 60000), TZ)}
+                                </span>
+                                {' · '}
+                                <span style={{ fontWeight: 400, color: next.isBooked ? GH.ink : STATUS.pending.fg }}>
+                                    {next.isBooked ? 'Кабинет забронирован' : 'Без кабинета'}
+                                </span>
+                            </div>
+                            {futureSessions.length > 1 && (
+                                <div style={{ fontSize: 14, color: GH.ink60, marginTop: 4 }}>
+                                    Дальше: {futureSessions.slice(1, 4).map(s => formatDayMonth(parseUTC(s.date), TZ)).join(', ')}
+                                    {futureSessions.length > 4 ? ` и ещё ${futureSessions.length - 4}` : ''}
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>
+                            Следующей нет
+                            {lastHeld && (
+                                <span style={{ fontWeight: 400, color: GH.ink60 }}> · была {formatDayMonth(parseUTC(lastHeld.date), { withYear: 'auto', ...TZ })}</span>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {!viewingOther && (next ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button variant="secondary" onClick={() => setRescheduleFor(next)}>Перенести</Button>
+                        {!next.isBooked && <Button variant="secondary" onClick={() => goBookRoom(next)}>Кабинет</Button>}
+                    </div>
+                ) : (
+                    <Button variant="primary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNewSessionOpen(true)}>
+                        Записать на {shortDayLabel(suggestion.date)}, {suggestion.time}
+                    </Button>
+                ))}
+            </section>
+
+            {/* ── Долг — только если он есть ── */}
+            {unpaidPast.length > 0 && debt.label && (
+                <section
+                    aria-label="Долг клиента"
+                    style={{ background: STATUS.pending.bg, padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}
+                >
+                    <div style={{ flex: '1 1 280px', fontSize: 15, color: STATUS.pending.fg }}>
+                        <b>Долг {debt.label}</b>
+                        {' · '}{ruCountWord(unpaidPast.length, ['сессия', 'сессии', 'сессий'])}
+                        {unpaidPast.length <= 3 && (
+                            <>: {unpaidPast.map(s => formatDayMonth(parseUTC(s.date), TZ)).join(', ')}</>
+                        )}
+                    </div>
+                    {!viewingOther && (
+                        <Button variant="primary" onClick={() => setUnpaidOpen(true)}>
+                            {debt.single ? `Отметить оплату · ${debt.label}` : 'Отметить оплату'}
+                        </Button>
+                    )}
+                </section>
+            )}
+
+            {/* ── Две колонки: история | деньги и заметка ── */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, marginTop: 24, alignItems: 'flex-start' }}>
+                <HistorySection
+                    client={client}
+                    pastSessions={pastSessions}
+                    generalNotes={notes.filter(n => !n.sessionId)}
+                    notesBySession={notesBySession}
+                    viewingOther={viewingOther}
+                    syncing={syncing}
+                    onOpenSync={() => setShowSyncPicker(true)}
+                    onNewSession={() => setNewSessionOpen(true)}
+                    payingId={payingId}
+                    onPay={payOne}
+                    handleUnmarkPaid={handleUnmarkPaid}
+                    handleDeleteNote={handleDeleteNote}
+                    editingSession={editingSession}
+                    setEditingSession={setEditingSession}
+                    editSessionPrice={editSessionPrice}
+                    setEditSessionPrice={setEditSessionPrice}
+                    editSessionAccount={editSessionAccount}
+                    setEditSessionAccount={setEditSessionAccount}
+                    handleUpdateSession={handleUpdateSession}
+                    setPendingDelete={setPendingDelete}
+                    sessionNoteId={sessionNoteId}
+                    setSessionNoteId={setSessionNoteId}
+                    sessionNoteText={sessionNoteText}
+                    setSessionNoteText={setSessionNoteText}
+                    savingSessionNote={savingSessionNote}
+                    handleAddSessionNote={handleAddSessionNote}
+                />
+
+                <aside style={{ flex: '1 1 280px', maxWidth: 360, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                        <div style={{ ...cap, marginBottom: 8 }}>Деньги</div>
+                        <div style={{ fontSize: 14, lineHeight: 1.6 }}>
+                            Ставка <b className="num">{formatMoney(client.basePrice, { currency: client.currency })}</b>
+                            {' · '}оплачено всего <b className="num">{paidLabel}</b>
+                            {paidSessions > 0 && <> за {ruCountWord(paidSessions, ['сессию', 'сессии', 'сессий'])}</>}
+                        </div>
+                    </div>
+
+                    <div style={{ borderTop: hairline, paddingTop: 12 }}>
+                        <div style={{ ...cap, marginBottom: 6 }}>Последние оплаты</div>
+                        {sortedPayments.length === 0 ? (
+                            <div style={{ fontSize: 14, color: GH.ink60, padding: '4px 0' }}>Оплат пока нет.</div>
+                        ) : (
+                            <>
+                                {visiblePayments.map(p => (
+                                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '2px 0' }}>
+                                        <span style={{ flex: 1, minWidth: 0 }}>
+                                            {formatDayMonth(p.date || p.createdAt, { withYear: 'auto' })}
+                                            {' · '}{paymentAccounts.find(a => a.id === p.account)?.label || p.account}
+                                        </span>
+                                        <span className="num" style={{ whiteSpace: 'nowrap' }}>{formatMoney(p.amount, { currency: p.currency })}</span>
+                                        {!viewingOther && (
+                                            <button
+                                                onClick={() => handleDeletePayment(p.id)}
+                                                title="Удалить оплату"
+                                                aria-label={`Удалить оплату ${formatMoney(p.amount, { currency: p.currency })}`}
+                                                style={{
+                                                    width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    background: 'none', border: 'none', cursor: 'pointer', color: GH.ink60, flexShrink: 0,
+                                                }}
+                                            >
+                                                <Trash2 size={13} aria-hidden="true" />
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                                {sortedPayments.length > PAYMENTS_PREVIEW && (
+                                    <button type="button" style={textLink} onClick={() => setShowAllPayments(v => !v)} aria-expanded={showAllPayments}>
+                                        {showAllPayments ? 'Свернуть' : `Показать все (${sortedPayments.length})`}
+                                    </button>
+                                )}
+                            </>
+                        )}
+                    </div>
+
+                    {!viewingOther && (
+                        <div style={{ borderTop: hairline, paddingTop: 12 }}>
+                            <NoteComposer onSave={handleAddNote} />
+                        </div>
+                    )}
+                </aside>
+            </div>
+        </div>
+
         <DeleteSessionModal
             isOpen={!!pendingDelete}
             onClose={closeDelete}
@@ -461,92 +780,141 @@ export function CrmClientDetail() {
             isRecurring={Boolean(pendingDelete?.recurringGroupId)}
             label={pendingDelete ? `${client?.name || 'Клиент'} — ${dayTime(parseUTC(pendingDelete.date))}` : undefined}
         />
+
+        <NewSessionSheet
+            open={newSessionOpen}
+            onClose={() => setNewSessionOpen(false)}
+            client={client}
+            lastSession={lastHeld}
+            onCreated={() => { setNewSessionOpen(false); reloadQuietly(); }}
+        />
+
+        <UnpaidSessionsSheet
+            open={unpaidOpen}
+            onClose={() => setUnpaidOpen(false)}
+            client={client}
+            sessions={sessions}
+            onChanged={reloadQuietly}
+        />
+
+        <RescheduleSheet
+            session={rescheduleFor}
+            clientName={client.name}
+            onClose={() => setRescheduleFor(null)}
+            onDone={() => { setRescheduleFor(null); reloadQuietly(); }}
+        />
+
+        {/* Изменить профиль — шторка вместо формы посреди страницы (X4-04/X4-05). */}
+        <Sheet
+            open={editingProfile}
+            onClose={() => { setEditingProfile(false); setApplyPriceTo('none'); }}
+            title="Изменить клиента"
+            width={640}
+            footer={
+                <>
+                    <Button onClick={handleSaveProfile} disabled={!editForm.name.trim()} icon={<Check size={16} aria-hidden="true" />}>Сохранить</Button>
+                    <Button variant="secondary" onClick={() => { setEditingProfile(false); setApplyPriceTo('none'); }}>Не сохранять</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+                <Field label="Имя" required>
+                    <Input kind="name" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                </Field>
+                <Field label="Телефон" optional>
+                    <Input kind="phone" value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="+995…" />
+                </Field>
+                <Field label="E-mail" optional>
+                    <Input kind="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+                </Field>
+                <Field label="Telegram" optional>
+                    <Input value={editForm.telegram} onChange={e => setEditForm(f => ({ ...f, telegram: e.target.value }))} placeholder="@username" />
+                </Field>
+                <Field label="Код клиента" hint="4 цифры: в календаре пишите «Анна #4821»" optional>
+                    <Input kind="integer" value={editForm.aliasCode} onChange={e => setEditForm(f => ({ ...f, aliasCode: e.target.value }))} maxLength={4} />
+                </Field>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <Field label="Ставка" className="flex-1">
+                        <Input kind="money" value={editForm.basePrice} onChange={e => setEditForm(f => ({ ...f, basePrice: e.target.value }))} placeholder="0" />
+                    </Field>
+                    <Field label="Валюта">
+                        <Select value={editForm.currency} onChange={e => setEditForm(f => ({ ...f, currency: e.target.value }))}>
+                            {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
+                        </Select>
+                    </Field>
+                </div>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontWeight: 500 }}>
+                    Счёт по умолчанию
+                    <AccountSelect className="ui-input" value={editForm.defaultAccount} onChange={(v) => setEditForm(f => ({ ...f, defaultAccount: v }))} />
+                </label>
+                <Field label="Теги" hint="Через запятую: тревога, пары, онлайн" optional>
+                    <Input value={editForm.tags} onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))} />
+                </Field>
+            </div>
+            {(editForm.basePrice !== String(client?.basePrice || '') || editForm.currency !== (client?.currency || 'GEL') || editForm.defaultAccount !== (client?.defaultAccount || 'cash')) && (
+                <fieldset style={{ marginTop: 16, padding: 12, background: STATUS.pending.bg, border: 'none' }}>
+                    <legend style={{ fontSize: 14, fontWeight: 600, color: STATUS.pending.fg, padding: 0, float: 'left', marginBottom: 8, width: '100%' }}>Применить к существующим сессиям:</legend>
+                    {[
+                        { value: 'none' as const, label: 'Только для новых сессий' },
+                        { value: 'future_only' as const, label: 'Ко всем запланированным (незавершённым)' },
+                        { value: 'all_unpaid' as const, label: 'Ко всем неоплаченным' },
+                    ].map(opt => (
+                        <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: STATUS.pending.fg, cursor: 'pointer', minHeight: 32 }}>
+                            <input type="radio" name="ghApplyPriceTo" checked={applyPriceTo === opt.value} onChange={() => setApplyPriceTo(opt.value)} />
+                            {opt.label}
+                        </label>
+                    ))}
+                </fieldset>
+            )}
+        </Sheet>
+
+        {/* Синхронизация истории с календарём — на общем Sheet (X4-04). */}
+        <Sheet
+            open={showSyncPicker}
+            onClose={() => setShowSyncPicker(false)}
+            title="Подтянуть сессии из календаря"
+            description="Найдём события с кодом клиента в Google Календаре и добавим недостающие сессии."
+            width={420}
+            footer={
+                <>
+                    <Button onClick={runSync} loading={syncing} icon={<RefreshCw size={16} aria-hidden="true" />}>Синхронизировать</Button>
+                    <Button variant="secondary" onClick={() => setShowSyncPicker(false)}>Не сейчас</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'grid', gap: 16 }}>
+                <Field label="Назад">
+                    <Select value={syncMonthsBack} onChange={e => setSyncMonthsBack(Number(e.target.value))}>
+                        {[1, 3, 6, 12, 24, 60].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : m === 12 ? '1 год' : m === 24 ? '2 года' : '5 лет'}</option>)}
+                    </Select>
+                </Field>
+                <Field label="Вперёд">
+                    <Select value={syncMonthsForward} onChange={e => setSyncMonthsForward(Number(e.target.value))}>
+                        {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : '1 год'}</option>)}
+                    </Select>
+                </Field>
+            </div>
+        </Sheet>
         </>
     );
 }
 
 
-// ── Note Inline Form ─────────────────────────────────────────────────────────
+// ── История: сессии вместе с их заметками + общие заметки ────────────────────
 
-function NoteInlineForm({
-    onSave,
-    onCancel,
-}: {
-    onSave: (content: string, tags?: string) => Promise<void>;
-    onCancel: () => void;
-}) {
-    const [content, setContent] = useState('');
-    const [tags, setTags] = useState('');
-    const [saving, setSaving] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!content.trim()) return;
-        setSaving(true);
-        try {
-            await onSave(content.trim(), tags || undefined);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <form onSubmit={handleSubmit} className="p-4 border-b border-unbox-light bg-unbox-light/20 space-y-3">
-            <textarea
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                rows={3}
-                autoFocus
-                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green resize-none bg-card"
-                placeholder="Текст заметки..."
-                required
-            />
-            <div className="flex items-center gap-3">
-                <input
-                    type="text"
-                    value={tags}
-                    onChange={e => setTags(e.target.value)}
-                    className="flex-1 px-3 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
-                    placeholder="Теги через запятую (необязательно)"
-                />
-                <button type="button" onClick={onCancel} className="p-1.5 hover:bg-unbox-light/50 rounded-lg transition-colors">
-                    <X className="w-4 h-4 text-ink-60" />
-                </button>
-                <button
-                    type="submit"
-                    disabled={saving || !content.trim()}
-                    className="flex items-center gap-1.5 px-4 py-1.5 bg-unbox-green text-white text-xs font-medium rounded-lg hover:bg-unbox-dark disabled:opacity-50 transition-colors"
-                >
-                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                    Сохранить
-                </button>
-            </div>
-        </form>
-    );
-}
-
-// ─── Grid House: CrmClientDetail ────────────────────────────────────────────
-
-interface GHClientDetailProps {
+interface HistoryProps {
     client: CrmClient;
-    sessions: CrmSession[];
-    notes: CrmNote[];
-    payments: CrmPayment[];
-    stats: { completed: number; unpaidCount: number; debt: number; totalPaid: number; paidByCurrency: Record<string, number>; debtByCurrency: Record<string, number> };
-    futureSessions: CrmSession[];
     pastSessions: CrmSession[];
-    notesBySession: Map<string, CrmNote>;
-    editingProfile: boolean;
-    editForm: { name: string; phone: string; email: string; telegram: string; aliasCode: string; basePrice: string; currency: string; defaultAccount: string; tags: string };
-    setEditForm: React.Dispatch<React.SetStateAction<GHClientDetailProps['editForm']>>;
-    openEditProfile: () => void;
-    handleSaveProfile: () => Promise<void>;
-    setEditingProfile: (v: boolean) => void;
-    showNoteForm: boolean;
-    setShowNoteForm: (v: boolean) => void;
-    handleAddNote: (content: string, tags?: string) => Promise<void>;
+    generalNotes: CrmNote[];
+    notesBySession: Map<string, CrmNote[]>;
+    viewingOther: boolean;
+    syncing: boolean;
+    onOpenSync: () => void;
+    onNewSession: () => void;
+    payingId: string | null;
+    onPay: (sessionId: string, account?: string) => Promise<void>;
+    handleUnmarkPaid: (sessionId: string) => Promise<void>;
     handleDeleteNote: (noteId: string) => Promise<void>;
-    handleDeletePayment: (paymentId: string) => Promise<void>;
     editingSession: string | null;
     setEditingSession: (id: string | null) => void;
     editSessionPrice: string;
@@ -554,876 +922,408 @@ interface GHClientDetailProps {
     editSessionAccount: string;
     setEditSessionAccount: (v: string) => void;
     handleUpdateSession: (sessionId: string, data: Partial<CrmSession>) => Promise<void>;
-    handleQuickPay: (sessionId: string, account?: string) => Promise<void>;
-    handleUnmarkPaid: (sessionId: string) => Promise<void>;
-    handleMarkAllPaid: () => Promise<void>;
-    markingAll: boolean;
+    setPendingDelete: (s: CrmSession | null) => void;
     sessionNoteId: string | null;
     setSessionNoteId: (id: string | null) => void;
     sessionNoteText: string;
     setSessionNoteText: (v: string) => void;
-    sessionNoteTags: string;
-    setSessionNoteTags: (v: string) => void;
     savingSessionNote: boolean;
     handleAddSessionNote: (sId: string) => Promise<void>;
-    showSyncPicker: boolean;
-    setShowSyncPicker: (v: boolean) => void;
-    syncMonthsBack: number;
-    setSyncMonthsBack: (v: number) => void;
-    syncMonthsForward: number;
-    setSyncMonthsForward: (v: number) => void;
-    syncing: boolean;
-    setSyncing: (v: boolean) => void;
-    applyPriceTo: 'none' | 'all_unpaid' | 'future_only';
-    setApplyPriceTo: (v: 'none' | 'all_unpaid' | 'future_only') => void;
-    clientId: string;
-    loadData: () => Promise<void>;
-    navigate: ReturnType<typeof useNavigate>;
-    paymentAccounts: { id: string; label: string }[];
-    setPendingDelete: (s: CrmSession | null) => void;
 }
 
-const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
-const ghHairline = `1px solid ${GH.ink10}`;
+type HistoryItem =
+    | { kind: 'session'; t: number; session: CrmSession }
+    | { kind: 'note'; t: number; note: CrmNote };
 
-// Статус сессии — общий StatusBadge (цвета --status-*). Раньше тут была своя
-// карта: бирюза для «Прошла» и старый кирпичный красный вместо --status-danger.
-
-function GridHouseCrmClientDetail(props: GHClientDetailProps) {
-    const narrow = useGHNarrow();
+function HistorySection(props: HistoryProps) {
     const {
-        client, sessions: _sessions, notes, payments, stats, futureSessions, pastSessions, notesBySession,
-        editingProfile, editForm, setEditForm, openEditProfile, handleSaveProfile, setEditingProfile,
-        showNoteForm, setShowNoteForm, handleAddNote, handleDeleteNote, handleDeletePayment,
+        client, pastSessions, generalNotes, notesBySession, viewingOther, syncing, onOpenSync, onNewSession,
+        payingId, onPay, handleUnmarkPaid, handleDeleteNote,
         editingSession, setEditingSession, editSessionPrice, setEditSessionPrice,
-        editSessionAccount, setEditSessionAccount, handleUpdateSession,
-        handleQuickPay, handleUnmarkPaid, handleMarkAllPaid, markingAll,
-        sessionNoteId, setSessionNoteId, sessionNoteText, setSessionNoteText,
-        sessionNoteTags: _sessionNoteTags, setSessionNoteTags, savingSessionNote, handleAddSessionNote,
-        showSyncPicker, setShowSyncPicker, syncMonthsBack, setSyncMonthsBack,
-        syncMonthsForward, setSyncMonthsForward, syncing, setSyncing,
-        applyPriceTo, setApplyPriceTo,
-        clientId, loadData, navigate, paymentAccounts, setPendingDelete,
+        editSessionAccount, setEditSessionAccount, handleUpdateSession, setPendingDelete,
+        sessionNoteId, setSessionNoteId, sessionNoteText, setSessionNoteText, savingSessionNote, handleAddSessionNote,
     } = props;
 
-    // История сессий: шапка и строки — одна сетка с фиксированными колонками,
-    // иначе у каждой строки своя ширина «auto» и статус наезжал на сумму (M4).
-    // Если колонка уже минимума сетки (телефон, окно ~1024–1300 с сайдбаром) —
-    // одна колонка: дата, под ней статус, под ним сумма.
+    // Шапка и строки — одна сетка с одинаковыми колонками и зазором, чтобы
+    // статус не наезжал на сумму (M4). Если колонка уже минимума сетки
+    // (окно ~1024–1300 с сайдбаром) — одна колонка: дата, статус, сумма.
     const [historyRef, historyW] = useElementWidth<HTMLDivElement>();
-    const historyStacked = narrow || historyW < HISTORY_TABLE_MIN;
-    const historyColumns = historyStacked ? '1fr' : 'minmax(140px, 1fr) 150px 250px';
+    const historyStacked = historyW > 0 && historyW < HISTORY_TABLE_MIN;
+    const historyColumns = historyStacked ? '1fr' : HISTORY_COLUMNS;
 
-    const ghInput: React.CSSProperties = {
-        fontFamily: GH_SANS, fontSize: 13, padding: '8px 12px',
-        border: ghHairline, background: GH.card, color: GH.ink,
-        outline: 'none', width: '100%',
-    };
+    const items = useMemo<HistoryItem[]>(() => {
+        const list: HistoryItem[] = [
+            ...pastSessions.map(session => ({ kind: 'session' as const, t: parseUTC(session.date).getTime(), session })),
+            ...generalNotes.map(note => ({ kind: 'note' as const, t: parseUTC(note.createdAt).getTime(), note })),
+        ];
+        return list.sort((a, b) => b.t - a.t);
+    }, [pastSessions, generalNotes]);
+
+    const noteBlock = (note: CrmNote, withDate: boolean) => (
+        <div key={note.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 6 }}>
+            <div style={{ flex: 1, minWidth: 0, maxWidth: '72ch' }}>
+                {withDate && (
+                    <div style={{ ...cap, marginBottom: 2 }}>Заметка · {dayTime(parseUTC(note.createdAt))}</div>
+                )}
+                <p style={{ fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', margin: 0, color: GH.ink80, wordBreak: 'break-word' }}>
+                    {note.content}
+                </p>
+                {note.tags && <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>{note.tags}</div>}
+            </div>
+            {!viewingOther && (
+                // Зона нажатия 32×32: корзину не промахнуть (G5-01).
+                <button
+                    onClick={() => handleDeleteNote(note.id)}
+                    title="Удалить заметку"
+                    aria-label="Удалить заметку"
+                    style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
+                        width: 32, height: 32,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                    onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
+                >
+                    <Trash2 size={13} aria-hidden="true" />
+                </button>
+            )}
+        </div>
+    );
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-
-            {/* ── Back link ── */}
-            <div style={{ padding: narrow ? '16px 16px 0' : '24px 32px 0' }}>
-                <button
-                    onClick={() => navigate('/crm/clients')}
-                    style={{
-                        ...ghMono, display: 'inline-flex', alignItems: 'center', gap: 6,
-                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
-                    }}
-                >
-                    <ArrowLeft size={14} /> К списку клиентов
-                </button>
+        <section ref={historyRef} aria-label="История" style={{ flex: '999 1 520px', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                <h2 style={{ ...cap, margin: 0 }}>История</h2>
+                {!viewingOther && (
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                        <button type="button" style={{ ...textLink, color: GH.ink60, fontWeight: 500 }} onClick={onOpenSync} disabled={syncing}>
+                            <RefreshCw size={14} aria-hidden="true" className={syncing ? 'animate-spin' : undefined} />
+                            {syncing ? 'Синхронизируем…' : 'Из календаря'}
+                        </button>
+                        <button type="button" style={textLink} onClick={onNewSession}>
+                            <Plus size={14} aria-hidden="true" /> Новая сессия
+                        </button>
+                    </div>
+                )}
             </div>
 
-            {/* ── Head ── */}
-            <div style={{ padding: narrow ? '16px 16px 0' : '20px 32px 0' }}>
-                <div style={ghMono}>CRM · Клиент</div>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                        {/* Avatar */}
-                        <div style={{
-                            width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 22, fontWeight: 800, color: GH.paper,
-                            background: client.isActive ? GH.accent : GH.ink60,
-                        }}>
-                            {client.name?.[0]?.toUpperCase() ?? '?'}
-                        </div>
-                        <div>
-                            <h1 style={{
-                                fontFamily: GH_SANS, fontSize: 'clamp(28px, 3.5vw, 42px)',
-                                fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1, margin: 0,
-                            }}>
-                                {client.name}
-                                {client.aliasCode && (
-                                    <span style={{ color: GH.ink60, fontWeight: 400, fontSize: '0.55em', marginLeft: 8 }}>#{client.aliasCode}</span>
-                                )}
-                            </h1>
-                            {/* Contact row */}
-                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginTop: 8 }}>
-                                {client.phone && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                                        <Phone size={12} />{client.phone}
-                                    </span>
-                                )}
-                                {client.telegram && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                                        <Send size={12} />{client.telegram}
-                                    </span>
-                                )}
-                                {client.email && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                                        <Mail size={12} />{client.email}
-                                    </span>
-                                )}
-                            </div>
-                            {/* Tags */}
-                            {client.tags?.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                                    {client.tags.map(tag => (
-                                        <span key={tag} style={{
-                                            ...ghMono, fontSize: 12, padding: '3px 8px',
-                                            background: GH.ink5, border: ghHairline,
-                                        }}>
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {stats.unpaidCount > 0 && (
-                            <button
-                                onClick={handleMarkAllPaid}
-                                disabled={markingAll}
-                                style={{
-                                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                    padding: '10px 20px', background: GH.accent, color: GH.paper,
-                                    border: 'none', cursor: 'pointer', opacity: markingAll ? 0.5 : 1,
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                }}
-                            >
-                                {markingAll ? <Loader2 size={14} className="animate-spin" /> : <CheckCheck size={14} />}
-                                Отметить оплату всех ({stats.unpaidCount})
-                            </button>
-                        )}
-                        <button
-                            onClick={openEditProfile}
-                            style={{
-                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                padding: '10px 16px', background: 'transparent', border: ghHairline,
-                                cursor: 'pointer', color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6,
-                            }}
-                        >
-                            <Pencil size={14} /> Редактировать
-                        </button>
-                        <button
-                            onClick={() => navigate('/crm/sessions')}
-                            style={{
-                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                padding: '10px 20px', background: GH.ink, color: GH.paper,
-                                border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-                            }}
-                        >
-                            <Plus size={14} /> Новая сессия
-                        </button>
-                    </div>
+            {items.length === 0 ? (
+                <div style={{ padding: '24px 0', color: GH.ink60, fontSize: 14, borderTop: hairline }}>
+                    Здесь появятся прошедшие сессии и заметки.
                 </div>
-            </div>
+            ) : (
+                <div style={{ borderTop: hairline }}>
+                    {items.map(item => {
+                        if (item.kind === 'note') {
+                            return (
+                                <div key={`n-${item.note.id}`} style={{ padding: '12px 0', borderBottom: hairline }}>
+                                    {noteBlock(item.note, true)}
+                                </div>
+                            );
+                        }
+                        const session = item.session;
+                        const dt = parseUTC(session.date);
+                        const sessionPrice = session.price ?? client.basePrice;
+                        const isCancelled = CANCELLED.has(session.status);
+                        const isEditing = editingSession === session.id;
+                        const sNotes = notesBySession.get(session.id) ?? [];
 
-            {/* ── Anchor KPI + secondary ── */}
-            <div style={{
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-                padding: narrow ? '20px 16px 16px' : '32px 32px 24px', flexWrap: 'wrap', gap: narrow ? 16 : 24,
-            }}>
-                <div>
-                    {Object.keys(stats.paidByCurrency).length > 1 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
-                                <div key={cur} style={{
-                                    fontFamily: GH_MONO, fontSize: 'clamp(28px, 3.5vw, 44px)',
-                                    fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                        return (
+                            <div key={session.id} style={{ padding: '12px 0', borderBottom: hairline }}>
+                                <div style={{
+                                    display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12, rowGap: 6,
+                                    alignItems: 'center',
                                 }}>
-                                    {moneyParts(amt, cur)[0]}
-                                    <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink60 }}>{moneyParts(amt, cur)[1]}</span>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div style={{
-                            fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)',
-                            fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
-                        }}>
-                            {moneyParts(stats.totalPaid, Object.keys(stats.paidByCurrency)[0] || client.currency)[0]}
-                            <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink60 }}>{moneyParts(stats.totalPaid, Object.keys(stats.paidByCurrency)[0] || client.currency)[1]}</span>
-                        </div>
-                    )}
-                    <div style={{ ...ghMono, marginTop: 4 }}>Всего оплачено</div>
-                </div>
-                <div style={{ display: 'flex', gap: 24 }}>
-                    {[
-                        { label: 'Сессий', value: stats.completed },
-                        { label: 'Ставка', value: formatMoney(client.basePrice, { currency: client.currency }) },
-                        { label: 'Не оплачено', value: stats.unpaidCount, color: stats.unpaidCount > 0 ? GH.danger : undefined },
-                        ...(stats.debt > 0 ? [{ label: 'Долг', value: Object.keys(stats.debtByCurrency).length > 1
-                            ? Object.entries(stats.debtByCurrency).map(([c, a]) => formatMoney(a, { currency: c })).join(' / ')
-                            : formatMoney(stats.debt, { currency: Object.keys(stats.debtByCurrency)[0] || client.currency }), color: GH.danger }] : []),
-                    ].map(kpi => (
-                        <div key={kpi.label} style={{ textAlign: 'right' }}>
-                            <div style={{
-                                fontFamily: GH_MONO, fontSize: 22, fontWeight: 700,
-                                fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink,
-                            }}>
-                                {kpi.value}
-                            </div>
-                            <div style={{ ...ghMono, fontSize: 12 }}>{kpi.label}</div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* ── Thick header border ── */}
-            <div style={{ margin: narrow ? '0 16px' : '0 32px', borderBottom: `2px solid ${GH.ink}` }} />
-
-            {/* ── Edit Profile Form ── */}
-            {editingProfile && (
-                <div style={{ margin: narrow ? '16px' : '24px 32px', padding: narrow ? 16 : 24, border: `1px solid ${GH.accent}`, background: GH.card }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                        <div style={{ ...ghMono, color: GH.accent }}>Редактировать профиль</div>
-                        <button onClick={() => setEditingProfile(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
-                            <X size={18} />
-                        </button>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Имя *</label>
-                            <input style={ghInput} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} required />
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Телефон</label>
-                            <input style={ghInput} value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="+995..." />
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Email</label>
-                            <input style={ghInput} type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Telegram</label>
-                            <input style={ghInput} value={editForm.telegram} onChange={e => setEditForm(f => ({ ...f, telegram: e.target.value }))} placeholder="@username" />
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Код клиента</label>
-                            <input style={ghInput} value={editForm.aliasCode} onChange={e => setEditForm(f => ({ ...f, aliasCode: e.target.value }))} placeholder="4-значный код" maxLength={4} />
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Ставка</label>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <input style={{ ...ghInput, flex: 1 }} type="number" value={editForm.basePrice} onChange={e => setEditForm(f => ({ ...f, basePrice: e.target.value }))} placeholder="0" />
-                                <select
-                                    style={{ ...ghInput, width: 'auto', minWidth: 80 }}
-                                    value={editForm.currency}
-                                    onChange={e => setEditForm(f => ({ ...f, currency: e.target.value }))}
-                                >
-                                    {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>)}
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Счёт по умолчанию</label>
-                            <AccountSelect value={editForm.defaultAccount} onChange={(v) => setEditForm(f => ({ ...f, defaultAccount: v }))} />
-                        </div>
-                        <div style={{ gridColumn: '1 / -1' }}>
-                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Теги</label>
-                            <input style={ghInput} value={editForm.tags} onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))} placeholder="через запятую: тревога, пары, онлайн" />
-                        </div>
-                    </div>
-                    {(editForm.basePrice !== String(client?.basePrice || '') || editForm.currency !== (client?.currency || 'GEL') || editForm.defaultAccount !== (client?.defaultAccount || 'cash')) && (
-                        <div style={{ marginTop: 16, padding: 12, background: STATUS.pending.bg, border: `1px solid ${STATUS.pending.fg}33` }}>
-                            <div style={{ ...ghMono, fontSize: 12, color: STATUS.pending.fg, marginBottom: 8 }}>Применить к существующим сессиям:</div>
-                            {[
-                                { value: 'none' as const, label: 'Только для новых сессий' },
-                                { value: 'future_only' as const, label: 'Ко всем запланированным (незавершённым)' },
-                                { value: 'all_unpaid' as const, label: 'Ко всем неоплаченным' },
-                            ].map(opt => (
-                                <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 8, ...ghMono, fontSize: 12, color: STATUS.pending.fg, cursor: 'pointer', marginBottom: 4 }}>
-                                    <input type="radio" name="ghApplyPriceTo" checked={applyPriceTo === opt.value} onChange={() => setApplyPriceTo(opt.value)} />
-                                    {opt.label}
-                                </label>
-                            ))}
-                        </div>
-                    )}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20, paddingTop: 16, borderTop: ghHairline }}>
-                        <button
-                            onClick={() => { setEditingProfile(false); setApplyPriceTo('none'); }}
-                            style={{ ...ghMono, padding: '8px 16px', background: 'transparent', border: ghHairline, cursor: 'pointer', color: GH.ink60 }}
-                        >
-                            Отмена
-                        </button>
-                        <button
-                            onClick={handleSaveProfile}
-                            disabled={!editForm.name.trim()}
-                            style={{
-                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                padding: '8px 20px', background: GH.ink, color: GH.paper,
-                                border: 'none', cursor: 'pointer', opacity: !editForm.name.trim() ? 0.4 : 1,
-                                display: 'flex', alignItems: 'center', gap: 6,
-                            }}
-                        >
-                            <Check size={14} /> Сохранить
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* ── Two-column layout ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '2fr 1fr', gap: 0, padding: narrow ? '0 16px' : '0 32px' }}>
-
-                {/* ── Left column ── */}
-                <div style={{ borderRight: narrow ? 'none' : ghHairline, order: narrow ? 2 : undefined }}>
-
-                    {/* Notes section */}
-                    <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <div style={ghMono}>Заметки</div>
-                            <button
-                                onClick={() => setShowNoteForm(!showNoteForm)}
-                                style={{
-                                    ...ghMono, fontSize: 12, padding: '6px 12px',
-                                    background: 'transparent', border: ghHairline,
-                                    cursor: 'pointer', color: GH.accent,
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                }}
-                            >
-                                <Plus size={12} /> Написать
-                            </button>
-                        </div>
-
-                        {showNoteForm && (
-                            <NoteInlineForm onSave={handleAddNote} onCancel={() => setShowNoteForm(false)} />
-                        )}
-
-                        {notes.filter(n => !n.sessionId).length === 0 && !showNoteForm ? (
-                            <div style={{
-                                padding: 32, textAlign: 'center', color: GH.ink60,
-                                fontSize: 14, border: `1px dashed ${GH.ink10}`,
-                            }}>
-                                Заметок пока нет. Добавьте первую запись.
-                            </div>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                {notes.filter(n => !n.sessionId).map(note => (
-                                    <div key={note.id} style={{ padding: '12px 16px', border: ghHairline, background: GH.card, position: 'relative' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                                            <span style={{ ...ghMono, fontSize: 12 }}>
-                                                {dayTime(note.createdAt)}
-                                            </span>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                {note.tags && (
-                                                    <span style={{ ...ghMono, fontSize: 12, padding: '2px 6px', background: GH.ink5 }}>
-                                                        {note.tags}
-                                                    </span>
-                                                )}
-                                                {/* Зона нажатия 32×32, а вид прежний: отрицательные
-                                                    поля не дают строке с датой вырасти. */}
-                                                <button
-                                                    onClick={() => handleDeleteNote(note.id)}
-                                                    title="Удалить заметку"
-                                                    aria-label="Удалить заметку"
-                                                    style={{
-                                                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
-                                                        width: 32, height: 32, margin: '-9px -10px -9px -4px',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                                                    }}
-                                                    onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
-                                                    onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
-                                                >
-                                                    <Trash2 size={13} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <p style={{ fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>{note.content}</p>
+                                    {/* Дата и время */}
+                                    <div style={{ minWidth: 0 }}>
+                                        <b style={{ fontSize: 15, fontWeight: 600 }}>{formatDateLabel(dt, { capitalize: true, ...TZ })}</b>
+                                        <span className="num" style={{ fontSize: 13, color: GH.ink60, marginLeft: 8, whiteSpace: 'nowrap' }}>
+                                            {formatTime(dt, TZ)}{session.durationMinutes ? ` · ${session.durationMinutes} мин` : ''}
+                                        </span>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
 
-                    <div style={{ borderBottom: ghHairline, marginRight: 24 }} />
+                                    {/* Статус */}
+                                    <div style={{ minWidth: 0 }}>
+                                        <StatusBadge kind="session" status={session.status} audience="staff" className="whitespace-nowrap" />
+                                    </div>
 
-                    {/* Upcoming sessions */}
-                    {futureSessions.length > 0 && (
-                        <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                                <div style={ghMono}>Ближайшие сессии</div>
-                                <span style={{ ...ghMono, fontSize: 12, color: GH.accent }}>{futureSessions.length} запланировано</span>
-                            </div>
-                            {futureSessions.slice(0, 3).map(s => (
-                                <div key={s.id} style={{
-                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                    padding: '10px 0', borderBottom: ghHairline,
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                        <div style={{
-                                            width: 8, height: 8, borderRadius: '50%',
-                                            background: s.isBooked ? STATUS.ok.fg : STATUS.danger.fg,
-                                        }} />
-                                        <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                            {dayTime(parseUTC(s.date))}
+                                    {/* Сумма и действия */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: historyStacked ? 'flex-start' : 'flex-end', gap: 8, minWidth: 0 }}>
+                                        <span className="num" style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                            {formatMoney(sessionPrice, { currency: session.currency ?? client.currency })}
                                         </span>
-                                        {!s.isBooked && (
+                                        {!isCancelled && (
+                                            session.isPaid ? (
+                                                // «Оплачено» — только статус, не кнопка: раньше
+                                                // один клик по нему удалял платёж (G5-07). Снять
+                                                // оплату — отдельный крестик с подтверждением.
+                                                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                                    <StatusBadge kind="payment" status="paid" audience="staff" />
+                                                    {!viewingOther && (
+                                                    <button
+                                                        onClick={() => handleUnmarkPaid(session.id)}
+                                                        title="Снять отметку об оплате"
+                                                        aria-label="Снять отметку об оплате"
+                                                        style={{
+                                                            width: 32, height: 32,
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
+                                                        }}
+                                                        onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                                                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
+                                                    >
+                                                        <X size={12} />
+                                                    </button>
+                                                    )}
+                                                </span>
+                                            ) : (
+                                                !viewingOther && (
+                                                    <Button
+                                                        size="compact"
+                                                        variant="secondary"
+                                                        loading={payingId === session.id}
+                                                        disabled={!!payingId && payingId !== session.id}
+                                                        onClick={() => onPay(session.id, isEditing ? editSessionAccount : undefined)}
+                                                    >
+                                                        Отметить оплату
+                                                    </Button>
+                                                )
+                                            )
+                                        )}
+                                        {!viewingOther && (
                                             <button
-                                                onClick={() => navigate('/dashboard/bookings', {
-                                                    state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
-                                                })}
-                                                style={{ ...ghMono, fontSize: 12, padding: '2px 8px', background: STATUS.danger.bg, color: STATUS.danger.fg, border: 'none', cursor: 'pointer' }}
+                                                onClick={() => {
+                                                    if (isEditing) {
+                                                        setEditingSession(null);
+                                                    } else {
+                                                        setEditingSession(session.id);
+                                                        setEditSessionPrice(String(session.price ?? client.basePrice));
+                                                        setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
+                                                    }
+                                                }}
+                                                aria-label="Изменить сессию"
+                                                aria-expanded={isEditing}
+                                                title="Изменить сессию"
+                                                style={{
+                                                    width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    background: isEditing ? GH.ink5 : 'transparent',
+                                                    border: 'none', cursor: 'pointer',
+                                                    color: isEditing ? GH.accent : GH.ink60, flexShrink: 0,
+                                                }}
                                             >
-                                                Нет брони
+                                                <Pencil size={13} />
                                             </button>
                                         )}
                                     </div>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, color: GH.ink60 }}>
-                                        {formatMoney(s.price ?? client.basePrice, { currency: s.currency ?? client.currency })}
-                                    </span>
                                 </div>
-                            ))}
-                            {futureSessions.length > 3 && (
-                                <div style={{ ...ghMono, fontSize: 12, padding: '10px 0', textAlign: 'center' }}>
-                                    И ещё {futureSessions.length - 3} сессий в будущем
-                                </div>
-                            )}
-                            <div style={{ borderBottom: ghHairline, marginTop: 24, marginRight: 24 }} />
-                        </div>
-                    )}
 
-                    {/* Session history */}
-                    <div ref={historyRef} style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <div style={ghMono}>История сессий</div>
-                            <div style={{ position: 'relative' }}>
-                                <button
-                                    onClick={() => setShowSyncPicker(!showSyncPicker)}
-                                    disabled={syncing}
-                                    style={{
-                                        ...ghMono, fontSize: 12, padding: '6px 12px',
-                                        background: 'transparent', border: ghHairline,
-                                        cursor: 'pointer', color: GH.ink60,
-                                        display: 'flex', alignItems: 'center', gap: 4,
-                                    }}
-                                >
-                                    {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                    Синхронизация
-                                </button>
-                                {showSyncPicker && (
-                                    <div
-                                        style={{ position: 'fixed', inset: 0, background: GH.ink30, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        onClick={() => setShowSyncPicker(false)}
-                                    >
-                                        <div
-                                            style={{ background: GH.card, border: `2px solid ${GH.ink}`, padding: 24, width: 340 }}
-                                            onClick={e => e.stopPropagation()}
-                                        >
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                                                <div style={{ ...ghMono, color: GH.ink }}>Период синхронизации</div>
-                                                <button onClick={() => setShowSyncPicker(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
-                                                    <X size={16} />
-                                                </button>
-                                            </div>
-                                            <div style={{ marginBottom: 12 }}>
-                                                <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Назад</label>
-                                                <select style={ghInput} value={syncMonthsBack} onChange={e => setSyncMonthsBack(Number(e.target.value))}>
-                                                    {[1, 3, 6, 12, 24, 60].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : m === 12 ? '1 год' : m === 24 ? '2 года' : '5 лет'}</option>)}
-                                                </select>
-                                            </div>
-                                            <div style={{ marginBottom: 16 }}>
-                                                <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Вперёд</label>
-                                                <select style={ghInput} value={syncMonthsForward} onChange={e => setSyncMonthsForward(Number(e.target.value))}>
-                                                    {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : '1 год'}</option>)}
-                                                </select>
-                                            </div>
-                                            <div style={{ display: 'flex', gap: 12 }}>
-                                                <button
-                                                    onClick={() => setShowSyncPicker(false)}
-                                                    style={{ ...ghMono, flex: 1, padding: '10px', background: 'transparent', border: ghHairline, cursor: 'pointer', color: GH.ink60 }}
-                                                >
-                                                    Отмена
-                                                </button>
-                                                <button
-                                                    onClick={async () => {
-                                                        setSyncing(true);
-                                                        setShowSyncPicker(false);
-                                                        try {
-                                                            const r = await crmApi.syncClientHistory(clientId, syncMonthsBack, syncMonthsForward);
-                                                            toast.success(`Найдено: ${r.totalFound}, создано: ${r.created}`);
-                                                            loadData();
-                                                        } catch (err: any) {
-                                                            toast.error(err?.response?.data?.detail || 'Ошибка синхронизации');
-                                                        } finally {
-                                                            setSyncing(false);
-                                                        }
-                                                    }}
-                                                    style={{
-                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                                        flex: 1, padding: '10px', background: GH.ink, color: GH.paper,
-                                                        border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                                                    }}
-                                                >
-                                                    <RefreshCw size={12} /> Синхронизировать
-                                                </button>
-                                            </div>
+                                {/* Заметки этой сессии */}
+                                {sNotes.map(n => noteBlock(n, false))}
+
+                                {!viewingOther && (sessionNoteId === session.id ? (
+                                    <div style={{ marginTop: 8, maxWidth: '72ch' }}>
+                                        <Field label="Заметка к сессии">
+                                            <TextArea
+                                                value={sessionNoteText}
+                                                onChange={e => setSessionNoteText(e.target.value)}
+                                                rows={3}
+                                                autoFocus
+                                            />
+                                        </Field>
+                                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                            <Button
+                                                size="compact"
+                                                loading={savingSessionNote}
+                                                disabled={!sessionNoteText.trim()}
+                                                onClick={() => handleAddSessionNote(session.id)}
+                                            >
+                                                Сохранить заметку
+                                            </Button>
+                                            <Button size="compact" variant="quiet" onClick={() => setSessionNoteId(null)}>Не сохранять</Button>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {pastSessions.length === 0 ? (
-                            <div style={{ padding: 32, textAlign: 'center', color: GH.ink60, fontSize: 14 }}>
-                                У клиента пока нет состоявшихся сессий.
-                            </div>
-                        ) : (
-                            <>
-                                {/* Table header */}
-                                {/* Шапка и строки — одна сетка с одинаковыми колонками и
-                                    зазором, чтобы статус не наезжал на сумму (M4). */}
-                                <div style={{
-                                    display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12,
-                                    padding: '8px 0', borderBottom: `2px solid ${GH.ink}`,
-                                }}>
-                                    <div style={{ ...ghMono, fontSize: 12 }}>{historyStacked ? 'Дата · статус · ставка' : 'Дата'}</div>
-                                    {!historyStacked && <div style={{ ...ghMono, fontSize: 12, textAlign: 'center' }}>Статус</div>}
-                                    {!historyStacked && <div style={{ ...ghMono, fontSize: 12, textAlign: 'right' }}>Ставка</div>}
-                                </div>
-
-                                {/* Rows */}
-                                {pastSessions.map(session => {
-                                    const dt = parseUTC(session.date);
-                                    const sessionPrice = session.price ?? client.basePrice;
-                                    const isCancelled = session.status === 'CANCELLED_CLIENT' || session.status === 'CANCELLED_THERAPIST';
-                                    const isEditing = editingSession === session.id;
-
-                                    return (
-                                        <div key={session.id} style={{ borderBottom: ghHairline }}>
-                                            <div style={{
-                                                display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12, rowGap: 8,
-                                                padding: '12px 0', alignItems: 'start',
-                                                // Долг — лёгкая красная подложка (статус), оплаченное — без подложки.
-                                                background: session.isPaid || isCancelled ? 'transparent' : `${STATUS.danger.bg}66`,
-                                            }}>
-                                                {/* Date + session note */}
-                                                <div>
-                                                    <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                                        {dayTime(dt)}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => {
-                                                            if (sessionNoteId === session.id) {
-                                                                setSessionNoteId(null);
-                                                            } else {
-                                                                setSessionNoteId(session.id);
-                                                                const existing = notesBySession.get(session.id);
-                                                                setSessionNoteText(existing?.content || '');
-                                                                setSessionNoteTags(existing?.tags || '');
-                                                            }
-                                                        }}
-                                                        style={{
-                                                            display: 'flex', alignItems: 'center', gap: 4,
-                                                            background: 'transparent', border: 'none', cursor: 'pointer',
-                                                            marginTop: 4, padding: 0, color: GH.ink60, fontSize: 12,
-                                                            // На телефоне — палец, 44 px (rule 9).
-                                                            minHeight: narrow ? 44 : undefined,
-                                                        }}
-                                                    >
-                                                        <StickyNote size={12} aria-hidden="true" />
-                                                        {notesBySession.has(session.id)
-                                                            ? <span style={{ color: GH.accent, fontStyle: 'italic', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
-                                                                {notesBySession.get(session.id)?.content}
-                                                              </span>
-                                                            : <span>Добавить заметку</span>
-                                                        }
-                                                    </button>
-                                                    {sessionNoteId === session.id && (
-                                                        <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
-                                                            <textarea
-                                                                value={sessionNoteText}
-                                                                onChange={e => setSessionNoteText(e.target.value)}
-                                                                placeholder="Заметка к сессии..."
-                                                                rows={2}
-                                                                style={{ ...ghInput, fontSize: 12, resize: 'none', width: '90%' }}
-                                                            />
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                                                <button
-                                                                    onClick={() => handleAddSessionNote(session.id)}
-                                                                    disabled={savingSessionNote || !sessionNoteText.trim()}
-                                                                    style={{
-                                                                        ...ghMono, fontSize: 12, padding: '4px 10px',
-                                                                        minHeight: narrow ? 44 : undefined,
-                                                                        background: GH.accent, color: GH.paper, border: 'none',
-                                                                        cursor: 'pointer', opacity: savingSessionNote || !sessionNoteText.trim() ? 0.4 : 1,
-                                                                    }}
-                                                                >
-                                                                    {savingSessionNote ? 'Сохраняем…' : 'Сохранить'}
-                                                                </button>
-                                                                <button onClick={() => setSessionNoteId(null)} aria-label="Закрыть заметку" style={{
-                                                                    background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
-                                                                    width: narrow ? 44 : undefined, height: narrow ? 44 : undefined,
-                                                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                                                }}>
-                                                                    <X size={12} />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                {/* Status */}
-                                                <div style={{ display: 'flex', justifyContent: historyStacked ? 'flex-start' : 'center', minWidth: 0 }}>
-                                                    <StatusBadge kind="session" status={session.status} audience="staff" className="whitespace-normal" />
-                                                </div>
-
-                                                {/* Price + actions */}
-                                                <div style={{ textAlign: historyStacked ? 'left' : 'right' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: historyStacked ? 'flex-start' : 'flex-end', gap: 8 }}>
-                                                        <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
-                                                            {formatMoney(sessionPrice, { currency: session.currency ?? client.currency })}
-                                                        </span>
-                                                        {!isCancelled && (
-                                                            session.isPaid ? (
-                                                                // «Оплачено» — только статус, не кнопка: раньше
-                                                                // один клик по нему удалял платёж (G5-07). Снять
-                                                                // оплату — отдельный крестик с подтверждением.
-                                                                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                                                    <StatusBadge kind="payment" status="paid" audience="staff" />
-                                                                    <button
-                                                                        onClick={() => handleUnmarkPaid(session.id)}
-                                                                        title="Снять отметку об оплате"
-                                                                        aria-label="Снять отметку об оплате"
-                                                                        style={{
-                                                                            width: narrow ? 44 : 32, height: narrow ? 44 : 32, margin: narrow ? 0 : '-8px -4px -8px 0',
-                                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                            background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
-                                                                        }}
-                                                                        onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
-                                                                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
-                                                                    >
-                                                                        <X size={12} />
-                                                                    </button>
-                                                                </span>
-                                                            ) : (
-                                                                <button
-                                                                    onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}
-                                                                    style={{
-                                                                        ...ghMono, fontSize: 12, padding: '3px 8px',
-                                                                        // На телефоне — палец, 44 px (rule 9).
-                                                                        minHeight: narrow ? 44 : undefined,
-                                                                        background: GH.ink, color: GH.paper,
-                                                                        border: 'none', cursor: 'pointer',
-                                                                        display: 'flex', alignItems: 'center', gap: 4,
-                                                                    }}
-                                                                >
-                                                                    <Check size={12} /> Отметить оплату
-                                                                </button>
-                                                            )
-                                                        )}
-                                                        <button
-                                                            onClick={() => {
-                                                                if (isEditing) {
-                                                                    setEditingSession(null);
-                                                                } else {
-                                                                    setEditingSession(session.id);
-                                                                    setEditSessionPrice(String(session.price ?? client.basePrice));
-                                                                    setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
-                                                                }
-                                                            }}
-                                                            aria-label="Изменить сессию"
-                                                            title="Изменить сессию"
-                                                            style={{
-                                                                background: isEditing ? GH.ink5 : 'transparent',
-                                                                border: 'none', cursor: 'pointer', padding: narrow ? 14 : 4,
-                                                                color: isEditing ? GH.accent : GH.ink60,
-                                                            }}
-                                                        >
-                                                            <Pencil size={12} />
-                                                        </button>
-                                                    </div>
-
-                                                    {/* Edit panel */}
-                                                    {isEditing && (
-                                                        <div style={{ marginTop: 8, padding: 12, background: GH.ink5, border: ghHairline, textAlign: 'left' }} onClick={e => e.stopPropagation()}>
-                                                            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                                                                <div style={{ flex: 1 }}>
-                                                                    <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Сумма</label>
-                                                                    <input
-                                                                        type="number" step="0.01"
-                                                                        value={editSessionPrice}
-                                                                        onChange={e => setEditSessionPrice(e.target.value)}
-                                                                        style={{ ...ghInput, fontSize: 12 }}
-                                                                    />
-                                                                </div>
-                                                                <div style={{ flex: 1 }}>
-                                                                    <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Счёт</label>
-                                                                    <AccountSelect value={editSessionAccount} onChange={setEditSessionAccount} />
-                                                                </div>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const newPrice = parseFloat(editSessionPrice);
-                                                                        if (!isNaN(newPrice) && newPrice >= 0) {
-                                                                            handleUpdateSession(session.id, { price: newPrice });
-                                                                        }
-                                                                    }}
-                                                                    style={{
-                                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                                                        padding: '8px 12px', background: GH.ink, color: GH.paper,
-                                                                        border: 'none', cursor: 'pointer',
-                                                                    }}
-                                                                >
-                                                                    Сохранить
-                                                                </button>
-                                                            </div>
-                                                            {/* Status buttons */}
-                                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, paddingTop: 10, borderTop: ghHairline }}>
-                                                                {Object.entries(STATUS_LABELS).map(([key, label]) => (
-                                                                    <button
-                                                                        key={key}
-                                                                        onClick={() => handleUpdateSession(session.id, { status: key as CrmSession['status'] })}
-                                                                        style={{
-                                                                            ...ghMono, fontSize: 12, padding: '3px 10px',
-                                                                            background: session.status === key ? GH.ink : 'transparent',
-                                                                            color: session.status === key ? GH.paper : GH.ink60,
-                                                                            border: session.status === key ? 'none' : ghHairline,
-                                                                            cursor: 'pointer',
-                                                                        }}
-                                                                    >
-                                                                        {label}
-                                                                    </button>
-                                                                ))}
-                                                                <button
-                                                                    onClick={() => setPendingDelete(session)}
-                                                                    style={{
-                                                                        ...ghMono, fontSize: 12, padding: '3px 10px',
-                                                                        background: 'transparent', border: `1px solid ${GH.danger}`,
-                                                                        color: GH.danger, cursor: 'pointer', marginLeft: 'auto',
-                                                                    }}
-                                                                >
-                                                                    Удалить
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </>
-                        )}
-                    </div>
-                </div>
-
-                {/* ── Right column (Finance) ── */}
-                {/* На телефоне финансы первыми: долг — главный вопрос с телефона */}
-                <div style={{ padding: narrow ? '24px 0 8px' : '24px 0 24px 24px', order: narrow ? 1 : undefined, borderBottom: narrow ? ghHairline : 'none' }}>
-                    <div style={ghMono}>Финансы</div>
-
-                    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ padding: '14px 16px', background: GH.cellDead, border: ghHairline }}>
-                            <div style={{ ...ghMono, fontSize: 12, marginBottom: 4 }}>Ставка за сессию</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700 }}>{formatMoney(client.basePrice, { currency: client.currency })}</div>
-                        </div>
-
-                        {/* «Всего оплачено» — нейтральная карточка: бирюза значит «выбрано», не деньги. */}
-                        <div style={{ padding: '14px 16px', background: GH.sunken, border: ghHairline }}>
-                            <div style={{ ...ghMono, fontSize: 12, marginBottom: 4 }}>Всего оплачено</div>
-                            {Object.keys(stats.paidByCurrency).length > 1 ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
-                                        <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700 }}>
-                                            {formatMoney(amt, { currency: cur })}
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700 }}>
-                                    {formatMoney(stats.totalPaid, { currency: Object.keys(stats.paidByCurrency)[0] || client.currency })}
-                                </div>
-                            )}
-                        </div>
-
-                        {stats.debt > 0 && (
-                            <div style={{ padding: '14px 16px', background: STATUS.danger.bg, border: `1px solid ${STATUS.danger.fg}26` }}>
-                                <div style={{ ...ghMono, fontSize: 12, marginBottom: 4, color: STATUS.danger.fg }}>Текущий долг</div>
-                                {Object.keys(stats.debtByCurrency).length > 1 ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                        {Object.entries(stats.debtByCurrency).map(([cur, amt]) => (
-                                            <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: STATUS.danger.fg }}>
-                                                {formatMoney(amt, { currency: cur })}
-                                            </div>
-                                        ))}
                                     </div>
                                 ) : (
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: STATUS.danger.fg }}>
-                                        {formatMoney(stats.debt, { currency: Object.keys(stats.debtByCurrency)[0] || client.currency })}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                                    <button
+                                        type="button"
+                                        style={{ ...textLink, color: GH.ink60, fontWeight: 500, fontSize: 13 }}
+                                        onClick={() => { setSessionNoteId(session.id); setSessionNoteText(''); }}
+                                    >
+                                        <StickyNote size={13} aria-hidden="true" /> Заметка к сессии
+                                    </button>
+                                ))}
 
-                    {/* Payment history */}
-                    <div style={{ marginTop: 24, borderTop: ghHairline }}>
-                        <div style={{ ...ghMono, fontSize: 12, padding: '12px 0 8px' }}>История оплат</div>
-                        {payments.length === 0 ? (
-                            <div style={{ padding: '24px 0', textAlign: 'center', color: GH.ink60, fontSize: 14 }}>
-                                Оплат пока нет.
-                            </div>
-                        ) : (
-                            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                                {payments.map(p => (
-                                    <div key={p.id} style={{
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        padding: '10px 0', borderBottom: ghHairline,
-                                    }}>
-                                        <div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600 }}>
-                                                {formatMoney(p.amount, { currency: p.currency })}
-                                            </div>
-                                            <div style={{ ...ghMono, fontSize: 12 }}>
-                                                {paymentAccounts.find(a => a.id === p.account)?.label || p.account}
-                                            </div>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                            <div style={{ ...ghMono, fontSize: 12 }}>
-                                                {formatDayMonth(p.date || p.createdAt, { withYear: 'auto' })}
-                                            </div>
-                                            <button
-                                                onClick={() => handleDeletePayment(p.id)}
-                                                title="Удалить оплату"
-                                                aria-label="Удалить оплату"
-                                                style={{
-                                                    background: 'none', border: 'none', cursor: 'pointer',
-                                                    padding: 4, lineHeight: 0, color: GH.ink60,
+                                {/* Правка цены и статуса */}
+                                {isEditing && (
+                                    <div style={{ marginTop: 8, padding: 12, background: GH.sunken, border: hairline }}>
+                                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                            <Field label="Сумма" className="flex-1">
+                                                <Input kind="money" value={editSessionPrice} onChange={e => setEditSessionPrice(e.target.value)} />
+                                            </Field>
+                                            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontWeight: 500, minWidth: 160 }}>
+                                                Счёт для оплаты
+                                                <AccountSelect className="ui-input" value={editSessionAccount} onChange={setEditSessionAccount} />
+                                            </label>
+                                            <Button
+                                                size="compact"
+                                                onClick={() => {
+                                                    const newPrice = parseFloat(editSessionPrice.replace(',', '.'));
+                                                    if (!isNaN(newPrice) && newPrice >= 0) {
+                                                        handleUpdateSession(session.id, { price: newPrice });
+                                                    }
                                                 }}
                                             >
-                                                <Trash2 size={13} />
+                                                Сохранить сумму
+                                            </Button>
+                                        </div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, paddingTop: 10, borderTop: hairline }}>
+                                            {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                                                <button
+                                                    key={key}
+                                                    onClick={() => handleUpdateSession(session.id, { status: key as CrmSession['status'] })}
+                                                    aria-pressed={session.status === key}
+                                                    style={{
+                                                        fontSize: 13, padding: '0 10px', minHeight: 32,
+                                                        background: session.status === key ? GH.ink : 'transparent',
+                                                        color: session.status === key ? GH.paper : GH.ink,
+                                                        border: session.status === key ? `1px solid ${GH.ink}` : hairline,
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    {label}
+                                                </button>
+                                            ))}
+                                            <button
+                                                onClick={() => setPendingDelete(session)}
+                                                style={{
+                                                    fontSize: 13, padding: '0 10px', minHeight: 32,
+                                                    background: 'transparent', border: `1px solid ${GH.danger}`,
+                                                    color: GH.danger, cursor: 'pointer', marginLeft: 'auto',
+                                                }}
+                                            >
+                                                Удалить сессию
                                             </button>
                                         </div>
                                     </div>
-                                ))}
+                                )}
                             </div>
-                        )}
-                    </div>
+                        );
+                    })}
                 </div>
-            </div>
+            )}
+        </section>
+    );
+}
 
-            {/* ── Footer ── */}
-            <div style={{
-                borderTop: `2px solid ${GH.ink}`, margin: narrow ? '32px 16px 0' : '48px 32px 0',
-                padding: '12px 0 32px', display: 'flex', justifyContent: 'space-between',
-            }}>
-                <div style={{ ...ghMono, fontSize: 12 }}>UNBOX · 2026</div>
-                <div style={{ ...ghMono, fontSize: 12 }}>GRID HOUSE</div>
-            </div>
+
+// ── Новая заметка к клиенту (правая колонка) ─────────────────────────────────
+
+function NoteComposer({ onSave }: { onSave: (content: string) => Promise<boolean> }) {
+    const [content, setContent] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    const submit = async () => {
+        const text = content.trim();
+        if (!text || saving) return;
+        setSaving(true);
+        try {
+            if (await onSave(text)) setContent('');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div>
+            <Field label="Заметка" hint="Видите только вы. Хранится зашифрованной.">
+                <TextArea
+                    value={content}
+                    onChange={e => setContent(e.target.value)}
+                    rows={3}
+                    placeholder="Новая заметка к клиенту"
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }}
+                />
+            </Field>
+            {content.trim() && (
+                <div style={{ marginTop: 8 }}>
+                    <Button size="compact" loading={saving} onClick={submit}>Сохранить заметку</Button>
+                </div>
+            )}
         </div>
+    );
+}
+
+
+// ── «Перенести» следующую встречу ───────────────────────────────────────────
+
+function RescheduleSheet({ session, clientName, onClose, onDone }: {
+    session: CrmSession | null;
+    clientName: string;
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const [date, setDate] = useState('');
+    const [time, setTime] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!session) return;
+        const wall = utcNaiveToTbilisi(session.date);
+        setDate(wall?.date ?? '');
+        setTime(wall?.time ?? '');
+        setError(null);
+    }, [session]);
+
+    const submit = async () => {
+        if (!session || saving) return;
+        let naive: string;
+        try {
+            // Сервер ждёт naive-время по Батуми и сам переводит в UTC
+            // (как перенос в шторке сессии на телефоне). Без toISOString().
+            naive = toTbilisiNaive(date, time);
+        } catch (e: any) {
+            setError(e?.message || 'Проверьте дату и время');
+            return;
+        }
+        setSaving(true);
+        try {
+            // crmApi напрямую: если кабинет в новое время занят, сервер скажет
+            // это словами — стор показал бы только «Не удалось обновить сессию».
+            await crmApi.updateSession(session.id, { date: naive });
+            toast.success(`Перенесли на ${formatDayMonth(date)}, ${time}`);
+            onDone();
+        } catch (e) {
+            toastApiError(e, 'Не удалось перенести сессию. Попробуйте ещё раз');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const from = session ? dayTime(parseUTC(session.date)) : '';
+    return (
+        <Sheet
+            open={!!session}
+            onClose={onClose}
+            title="Перенести сессию"
+            description={session ? `${clientName}, сейчас — ${from}.${session.isBooked ? ' Бронь кабинета переедет вместе с сессией, если он свободен.' : ''}` : undefined}
+            width={420}
+            footer={
+                <>
+                    <Button onClick={submit} loading={saving} disabled={!date || !time}>
+                        {date && time ? `Перенести на ${formatDayMonth(date)}, ${time}` : 'Перенести'}
+                    </Button>
+                    <Button variant="secondary" onClick={onClose}>Оставить как есть</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Дата" error={error ?? undefined}>
+                    <Input kind="date" value={date} onChange={e => { setDate(e.target.value); setError(null); }} />
+                </Field>
+                <Field label="Время">
+                    <Input kind="time" value={time} onChange={e => { setTime(e.target.value); setError(null); }} />
+                </Field>
+            </div>
+        </Sheet>
     );
 }
