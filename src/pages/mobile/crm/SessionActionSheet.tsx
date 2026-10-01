@@ -513,8 +513,10 @@ function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
     // Кнопка «Перенести сессию» — в подвале шторки (SessionActionSheet).
     return (
         <FormShell title="Перенос сессии" onBack={onBack}>
-            <Field label="Дата">
-                <Input kind="date" value={date} onChange={e => onDate(e.target.value)} />
+            {/* Поле даты браузер рисует на языке телефона («10/07/2026», «Oct 7»).
+                Под ним — та же дата по-русски из format.ts, как в «Новой сессии». */}
+            <Field label="Дата" hint={date ? formatDateLabel(date, { capitalize: true, withYear: 'auto' }) : undefined}>
+                <Input kind="date" lang="ru" value={date} onChange={e => onDate(e.target.value)} />
             </Field>
             <Field label="Время (Батуми)">
                 <Input kind="time" value={time} onChange={e => onTime(e.target.value)} />

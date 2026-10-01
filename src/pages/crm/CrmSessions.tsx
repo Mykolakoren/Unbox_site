@@ -689,10 +689,18 @@ function SessionEditPanel({
                     <label className="text-xs font-medium text-unbox-dark mb-1 block">Дата и время</label>
                     <input
                         type="datetime-local"
+                        lang="ru"
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     />
+                    {/* Поле браузер рисует на языке системы («10/07/2026, 02:00 PM») —
+                        ниже та же дата по-русски из format.ts. */}
+                    {date && (
+                        <div className="text-xs mt-1" style={{ color: GH.ink60 }}>
+                            {formatDateLabel(new Date(date), { capitalize: true, withYear: 'auto' })}, {formatTime(new Date(date))}
+                        </div>
+                    )}
                 </div>
                 <div>
                     <label className="text-xs font-medium text-unbox-dark mb-1 block">Длительность</label>
