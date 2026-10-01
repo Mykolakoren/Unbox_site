@@ -382,6 +382,69 @@ def _resolve_booking_owner(session: Session, booking: Booking) -> User | None:
     return None
 
 
+def _res_type(session: Session, resource_id: Optional[str]) -> Optional[str]:
+    """Тип помещения ('capsule' | 'cabinet') — от него зависит доп. пул абонемента."""
+    from app.services.billing_defer import _resource_type
+    return _resource_type(session, resource_id)
+
+
+def _pool_kind(session: Session, booking: Booking) -> str:
+    """Вид доп. пула, из которого могла платить бронь: капсула / кабинет."""
+    return subscription_pool.kind_for_resource(_res_type(session, booking.resource_id))
+
+
+def _check_extra_pool_move(session: Session, booking: Booking, new_resource_id: Optional[str]) -> None:
+    """Перенос абонементной брони не пересчитывает часы — бронь едет со своими
+    часами. Часы капсулы годятся только для капсулы, «4 ч индивидуально» —
+    только для кабинета: бронь, оплаченную часами доп. пула, в помещение
+    другого вида не переносим (иначе час капсулы 10 ₾ оплатил бы кабинет)."""
+    if (booking.payment_method or "").lower() != "subscription":
+        return
+    # Бронь заранее (pending) часов ещё не тратила — крон T-24ч разложит их
+    # по пулам уже для нового помещения. Касается только списанных.
+    if (booking.payment_status or "paid") != "paid":
+        return
+    if not new_resource_id or new_resource_id == booking.resource_id:
+        return
+    if subscription_pool.booking_extra(booking) <= 0:
+        return
+    old_kind = subscription_pool.kind_for_resource(_res_type(session, booking.resource_id))
+    new_kind = subscription_pool.kind_for_resource(_res_type(session, new_resource_id))
+    if old_kind != new_kind:
+        what = "часами капсулы — перенести её можно только в капсулу" if old_kind == "capsule" \
+            else "часами «индивидуально» — перенести её можно только в кабинет"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Бронь оплачена {what}. Отмените её (часы вернутся) и создайте новую.",
+        )
+
+
+def _debit_approved_subscription_hours(session: Session, owner: User, booking: Booking) -> None:
+    """Подтверждение горячей брони (сайт /approve и кнопка в Telegram): снять
+    часы абонемента. Раскладка доп./основной — по живому пулу (с момента
+    создания брони часы капсулы могли уйти на другую бронь); доп. пул первым.
+    Как и раньше, покрытие основным пулом здесь не перепроверяется (остаток не
+    ниже 0). Исключение — формат, которого в основном пуле нет вовсе (индивидуальная
+    бронь Группового мастера): если «4 ч индивидуально» уже разобрали другие
+    брони, основной (групповой) пул её не оплачивает — 409, бронь остаётся на
+    согласовании (ревизия доп. пула 01.10)."""
+    hrs = float(booking.hours_deducted or 0)
+    extra = subscription_pool.live_extra(
+        owner.subscription, hrs, resource_type=_res_type(session, booking.resource_id),
+        format_type=booking.format,
+    )
+    included = subscription_pool.get(owner.subscription, "included_formats", ["individual"]) or ["individual"]
+    if hrs > 0 and extra < hrs - 0.01 and (booking.format or "individual") not in included:
+        raise HTTPException(
+            status_code=409,
+            detail="Часы абонемента не покрывают эту бронь (формат не входит в основной пул, "
+                   "а часов нужного пула уже нет). Отклоните её или попросите клиента оплатить деньгами.",
+        )
+    owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs, extra=extra)
+    if hrs > 0:
+        subscription_pool.stamp_booking(booking, hrs, extra)
+
+
 def _refund_booking_to_owner(
     session: Session, booking: Booking, owner: User, refund_percent: float = 1.0
 ) -> dict:
@@ -436,20 +499,21 @@ def _refund_booking_to_owner(
             )
             refund_hours = round(full_hours * refund_percent, 4)
             retained_hours = round(full_hours - refund_hours, 4)
+            # Доп. пул (часы капсулы / «4 ч индивидуально») возвращается в
+            # свой пул той же долей, что и вся бронь.
+            refund_extra = round(subscription_pool.booking_extra(booking) * refund_percent, 4)
             if not subscription_pool.hours_return_allowed(new_sub, booking.date):
                 # Бронь из прошлой недели недельного пакета — её часы сгорели
                 # вместе с неделей; в пул новой недели не возвращаем.
                 refund_hours = 0.0
-            rem = subscription_pool.get_float(new_sub, "remaining_hours")
+                refund_extra = 0.0
             # Mirror waive_charge in billing_defer.py: refunding hours back to
             # the pool must also decrement used_hours, or the pool drifts
             # (remaining + used no longer sums to the plan total).
-            used = subscription_pool.get_float(new_sub, "used_hours")
-            owner.subscription = new_sub = subscription_pool.update(
-                new_sub,
-                remaining_hours=rem + refund_hours,
-                used_hours=max(0.0, used - refund_hours),
-            )
+            owner.subscription = new_sub = subscription_pool.credit_hours(
+                new_sub, refund_hours, extra=refund_extra, kind=_pool_kind(session, booking))
+            if refund_extra > 0:
+                refund_meta["refunded_extra_hours"] = refund_extra
             session.add(owner)
             refund_meta["refunded_hours"] = refund_hours
             refund_meta["retained_hours_unbox_income"] = retained_hours
@@ -1198,13 +1262,8 @@ def create_booking(
                     detail="Абонемент не покрывает эту бронь: не хватает часов или этот формат кабинета не входит в тариф",
                 )
             if not defer_charge_single and booking_owner.subscription:
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=max(0.0, rem - quote.hours_deducted),
-                    used_hours=used + quote.hours_deducted,
-                )
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, quote.hours_deducted, extra=quote.extra_hours_deducted)
         else:
             if not defer_charge_single:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -1280,13 +1339,10 @@ def create_booking(
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
-                    rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                    booking_owner.subscription = subscription_pool.update(
-                        booking_owner.subscription,
-                        remaining_hours=rem + quote.hours_deducted,
-                        used_hours=max(0.0, used - quote.hours_deducted),
-                    )
+                    booking_owner.subscription = subscription_pool.credit_hours(
+                        booking_owner.subscription, quote.hours_deducted,
+                        extra=quote.extra_hours_deducted,
+                        kind=subscription_pool.kind_for_resource(_res_type(session, booking_in.resource_id)))
                 # Аудит 2026-08-27: пиковая надбавка — реальные ДЕНЬГИ, списанные
                 # выше (wallet.debit(peak_debt) на не-отложенном пути; hot всегда
                 # не-отложенный). Часы откатили — откатываем и деньги, иначе
@@ -1319,6 +1375,10 @@ def create_booking(
         booking_data["created_by_name"] = current_user.name or ""
 
         booking = Booking(**booking_data)
+        # Из какого пула абонемента часы (доп. / основной). Для брони заранее
+        # (pending) — прикидка; точную раскладку пишет крон T-24ч.
+        if booking.payment_method == "subscription":
+            subscription_pool.stamp_booking(booking, quote.hours_deducted, quote.extra_hours_deducted)
 
         session.add(booking)
         session.commit()
@@ -1748,18 +1808,15 @@ def create_multi_slot_booking(
                 # or never decrements a snake_case pool. Mirror the
                 # single/recurring paths and normalize to snake on write.
                 remaining = subscription_pool.get_float(new_sub, "remaining_hours")
-                used = subscription_pool.get_float(new_sub, "used_hours")
                 hours_deducted = quote.hours_deducted or 0
-                if remaining < hours_deducted:
+                # Из основного пула — только то, что не покрыл доп. (капсула).
+                if remaining < hours_deducted - (quote.extra_hours_deducted or 0):
                     raise HTTPException(
                         400,
                         f"Not enough subscription hours for slot {s.date} {s.start_time}",
                     )
-                booking_owner.subscription = new_sub = subscription_pool.update(
-                    new_sub,
-                    remaining_hours=max(0.0, remaining - hours_deducted),
-                    used_hours=used + hours_deducted,
-                )
+                booking_owner.subscription = new_sub = subscription_pool.debit_hours(
+                    new_sub, hours_deducted, extra=quote.extra_hours_deducted)
         else:  # balance (и bonus — остаток сверх бонусных часов)
             if not defer_charge_multi:
                 available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
@@ -1808,6 +1865,8 @@ def create_multi_slot_booking(
             created_by_id=str(current_user.id),
             created_by_name=current_user.name or "",
         )
+        if slot_method == "subscription":
+            subscription_pool.stamp_booking(booking, quote.hours_deducted, quote.extra_hours_deducted)
         session.add(booking)
         created_bookings.append(booking)
 
@@ -2066,6 +2125,8 @@ def quote_recurring_booking(
             "method": occ_method,
             "amount": round(amount, 2),
             "hours": hours,
+            # Из hours — часы доп. пула (капсула / «индивидуально»), прикидка.
+            "extra_hours": float(quote.extra_hours_deducted or 0) if occ_method == "subscription" else 0.0,
             "bonus_hours": occ_bonus,
         })
 
@@ -2350,13 +2411,8 @@ def create_recurring_booking(
                     400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
                 )
             if not defer_charge and booking_owner.subscription:
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=max(0.0, rem - quote.hours_deducted),
-                    used_hours=used + quote.hours_deducted,
-                )
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, quote.hours_deducted, extra=quote.extra_hours_deducted)
         else:
             if not defer_charge:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -2402,6 +2458,8 @@ def create_recurring_booking(
             created_by_id=str(current_user.id),
             created_by_name=current_user.name or "",
         )
+        if occ_method == "subscription":
+            subscription_pool.stamp_booking(booking, quote.hours_deducted, quote.extra_hours_deducted)
         session.add(booking)
         session.flush()
 
@@ -2956,6 +3014,7 @@ def extend_recurring_series(
                 else (_ext_bonus or None) if _method == "bonus"
                 else None
             )
+            _xhrs = _q.extra_hours_deducted if _method == "subscription" else 0.0
         else:
             # Бонусный шаблон нельзя копировать без движка: вышла бы бронь за
             # 0 ₾ с payment_method='bonus', а бонусный час не списан — комната
@@ -2969,6 +3028,7 @@ def extend_recurring_series(
             _rule = template.applied_rule
             _damt, _dpct = template.discount_amount, template.discount_percent
             _hrs = template.hours_deducted if template.payment_method == "subscription" else None
+            _xhrs = subscription_pool.booking_extra(template) if template.payment_method == "subscription" else 0.0
         new_booking = Booking(
             resource_id=template.resource_id,
             location_id=template.location_id,
@@ -2997,6 +3057,9 @@ def extend_recurring_series(
             crm_client_id=template.crm_client_id,
             recurring_group_id=group_id,
         )
+        # Прикидка пула (крон T-24ч пересчитает по живому пулу).
+        if _method == "subscription":
+            subscription_pool.stamp_booking(new_booking, _hrs, _xhrs)
         session.add(new_booking)
         session.flush()
         try:
@@ -3762,6 +3825,7 @@ def reschedule_booking(
                 detail="Нельзя менять длительность для бронирований по абонементу. "
                 "Отмените текущее и создайте новое.",
             )
+        _check_extra_pool_move(session, booking, new_resource)
         # Бонусная бронь: бонус-часы потрачены при создании под ЭТУ длительность.
         # Другая длительность — надо вернуть/дотратить бонус, а этого пока нет.
         if duration_changed and _bonus_hours_on(booking) > 0:
@@ -4184,6 +4248,25 @@ def trim_booking(
     leftQuote = _quote_for(bStart, left) if left > 0 else None
     rightQuote = _quote_for(cTo, right) if right > 0 else None
 
+    # Абонементная бронь: часы остатка — от ЧАСОВ ИСХОДНОЙ брони, а не от живого
+    # пула. Котировка идёт по пулу, из которого часы этой брони уже списаны, и
+    # при пустом пуле (а у Группового мастера индивидуальная бронь основной пул
+    # не покрывает НИКОГДА) вернула бы «не абонемент»: остаток превращался в
+    # бесплатный (часы 0, цена деньгами без списания), а все часы возвращались
+    # в пул — трюк повторяем (ревизия доп. пула 01.10). Пропорциональная доля и
+    # пропорциональная пиковая надбавка — как в сокращении (shorten_booking).
+    if (booking.payment_method or "").lower() == "subscription":
+        _orig_h = float(booking.hours_deducted if booking.hours_deducted is not None else (booking.duration / 60))
+        for _q, _dur in ((leftQuote, left), (rightQuote, right)):
+            if _q is not None and _dur > 0 and _q.applied_rule != "SUBSCRIPTION":
+                _ratio = _dur / booking.duration
+                _q.applied_rule = "SUBSCRIPTION"
+                _q.hours_deducted = round(_orig_h * _ratio, 4)
+                _q.extra_hours_deducted = 0.0
+                _q.final_price = round(float(booking.final_price or 0) * _ratio, 2)
+                _q.discount_amount = 0.0
+                _q.discount_percent = 0
+
     # ── Money ──
     pending = booking.payment_status == "pending"
     new_total_price = (
@@ -4222,17 +4305,21 @@ def trim_booking(
             + ((rightQuote.hours_deducted or 0) if right > 0 else 0)
         )
         removed_hours = round(orig_hours - new_hours, 4)
+        # Доп. пул (часы капсулы / «индивидуально»): при создании он тратился
+        # ПЕРВЫМ, значит отрезанные часы — это сначала часы основного пула,
+        # и только когда их не хватает — доп. («последним пришёл — первым
+        # ушёл»). Оставшимся частям — остаток доп. часов по порядку.
+        orig_extra = subscription_pool.booking_extra(booking)
+        removed_extra = 0.0
+        if removed_hours > 0:
+            removed_extra = round(min(orig_extra, max(0.0, removed_hours - (float(orig_hours) - orig_extra))), 4)
+        trim_extra_left = round(orig_extra - removed_extra, 4)
         # Refund the removed hours to the pool: bump remaining_hours, drop
         # used_hours (floored at 0) — subscription_pool keeps both dialects.
         if (not pending and removed_hours > 0 and owner and owner.subscription
                 and subscription_pool.hours_return_allowed(owner.subscription, booking.date)):
-            rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-            used = subscription_pool.get_float(owner.subscription, "used_hours")
-            owner.subscription = subscription_pool.update(
-                owner.subscription,
-                remaining_hours=rem + removed_hours,
-                used_hours=max(0.0, used - removed_hours),
-            )
+            owner.subscription = subscription_pool.credit_hours(
+                owner.subscription, removed_hours, extra=removed_extra, kind=_pool_kind(session, booking))
             session.add(owner)
         # Peak-hour surcharge on a subscription booking is charged to BALANCE at
         # creation (final_price = subscription_peak_debt). If the trimmed slice
@@ -4263,8 +4350,11 @@ def trim_booking(
     booking.discount_amount = kept_quote.discount_amount
     booking.discount_percent = kept_quote.discount_percent
     booking.applied_rule = kept_quote.applied_rule
+    _kept_extra = 0.0
     if booking.payment_method == "subscription":
         booking.hours_deducted = kept_quote.hours_deducted
+        _kept_extra = round(min(trim_extra_left, float(kept_quote.hours_deducted or 0)), 4)
+        subscription_pool.stamp_booking(booking, booking.hours_deducted, _kept_extra)
     # charge_amount = what this row is actually holding of the client's money.
     # It used to be re-stamped only for `pending` rows, so a PAID booking kept
     # the pre-trim figure: trim 12:00-18:00 (charged 120₾) down to 13:00-15:00,
@@ -4315,6 +4405,10 @@ def trim_booking(
             recurring_group_id=None,
             gcal_event_id=None,
         )
+        if booking.payment_method == "subscription":
+            subscription_pool.stamp_booking(
+                new_remnant, new_remnant.hours_deducted,
+                min(round(trim_extra_left - _kept_extra, 4), float(new_remnant.hours_deducted or 0)))
         session.add(new_remnant)
 
     # ── Detach any CRM session linked to this booking ──
@@ -4514,6 +4608,13 @@ def reschedule_booking_series(
                 "date": sib.date.isoformat(),
                 "reason": "уже прошла",
             })
+            continue
+        # Встреча, оплаченная часами капсулы / «индивидуально», в помещение
+        # другого вида не едет (см. _check_extra_pool_move) — пропускаем её.
+        try:
+            _check_extra_pool_move(session, sib, new_resource)
+        except HTTPException as _xe:
+            skipped.append({"id": str(sib.id), "date": sib.date.isoformat(), "reason": _xe.detail})
             continue
 
         available, conflict = check_availability(
@@ -4846,6 +4947,19 @@ def change_booking_format(
     # клиент доплачивал весь слот, уже оплаченный бонус-часом.
     quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
 
+    # Абонементная бронь остаётся абонементной только если часы покрывают её и в
+    # новом формате. Иначе (формат не входит в тариф, нет часов нужного пула —
+    # у Группового мастера индивидуальная бронь платится ТОЛЬКО «4 ч
+    # индивидуально») котировка вернула бы деньги: часы вернулись бы в пул,
+    # бронь стала бесплатной, а при отмене вернулись бы деньги, которых никто
+    # не брал (ревизия доп. пула 01.10). Честно отказываем.
+    if (booking.payment_method or "").lower() == "subscription" and quote.applied_rule != "SUBSCRIPTION":
+        raise HTTPException(
+            status_code=400,
+            detail="Абонемент не покрывает эту бронь в новом формате (формат не входит в тариф "
+                   "или не хватает часов нужного пула). Отмените бронь и создайте новую.",
+        )
+
     old_price = float(booking.final_price or 0)
     old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
     new_price = float(quote.final_price)
@@ -4859,13 +4973,26 @@ def change_booking_format(
     settled_now = False
     if booking.payment_status == "paid":
         if (booking.payment_method or "").lower() == "subscription":
-            rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-            used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-            booking_owner.subscription = subscription_pool.update(
-                booking_owner.subscription,
-                remaining_hours=max(0.0, rem - delta_hours),
-                used_hours=max(0.0, used + delta_hours),
-            )
+            # Знаковая разница ПО КАЖДОМУ пулу: >0 — дописать часы, <0 — вернуть.
+            # Основной и доп. (капсула / «индивидуально» — у Группового мастера
+            # смена индивидуальный ↔ групповой переносит часы между пулами).
+            old_extra = subscription_pool.booking_extra(booking)
+            new_extra = float(quote.extra_hours_deducted or 0) if new_hours > 0 else 0.0
+            delta_extra = round(new_extra - old_extra, 4)
+            delta_main = round(delta_hours - delta_extra, 4)
+            if delta_main > 0:
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, delta_main)
+            else:
+                booking_owner.subscription = subscription_pool.credit_hours(
+                    booking_owner.subscription, -delta_main)
+            if delta_extra > 0:
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, delta_extra, extra=delta_extra)
+            elif delta_extra < 0:
+                booking_owner.subscription = subscription_pool.credit_hours(
+                    booking_owner.subscription, -delta_extra, extra=-delta_extra,
+                    kind=_pool_kind(session, booking))
         else:
             # delta_price знаковая: >0 — доплата, <0 — возврат.
             wallet.apply(session, booking_owner, -delta_price, reason="format_change",
@@ -4882,6 +5009,7 @@ def change_booking_format(
     booking.discount_percent = quote.discount_percent
     if (booking.payment_method or "").lower() == "subscription":
         booking.hours_deducted = quote.hours_deducted
+        subscription_pool.stamp_booking(booking, quote.hours_deducted, quote.extra_hours_deducted)
 
     session.add(booking_owner)
     session.add(booking)
@@ -5019,15 +5147,22 @@ def set_booking_price(
             old_hours = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
             new_hours = old_hours * (new_price / old_price) if old_price > 0 else old_hours
             hours_delta = round(old_hours - new_hours, 4)
+            # Доп. пул масштабируется той же долей и возвращается в свой пул.
+            old_extra = subscription_pool.booking_extra(booking)
+            new_extra = round(old_extra * (new_hours / old_hours), 4) if old_hours > 0 else old_extra
+            extra_delta = round(old_extra - new_extra, 4)
             if subscription_pool.hours_return_allowed(booking_owner.subscription, booking.date):
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=rem + hours_delta,
-                    used_hours=max(0.0, used - hours_delta),
-                )
+                booking_owner.subscription = subscription_pool.credit_hours(
+                    booking_owner.subscription, hours_delta - extra_delta)
+                if extra_delta > 0:
+                    booking_owner.subscription = subscription_pool.credit_hours(
+                        booking_owner.subscription, extra_delta, extra=extra_delta,
+                        kind=_pool_kind(session, booking))
+                elif extra_delta < 0:
+                    booking_owner.subscription = subscription_pool.debit_hours(
+                        booking_owner.subscription, -extra_delta, extra=-extra_delta)
             booking.hours_deducted = round(new_hours, 4)
+            subscription_pool.stamp_booking(booking, booking.hours_deducted, new_extra)
         else:
             # delta знаковая: >0 — возврат клиенту, <0 — доплата.
             wallet.apply(session, booking_owner, delta, reason="price_change",
@@ -5583,6 +5718,7 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         )
 
     hours = round(float(quote.hours_deducted or (booking.duration / 60.0)), 4)
+    extra_hours = float(quote.extra_hours_deducted or 0)
 
     # 1. Возврат денег на баланс. Возвращаем ровно то, что было списано, за
     #    вычетом остатка, который абонемент не покрыл (пиковая надбавка).
@@ -5609,19 +5745,14 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
     #    списание (Валерия Костенецкая 29.09: 6 ч).
     is_pending = booking.payment_status == "pending"
     if not is_pending:
-        rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-        used = subscription_pool.get_float(owner.subscription, "used_hours")
-        owner.subscription = subscription_pool.update(
-            owner.subscription,
-            remaining_hours=max(0.0, rem - hours),
-            used_hours=used + hours,
-        )
+        owner.subscription = subscription_pool.debit_hours(owner.subscription, hours, extra=extra_hours)
         session.add(owner)
 
     # 3. Перекраска брони.
     booking.payment_method = "subscription"
     booking.applied_rule = "SUBSCRIPTION"
     booking.hours_deducted = hours
+    subscription_pool.stamp_booking(booking, hours, extra_hours)
     booking.final_price = peak_left
     # Для pending снимок «сколько списано» ставит крон; до него — пусто, как
     # у обычной отложенной абонементной брони.
@@ -5774,6 +5905,10 @@ def shorten_booking(
     old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
     new_hours = round(old_hours * (new_duration / old_duration), 4) if old_duration > 0 else old_hours
     refund_hours = round(old_hours - new_hours, 4)
+    # Доп. пул — той же долей (пропорциональное сокращение), возврат в свой пул.
+    old_extra = subscription_pool.booking_extra(booking) if old_hours > 0 else 0.0
+    new_extra = round(old_extra * (new_hours / old_hours), 4) if old_hours > 0 else 0.0
+    refund_extra = round(old_extra - new_extra, 4)
 
     # Применяем возврат только если деньги уже списаны. Для pending —
     # cron возьмёт правильную сумму при T-24h.
@@ -5785,13 +5920,9 @@ def shorten_booking(
         if target_user:
             if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
                 if subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
-                    rem = subscription_pool.get_float(target_user.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(target_user.subscription, "used_hours")
-                    target_user.subscription = subscription_pool.update(
-                        target_user.subscription,
-                        remaining_hours=rem + refund_hours,
-                        used_hours=max(0.0, used - refund_hours),
-                    )
+                    target_user.subscription = subscription_pool.credit_hours(
+                        target_user.subscription, refund_hours, extra=refund_extra,
+                        kind=_pool_kind(session, booking))
             else:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
                               description="Возврат за сокращённое время брони",
@@ -5803,6 +5934,7 @@ def shorten_booking(
     booking.final_price = new_price
     if (booking.payment_method or "").lower() == "subscription":
         booking.hours_deducted = new_hours
+        subscription_pool.stamp_booking(booking, new_hours, new_extra)
     if settled_now:
         booking.charge_amount = new_price
     booking.updated_at = datetime.now()
@@ -5963,6 +6095,21 @@ def split_booking(
     charges = _split_amount(charged_total) if charged_total is not None else None
     hours_total = float(booking.hours_deducted or 0)
     hours = _split_amount(hours_total) if hours_total > 0 else None
+    # Доп. пул делим теми же долями; каждая часть берёт не больше своих часов,
+    # а сумма частей остаётся равной исходной (остаток — в первую часть).
+    extra_total = subscription_pool.booking_extra(booking) if hours is not None else 0.0
+    extras_split = None
+    if hours is not None and extra_total > 0:
+        extras_split = _split_amount(extra_total)
+        extras_split = [min(max(0.0, e), h) for e, h in zip(extras_split, hours)]
+        _rest = round(extra_total - sum(extras_split), 2)
+        for _i in range(len(extras_split)):
+            if _rest <= 0:
+                break
+            _room = round(hours[_i] - extras_split[_i], 2)
+            _add = min(_room, _rest)
+            extras_split[_i] = round(extras_split[_i] + _add, 2)
+            _rest = round(_rest - _add, 2)
 
     old_event_id = booking.gcal_event_id
     created: list = []
@@ -5980,6 +6127,9 @@ def split_booking(
                 booking.charge_amount = charges[0]
             if hours is not None:
                 booking.hours_deducted = hours[0]
+                if (booking.payment_method or "").lower() == "subscription":
+                    subscription_pool.stamp_booking(
+                        booking, hours[0], extras_split[0] if extras_split else 0.0)
             if q is not None:
                 booking.base_price = float(q.base_price)
                 booking.applied_rule = q.applied_rule
@@ -6017,6 +6167,8 @@ def split_booking(
                 created_by_id=str(current_user.id),
                 created_by_name=current_user.name or "",
             )
+            if hours is not None and (nb.payment_method or "").lower() == "subscription":
+                subscription_pool.stamp_booking(nb, hours[idx], extras_split[idx] if extras_split else 0.0)
             session.add(nb)
             created.append(nb)
         offset += p
@@ -6213,14 +6365,7 @@ def approve_booking(
     if b_owner:
         if booking.payment_method == "subscription":
             if b_owner.subscription:
-                rem = subscription_pool.get_float(b_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(b_owner.subscription, "used_hours")
-                hrs = float(booking.hours_deducted or 0)
-                b_owner.subscription = subscription_pool.update(
-                    b_owner.subscription,
-                    remaining_hours=max(0.0, rem - hrs),
-                    used_hours=used + hrs,
-                )
+                _debit_approved_subscription_hours(session, b_owner, booking)
         else:
             wallet.debit(session, b_owner, float(booking.final_price or 0), reason="booking_charge",
                          description="Списание при подтверждении брони (approve)",

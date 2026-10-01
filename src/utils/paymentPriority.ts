@@ -20,6 +20,7 @@
 import type { BookingHistoryItem, Subscription } from '../store/types';
 import type { Format } from '../types';
 import { subscriptionLifecycle } from './subscription';
+import { extraAvailable, extraKindLabel, extraPool, type ResourceKind } from './subscriptionHours';
 
 export type PayMethod = 'balance' | 'subscription' | 'bonus';
 
@@ -68,6 +69,11 @@ export interface SubscriptionHours {
     reserved: number;
     /** Свободно для новой брони: пул минус уже забронированное. */
     free: number;
+    /** Из `remaining`/`pool` — часы доп. пула (капсула / «индивидуально»),
+     *  которые подходят этой брони (владелец 01.10; сервер тратит их первыми). */
+    extra: number;
+    /** Название доп. пула для подписи: «Капсула» / «Индивидуально». */
+    extraLabel?: string;
 }
 
 /**
@@ -112,29 +118,42 @@ export function subscriptionHours(
         ownerEmail?: string | null;
         excludeBookingId?: string | null;
         now?: Date;
+        /** Капсула или кабинет (utils/subscriptionHours.cartResourceKind). Не
+         *  задан / корзина смешанная — доп. пул не учитываем, как и сервер. */
+        resourceKind?: ResourceKind;
     },
 ): SubscriptionHours {
-    const empty = { remaining: 0, pool: 0, reserved: 0, free: 0 };
+    const empty = { remaining: 0, pool: 0, reserved: 0, free: 0, extra: 0 };
     if (!sub) return { ok: false, active: false, reason: 'Нет абонемента', ...empty };
     const life = subscriptionLifecycle(sub as any, opts.now);
     if (life === 'frozen') return { ok: false, active: false, reason: 'Абонемент заморожен', ...empty };
     if (life === 'completed') return { ok: false, active: false, reason: 'Срок абонемента закончился', ...empty };
     const formats = sub.includedFormats || ['individual'];
-    const remaining = Math.max(0, Number(sub.remainingHours) || 0);
+    // Доп. пул (зеркало pricing/subscription_pool.plan_split): часы капсулы —
+    // на капсулу, «4 ч индивидуально» — на индивидуальную бронь в кабинете. Они
+    // идут первыми и годятся, даже когда формат не входит в основной пул.
+    const extra = extraAvailable(sub, opts.resourceKind, opts.format);
+    const extraLabel = extra > 0 ? extraKindLabel(extraPool(sub)!.kind) : undefined;
+    const mainRemaining = Math.max(0, Number(sub.remainingHours) || 0);
     if (!formats.includes(opts.format)) {
+        if (extra > 0) {
+            // Формат не входит в основной пул — платить может только доп. пул.
+            return { ok: true, active: true, reason: '', remaining: extra, pool: extra, reserved: 0, free: extra, extra, extraLabel };
+        }
         return {
             ok: false,
             active: true,
             reason: `Абонемент только для ${formats.includes('individual') ? 'индивидуальной' : 'групповой'} работы`,
-            remaining, pool: remaining, reserved: 0, free: remaining,
+            remaining: mainRemaining, pool: mainRemaining, reserved: 0, free: mainRemaining, extra: 0,
         };
     }
+    const remaining = mainRemaining + extra;
 
     const weekly = !!sub.weeklyPackage;
     const week = mondayKey(opts.bookingDate);
-    let pool = remaining;
+    let pool = mainRemaining;
     if (weekly && sub.packageWeek && week > sub.packageWeek) {
-        pool = Number(sub.weeklyHours) || Number(sub.totalHours) || remaining;
+        pool = Number(sub.weeklyHours) || Number(sub.totalHours) || mainRemaining;
     }
 
     const reserved = reservedSubscriptionHours(sub, opts.bookings, opts.ownerEmail, {
@@ -147,18 +166,22 @@ export function subscriptionHours(
         active: true,
         reason: '',
         remaining,
-        pool,
+        pool: pool + extra,
         reserved,
-        free: Math.max(0, pool - reserved),
+        free: Math.max(0, pool + extra - reserved),
+        extra,
+        extraLabel,
     };
 }
 
 /** Подпись остатка: «Осталось 6 ч» или «Свободно 2 ч из 6 — 4 ч уже в бронях». */
 export function subscriptionHoursLabel(s: SubscriptionHours): string {
+    // «из них 1 ч капсулы» — часы доп. пула идут первыми (владелец 01.10).
+    const x = s.extra > 0.01 ? ` (из них ${fmtHours(s.extra)} — ${(s.extraLabel || '').toLowerCase()})` : '';
     if (s.reserved > 0.01) {
-        return `Свободно ${Number(s.free.toFixed(1))} из ${fmtHours(s.pool)} — ${fmtHours(s.reserved)} уже в бронях`;
+        return `Свободно ${Number(s.free.toFixed(1))} из ${fmtHours(s.pool)}${x} — ${fmtHours(s.reserved)} уже в бронях`;
     }
-    return `Осталось ${fmtHours(s.pool)}`;
+    return `Осталось ${fmtHours(s.pool)}${x}`;
 }
 
 export interface PaymentPlan {

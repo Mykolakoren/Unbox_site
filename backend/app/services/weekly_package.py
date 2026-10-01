@@ -51,10 +51,8 @@ def package_fields(week_start: date, hours: float, used: float = 0.0) -> dict:
     если крон опоздает."""
     week_end_local = datetime.combine(week_start + timedelta(days=6), time(23, 59, 59))
     return {
-        "total_hours": float(hours),
-        "bonus_hours": 0.0,  # иначе remaining+used ≠ total+bonus (бонус старого плана)
-        "remaining_hours": max(0.0, float(hours) - float(used)),
-        "used_hours": float(used),
+        # bonus 0 — иначе remaining+used ≠ total+bonus (бонус старого плана)
+        **subscription_pool.pool_fields(hours, 0.0, used),
         "expiry_date": (week_end_local - TZ).isoformat(),
         "package_week": week_start.isoformat(),
         "status": "active",

@@ -1623,6 +1623,9 @@ def _book_step_confirm(
     # Price section
     if quote.applied_rule == "SUBSCRIPTION":
         lines.append(f"🎫 Абонемент: списание {quote.hours_deducted:g} ч")
+        if (quote.extra_hours_deducted or 0) > 0:
+            _kind = "капсулы" if resource.type == "capsule" else "«индивидуально»"
+            lines.append(f"  из них {quote.extra_hours_deducted:g} ч — часы {_kind}")
         if quote.subscription_peak_debt > 0:
             lines.append(f"⚡ Доплата за пик-часы: {quote.subscription_peak_debt:g} ₾")
         pay_method = "subscription"
@@ -1924,14 +1927,14 @@ def _handle_hot_booking_callback(
         if owner:
             if (booking.payment_method or "").lower() == "subscription":
                 if owner.subscription:
-                    rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(owner.subscription, "used_hours")
-                    hrs = float(booking.hours_deducted or 0)
-                    owner.subscription = subscription_pool.update(
-                        owner.subscription,
-                        remaining_hours=max(0.0, rem - hrs),
-                        used_hours=used + hrs,
-                    )
+                    # Как /approve: часы — по живому пулу, доп. пул первым.
+                    from app.api.v1.bookings.routes import _debit_approved_subscription_hours
+                    try:
+                        _debit_approved_subscription_hours(session, owner, booking)
+                    except HTTPException as _e:
+                        session.rollback()
+                        _answer_callback(callback_id, str(_e.detail)[:190], show_alert=True)
+                        return {"ok": True}
                 session.add(owner)
             else:
                 from app.services import wallet as _wallet

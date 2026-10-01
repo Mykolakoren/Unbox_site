@@ -160,6 +160,60 @@ CHECKS: list[Check] = [
         """,
     ),
     Check(
+        key="broken_extra_pool",
+        title="Доп. пул абонемента (часы капсулы / «индивидуально») не сходится",
+        why=(
+            "У абонемента есть второй пул: часы капсулы (Пробный 1, Тёплый 4, Регулярный 6, "
+            "Профи+ 10) или «4 ч индивидуально» у Группового мастера. Инварианты: остаток "
+            "+ израсходовано = всего; остаток не уходит в минус и не превышает «всего». "
+            "Нарушение значит, что часы вернули не в тот пул или списали мимо subscription_pool."
+        ),
+        sql="""
+            SELECT u.email,
+                   coalesce(u.subscription->>'extra_kind', u.subscription->>'extraKind') AS kind,
+                   coalesce(u.subscription->>'extra_hours_total',     u.subscription->>'extraHoursTotal')     AS total,
+                   coalesce(u.subscription->>'extra_hours_used',      u.subscription->>'extraHoursUsed', '0') AS used,
+                   coalesce(u.subscription->>'extra_hours_remaining', u.subscription->>'extraHoursRemaining') AS remaining
+            FROM "user" u
+            WHERE u.subscription IS NOT NULL
+              AND u.subscription::text NOT IN ('null', '{}')
+              AND coalesce(u.subscription->>'extra_hours_total', u.subscription->>'extraHoursTotal') IS NOT NULL
+              AND coalesce(u.subscription->>'status', u.subscription->>'status') IS DISTINCT FROM 'completed'
+              AND (
+                    abs(
+                        coalesce(u.subscription->>'extra_hours_remaining', u.subscription->>'extraHoursRemaining', '0')::float
+                      + coalesce(u.subscription->>'extra_hours_used', u.subscription->>'extraHoursUsed', '0')::float
+                      - coalesce(u.subscription->>'extra_hours_total', u.subscription->>'extraHoursTotal')::float
+                    ) > 0.01
+                 OR coalesce(u.subscription->>'extra_hours_remaining', u.subscription->>'extraHoursRemaining', '0')::float < -0.01
+                 OR coalesce(u.subscription->>'extra_hours_remaining', u.subscription->>'extraHoursRemaining', '0')::float
+                    > coalesce(u.subscription->>'extra_hours_total', u.subscription->>'extraHoursTotal')::float + 0.01
+              )
+            ORDER BY u.email
+        """,
+    ),
+    Check(
+        key="extra_booking_overdraw",
+        title="В брони часов из доп. пула больше, чем часов абонемента (или не абонементная бронь)",
+        why=(
+            "У брони хранится hours_deducted (всего часов абонемента) и extra_hours_deducted "
+            "(из них из доп. пула). Доп. часов не может быть больше всех, и они бывают только "
+            "у абонементных броней. Иначе возврат при отмене положит в пул лишнее. "
+            "(to_jsonb — чтобы ревизор не падал, пока колонку ещё не добавила миграция.)"
+        ),
+        sql="""
+            SELECT b.id::text, u.email, b.date::date::text AS date, b.payment_method,
+                   b.hours_deducted, (to_jsonb(b)->>'extra_hours_deducted') AS extra_hours_deducted
+            FROM booking b LEFT JOIN "user" u ON u.id = b.user_uuid
+            WHERE coalesce((to_jsonb(b)->>'extra_hours_deducted')::float, 0) > 0.0001
+              AND (
+                    b.payment_method <> 'subscription'
+                 OR (to_jsonb(b)->>'extra_hours_deducted')::float > coalesce(b.hours_deducted, 0) + 0.01
+              )
+            ORDER BY b.date DESC
+        """,
+    ),
+    Check(
         key="charge_amount_mismatch",
         title="Списанная сумма не совпадает с ценой брони",
         why=(

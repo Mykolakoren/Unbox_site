@@ -37,19 +37,26 @@ from app.services import subscription_pool, wallet
 # Групповой 0. Тратит reschedule_booking (services/subscription_perks.py).
 # freeze_days — бюджет дней заморозки «как на сайте» (владелец 01.10):
 # Регулярный 7, Профи+ 30, остальные 0. Бюджет делится на несколько пауз.
+# extra_hours / extra_kind — доп. пул (владелец 01.10, шаг 4): часы капсулы
+# Пробный 1, Тёплый 4, Регулярный 6, Профи+ 10; у Группового мастера
+# «4 ч индивидуально» — только кабинеты, индивидуальный формат. Порядок
+# списания — services/subscription_pool.plan_split.
 PLANS: dict[str, dict] = {
     "TRIAL": dict(name="Пробный", hours=4, bonus_hours=0, price=70, duration_days=14,
-                  discount_percent=0, formats=["individual"], free_reschedules=0, freeze_days=0),
+                  discount_percent=0, formats=["individual"], free_reschedules=0, freeze_days=0,
+                  extra_hours=1, extra_kind="capsule"),
     "WARM_START": dict(name="Тёплый старт", hours=10, bonus_hours=0, price=180, duration_days=30,
-                       discount_percent=10, formats=["individual"], free_reschedules=1, freeze_days=0),
+                       discount_percent=10, formats=["individual"], free_reschedules=1, freeze_days=0,
+                       extra_hours=4, extra_kind="capsule"),
     "REGULAR_PRACTITIONER": dict(name="Регулярный практик", hours=20, bonus_hours=0, price=350,
                                  duration_days=30, discount_percent=15, formats=["individual"],
-                                 free_reschedules=2, freeze_days=7),
+                                 free_reschedules=2, freeze_days=7, extra_hours=6, extra_kind="capsule"),
     "PRO_PLUS": dict(name="Профи+", hours=40, bonus_hours=2, price=650, duration_days=45,
                      discount_percent=20, formats=["individual", "group", "intervision"],
-                     free_reschedules=3, freeze_days=30),
+                     free_reschedules=3, freeze_days=30, extra_hours=10, extra_kind="capsule"),
     "GROUP_MASTER": dict(name="Групповой мастер", hours=20, bonus_hours=0, price=450, duration_days=45,
-                         discount_percent=25, formats=["group"], free_reschedules=0, freeze_days=0),
+                         discount_percent=25, formats=["group"], free_reschedules=0, freeze_days=0,
+                         extra_hours=4, extra_kind="individual"),
 }
 
 CASH_METHODS = {"cash": "наличные", "card_tbc": "карта TBC", "card_bog": "карта BOG"}
@@ -72,14 +79,19 @@ def _subscription_category(session: Session, requested: Optional[str]) -> Option
     return cat.id if cat else None
 
 
-def build_subscription(plan_id: str, now: datetime, carry_hours: float = 0.0) -> dict:
+def build_subscription(plan_id: str, now: datetime, carry_hours: float = 0.0,
+                       carry_extra_hours: float = 0.0) -> dict:
+    """Новый пул по тарифу. carry_hours — остаток основного пула старого
+    абонемента (бонусными часами), carry_extra_hours — остаток доп. пула того
+    же вида (капсула → капсула), прибавляется к доп. пулу тарифа."""
     p = PLANS[plan_id]
     bonus = float(p["bonus_hours"]) + float(carry_hours)
     total = float(p["hours"])
+    extra_total = float(p.get("extra_hours", 0)) + max(0.0, float(carry_extra_hours or 0))
     return subscription_pool.update({}, **{
         "id": str(uuid4()), "plan_id": plan_id, "name": p["name"],
-        "total_hours": total, "bonus_hours": round(bonus, 2),
-        "remaining_hours": round(total + bonus, 2), "used_hours": 0.0,
+        **subscription_pool.pool_fields(total, round(bonus, 2)),
+        **subscription_pool.extra_fields(p.get("extra_kind"), extra_total),
         "free_reschedules": p["free_reschedules"], "free_reschedules_used": 0,
         "expiry_date": (now + timedelta(days=p["duration_days"])).isoformat(),
         "is_frozen": False, "freeze_count": 0, "discount_percent": p["discount_percent"],
@@ -134,10 +146,20 @@ def sell_subscription(
 
     old = user.subscription
     carry = 0.0
+    carry_extra = 0.0
     if (old and not subscription_pool.get(old, "weekly_package", False)
             and not subscription_pool.is_expired(old, now)):
         carry = max(0.0, subscription_pool.get_float(old, "remaining_hours"))
-    user.subscription = build_subscription(plan_id, now, carry)
+        # Доп. пул старого абонемента тоже не сгорает: того же вида (капсула →
+        # капсула) — в доп. пул нового; другого вида или у нового тарифа его
+        # нет — в основной (бонусными часами), как и остаток основного.
+        old_extra = subscription_pool.extra_remaining(old)
+        if old_extra > 0:
+            if subscription_pool.extra_kind(old) == p.get("extra_kind"):
+                carry_extra = old_extra
+            else:
+                carry += old_extra
+    user.subscription = build_subscription(plan_id, now, carry, carry_extra)
     session.add(user)
     session.flush()
 
@@ -160,7 +182,10 @@ def sell_subscription(
 
     return {
         "plan": p["name"], "price": price, "method": method, "cashbox_tx_id": tx_id,
-        "carried_hours": round(carry, 2), "converted_bookings": converted,
+        "carried_hours": round(carry + carry_extra, 2), "converted_bookings": converted,
+        "carried_extra_hours": round(carry_extra, 2),
+        "extra_hours": subscription_pool.extra_remaining(user.subscription),
+        "extra_kind": subscription_pool.extra_kind(user.subscription),
         "remaining_hours": subscription_pool.get_float(user.subscription, "remaining_hours"),
         "expiry_date": subscription_pool.get(user.subscription, "expiry_date"),
         "balance": float(user.balance or 0),

@@ -40,6 +40,12 @@ export interface Subscription {
     weeklyHours?: number;
     /** Понедельник (yyyy-mm-dd) недели, за которую выдан текущий пул. */
     packageWeek?: string;
+    /** Доп. пул (владелец 01.10): часы капсулы / «4 ч индивидуально» Группового
+     *  мастера — см. utils/subscriptionHours.ts. Нет поля — у тарифа его нет. */
+    extraKind?: 'capsule' | 'individual';
+    extraHoursTotal?: number;
+    extraHoursRemaining?: number;
+    extraHoursUsed?: number;
 }
 
 export interface DiscountLogEntry {

@@ -665,23 +665,29 @@ def topup_subscription(
     account = payload.get("account", "")
     note = payload.get("note", "")
 
-    if hours <= 0:
+    # Доп. пул (часы капсулы / «индивидуально») пополняется отдельным полем —
+    # `hours` всегда про основной пул, как и раньше.
+    extra_hours = float(payload.get("extra_hours", 0) or 0)
+    if extra_hours < 0:
+        raise HTTPException(400, "extra_hours must not be negative")
+    if hours <= 0 and extra_hours <= 0:
+        raise HTTPException(400, "Hours must be positive")
+    if hours < 0:
         raise HTTPException(400, "Hours must be positive")
 
     # Write both dialects: this used to be camelCase-only, so billing_defer
     # (snake-only) saw remaining_hours=0, fell back to cash and charged the
     # client's balance for hours they had just paid for. See subscription_pool.
-    current_hours = subscription_pool.get_float(user.subscription, "remaining_hours")
-    total_hours = subscription_pool.get_float(user.subscription, "total_hours")
-    user.subscription = subscription_pool.update(
-        user.subscription,
-        remaining_hours=round(current_hours + hours, 2),
-        total_hours=round(total_hours + hours, 2),
-    )
+    if hours > 0:
+        user.subscription = subscription_pool.grant_hours(user.subscription, hours)
+    if extra_hours > 0:
+        user.subscription = subscription_pool.grant_extra_hours(user.subscription, extra_hours)
 
     comment_history = list(user.comment_history or [])
     log_text = (
-        f"Пополнение абонемента: +{hours}ч · {amount} · {payment_method} · счёт: {account}"
+        f"Пополнение абонемента: +{hours}ч"
+        + (f" (+{extra_hours:g} ч доп. пула)" if extra_hours > 0 else "")
+        + f" · {amount} · {payment_method} · счёт: {account}"
         + (f" · {note}" if note else "")
     )
     comment_history.append({
@@ -691,6 +697,7 @@ def topup_subscription(
         "type": "subscription_topup",
         "meta": {
             "hours": hours,
+            "extra_hours": extra_hours,
             "amount": amount,
             "payment_method": payment_method,
             "account": account,

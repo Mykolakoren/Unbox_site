@@ -37,6 +37,9 @@ class PriceBreakdown(BaseModel):
     # Subscription Details
     subscription_plan: Optional[str] = None
     hours_deducted: float = 0.0
+    # Из hours_deducted — сколько из доп. пула (часы капсулы / «4 ч
+    # индивидуально»), остальное из основного. См. subscription_pool.plan_split.
+    extra_hours_deducted: float = 0.0
 
     final_price: float
 
@@ -621,18 +624,26 @@ class PricingService:
             user.subscription, "included_formats", ["individual"]
         )
 
-        # 1. Format Check
-        if format_type not in included_formats:
+        # 1. Покрытие часами: доп. пул (часы капсулы / «4 ч индивидуально»
+        # Группового мастера) + основной пул, бронь целиком (владелец 01.10:
+        # капсула — сначала часы капсулы, потом общий пул; индивидуальная бронь
+        # Группового мастера — только «4 ч индивидуально», потом деньги).
+        # Без доп. пула — ровно прежнее правило: формат в тарифе и остаток ≥ часов.
+        extra = subscription_pool.plan_split(
+            user.subscription, breakdown.booked_hours,
+            resource_type=getattr(resource, "type", None), format_type=format_type,
+        )
+
+        # 2. Format Check — тариф не покрывает этот формат ни часами, ни скидкой.
+        if extra is None and format_type not in included_formats:
             return False
 
-        # 2. Check Remaining Hours
-        remaining = subscription_pool.get_float(user.subscription, "remaining_hours")
-        
-        if remaining >= breakdown.booked_hours - 0.01: # Float safety
+        if extra is not None:
             # Full coverage by hours
             breakdown.applied_rule = "SUBSCRIPTION"
             breakdown.subscription_plan = plan_id
             breakdown.hours_deducted = breakdown.booked_hours
+            breakdown.extra_hours_deducted = extra
             # Peak hours debt: subscription covers base but peak surcharge = +5 GEL/hr
             if breakdown.peak_slot_count > 0:
                 peak_hours = breakdown.peak_slot_count / 2.0
