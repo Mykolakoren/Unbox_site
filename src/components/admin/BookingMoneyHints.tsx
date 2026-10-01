@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import clsx from 'clsx';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { cashboxApi } from '../../api/cashbox';
 import { useUserStore } from '../../store/userStore';
-import type { BookingHistoryItem } from '../../store/types';
+import type { BookingHistoryItem, User } from '../../store/types';
 import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AddFundsModal } from './modals/AddFundsModal';
 import { formatDayMonth, formatGel } from '../../utils/format';
+import { Button } from '../ui/Button';
 
 type Estimate = Awaited<ReturnType<typeof bookingsApi.getWeeklyEstimate>>;
 
@@ -22,10 +24,8 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toString().replace('.', '
  */
 export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryItem; due?: DueInfo }) {
     const users = useUserStore(s => s.users);
-    const fetchUsers = useUserStore(s => s.fetchUsers);
     const client = users.find(u => u.email === booking.userId || u.id === booking.userId);
     const [est, setEst] = useState<Estimate | null>(null);
-    const [payOpen, setPayOpen] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -49,26 +49,6 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
             ? `Подставлена цена брони: ${formatGel(price)} (спишется с баланса за сутки до начала)`
             : undefined;
 
-    const handleConfirm = async (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => {
-        if (!client) return;
-        const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
-        try {
-            await cashboxApi.createTransaction({
-                type: 'income',
-                amount,
-                payment_method: methodMap[method] || 'cash',
-                category_id: 'cat-topup',
-                description: `Пополнение баланса: ${client.name}`,
-                branch: branch || undefined,
-                client_id: client.id || client.email,
-                credit_user_balance: true,
-            } as any);
-            await fetchUsers();
-            toast.success(`Оплата принята: ${formatGel(amount)} на баланс ${client.name}`);
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось принять оплату (нужен доступ к кассе)');
-        }
-    };
 
     let weeklyLine: string | null = null;
     if (est && est.applies) {
@@ -95,7 +75,7 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
             {due && (
                 <div className="flex justify-between gap-3">
                     <span className="text-ink-60 shrink-0">К оплате</span>
-                    <span className={`font-semibold text-right ${due.due > 0 ? 'text-unbox-dark' : 'text-[var(--status-ok-fg)]'}`}
+                    <span className={`font-semibold text-right ${due.due > 0 ? 'text-[var(--status-danger-fg)]' : 'text-[var(--status-ok-fg)]'}`}
                         title="Считается из баланса клиента: долг — за самые свежие списанные брони, плюс на балансе (недельная скидка, предоплата) покрывает ближайшие брони.">
                         {due.due > 0 ? `${formatGel(due.due)}` : dueLabel(due)}
                         {due.due > 0 && due.due < due.price && (
@@ -118,14 +98,78 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                     <span className="text-ink-60 shrink-0">Баланс</span>
                     <span className="flex items-center gap-2">
                         <span className={`font-medium ${balance < 0 ? 'text-[var(--status-danger-fg)]' : 'text-unbox-dark'}`}>{formatGel(balance)}</span>
-                        <button
-                            onClick={() => setPayOpen(true)}
-                            className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-unbox-green/15 text-unbox-dark hover:bg-unbox-green/25 transition-colors"
-                        >
-                            Принять оплату
-                        </button>
+                        <AcceptPaymentButton client={client} defaultAmount={suggested} hint={suggestedHint} />
                     </span>
                 </div>
+            )}
+        </>
+    );
+}
+
+/**
+ * «Принять оплату» — пополнение баланса клиента через кассу (волна 4: вынесено
+ * из BookingMoneyHints, чтобы та же кнопка стояла и в «Сегодня»). handleConfirm
+ * перенесён без единой правки: те же поля createTransaction (category_id
+ * 'cat-topup', credit_user_balance: true), тот же fetchUsers и тосты. Сумму по
+ * умолчанию передаёт экран: в попапе брони — долг или цена брони, в «Сегодня» —
+ * весь долг клиента (решение владельца В3).
+ */
+export function AcceptPaymentButton({
+    client, defaultAmount, hint, label = 'Принять оплату', appearance = 'chip', className,
+}: {
+    client: User | null | undefined;
+    defaultAmount?: number;
+    hint?: string;
+    label?: ReactNode;
+    /** chip — маленькая кнопка в попапе брони; primary/secondary — общая Button. */
+    appearance?: 'chip' | 'primary' | 'secondary';
+    className?: string;
+}) {
+    const fetchUsers = useUserStore(s => s.fetchUsers);
+    const [payOpen, setPayOpen] = useState(false);
+
+    const handleConfirm = async (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => {
+        if (!client) return;
+        const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
+        try {
+            await cashboxApi.createTransaction({
+                type: 'income',
+                amount,
+                payment_method: methodMap[method] || 'cash',
+                category_id: 'cat-topup',
+                description: `Пополнение баланса: ${client.name}`,
+                branch: branch || undefined,
+                client_id: client.id || client.email,
+                credit_user_balance: true,
+            } as any);
+            await fetchUsers();
+            toast.success(`Оплата принята: ${formatGel(amount)} на баланс ${client.name}`);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось принять оплату (нужен доступ к кассе)');
+        }
+    };
+
+    return (
+        <>
+            {appearance === 'chip' ? (
+                <button
+                    type="button"
+                    onClick={() => setPayOpen(true)}
+                    disabled={!client}
+                    className={clsx('px-2.5 py-1 text-xs font-semibold rounded-lg bg-unbox-green/15 text-unbox-dark hover:bg-unbox-green/25 transition-colors', className)}
+                >
+                    {label}
+                </button>
+            ) : (
+                <Button
+                    variant={appearance}
+                    size="compact"
+                    disabled={!client}
+                    className={className}
+                    onClick={() => setPayOpen(true)}
+                >
+                    {label}
+                </Button>
             )}
             {/* Портал: попап брони маленький и анимируется (transform) —
                 окно внутри него обрезалось бы и позиционировалось криво. */}
@@ -136,8 +180,8 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                         onClose={() => setPayOpen(false)}
                         onConfirm={handleConfirm}
                         userName={client?.name}
-                        defaultAmount={suggested}
-                        hint={suggestedHint}
+                        defaultAmount={defaultAmount}
+                        hint={hint}
                     />
                 </div>,
                 document.body,
