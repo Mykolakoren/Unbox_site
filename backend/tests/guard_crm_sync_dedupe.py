@@ -358,6 +358,307 @@ def test_safe_mode_still_holds_deletions():
     assert res["deletions_held"] == 1
 
 
+# ─── D: перенос брони двигает событие ───────────────────────────────────
+
+def _seed_owner(s, master=True):
+    """Специалист как строка User (нужен _push_session_moves_to_gcal)."""
+    from uuid import uuid4
+    import app.api.v1.bookings.routes  # noqa: F401 — регистрирует все модели (Specialist и т.д.)
+    from app.models.user import User
+    uid = uuid4()
+    s.add(User(id=uid, email="sp1@example.com", name="Спец", hashed_password="x",
+               crm_data={"calendar_id": "cal@example.com", "gcal_source_of_truth": master}))
+    return str(uid)
+
+
+def _fake_calendar(p, *, exact_at=None, existing_event=None, fail_update=False):
+    """Замоканный календарь: find_matching_event видит событие `existing_event`
+    ровно на времени `exact_at`; update/insert только записываются."""
+    import app.services.crm_calendar as cc
+    calls = {"update": [], "create": [], "find": []}
+
+    def _find(cal, name, alias, when, dur=60):
+        calls["find"].append(when)
+        if exact_at is not None and existing_event and abs((when - exact_at).total_seconds()) < 60:
+            return existing_event, "exact"
+        return None, None
+
+    def _update(*a, **k):
+        # Зовут и позиционно (move_or_attach_event), и именованно (sessions.py).
+        names = ("calendar_id", "event_id", "client_name", "alias_code",
+                 "session_date", "duration_minutes", "notes")
+        args = dict(zip(names, a))
+        args.update(k)
+        if fail_update:
+            raise RuntimeError("Google 503")
+        calls["update"].append((args["event_id"], args["session_date"], args.get("duration_minutes", 60)))
+
+    def _create(cal, name, alias, when, dur=60, notes=None, session_id=None, booking_id=None):
+        calls["create"].append(when)
+        return "evCreated"
+
+    p.set(cc, "find_matching_event", _find)
+    p.set(cc, "update_calendar_event", _update)
+    p.set(cc, "create_calendar_event", _create)
+    return calls
+
+
+def test_booking_reschedule_moves_calendar_event():
+    """Перенос брони 18:00 → 19:40: сессия едет, событие клиента на старом
+    времени привязывается к сессии и двигается (а не остаётся сиротой, которую
+    синк превратит в дубль/откат)."""
+    from uuid import uuid4
+    from sqlmodel import Session
+    from app.models.booking import Booking
+    from app.models.therapy_session import TherapySession
+    from app.api.v1.bookings.routes import (
+        _push_session_moves_to_gcal, _sync_linked_session_to_booking,
+    )
+
+    eng = _engine()
+    d18 = _day(hour_utc=14)
+    bid = uuid4()
+    with Session(eng) as s:
+        spid = _seed_owner(s)
+        from app.models.therapist_client import TherapistClient
+        s.add(TherapistClient(id="c1", specialist_id=spid, name="Анна Петрова", alias_code="1234"))
+        s.add(Booking(id=bid, resource_id="cab1", location_id="loc1",
+                      date=(d18 + timedelta(hours=4)).replace(hour=0, minute=0),
+                      start_time="18:00", duration=60, status="confirmed",
+                      user_id="sp1@example.com", final_price=20, base_price=20,
+                      payment_method="balance"))
+        s.add(TherapySession(id="s1", client_id="c1", specialist_id=spid, date=d18,
+                             booking_id=str(bid), is_booked=True))
+        s.commit()
+
+    p = _Patch()
+    calls = _fake_calendar(p, exact_at=d18, existing_event={"id": "evOld", "summary": "Анна Петрова #1234"})
+    try:
+        with Session(eng) as s:
+            b = s.get(Booking, bid)
+            b.start_time = "19:40"
+            b.duration = 90
+            s.add(b)
+            s.commit()
+            move = _sync_linked_session_to_booking(s, b, old_booking_duration=60)
+            s.commit()
+            assert move and move["old_date"] == d18, "перенос брони не вернул описание переноса сессии"
+            _push_session_moves_to_gcal(s, [move])
+        with Session(eng) as s:
+            ts = s.get(TherapySession, "s1")
+            assert ts.date == d18 + timedelta(hours=1, minutes=40), "сессия не поехала за бронью"
+            assert ts.duration_minutes == 90, "длительность брони не перенесена в сессию"
+            assert ts.google_event_id == "evOld", "событие на старом времени не привязано"
+        assert calls["update"] and calls["update"][0][0] == "evOld", "событие не сдвинуто"
+        assert calls["update"][0][1] == d18 + timedelta(hours=1, minutes=40)
+        assert not calls["create"], "создано второе событие вместо переноса"
+    finally:
+        p.undo()
+
+    # Уже привязанная сессия: просто patch по id; сбой Google → уведомление.
+    p = _Patch()
+    calls = _fake_calendar(p, fail_update=True)
+    try:
+        with Session(eng) as s:
+            b = s.get(Booking, bid)
+            b.start_time = "20:00"
+            s.add(b)
+            s.commit()
+            move = _sync_linked_session_to_booking(s, b)
+            s.commit()
+            _push_session_moves_to_gcal(s, [move])
+        with Session(eng) as s:
+            from sqlmodel import select
+            from app.models.notification import Notification
+            n = s.exec(select(Notification).where(Notification.type == "calendar_push_failed")).first()
+            assert n is not None, "сбой переноса события прошёл молча"
+    finally:
+        p.undo()
+
+
+def test_routes_push_session_move_after_commit():
+    """Оба переноса (одиночный и серия) отдают движение события в фон ПОСЛЕ commit."""
+    src = _src("backend/app/api/v1/bookings/routes.py")
+    i = src.find("def reschedule_booking(")
+    body = src[i:src.find("def reschedule_booking_series(")]
+    a = body.find("_sync_linked_session_to_booking(")
+    c = body.find("session.commit()", a)
+    t = body.find("_push_session_moves_to_gcal_bg", a)
+    assert 0 < a < c < t, "событие должно двигаться после commit переноса брони"
+    j = src.find("def reschedule_booking_series(")
+    sbody = src[j:j + 12000]
+    assert "_series_session_moves" in sbody and "_push_session_moves_to_gcal_bg" in sbody, \
+        "перенос серии не двигает события сессий"
+
+
+# ─── E: перенос сессии из CRM ────────────────────────────────────────────
+
+def _call_update(eng, sid, data, master=True):
+    from sqlmodel import Session
+    from app.api.v1.crm.sessions import update_session
+    with Session(eng) as s:
+        return update_session(session_id=sid, data=data, session=s, current_user=_user(master))
+
+
+def test_update_session_without_id_finds_and_moves_event():
+    from sqlmodel import Session
+    from app.models.therapy_session import TherapySession, TherapySessionUpdate
+
+    eng = _engine()
+    d18 = _day(hour_utc=14)
+    with Session(eng) as s:
+        _seed_client(s)
+        s.add(TherapySession(id="s1", client_id="c1", specialist_id="sp1", date=d18))
+        s.commit()
+    new_tbs = (d18 + timedelta(hours=4 + 1)).replace(minute=40)  # 19:40 Тбилиси
+    p = _Patch()
+    calls = _fake_calendar(p, exact_at=d18, existing_event={"id": "evOld", "summary": "Анна Петрова #1234"})
+    try:
+        out = _call_update(eng, "s1", TherapySessionUpdate(date=new_tbs))
+    finally:
+        p.undo()
+    assert out.google_event_id == "evOld", "событие на старом времени не привязано к сессии"
+    assert calls["update"] and calls["update"][0][0] == "evOld", "событие не сдвинуто"
+    assert not calls["create"], "создано второе событие"
+    assert out.calendar_warning is None
+
+
+def test_update_session_patch_failure_returns_warning():
+    from sqlmodel import Session
+    from app.models.therapy_session import TherapySession, TherapySessionUpdate
+
+    eng = _engine()
+    d18 = _day(hour_utc=14)
+    with Session(eng) as s:
+        _seed_client(s)
+        s.add(TherapySession(id="s1", client_id="c1", specialist_id="sp1", date=d18,
+                             google_event_id="evA"))
+        s.commit()
+    p = _Patch()
+    _fake_calendar(p, fail_update=True)
+    try:
+        out = _call_update(eng, "s1", TherapySessionUpdate(date=d18 + timedelta(hours=6)))
+    finally:
+        p.undo()
+    assert out.calendar_warning, "сбой патча Google снова проглочен молча"
+    with Session(eng) as s:
+        assert s.get(TherapySession, "s1").date == d18 + timedelta(hours=2), "перенос в CRM не сохранён"
+
+
+# ─── F: «почти совпало» → 409 ────────────────────────────────────────────
+
+def test_create_session_near_conflict_is_409_without_force():
+    from fastapi import HTTPException
+    from sqlmodel import Session, select
+    import app.services.crm_calendar as cc
+    from app.api.v1.crm.sessions import create_session
+    from app.models.therapy_session import TherapySession, TherapySessionCreate
+
+    eng = _engine()
+    d18 = _day(hour_utc=14)
+    with Session(eng) as s:
+        _seed_client(s)
+        s.add(TherapySession(id="old", client_id="c1", specialist_id="sp1", date=d18,
+                             google_event_id="evNear"))
+        s.commit()
+    near_ev = {"id": "evNear", "summary": "Анна Петрова #1234",
+               "start": {"dateTime": d18.strftime("%Y-%m-%dT%H:%M:%SZ")}}
+    p = _Patch()
+    created = []
+    p.set(cc, "find_matching_event", lambda *a, **k: (near_ev, "near"))
+    p.set(cc, "create_calendar_event", lambda *a, **k: created.append(1) or "evForced")
+    try:
+        req = dict(client_id="c1", date=(d18 + timedelta(hours=5)).replace(minute=0),
+                   push_to_calendar=True)
+        with Session(eng) as s:
+            try:
+                create_session(data=TherapySessionCreate(**req), session=s, current_user=_user())
+                raise AssertionError("near-конфликт не дал 409 — сессия создалась молча")
+            except HTTPException as e:
+                assert e.status_code == 409
+                assert e.detail["code"] == "calendar_near"
+                assert e.detail["existing_session_id"] == "old", "фронту не передана существующая сессия"
+                assert "уже есть встреча в календаре" in e.detail["message"]
+        with Session(eng) as s:
+            assert len(s.exec(select(TherapySession)).all()) == 1, "409, но сессия всё равно записана"
+        with Session(eng) as s:
+            out = create_session(data=TherapySessionCreate(**req, force=True), session=s,
+                                 current_user=_user())
+            assert out.google_event_id == "evForced" and created, "force не создал отдельное событие"
+    finally:
+        p.undo()
+
+
+# ─── G: пуш при создании сессий ──────────────────────────────────────────
+
+def test_session_creation_paths_push_to_calendar():
+    chess = _src("src/components/crm/CrmChessboardView.tsx")
+    hb = chess[chess.find("const handleBooked"):chess.find("const handleMultiSlotSave")]
+    assert "pushToCalendar: true" in hb, "сессия из шахматки CRM не уходит в календарь"
+    ms = chess[chess.find("const handleMultiSlotSave"):chess.find("// Recurring strategy")]
+    assert "pushToCalendar: true" in ms, "мульти-слот шахматки не уходит в календарь"
+    bk = _src("src/pages/crm/CrmBookings.tsx")
+    lk = bk[bk.find("const handleLinkSession"):bk.find("const FILTERS")]
+    assert "pushToCalendar: true" in lk, "привязка брони в CrmBookings не уходит в календарь"
+    rts = _src("backend/app/api/v1/bookings/routes.py")
+    ext = rts[rts.find("ext_crm_calendar_id = None"):rts.find("def dismiss_series_end_reminder")]
+    assert "create_or_link_event" in ext, "продление серии не пушит сессии в календарь"
+    sch = _src("backend/app/api/v1/specialist_schedule.py")
+    link = sch[sch.find("def _link_appointment_to_crm"):]
+    assert "tbilisi_naive_to_utc_naive" in link, "заявка с сайта снова пишет время по Тбилиси вместо UTC"
+
+
+def test_frontend_handles_near_conflict_and_calendar_warning():
+    sheet = _src("src/components/crm/NewSessionSheet.tsx")
+    assert "calendarNearConflict(e)" in sheet and "force: true" in sheet, \
+        "NewSessionSheet не разбирает 409 calendar_near / не умеет «Всё равно создать»"
+    assert "Перенести существующую" in sheet and "crmApi.updateSession(near.existingSessionId" in sheet, \
+        "NewSessionSheet не предлагает перенести существующую встречу"
+    util = _src("src/utils/crmCalendarConflict.ts")
+    assert "d.code !== 'calendar_near'" in util and "force: true" in util
+    client = _src("src/api/client.ts")
+    assert "detail.code === 'calendar_near'" in client, \
+        "глобальный тост 409 перекрикивает вопрос «перенести или создать»"
+    api = _src("src/api/crm.ts")
+    assert "calendarWarning" in api and "toast.warning(warning" in api, \
+        "предупреждение календаря при переносе не показывается"
+
+
+# ─── H: RRULE с timeZone ─────────────────────────────────────────────────
+
+def test_recurring_event_has_timezone():
+    import app.services.crm_calendar as cc
+    captured = {}
+
+    class _Ins:
+        def __init__(self, body):
+            captured["body"] = body
+
+        def execute(self):
+            return {"id": "master1"}
+
+    class _Events:
+        def insert(self, calendarId, body):
+            return _Ins(body)
+
+    class _Svc:
+        def events(self):
+            return _Events()
+
+    p = _Patch()
+    p.set(cc, "_get_calendar_service", lambda: _Svc())
+    try:
+        first = datetime(2026, 11, 2, 14, 0)
+        master, ids = cc.create_recurring_event(
+            "cal@example.com", "Анна", "1234", first, 60, 3, 1)
+    finally:
+        p.undo()
+    body = captured["body"]
+    assert body["start"].get("timeZone") == "Asia/Tbilisi", "RRULE без timeZone — Google отвергнет серию"
+    assert body["end"].get("timeZone") == "Asia/Tbilisi"
+    assert ids[0] == "master1_20261102T140000Z" and len(ids) == 3, "instance-id серии поплыли"
+
+
 if __name__ == "__main__":
     import traceback
     failures = 0

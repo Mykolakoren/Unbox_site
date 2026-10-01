@@ -10,6 +10,7 @@ import { specialistsApi } from '../../api/specialists';
 import { useCrmStore } from '../../store/crmStore';
 import { useUserStore } from '../../store/userStore';
 import { toastApiError } from '../../utils/errors';
+import { calendarNearConflict, type CalendarNearConflict } from '../../utils/crmCalendarConflict';
 import {
     formatDateLabel, formatDayMonth, formatDayMonthShort, formatMoney, formatWeekdayShort,
 } from '../../utils/format';
@@ -35,6 +36,9 @@ import {
  *   существующим pushToCalendar у POST /crm/sessions.
  * - Пишет ТОЛЬКО createSession: без заметок (они шифруются и живут в
  *   createNote) и без чужого специалиста. Дата — naive по Батуми.
+ * - 01.10: в календаре рядом (±3 ч) уже есть встреча клиента → сервер
+ *   отвечает 409 calendar_near; шторка предлагает «Перенести существующую»
+ *   (PATCH той сессии) или «Всё равно создать» (повтор с force: true).
  * - После успеха — onCreated(session); обновить список — дело родителя.
  */
 export interface NewSessionSheetProps {
@@ -116,6 +120,7 @@ export function NewSessionSheet({
     const [daySessions, setDaySessions] = useState<CrmSession[] | null>(null);
     const [errors, setErrors] = useState<{ client?: string; date?: string; time?: string; duration?: string; price?: string }>({});
     const [saving, setSaving] = useState(false);
+    const [near, setNear] = useState<CalendarNearConflict | null>(null);
     const savingRef = useRef(false);
     const dayCache = useRef(new Map<string, CrmSession[]>());
 
@@ -188,6 +193,9 @@ export function NewSessionSheet({
         setPrice(suggestion.w1.price ? String(suggestion.w1.price) : '');
     }, [suggestion]);
 
+    // Конфликт относится к конкретному времени — сменили время, вопрос снят.
+    useEffect(() => { setNear(null); }, [open, date, time, client?.id]);
+
     const chooseMode = (m: DateMode) => {
         setMode(m);
         setErrors(e => ({ ...e, date: undefined }));
@@ -253,7 +261,7 @@ export function NewSessionSheet({
     const validTime = /^\d{1,2}:\d{2}$/.test(time);
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
 
-    const submit = async () => {
+    const submit = async (opts?: { force?: boolean }) => {
         if (savingRef.current) return;
         const next: typeof errors = {};
         if (!client) next.client = 'Выберите клиента';
@@ -281,12 +289,39 @@ export function NewSessionSheet({
                 durationMinutes: dur,
                 price: priceNum,
                 pushToCalendar: calendarConnected && pushCal,
+                ...(opts?.force ? { force: true } : {}),
             });
             if (successToast) toast.success(`Записали: ${client.name}, ${shortDay(date)}, ${time}`);
             onCreated(session);
             onClose();
         } catch (e) {
-            toastApiError(e, 'Не удалось записать сессию');
+            const conflict = calendarNearConflict(e);
+            if (conflict) setNear(conflict);
+            else toastApiError(e, 'Не удалось записать сессию');
+        } finally {
+            savingRef.current = false;
+            setSaving(false);
+        }
+    };
+
+    // «Перенести существующую»: двигаем ту сессию (сервер сдвинет и её событие).
+    const moveExisting = async () => {
+        if (savingRef.current || !near?.existingSessionId || !client) return;
+        let naive: string;
+        try { naive = toTbilisiNaive(date, time); } catch { return; }
+        const dur = Math.round(Number(duration));
+        savingRef.current = true;
+        setSaving(true);
+        try {
+            const moved = await crmApi.updateSession(near.existingSessionId, {
+                date: naive,
+                ...(Number.isFinite(dur) && dur >= 10 ? { durationMinutes: dur } : {}),
+            });
+            if (successToast) toast.success(`Перенесли встречу: ${client.name}, ${shortDay(date)}, ${time}`);
+            onCreated(moved);
+            onClose();
+        } catch (e) {
+            toastApiError(e, 'Не удалось перенести встречу');
         } finally {
             savingRef.current = false;
             setSaving(false);
@@ -305,7 +340,7 @@ export function NewSessionSheet({
             width={480}
             footer={(
                 <>
-                    <Button block loading={saving} disabled={!canSubmit} onClick={submit}>
+                    <Button block loading={saving} disabled={!canSubmit} onClick={() => submit()}>
                         {submitLabel}
                     </Button>
                     <Button block variant="secondary" disabled={saving} onClick={onClose}>
@@ -422,6 +457,26 @@ export function NewSessionSheet({
                             <div role="status" style={warnStyle}>
                                 <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
                                 <span>Это время уже прошло — сессия запишется в прошлое</span>
+                            </div>
+                        )}
+
+                        {/* 01.10: в календаре рядом уже есть встреча клиента */}
+                        {near && (
+                            <div role="alert" style={{ ...warnStyle, flexDirection: 'column', alignItems: 'stretch' }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                    <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                                    <span>{near.message}</span>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    {near.existingSessionId && (
+                                        <Button variant="secondary" disabled={saving || viewingOther} onClick={moveExisting}>
+                                            Перенести существующую
+                                        </Button>
+                                    )}
+                                    <Button variant="quiet" disabled={saving || viewingOther} onClick={() => submit({ force: true })}>
+                                        Всё равно создать
+                                    </Button>
+                                </div>
                             </div>
                         )}
 

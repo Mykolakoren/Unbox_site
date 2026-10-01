@@ -98,7 +98,9 @@ api.interceptors.response.use(
             // {message, conflicts} object as a React child (Minified
             // React error #31).
             showErrorToastOnce(error, apiErrorMessage(error, 'Ошибка валидации данных'));
-        } else if (status === 409 && detail) {
+        } else if (status === 409 && detail && !(typeof detail === 'object' && detail.code === 'calendar_near')) {
+            // calendar_near (01.10) — не ошибка, а вопрос специалисту: экран
+            // сам предложит «Перенести существующую / Всё равно создать».
             showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
         } else if (isTimeoutError(error)) {
             // Timeout — пробрасываем юзеру только если это write. Для GET

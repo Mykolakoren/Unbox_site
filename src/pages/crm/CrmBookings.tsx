@@ -58,6 +58,7 @@ function GHSkeletonRows({ label }: { label: string }) {
 // раньше принимал Date | null, общий принимает str | Date | null —
 // сигнатура шире, рендеринг тот же.
 import { getSafeBookingDate } from '../../utils/bookingHelpers';
+import { createSessionResolvingCalendar } from '../../utils/crmCalendarConflict';
 
 // Wave 1: даты в этом файле — через utils/format (formatDayMonth), статусы
 // брони — через общий StatusBadge (src/design/statuses.ts).
@@ -625,17 +626,21 @@ export function CrmBookings() {
             await addSessionNote(modalExistingSessionId);
             toast.success('Сессия обновлена');
         } else {
-            const created = await useCrmStore.getState().createSession({
+            // 01.10: сессия сразу уходит в Google Календарь (если подключён);
+            // «рядом уже есть встреча» — спросим, перенести её или создать.
+            const store = useCrmStore.getState();
+            const created = await createSessionResolvingCalendar(store.createSession, store.updateSession, {
                 clientId,
                 date: sessionDate,
                 durationMinutes: dur,
                 price: price || undefined,
                 bookingId: modalBooking.id,
                 isBooked: true,
+                pushToCalendar: true,
             });
             // Accumulate offset for next slot in split mode
             slotOffsetRef.current += dur;
-            await addSessionNote(created.id);
+            if (created) await addSessionNote(created.id);
         }
 
         // Refresh sessions

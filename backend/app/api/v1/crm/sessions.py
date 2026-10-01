@@ -227,10 +227,10 @@ def create_session(
                 # предложит «Перенести существующую» или «Всё равно создать»
                 # (повтор запроса с force=true). Ничего не сохраняем.
                 logger.warning(f"[create_session] GCal near-conflict → 409: {res}")
-                _existing_sid = None
+                _existing = None
                 if res.get("conflict_event_id"):
-                    _existing_sid = session.exec(
-                        select(TherapySession.id).where(
+                    _existing = session.exec(
+                        select(TherapySession).where(
                             TherapySession.google_event_id == res["conflict_event_id"],
                             TherapySession.specialist_id == str(current_user.id),
                         )
@@ -255,7 +255,10 @@ def create_session(
                         ),
                         "conflict_start": _when_iso,
                         "event_summary": res.get("summary"),
-                        "existing_session_id": _existing_sid,
+                        "existing_session_id": _existing.id if _existing else None,
+                        # Фронт не предложит «перенести существующую», если у неё
+                        # своя бронь, а мы привязываем новую (сдвинулась бы та).
+                        "existing_has_booking": bool(_existing and _existing.booking_id),
                     },
                 )
 

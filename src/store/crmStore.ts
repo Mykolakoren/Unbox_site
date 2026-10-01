@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { crmApi } from '../api/crm';
+import { calendarNearConflict } from '../utils/crmCalendarConflict';
 
 // Dedup concurrent quick-pay calls per session id — a double-tap on the "Оплатить"
 // button (the flag flips isPaid only AFTER the await) would otherwise fire two
@@ -172,7 +173,9 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
             set((s) => ({ sessions: [session, ...s.sessions] }));
             return session;
         } catch (error) {
-            toast.error('Не удалось создать сессию');
+            // «Рядом уже есть встреча в календаре» — вопрос, а не сбой:
+            // его разбирает createSessionResolvingCalendar на экране.
+            if (!calendarNearConflict(error)) toast.error('Не удалось создать сессию');
             throw error;
         }
     },
