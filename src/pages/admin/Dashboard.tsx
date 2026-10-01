@@ -16,6 +16,8 @@ import { STATUS, COLOR } from '../../design/tokens';
 import { computeDueByBooking } from '../../utils/dueAmounts';
 import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../utils/adminToday';
 import { hasPermission } from '../../utils/permissions';
+import { cashBranchOfBooking } from '../../utils/cashBranch';
+import { useArchivedClients } from '../../hooks/useArchivedClients';
 import { ruCountWord } from '../../utils/plural';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
@@ -96,6 +98,15 @@ export function AdminDashboard() {
     const summary = useMemo(() => todaySummary(rows), [rows]);
     const clients = useMemo(() => byClient(rows, users), [rows, users]);
 
+    // Брони клиентов, которых нет в обычном списке (аккаунт в архиве после
+    // склейки), — подписываем именем из архива с пометкой «архив».
+    const missingUserIds = useMemo(() => {
+        const known = new Set<string>();
+        for (const u of users) { if (u.id) known.add(String(u.id)); if (u.email) known.add(u.email); }
+        return rows.filter(r => r.userId && !known.has(r.userId)).map(r => r.userId);
+    }, [rows, users]);
+    const archived = useArchivedClients(missingUserIds);
+
     const tomorrowSummary = useMemo(() => {
         const t = todayRows({ bookings, users, dueMap, dayKey: nextDayKey(dayKey), resources });
         return { count: t.length, ...todaySummary(t) };
@@ -117,6 +128,11 @@ export function AdminDashboard() {
     const canCash = hasPermission(currentUser, 'finance.manage_cashbox')
         || hasPermission(currentUser, 'finance.view_reports');
     const [cash, setCash] = useState<{ cash: number | null; openedAt: string | null; shiftKnown: boolean } | null>(null);
+    // Перечитываем строку кассы и после «Принять оплату» — иначе «наличные»
+    // стояли старые до перезагрузки страницы. Ответ, пришедший позже нового
+    // запроса, не перетирает свежий (cashReq).
+    const [cashReq, setCashReq] = useState(0);
+    const reloadCash = useCallback(() => setCashReq(n => n + 1), []);
     useEffect(() => {
         if (!canCash) return;
         let cancelled = false;
@@ -129,7 +145,7 @@ export function AdminDashboard() {
             });
         });
         return () => { cancelled = true; };
-    }, [canCash]);
+    }, [canCash, cashReq]);
 
     // Новые брони (созданы сегодня/вчера) — короткий поток внизу.
     const recentBookings = useMemo(
@@ -152,6 +168,8 @@ export function AdminDashboard() {
             overLimit={overLimit}
             tomorrow={tomorrowSummary}
             cash={canCash ? cash : undefined}
+            onPaid={reloadCash}
+            archived={archived}
             recentBookings={recentBookings}
         />
     );
@@ -169,6 +187,10 @@ interface TodayProps {
     tomorrow: { count: number; amount: number; clients: number; label: string };
     /** undefined — нет доступа к кассе (строку не показываем); null — грузится. */
     cash: { cash: number | null; openedAt: string | null; shiftKnown: boolean } | null | undefined;
+    /** После «Принять оплату» — перечитать строку кассы. */
+    onPaid: () => void;
+    /** Архивные клиенты по userId брони — только имя для подписи. */
+    archived: Map<string, AppUser>;
     recentBookings: BookingHistoryItem[];
 }
 
@@ -182,7 +204,7 @@ const monoLabel: React.CSSProperties = {
 };
 
 function GridHouseToday({
-    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, recentBookings,
+    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, onPaid, archived, recentBookings,
 }: TodayProps) {
     const navigate = useNavigate();
     const [filter, setFilter] = useState<'all' | 'due'>('all');
@@ -271,7 +293,8 @@ function GridHouseToday({
                             onChange={setFilter}
                             options={[
                                 { value: 'all', label: `Все · ${rows.length}` },
-                                { value: 'due', label: `Должны · ${dueRows.length}` },
+                                // «Должны · 2» — клиентов, как на телефоне (броней у них может быть больше).
+                                { value: 'due', label: `Должны · ${summary.clients}` },
                             ]}
                         />
                     </div>
@@ -286,11 +309,21 @@ function GridHouseToday({
                             hint={filter === 'due' ? 'Брать сегодня не с кого.' : 'Новые брони появятся здесь сами.'}
                         />
                     ) : (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                        // Ширины колонок заданы: имя клиента — одной строкой с обрезкой,
+                        // телефон — под ним тоже в одну строку (раньше узкая колонка
+                        // клиента переносила имя и телефон на 3–4 строки). Кабинет — под
+                        // временем, чтобы отдать место имени.
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, tableLayout: 'fixed' }}>
+                            <colgroup>
+                                <col style={{ width: 124 }} />
+                                <col />
+                                <col style={{ width: 150 }} />
+                                <col style={{ width: 168 }} />
+                            </colgroup>
                             <thead>
                                 <tr style={{ background: GH.ink5 }}>
-                                    {['Время', 'Клиент', 'Кабинет', 'Статус', 'Оплата'].map((h, i) => (
-                                        <th key={h} scope="col" style={{ ...monoLabel, textAlign: i === 4 ? 'right' : 'left', padding: '8px 12px', fontWeight: 500 }}>{h}</th>
+                                    {['Время', 'Клиент', 'Статус', 'Оплата'].map((h, i) => (
+                                        <th key={h} scope="col" style={{ ...monoLabel, textAlign: i === 3 ? 'right' : 'left', padding: '8px 12px', fontWeight: 500 }}>{h}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -298,6 +331,10 @@ function GridHouseToday({
                                 {shown.map(r => {
                                     const owes = r.due !== null && r.due > 0;
                                     const open = () => navigate(`/admin/bookings?view=grid&highlight=${r.bookingId}`);
+                                    // Клиента нет в обычном списке — аккаунт в архиве (склейка дублей).
+                                    const arch = archived.get(r.userId);
+                                    const name = arch?.name || r.client;
+                                    const phone = r.phone || arch?.phone || null;
                                     return (
                                         <tr
                                             key={r.bookingId}
@@ -314,25 +351,31 @@ function GridHouseToday({
                                                 background: owes ? STATUS.danger.bg : undefined,
                                             }}
                                         >
-                                            <td className="num" style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontFamily: GH_MONO }}>
-                                                {r.time}–{r.endTime}
+                                            <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                <div className="num" style={{ fontFamily: GH_MONO }}>{r.time}–{r.endTime}</div>
+                                                <div style={{ fontSize: 12, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.cabinet}</div>
                                             </td>
                                             <td style={{ padding: '10px 12px', minWidth: 0 }}>
-                                                <Link
-                                                    to={`/admin/users/${encodeURIComponent(r.userId)}`}
-                                                    onClick={e => e.stopPropagation()}
-                                                    style={{ color: GH.ink, fontWeight: 600, textDecoration: 'none' }}
-                                                >
-                                                    {r.client}
-                                                </Link>
-                                                {r.phone && (
-                                                    <div style={{ fontSize: 12, color: GH.ink60 }}>
-                                                        <a href={`tel:${r.phone}`} onClick={e => e.stopPropagation()} style={{ color: GH.ink60 }}>{r.phone}</a>
+                                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                                                    <Link
+                                                        to={`/admin/users/${encodeURIComponent(r.userId)}`}
+                                                        onClick={e => e.stopPropagation()}
+                                                        title={name}
+                                                        style={{ color: GH.ink, fontWeight: 600, textDecoration: 'none', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                    >
+                                                        {name}
+                                                    </Link>
+                                                    {arch && (
+                                                        <span className="ui-badge ui-badge--muted" title="Аккаунт клиента в архиве (склеен с другим)" style={{ flexShrink: 0 }}>архив</span>
+                                                    )}
+                                                </div>
+                                                {phone && (
+                                                    <div style={{ fontSize: 12, color: GH.ink60, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                        <a href={`tel:${phone}`} onClick={e => e.stopPropagation()} style={{ color: GH.ink60 }}>{phone}</a>
                                                     </div>
                                                 )}
                                             </td>
-                                            <td style={{ padding: '10px 12px', color: GH.ink }}>{r.cabinet}</td>
-                                            <td style={{ padding: '10px 12px' }}>
+                                            <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
                                             </td>
                                             <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -365,7 +408,7 @@ function GridHouseToday({
                         ) : (
                             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                                 {toCollect.map(c => (
-                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} />
+                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} />
                                 ))}
                             </ul>
                         )}
@@ -443,7 +486,7 @@ function CashLine({ cash, dayKey }: { cash: TodayProps['cash']; dayKey: string }
     );
 }
 
-function CollectRow({ c, user }: { c: TodayClient; user: AppUser | null }) {
+function CollectRow({ c, user, onPaid }: { c: TodayClient; user: AppUser | null; onPaid: () => void }) {
     // В3: по умолчанию — весь долг клиента, подпись «из них за сегодня».
     const amount = c.total > 0 ? c.total : c.today;
     const hint = c.total > 0
@@ -472,7 +515,12 @@ function CollectRow({ c, user }: { c: TodayClient; user: AppUser | null }) {
                 )}
             </div>
             <div>
-                <AcceptPaymentButton client={user} defaultAmount={amount} hint={hint} appearance="primary" />
+                {/* Филиал — по кабинету первой сегодняшней брони (rows по времени), как на телефоне. */}
+                <AcceptPaymentButton
+                    client={user} defaultAmount={amount} hint={hint} appearance="primary"
+                    branch={c.rows[0] ? cashBranchOfBooking({ resourceId: c.rows[0].cabinetId }) : undefined}
+                    onPaid={onPaid}
+                />
             </div>
         </li>
     );

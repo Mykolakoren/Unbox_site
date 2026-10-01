@@ -20,6 +20,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { formatDateLabel, formatGel } from '../../../utils/format';
+import { useArchivedClients } from '../../../hooks/useArchivedClients';
 
 /** 1 клиент, 2 клиента, 5 клиентов. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -92,6 +93,14 @@ export function MobileAdminDashboard() {
         [bookings, users, dueMap, tomorrowKey],
     );
     const summary = useMemo(() => todaySummary(rowsToday), [rowsToday]);
+    // Брони клиента, чей аккаунт в архиве (склейка дублей): в обычном списке
+    // его нет — подписываем именем из архива с пометкой «архив».
+    const missingUserIds = useMemo(() => {
+        const known = new Set<string>();
+        for (const u of users || []) { if (u.id) known.add(String(u.id)); if (u.email) known.add(u.email); }
+        return [...rowsToday, ...rowsTomorrow].filter(r => r.userId && !known.has(r.userId)).map(r => r.userId);
+    }, [rowsToday, rowsTomorrow, users]);
+    const archived = useArchivedClients(missingUserIds);
     const owing = useMemo(
         () => byClient(rowsToday, users).filter(c => c.today > 0 || c.total > 0),
         [rowsToday, users],
@@ -122,13 +131,33 @@ export function MobileAdminDashboard() {
 
     return (
         <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    Сегодня
-                </h1>
-                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {formatDateLabel(new Date(), { capitalize: true })}
-                </p>
+            {/* «+ Бронь» — в шапке, а не плавающей кнопкой: плавающий «+» лежал
+                поверх строк ленты и закрывал отметку «к оплате / ✓» справа. */}
+            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                    <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
+                        Сегодня
+                    </h1>
+                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                        {formatDateLabel(new Date(), { capitalize: true })}
+                    </p>
+                </div>
+                {/* Бронь от своего имени: сбрасываем «бронь за клиента». */}
+                <Link
+                    to="/m/find"
+                    aria-label="Новая бронь"
+                    onClick={() => setBookingForUser(null)}
+                    className="press"
+                    style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                        minHeight: 44, padding: '0 16px', borderRadius: 22,
+                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
+                        fontSize: 14, fontWeight: 600, textDecoration: 'none',
+                    }}
+                >
+                    <Plus size={18} strokeWidth={2.4} aria-hidden="true" />
+                    Бронь
+                </Link>
             </div>
 
             {approvalsFailed && (
@@ -255,7 +284,7 @@ export function MobileAdminDashboard() {
                         }
                         return (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                {rows.map(r => <DayRow key={r.bookingId} row={r} onOpen={() => openRow(r)} />)}
+                                {rows.map(r => <DayRow key={r.bookingId} row={r} archivedName={archived.get(r.userId)?.name} onOpen={() => openRow(r)} />)}
                             </div>
                         );
                     })()
@@ -346,27 +375,6 @@ export function MobileAdminDashboard() {
                 />
             )}
 
-            {/* «+» — новая бронь (бронь от своего имени: сбрасываем «бронь за клиента»). */}
-            <Link
-                to="/m/find"
-                aria-label="Новая бронь"
-                onClick={() => setBookingForUser(null)}
-                style={{
-                    position: 'fixed',
-                    right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
-                    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-                    width: 56, height: 56,
-                    borderRadius: 28,
-                    background: 'var(--color-ink)',
-                    color: 'var(--color-on-ink)',
-                    display: 'grid', placeItems: 'center',
-                    boxShadow: 'var(--shadow-pop)',
-                    textDecoration: 'none',
-                    zIndex: 30,
-                }}
-            >
-                <Plus size={24} strokeWidth={2.4} />
-            </Link>
         </div>
     );
 }
@@ -378,7 +386,7 @@ const bannerStyle: React.CSSProperties = {
 };
 
 /** Строка дня: время · клиент · кабинет · «к оплате / ✓». Неоплаченная — рамкой danger (В2). */
-function DayRow({ row, onOpen }: { row: TodayRow; onOpen: () => void }) {
+function DayRow({ row, archivedName, onOpen }: { row: TodayRow; archivedName?: string; onOpen: () => void }) {
     const owes = row.due !== null && row.due > 0;
     const note = row.status === 'completed' ? ' · прошла'
         : row.status === 'pending_approval' ? ' · ждёт одобрения' : '';
@@ -404,8 +412,11 @@ function DayRow({ row, onOpen }: { row: TodayRow; onOpen: () => void }) {
                 <span style={{ display: 'block', fontSize: 12, fontWeight: 400, color: 'var(--color-ink-60)' }}>{row.endTime}</span>
             </span>
             <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {row.client}
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {archivedName || row.client}
+                    </span>
+                    {archivedName && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>архив</span>}
                 </span>
                 <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {row.cabinet}{note}
