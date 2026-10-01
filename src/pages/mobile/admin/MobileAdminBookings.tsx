@@ -17,6 +17,7 @@ import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { COLOR } from '../../../design/tokens';
 import { formatDateLabel, formatDayMonth } from '../../../utils/format';
+import { useArchivedClients } from '../../../hooks/useArchivedClients';
 
 /**
  * Mobile admin — bookings overview.
@@ -71,7 +72,27 @@ export function MobileAdminBookings() {
     }, [dayKey]);
     const todayKey = useMemo(() => fmtDate(new Date(), 'yyyy-MM-dd'), []);
 
-    const getUserName = (email: string | null | undefined) => getAdminUserName(users, email);
+    // Брони клиента, чей аккаунт в архиве (склейка дублей): в обычном списке
+    // его нет — подписываем именем из архива с пометкой «архив», а не началом
+    // почты (как «Сегодня» и шахматка). Только подпись: «к оплате» по-прежнему
+    // из dueMap по обычному списку, архив в деньги не подмешиваем.
+    const knownUserIds = useMemo(() => {
+        const known = new Set<string>();
+        for (const u of users || []) { if (u.id) known.add(String(u.id)); if (u.email) known.add(u.email); }
+        return known;
+    }, [users]);
+    const missingUserIds = useMemo(
+        () => bookings
+            .filter(b => b.userId && !knownUserIds.has(b.userId) && bookingDayKey(b) === dayKey)
+            .map(b => b.userId),
+        [bookings, knownUserIds, dayKey],
+    );
+    const archived = useArchivedClients(missingUserIds);
+    const archivedNameOf = (email: string | null | undefined): string | undefined =>
+        email && !knownUserIds.has(email) ? archived.get(email)?.name || undefined : undefined;
+
+    const getUserName = (email: string | null | undefined) =>
+        archivedNameOf(email) ?? getAdminUserName(users, email);
 
     /** System blockers (cleaning, maintenance, etc.) aren't real client
      *  bookings — admin shouldn't read them with the same scanning priority.
@@ -101,11 +122,7 @@ export function MobileAdminBookings() {
         const q = query.trim().toLowerCase();
         return bookings
             .filter(b => {
-                const _d = b.date as any;
-                const bDay = typeof _d === 'string'
-                    ? _d.slice(0, 10)
-                    : fmtDate(new Date(_d), 'yyyy-MM-dd');
-                if (bDay !== dayKey) return false;
+                if (bookingDayKey(b) !== dayKey) return false;
                 if (!showPast && PAST_STATUSES.has(b.status)) return false;
                 if (loc !== 'all' && b.locationId !== loc) return false;
                 if (q) {
@@ -120,13 +137,7 @@ export function MobileAdminBookings() {
     }, [bookings, dayKey, showPast, loc, query, users]);
 
     const counts = useMemo(() => {
-        const dayAll = bookings.filter(b => {
-            const _d = b.date as any;
-            const bDay = typeof _d === 'string'
-                ? _d.slice(0, 10)
-                : fmtDate(new Date(_d), 'yyyy-MM-dd');
-            return bDay === dayKey;
-        });
+        const dayAll = bookings.filter(b => bookingDayKey(b) === dayKey);
         return {
             active: dayAll.filter(b => !PAST_STATUSES.has(b.status)).length,
             past: dayAll.filter(b => PAST_STATUSES.has(b.status)).length,
@@ -134,22 +145,46 @@ export function MobileAdminBookings() {
     }, [bookings, dayKey]);
 
     return (
-        // Нижний отступ под плавающий «+» (56 px + зазор): иначе он закрывал
-        // отметку «к оплате / ✓» у последней брони списка.
+        // Нижний отступ — под нижнее меню, чтобы последняя бронь не уходила под него.
         <div style={{ paddingTop: 12, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
-                    Все брони
-                </h1>
-                {/* P0-fix: было #666 на #fff = 3.4:1 (FAIL). Теперь ink-60
-                    через rgba — реальный контраст 5.4:1 (AA pass). */}
-                <p style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {formatDateLabel(targetDate, { capitalize: true })}
-                    {' · '}
-                    {showPast
-                        ? `всего ${counts.active + counts.past}`
-                        : `активных ${counts.active}${counts.past > 0 ? ` (${counts.past} прошедших скрыто)` : ''}`}
-                </p>
+            {/* «+ Бронь» — в шапке, как на «Сегодня», а не плавающей кнопкой:
+                при прокрутке плавающий «+» ложился на отметку «к оплате / ✓»
+                справа в строке. Кнопка тёмная и с подписью — быстрый «+»
+                (просьба владельца, июнь) остаётся на виду. */}
+            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
+                        Все брони
+                    </h1>
+                    {/* P0-fix: было #666 на #fff = 3.4:1 (FAIL). Теперь ink-60
+                        через rgba — реальный контраст 5.4:1 (AA pass). */}
+                    <p style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                        {formatDateLabel(targetDate, { capitalize: true })}
+                        {' · '}
+                        {showPast
+                            ? `всего ${counts.active + counts.past}`
+                            : `активных ${counts.active}${counts.past > 0 ? ` (${counts.past} прошедших скрыто)` : ''}`}
+                    </p>
+                </div>
+                {/* 2026-06-06 owner: «+ Новая бронь» для админа. Ведёт на /m/find —
+                    общий flow поиска слота; MobileCheckout сам включает выбор
+                    «За кого бронируешь?» (isAdminActor). Бронь от своего имени:
+                    сбрасываем «бронь за клиента». */}
+                <Link
+                    to="/m/find"
+                    aria-label="Новая бронь"
+                    onClick={() => setBookingForUser(null)}
+                    className="press"
+                    style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                        minHeight: 44, padding: '0 16px', borderRadius: 22,
+                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
+                        fontSize: 14, fontWeight: 600, textDecoration: 'none',
+                    }}
+                >
+                    <Plus size={18} strokeWidth={2.4} aria-hidden="true" />
+                    Бронь
+                </Link>
             </div>
 
             {/* ── КОГДА ── Day chips + date picker.
@@ -296,6 +331,7 @@ export function MobileAdminBookings() {
                     const l = LOCATIONS.find(x => x.id === r?.locationId);
                     const isBlocker = isSystemBlocker(b.userId);
                     const userName = getUserName(b.userId);
+                    const isArchived = !isBlocker && !!archivedNameOf(b.userId);
                     // Завершённое/отменённое/перенесённое — это прошлое.
                     // Притушиваем визуально, чтобы активные брони выделялись.
                     const isPast = b.status === 'completed'
@@ -308,7 +344,7 @@ export function MobileAdminBookings() {
                         <button
                             key={b.id}
                             onClick={() => setSheet(b)}
-                            aria-label={`${b.startTime}, ${userName}, ${isBlocker ? 'блок' : statusLabel('booking', b.status, 'staff')}`}
+                            aria-label={`${b.startTime}, ${userName}${isArchived ? ' (архив)' : ''}, ${isBlocker ? 'блок' : statusLabel('booking', b.status, 'staff')}`}
                             className="press"
                             style={{
                                 background: isBlocker ? 'var(--color-sunken)' : 'var(--color-card)',
@@ -346,6 +382,7 @@ export function MobileAdminBookings() {
                                         // чтобы CAPS не кричал в общем списке.
                                         textTransform: isBlocker ? 'capitalize' : 'none',
                                     }}>{isBlocker ? userName.toLowerCase() : userName}</span>
+                                    {isArchived && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>архив</span>}
                                 </div>
                                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
                                     {r?.name || b.resourceId} · {l?.name || ''} · {formatDuration(b.duration ?? 60)}
@@ -376,7 +413,10 @@ export function MobileAdminBookings() {
             {/* Шторки общие с дашбордом (bookingSheets.tsx). */}
             <AdminBookingSheets
                 booking={sheet}
-                getUserName={getUserName}
+                getUserName={email => {
+                    const arch = archivedNameOf(email);
+                    return arch ? `${arch} (архив)` : getAdminUserName(users, email);
+                }}
                 onClose={() => setSheet(null)}
                 acceptPayment={b => {
                     const p = acceptPaymentFor(b, bookings, users, dueMap);
@@ -401,34 +441,14 @@ export function MobileAdminBookings() {
                 />
             )}
 
-            {/* 2026-06-06 owner: FAB «+ Новая бронь» для админа.
-                Ведёт на /m/find — общий клиентский flow поиска слота, но
-                MobileCheckout автоматически активирует admin user-picker
-                «За кого бронируешь?» по isAdminActor-чеку (см. MobileCheckout
-                lines 401-430). Минимум кода, переиспользует существующее. */}
-            <Link
-                to="/m/find"
-                aria-label="Новая бронь"
-                onClick={() => setBookingForUser(null)}
-                style={{
-                    position: 'fixed',
-                    right: 16,
-                    // Над bottom-nav (72px высота + 8px зазор + safe-area).
-                    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-                    width: 56, height: 56,
-                    borderRadius: 28,
-                    background: 'var(--color-ink)',
-                    color: 'var(--color-on-ink)',
-                    display: 'grid', placeItems: 'center',
-                    boxShadow: 'var(--shadow-pop)',
-                    textDecoration: 'none',
-                    zIndex: 30,
-                }}
-            >
-                <Plus size={24} strokeWidth={2.4} />
-            </Link>
         </div>
     );
+}
+
+/** День брони yyyy-MM-dd (в сторе дата бывает и строкой, и Date). */
+function bookingDayKey(b: BookingHistoryItem): string {
+    const d = b.date as any;
+    return typeof d === 'string' ? d.slice(0, 10) : fmtDate(new Date(d), 'yyyy-MM-dd');
 }
 
 /** Section label — было визуально склеено в одну стену чипов. */
