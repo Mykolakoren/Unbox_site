@@ -6,19 +6,10 @@ import { type CrmClient } from '../../api/crm';
 import { RESOURCES } from '../../utils/data';
 import { isAfter, isBefore } from 'date-fns';
 import type { BookingHistoryItem } from '../../store/types';
-import {
-    UserCheck,
-    Loader2,
-    X,
-    Search,
-    Link2,
-    Repeat,
-    AlertTriangle,
-} from 'lucide-react';
+import { X, Repeat, AlertTriangle } from 'lucide-react';
 import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
-import clsx from 'clsx';
-import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
+import { CrmChessboardView, PickList, PickRow } from '../../components/crm/CrmChessboardView';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { CURRENCIES } from '../../utils/currency';
 import { formatMoney, formatGel, formatDayMonth } from '../../utils/format';
@@ -26,7 +17,10 @@ import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
-import { Field, TextArea } from '../../components/ui/Field';
+import { Field, Input, TextArea } from '../../components/ui/Field';
+import { Chip, Segmented } from '../../components/ui/Chip';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { apiErrorMessage, toastApiError } from '../../utils/errors';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 
@@ -166,7 +160,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
 
     const handleSubmit = async () => {
         for (const sl of slots) {
-            if (!sl.clientId) { toast.error('Выберите клиента для каждого слота'); return; }
+            if (!sl.clientId) { toast.error('Выберите клиента для каждой части брони'); return; }
             if (sl.duration <= 0) { toast.error('Длительность должна быть > 0'); return; }
         }
         setSaving(true);
@@ -175,8 +169,8 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                 await onConfirm(sl.clientId, Number(sl.price) || 0, sl.notes, sl.duration);
             }
             onClose();
-        } catch {
-            toast.error('Ошибка при создании сессий');
+        } catch (e) {
+            toastApiError(e, 'Не удалось сохранить сессии — попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
@@ -196,281 +190,224 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
         });
     }, [slots, booking.startTime]);
 
+    const submitLabel = existingSessionClientId
+        ? 'Сохранить'
+        : splitMode && slots.length > 1 ? `Создать ${slots.length} ${sessionsWord(slots.length)}` : 'Создать сессию';
+
+    // Волна 3 (X4-04): общая шторка Sheet вместо самодельного оверлея —
+    // Esc, фокус внутри, подвал с кнопкой всегда виден. Создание/изменение
+    // сессий (onConfirm по слотам), цена, отвязка — прежние; поменялась обёртка.
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <div className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200">
-                {/* Header */}
-                <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-card z-10 rounded-t-2xl">
+        <Sheet
+            open
+            onClose={onClose}
+            dismissible={!saving}
+            title={existingSessionClientId ? 'Изменить клиента сессии' : 'Создать сессию из брони'}
+            description={`${resource?.name || 'Кабинет'} · ${bookingDateObj ? formatDayMonth(bookingDateObj, { withYear: 'auto' }) : bookingDate} ${booking.startTime || ''}${booking.duration ? ` · ${booking.duration} мин` : ''}`}
+            width={520}
+            footer={
+                <>
+                    <Button
+                        variant="primary"
+                        loading={saving}
+                        disabled={slots.some(s => !s.clientId) || (splitMode && remainingMinutes < 0)}
+                        onClick={handleSubmit}
+                    >
+                        {submitLabel}
+                    </Button>
+                    <Button variant="secondary" disabled={saving} onClick={onClose}>Отмена</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Пресеты разбивки (02.09, владелец): без переключателя —
+                    одна кнопка сразу отделяет кусок нужной длины, «По часу»
+                    режет всю бронь на равные часовые слоты. */}
+                {!existingSessionClientId && totalDuration > 60 && (
                     <div>
-                        <h3 className="font-bold text-base flex items-center gap-2">
-                            <Link2 size={16} className="text-unbox-green" />
-                            {existingSessionClientId ? 'Изменить клиента сессии' : 'Создать сессию из брони'}
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            {resource?.name || 'Кабинет'} · {bookingDateObj ? formatDayMonth(bookingDateObj, { withYear: 'auto' }) : bookingDate} {booking.startTime || ''}
-                            {booking.duration ? ` · ${booking.duration} мин` : ''}
-                        </p>
-                    </div>
-                    <button onClick={onClose} aria-label="Закрыть" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                        <X size={18} className="text-gray-500" />
-                    </button>
-                </div>
-
-                <div className="p-5 space-y-4">
-                    {/* Пресеты разбивки (02.09, владелец): без переключателя —
-                        одна кнопка сразу отделяет кусок нужной длины, «По часу»
-                        режет всю бронь на равные часовые слоты. */}
-                    {!existingSessionClientId && totalDuration > 60 && (
-                        <div>
-                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
-                                Разбить бронь ({totalDuration / 60} ч)
-                            </div>
-                            <div className="flex gap-1.5 flex-wrap">
-                                {[60, 90, 120].filter(d => d < totalDuration).map(d => (
-                                    <button
-                                        key={d}
-                                        onClick={() => applyPreset([d, totalDuration - d])}
-                                        className="px-3 py-2 rounded-lg text-xs font-semibold border border-unbox-green/40 text-unbox-dark hover:bg-unbox-green/10 transition-colors"
-                                    >
-                                        Отделить {d === 90 ? '1,5 ч' : `${d / 60} ч`}
-                                    </button>
-                                ))}
-                                {totalDuration >= 120 && totalDuration % 60 === 0 && (
-                                    <button
-                                        onClick={() => applyPreset(Array(totalDuration / 60).fill(60))}
-                                        className="px-3 py-2 rounded-lg text-xs font-semibold border border-unbox-green bg-unbox-green/10 text-unbox-dark hover:bg-unbox-green/20 transition-colors"
-                                    >
-                                        По часу × {totalDuration / 60}
-                                    </button>
-                                )}
-                                {slots.length > 1 && (
-                                    <button
-                                        onClick={() => {
-                                            setSlots([{ ...slots[0], duration: totalDuration }]);
-                                            setActiveSlot(0);
-                                        }}
-                                        className="px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 text-gray-500 hover:border-gray-300 transition-colors"
-                                    >
-                                        Не разбивать
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Slot tabs (if split mode) */}
-                    {splitMode && slots.length > 0 && (
-                        <div className="flex gap-1.5 flex-wrap">
-                            {slots.map((sl, idx) => {
-                                const c = clients.find(cc => cc.id === sl.clientId);
-                                return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => { setActiveSlot(idx); setSearch(''); }}
-                                        className={clsx(
-                                            'px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5',
-                                            activeSlot === idx
-                                                ? 'border-unbox-green bg-unbox-green/10 text-unbox-dark'
-                                                : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                                        )}
-                                    >
-                                        <span className="font-bold">{slotStartTimes[idx]}</span>
-                                        <span>·</span>
-                                        <span>{sl.duration} мин</span>
-                                        {c && <span className="truncate max-w-[80px]">· {c.name}</span>}
-                                        {slots.length > 1 && (
-                                            <span
-                                                onClick={e => { e.stopPropagation(); removeSlot(idx); }}
-                                                title="Убрать слот"
-                                                aria-label="Убрать слот"
-                                                className="ml-1 text-[var(--status-danger-fg)] hover:opacity-70"
-                                            >×</span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                            {remainingMinutes > 0 && (
-                                <button
-                                    onClick={addSlot}
-                                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-ink-60 hover:border-unbox-green hover:text-unbox-green transition-colors"
+                        <div style={SHEET_LABEL}>Разбить бронь ({String(totalDuration / 60).replace('.', ',')} ч)</div>
+                        <div className="ui-chip-row" role="group" aria-label="Разбить бронь">
+                            {[60, 90, 120].filter(d => d < totalDuration).map(d => (
+                                <Chip key={d} onClick={() => applyPreset([d, totalDuration - d])}>
+                                    Отделить {d === 90 ? '1,5 ч' : `${d / 60} ч`}
+                                </Chip>
+                            ))}
+                            {totalDuration >= 120 && totalDuration % 60 === 0 && (
+                                <Chip onClick={() => applyPreset(Array(totalDuration / 60).fill(60))}>
+                                    По часу × {totalDuration / 60}
+                                </Chip>
+                            )}
+                            {slots.length > 1 && (
+                                <Chip
+                                    onClick={() => {
+                                        setSlots([{ ...slots[0], duration: totalDuration }]);
+                                        setActiveSlot(0);
+                                    }}
                                 >
-                                    + Слот
-                                </button>
+                                    Не разбивать
+                                </Chip>
                             )}
                         </div>
-                    )}
+                    </div>
+                )}
 
-                    {/* Active slot editor */}
-                    {currentSlot && (
-                        <>
-                            {/* Client picker */}
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-2">
-                                    Клиент {splitMode ? `(Слот ${activeSlot + 1})` : ''} *
-                                </label>
-                                <div className="relative mb-2">
-                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
-                                    <input
-                                        type="text"
-                                        value={search}
-                                        onChange={e => setSearch(e.target.value)}
-                                        placeholder="Поиск по имени, телефону..."
-                                        className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green focus:ring-2 focus:ring-unbox-green/10"
-                                    />
-                                </div>
-                                <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
-                                    {filteredClients.length === 0 ? (
-                                        <div className="p-4 text-center text-sm text-ink-60">Клиенты не найдены</div>
-                                    ) : filteredClients.map(client => (
+                {/* Части брони (если разбита) */}
+                {splitMode && slots.length > 0 && (
+                    <div className="ui-chip-row" role="group" aria-label="Части брони">
+                        {slots.map((sl, idx) => {
+                            const c = clients.find(cc => cc.id === sl.clientId);
+                            return (
+                                <span key={idx} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                    <Chip
+                                        selected={activeSlot === idx}
+                                        onClick={() => { setActiveSlot(idx); setSearch(''); }}
+                                    >
+                                        <span className="num">{slotStartTimes[idx]}</span>
+                                        <span style={{ fontWeight: 400 }}>· {sl.duration} мин</span>
+                                        {c && <span style={{ fontWeight: 400, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {c.name}</span>}
+                                    </Chip>
+                                    {slots.length > 1 && (
                                         <button
-                                            key={client.id}
-                                            onClick={() => updateSlot(activeSlot, { clientId: client.id })}
-                                            className={clsx(
-                                                'w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors border-b border-gray-100 last:border-0',
-                                                currentSlot.clientId === client.id
-                                                    ? 'bg-unbox-green/10 text-unbox-dark'
-                                                    : 'hover:bg-card'
-                                            )}
+                                            type="button"
+                                            onClick={() => removeSlot(idx)}
+                                            aria-label={`Убрать часть ${slotStartTimes[idx]}`}
+                                            title="Убрать эту часть"
+                                            style={{
+                                                width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                                background: 'none', border: 0, cursor: 'pointer', color: 'var(--status-danger-fg)',
+                                            }}
                                         >
-                                            <div className={clsx(
-                                                'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                                currentSlot.clientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
-                                            )}>
-                                                {client.name?.[0]?.toUpperCase() ?? '?'}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="font-medium text-sm truncate">{client.name}</div>
-                                                {client.aliasCode && (
-                                                    <div className="text-xs text-ink-60 font-mono">{client.aliasCode}</div>
-                                                )}
-                                            </div>
-                                            {currentSlot.clientId === client.id && (
-                                                <UserCheck size={14} className="ml-auto text-unbox-green shrink-0" />
-                                            )}
+                                            <X size={16} aria-hidden="true" />
                                         </button>
-                                    ))}
-                                </div>
-                            </div>
+                                    )}
+                                </span>
+                            );
+                        })}
+                        {remainingMinutes > 0 && (
+                            <Chip onClick={addSlot}>+ Часть</Chip>
+                        )}
+                    </div>
+                )}
 
-                            {/* Price & Duration */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                        Стоимость, {currencySign(selectedClient?.currency)}
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={currentSlot.price}
-                                        onChange={e => updateSlot(activeSlot, { price: e.target.value })}
-                                        placeholder={selectedClient ? String(selectedClient.basePrice) : '0'}
-                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                        Длит. (мин)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={currentSlot.duration}
-                                        onChange={e => {
-                                            const v = Math.max(15, Math.min(Number(e.target.value) || 15, totalDuration));
-                                            updateSlot(activeSlot, { duration: v });
-                                        }}
-                                        disabled={!splitMode}
-                                        className={clsx(
-                                            'w-full px-3 py-2 text-sm rounded-xl border',
-                                            splitMode
-                                                ? 'border-gray-200 focus:outline-none focus:border-unbox-green'
-                                                : 'border-gray-100 bg-gray-50 text-gray-500'
-                                        )}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Notes */}
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                    Заметка к сессии
-                                </label>
-                                <textarea
-                                    value={currentSlot.notes}
-                                    onChange={e => updateSlot(activeSlot, { notes: e.target.value })}
-                                    placeholder="Тема сессии, подготовка..."
-                                    rows={2}
-                                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green resize-none"
+                {/* Редактор выбранной части */}
+                {currentSlot && (
+                    <>
+                        <div>
+                            <Field label={splitMode ? `Клиент (часть ${activeSlot + 1})` : 'Клиент'} required>
+                                <Input
+                                    kind="search"
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    placeholder="Имя, телефон или код"
                                 />
-                            </div>
-                        </>
-                    )}
-
-                    {/* Summary for split mode */}
-                    {splitMode && slots.length > 1 && (
-                        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
-                            <div className="text-xs font-semibold text-gray-500 uppercase">Итого слотов: {slots.length}</div>
-                            {slots.map((sl, idx) => {
-                                const c = clients.find(cc => cc.id === sl.clientId);
-                                return (
-                                    <div key={idx} className="flex justify-between text-xs text-gray-600">
-                                        <span>{slotStartTimes[idx]} — {c?.name || '(не выбран)'}</span>
-                                        <span>{sl.duration} мин · {formatMoney(Number(sl.price) || 0, { currency: c?.currency })}</span>
+                            </Field>
+                            <PickList label="Клиенты">
+                                {filteredClients.length === 0 ? (
+                                    <div style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)', padding: '12px' }}>
+                                        Никого не нашли — проверьте имя или код
                                     </div>
-                                );
-                            })}
-                            {remainingMinutes !== 0 && (
-                                <div className={clsx('text-xs font-medium flex items-center gap-1', remainingMinutes > 0 ? 'text-[var(--status-pending-fg)]' : 'text-[var(--status-danger-fg)]')}>
-                                    <AlertTriangle size={12} className="shrink-0" aria-hidden="true" />
-                                    {remainingMinutes > 0 ? `Не распределено: ${remainingMinutes} мин` : `Превышение: ${Math.abs(remainingMinutes)} мин`}
-                                </div>
-                            )}
+                                ) : filteredClients.map(client => (
+                                    <PickRow
+                                        key={client.id}
+                                        selected={currentSlot.clientId === client.id}
+                                        onClick={() => updateSlot(activeSlot, { clientId: client.id })}
+                                        meta={client.aliasCode ? `#${client.aliasCode}` : undefined}
+                                    >
+                                        {client.name}
+                                    </PickRow>
+                                ))}
+                            </PickList>
                         </div>
-                    )}
-                </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 12 }}>
+                            <Field label="Стоимость сессии">
+                                {/* type="number" — как раньше: та же разборка суммы. */}
+                                <Input
+                                    kind="money"
+                                    type="number"
+                                    value={currentSlot.price}
+                                    onChange={e => updateSlot(activeSlot, { price: e.target.value })}
+                                    placeholder={selectedClient ? String(selectedClient.basePrice) : '0'}
+                                    suffix={currencySign(selectedClient?.currency)}
+                                />
+                            </Field>
+                            <Field label="Длительность" hint={splitMode ? undefined : 'Вся бронь'}>
+                                <Input
+                                    kind="integer"
+                                    type="number"
+                                    value={currentSlot.duration}
+                                    onChange={e => {
+                                        const v = Math.max(15, Math.min(Number(e.target.value) || 15, totalDuration));
+                                        updateSlot(activeSlot, { duration: v });
+                                    }}
+                                    disabled={!splitMode}
+                                    suffix="мин"
+                                />
+                            </Field>
+                        </div>
+
+                        <Field label="Заметка к сессии" optional hint="Попадёт в «Заметки» клиента">
+                            <TextArea
+                                value={currentSlot.notes}
+                                onChange={e => updateSlot(activeSlot, { notes: e.target.value })}
+                                placeholder="Тема сессии, подготовка…"
+                                rows={2}
+                            />
+                        </Field>
+                    </>
+                )}
+
+                {/* Итог по частям */}
+                {splitMode && slots.length > 1 && (
+                    <div style={{ background: 'var(--color-sunken)', padding: 12, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--text-small)' }}>
+                        <div style={{ fontWeight: 500 }}>Частей: {slots.length}</div>
+                        {slots.map((sl, idx) => {
+                            const c = clients.find(cc => cc.id === sl.clientId);
+                            return (
+                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: 'var(--color-ink-80)' }}>
+                                    <span><span className="num">{slotStartTimes[idx]}</span> — {c?.name || 'клиент не выбран'}</span>
+                                    <span className="num">{sl.duration} мин · {formatMoney(Number(sl.price) || 0, { currency: c?.currency })}</span>
+                                </div>
+                            );
+                        })}
+                        {remainingMinutes !== 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500, color: remainingMinutes > 0 ? 'var(--status-pending-fg)' : 'var(--status-danger-fg)' }}>
+                                <AlertTriangle size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
+                                {remainingMinutes > 0 ? `Не распределено: ${remainingMinutes} мин` : `Превышение: ${Math.abs(remainingMinutes)} мин`}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Отвязка клиента (02.09, владелец): сессия удаляется,
                     бронь остаётся свободной для привязки другого клиента. */}
                 {existingSessionClientId && onUnlink && (
-                    <div className="px-5 pb-1">
-                        <button
-                            onClick={async () => {
-                                const ok = await confirm({
-                                    title: 'Отвязать клиента от брони?',
-                                    body: 'Сессия удалится, а бронь кабинета останется — к ней можно будет привязать другого клиента.',
-                                    confirmLabel: 'Отвязать клиента',
-                                    cancelLabel: 'Оставить',
-                                    tone: 'danger',
-                                });
-                                if (!ok) return;
-                                await onUnlink();
-                            }}
-                            className="w-full py-2 rounded-xl border border-[var(--status-danger-fg)]/30 text-[var(--status-danger-fg)] text-xs font-semibold hover:bg-[var(--status-danger-bg)] transition-colors"
-                        >
-                            Отвязать клиента от брони
-                        </button>
-                    </div>
+                    <Button
+                        variant="secondary"
+                        onClick={async () => {
+                            const ok = await confirm({
+                                title: 'Отвязать клиента от брони?',
+                                body: 'Сессия удалится, а бронь кабинета останется — к ней можно будет привязать другого клиента.',
+                                confirmLabel: 'Отвязать клиента',
+                                cancelLabel: 'Оставить',
+                                tone: 'danger',
+                            });
+                            if (!ok) return;
+                            await onUnlink();
+                        }}
+                        style={{ color: 'var(--status-danger-fg)', alignSelf: 'flex-start' }}
+                    >
+                        Отвязать клиента от брони
+                    </Button>
                 )}
-
-                {/* Footer */}
-                <div className="flex gap-3 p-5 pt-0 sticky bottom-0 bg-card rounded-b-2xl">
-                    <button
-                        onClick={onClose}
-                        className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                        Отмена
-                    </button>
-                    <button
-                        onClick={handleSubmit}
-                        disabled={saving || slots.some(s => !s.clientId) || (splitMode && remainingMinutes < 0)}
-                        className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                    >
-                        {saving && <Loader2 size={14} className="animate-spin" />}
-                        {existingSessionClientId ? 'Сохранить' : splitMode && slots.length > 1 ? `Создать ${slots.length} ${sessionsWord(slots.length)}` : 'Создать сессию'}
-                    </button>
-                </div>
             </div>
-        </div>
+        </Sheet>
     );
 }
+
+const SHEET_LABEL: React.CSSProperties = {
+    fontSize: 'var(--text-small)', fontWeight: 500, color: 'var(--color-ink-60)', marginBottom: 8,
+};
 
 // BookingCard (карточка старого списка до Grid House) нигде не рендерилась —
 // удалена в wave 1 вместе со своими синими/фиолетовыми цветами.
@@ -519,10 +456,10 @@ export function CrmBookings() {
         setCancellingGroupId(groupId);
         try {
             const res = await bookingsApi.cancelRecurringSeries(groupId);
-            toast.success(`Серия отменена: ${res.cancelled} бронирований`);
+            toast.success(`Серия отменена: ${res.cancelled} ${bookingsWord(res.cancelled)}`);
             setRecurringGroups(prev => prev.filter(g => g.recurringGroupId !== groupId));
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка при отмене серии');
+            toast.error(apiErrorMessage(e, 'Не удалось отменить серию — проверьте интернет и попробуйте ещё раз'));
         } finally {
             setCancellingGroupId(null);
             setConfirmCancelGroupId(null);
@@ -799,120 +736,37 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
     ];
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-            {/* ── Compact header — title + inline KPIs left, action cluster
-                (+ Бронь · Список / Шахматка / Серии) right. Mirrors the
-                admin /admin/bookings layout so the two pages feel like a
-                pair. */}
-            <div style={{
-                padding: 'clamp(14px, 3vw, 20px) clamp(16px, 4vw, 32px) 12px',
-                borderBottom: `2px solid ${GH.ink}`,
-                marginBottom: 0,
-            }}>
-                <div style={ghMono}>CRM · Бронирования</div>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'space-between',
-                    gap: 24,
-                    flexWrap: 'wrap',
-                    marginTop: 4,
-                }}>
-                    {/* LEFT: title + inline KPIs */}
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 24, flexWrap: 'wrap' }}>
-                        <h1 style={{
-                            fontFamily: GH_SANS,
-                            fontSize: 'clamp(22px, 2.6vw, 32px)',
-                            fontWeight: 800,
-                            letterSpacing: '-0.02em',
-                            lineHeight: 1,
-                            margin: 0,
-                        }}>
-                            Мои бронирования.
-                        </h1>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 24, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
-                                    {stats.upcoming}
-                                </span>
-                                <span style={{ ...ghMono, fontSize: 12 }}>предстоит</span>
-                            </span>
-                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1 }}>
-                                    {stats.linked}
-                                </span>
-                                <span style={{ ...ghMono, fontSize: 12 }}>с клиентом</span>
-                            </span>
-                            {stats.unlinked > 0 && (
-                                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.danger, lineHeight: 1 }}>
-                                        {stats.unlinked}
-                                    </span>
-                                    <span style={{ ...ghMono, fontSize: 12 }}>без клиента</span>
-                                </span>
-                            )}
-                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1 }}>
-                                    {stats.total}
-                                </span>
-                                <span style={{ ...ghMono, fontSize: 12 }}>всего</span>
-                            </span>
-                        </div>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            {/* Волна 3 (G5-22 / G5-16): общая шапка PageHeader. «+ Бронь» убрана:
+                она лишь переключала на шахматку, где специалист уже стоит, а
+                «ближайший свободный слот» пришлось бы угадывать — кабинет и
+                время за специалиста выбирать нельзя (это деньги). Бронь
+                создаётся в самой шахматке: выделить свободное время → окно брони. */}
+            <PageHeader
+                title="Бронирования"
+                description={
+                    <span className="num" style={{ fontSize: 'var(--text-small)' }}>
+                        {stats.upcoming} впереди · {stats.linked} с клиентом
+                        {stats.unlinked > 0 && <> · {stats.unlinked} без клиента</>}
+                        {' '}· всего {stats.total}
+                    </span>
+                }
+                actions={
+                    <div style={{ width: 320, maxWidth: '100%' }}>
+                        <Segmented
+                            aria-label="Вид"
+                            options={VIEW_MODES.map(v => ({ value: v.key, label: v.label }))}
+                            value={viewMode}
+                            onChange={setViewMode}
+                        />
                     </div>
-
-                    {/* RIGHT: + Бронь next to view toggle */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button
-                            onClick={() => setViewMode('chess')}
-                            style={{
-                                padding: '6px 14px',
-                                border: ghHairline,
-                                cursor: 'pointer',
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase' as const,
-                                background: GH.ink,
-                                color: GH.paper,
-                                display: 'inline-flex', alignItems: 'center', gap: 6,
-                            }}
-                        >
-                            + Бронь
-                        </button>
-                        <div style={{ display: 'flex' }}>
-                            {VIEW_MODES.map((v, i) => (
-                                <button
-                                    key={v.key}
-                                    onClick={() => setViewMode(v.key)}
-                                    style={{
-                                        padding: '6px 14px',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.06em',
-                                        textTransform: 'uppercase' as const,
-                                        background: viewMode === v.key ? GH.ink : 'transparent',
-                                        color: viewMode === v.key ? GH.paper : GH.ink60,
-                                        borderTop: ghHairline,
-                                        borderBottom: ghHairline,
-                                        borderLeft: ghHairline,
-                                        borderRight: i === VIEW_MODES.length - 1 ? ghHairline : 'none',
-                                        transition: 'all 120ms',
-                                    }}
-                                >
-                                    {v.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
+                }
+            />
 
             {/* ── Content ── */}
-            <div style={{ padding: '0 32px 64px' }}>
+            <div style={{ paddingBottom: 48 }}>
                 {viewMode === 'chess' ? (
-                    <div style={{ marginTop: 24 }}><CrmChessboardView /></div>
+                    <CrmChessboardView />
                 ) : viewMode === 'series' ? (
                     <GHSeriesView
                         loadingGroups={loadingGroups} recurringGroups={recurringGroups}
@@ -923,22 +777,11 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                 ) : (
                     <>
                         {/* Filter row */}
-                        <div style={{ display: 'flex', gap: 0, borderBottom: ghHairline, marginTop: 24 }}>
+                        <div className="ui-chip-row" role="group" aria-label="Какие брони показать" style={{ marginBottom: 16 }}>
                             {GH_FILTERS.map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => setFilter(f.key)}
-                                    style={{
-                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                        padding: '10px 16px', background: 'transparent',
-                                        color: filter === f.key ? GH.ink : GH.ink60,
-                                        border: 'none',
-                                        borderBottom: filter === f.key ? `2px solid ${GH.ink}` : '2px solid transparent',
-                                        marginBottom: -1, cursor: 'pointer', transition: 'color 120ms',
-                                    }}
-                                >
-                                    {f.label}{f.count !== undefined ? ` ${f.count}` : ''}
-                                </button>
+                                <Chip key={f.key} selected={filter === f.key} onClick={() => setFilter(f.key)}>
+                                    {f.label}{f.count !== undefined ? <span className="num" style={{ fontWeight: 400 }}> {f.count}</span> : null}
+                                </Chip>
                             ))}
                         </div>
 
@@ -947,11 +790,11 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                             табличный header теряет смысл. */}
                         {!loadingClients && filteredBookings.length > 0 && (
                             <div className="cb-table-header" style={{
-                                display: 'grid', gridTemplateColumns: '40px 110px 1fr 120px 100px',
+                                display: 'grid', gridTemplateColumns: '110px 1fr 120px 100px',
                                 gap: 8,
                                 padding: '8px 0', borderBottom: ghHairline,
                             }}>
-                                {['№', 'Дата', 'Клиент', 'Кабинет', 'Статус'].map(h => (
+                                {['Дата', 'Клиент', 'Кабинет', 'Статус'].map(h => (
                                     <div key={h} style={{ ...ghMono, fontSize: 12 }}>{h}</div>
                                 ))}
                             </div>
@@ -976,14 +819,14 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                             />
                         ) : (
                             <div>
-                                {filteredBookings.map((booking, idx) => {
+                                {filteredBookings.map((booking) => {
                                     const allLinked = sessionsByBookingId.get(booking.id) || [];
                                     const linkedSession = allLinked[0];
                                     const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
                                     return (
                                         <GHBookingRow
                                             key={booking.id}
-                                            booking={booking} index={idx}
+                                            booking={booking}
                                             linkedClient={linkedClient}
                                             linkedSessionId={linkedSession?.id}
                                             linkedSessions={allLinked}
@@ -998,12 +841,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                 )}
             </div>
 
-            {/* Footer */}
-            <div style={{ borderTop: ghHairline, padding: '16px 32px', textAlign: 'center' }}>
-                <span style={ghMono}>Unbox · CRM · Бронирования · {new Date().getFullYear()}</span>
-            </div>
-
-            {/* Legacy modal */}
+            {/* Окно привязки сессии к брони (Sheet) */}
             {modalBooking && (
                 <LinkSessionModal
                     booking={modalBooking}
@@ -1024,8 +862,8 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
 
 // ─── GH: Строка бронирования ─────────────────────────────────────────────────
 
-function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSessions, clientById, onLink }: {
-    booking: BookingHistoryItem; index: number;
+function GHBookingRow({ booking, linkedClient, linkedSessionId, linkedSessions, clientById, onLink }: {
+    booking: BookingHistoryItem;
     linkedClient?: CrmClient; linkedSessionId?: string; linkedSessions?: any[];
     clientById: Map<string, CrmClient>;
     onLink: (b: BookingHistoryItem, sid?: string, cid?: string) => void;
@@ -1104,11 +942,6 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
             onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
-            {/* № */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', minWidth: 28 }}>
-                {String(index + 1).padStart(2, '0')}
-            </div>
-
             {/* Дата + время */}
             <div style={{ flexShrink: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1302,22 +1135,22 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                 for (looked up via crmClientId). Without it the user couldn't
                 tell which series belongs to which client at a glance. */}
             <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 110px 70px 70px 90px 110px 140px',
+                display: 'grid', gridTemplateColumns: '1fr 1fr 130px 70px 70px 90px 110px 160px',
                 padding: '8px 0', borderBottom: ghHairline,
             }}>
-                {['Кабинет', 'Клиент', 'Паттерн', 'Осталось', 'Всего', 'След.', 'Заканчивается', ''].map(h => (
+                {['Кабинет', 'Клиент', 'Повтор', 'Осталось', 'Всего', 'Следующая', 'Последняя', ''].map(h => (
                     <div key={h || 'empty'} style={{ ...ghMono, fontSize: 12 }}>{h}</div>
                 ))}
             </div>
             {recurringGroups.map(g => {
                 const resource = RESOURCES.find((r: any) => r.id === g.resourceId);
-                const patternLabel = g.pattern === 'monthly' ? '4 нед.' : g.pattern === 'biweekly' ? '2 нед.' : 'Еженед.';
+                const patternLabel = g.pattern === 'monthly' ? 'Раз в 4 недели' : g.pattern === 'biweekly' ? 'Раз в 2 недели' : 'Каждую неделю';
                 const isConfirming = confirmCancelGroupId === g.recurringGroupId;
                 const isCancelling = cancellingGroupId === g.recurringGroupId;
                 return (
                     <div key={g.recurringGroupId}
                         style={{
-                            display: 'grid', gridTemplateColumns: '1fr 1fr 110px 70px 70px 90px 110px 140px',
+                            display: 'grid', gridTemplateColumns: '1fr 1fr 130px 70px 70px 90px 110px 160px',
                             alignItems: 'center', padding: '14px 0', borderBottom: ghHairline, transition: 'background 120ms',
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
@@ -1362,8 +1195,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
             })}
 
             {(() => {
-                const chip = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 12, cursor: 'pointer', background: active ? GH.ink : 'transparent', color: active ? GH.paper : GH.ink60 });
-                const inp: React.CSSProperties = { padding: '8px 10px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit', fontSize: 14, width: 170 };
+                const inp: React.CSSProperties = { width: 170 };
                 // Общая шторка вместо самодельного окна: Esc, фокус внутри, подвал с кнопкой.
                 return (
                     <Sheet
@@ -1380,22 +1212,22 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                         }
                     >
                         <div>
-                            <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>ПЕРИОДИЧНОСТЬ</div>
-                            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                                {([['weekly', 'Еженед.'], ['biweekly', 'Раз в 2 нед.'], ['monthly', '4 недели']] as const).map(([p, l]) => (
-                                    <button key={p} onClick={() => setExPattern(p)} style={chip(exPattern === p)}>{l}</button>
+                            <div style={{ fontSize: 'var(--text-small)', fontWeight: 500, color: GH.ink60, marginBottom: 8 }}>Как часто</div>
+                            <div className="ui-chip-row" role="group" aria-label="Как часто" style={{ marginBottom: 16 }}>
+                                {([['weekly', 'Каждую неделю'], ['biweekly', 'Раз в 2 недели'], ['monthly', 'Раз в 4 недели']] as const).map(([p, l]) => (
+                                    <Chip key={p} selected={exPattern === p} onClick={() => setExPattern(p)}>{l}</Chip>
                                 ))}
                             </div>
-                            <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>СКОЛЬКО ДОБАВИТЬ</div>
-                            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                            <div style={{ fontSize: 'var(--text-small)', fontWeight: 500, color: GH.ink60, marginBottom: 8 }}>Сколько добавить</div>
+                            <div className="ui-chip-row" role="group" aria-label="Сколько добавить" style={{ marginBottom: 12 }}>
                                 {([['count', 'По числу'], ['until', 'До даты']] as const).map(([m, l]) => (
-                                    <button key={m} onClick={() => setExMode(m)} style={chip(exMode === m)}>{l}</button>
+                                    <Chip key={m} selected={exMode === m} onClick={() => setExMode(m)}>{l}</Chip>
                                 ))}
                             </div>
                             {exMode === 'count' ? (
-                                <input type="number" min={1} max={52} value={exCount} aria-label="Сколько броней добавить" onChange={e => setExCount(Math.max(1, Math.min(52, Number(e.target.value))))} style={inp} />
+                                <input type="number" min={1} max={52} value={exCount} aria-label="Сколько броней добавить" onChange={e => setExCount(Math.max(1, Math.min(52, Number(e.target.value))))} className="ui-input tabular-nums" style={inp} />
                             ) : (
-                                <input type="date" value={exUntil} aria-label="До какой даты продлить" min={new Date().toISOString().slice(0, 10)} onChange={e => setExUntil(e.target.value)} style={inp} />
+                                <input type="date" value={exUntil} aria-label="До какой даты продлить" min={new Date().toISOString().slice(0, 10)} onChange={e => setExUntil(e.target.value)} className="ui-input" style={inp} />
                             )}
                         </div>
                     </Sheet>

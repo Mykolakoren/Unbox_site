@@ -1,11 +1,20 @@
 /**
  * Payment accounts manager — add, edit, delete custom accounts.
+ *
+ * Волна 3 (пакет D, G5-11): на токенах Grid House — поля ui-input, кнопки
+ * Button, у значков-кнопок подписи для диктора. Сохранение — прежнее
+ * (updatePaymentAccounts из стора).
  */
 import { useState } from 'react';
 import { useCrmStore, type PaymentAccount } from '../../store/crmStore';
 import { CURRENCIES } from '../../utils/currency';
-import { Plus, Pencil, Trash2, Check, X, Wallet } from 'lucide-react';
+import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '../ui/Button';
+import { apiErrorMessage } from '../../utils/errors';
+
+/** Квадратная кнопка-значок 36 px с подписью для диктора. */
+const ICON_BTN = 'inline-flex items-center justify-center w-9 h-9 text-ink-60 hover:text-ink hover:bg-ink-05 transition-colors';
 
 export function PaymentAccountsManager() {
     const { paymentAccounts, updatePaymentAccounts } = useCrmStore();
@@ -29,8 +38,8 @@ export function PaymentAccountsManager() {
             setNewCurrency('');
             setAdding(false);
             toast.success('Счёт добавлен');
-        } catch {
-            toast.error('Ошибка при сохранении');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось добавить счёт — попробуйте ещё раз'));
         }
     };
 
@@ -42,9 +51,9 @@ export function PaymentAccountsManager() {
         try {
             await updatePaymentAccounts(updated);
             setEditing(null);
-            toast.success('Счёт обновлён');
-        } catch {
-            toast.error('Ошибка при сохранении');
+            toast.success('Счёт переименован');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось переименовать счёт — попробуйте ещё раз'));
         }
     };
 
@@ -57,25 +66,22 @@ export function PaymentAccountsManager() {
         try {
             await updatePaymentAccounts(updated);
             toast.success('Счёт удалён');
-        } catch {
-            toast.error('Ошибка при удалении');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось удалить счёт — попробуйте ещё раз'));
         }
     };
 
     return (
         <div className="space-y-3">
-            <h3 className="font-bold text-unbox-dark flex items-center gap-2">
-                <Wallet size={18} /> Счета для оплаты
-            </h3>
-            <p className="text-xs text-ink-60">
-                Настройте список счетов, которые будут доступны при приёме оплаты от клиентов.
+            <p className="text-small text-ink-60">
+                Эти счета вы выбираете, когда отмечаете оплату от клиента.
             </p>
 
-            <div className="space-y-2">
+            <ul className="border-t border-ink-10">
                 {paymentAccounts.map((acc) => (
-                    <div
+                    <li
                         key={acc.id}
-                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-card/60 border border-white/80"
+                        className="flex items-center gap-2 py-2 border-b border-ink-10 flex-wrap"
                     >
                         {editing === acc.id ? (
                             <>
@@ -84,25 +90,32 @@ export function PaymentAccountsManager() {
                                     value={editLabel}
                                     onChange={(e) => setEditLabel(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && handleEdit(acc)}
-                                    className="flex-1 px-2 py-1 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20"
+                                    aria-label={`Новое название счёта «${acc.label}»`}
+                                    className="ui-input flex-1 min-w-[160px]"
                                     autoFocus
                                 />
                                 <button
+                                    type="button"
                                     onClick={() => handleEdit(acc)}
-                                    className="p-1 text-unbox-green hover:bg-unbox-light rounded-lg transition-colors"
+                                    aria-label="Сохранить название"
+                                    title="Сохранить название"
+                                    className={ICON_BTN}
                                 >
-                                    <Check size={16} />
+                                    <Check size={16} aria-hidden="true" />
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => setEditing(null)}
-                                    className="p-1 text-ink-60 hover:bg-gray-100 rounded-lg transition-colors"
+                                    aria-label="Не переименовывать"
+                                    title="Не переименовывать"
+                                    className={ICON_BTN}
                                 >
-                                    <X size={16} />
+                                    <X size={16} aria-hidden="true" />
                                 </button>
                             </>
                         ) : (
                             <>
-                                <span className="flex-1 text-sm text-unbox-dark font-medium">{acc.label}</span>
+                                <span className="flex-1 min-w-[120px] text-body text-ink font-medium">{acc.label}</span>
                                 <select
                                     value={acc.currency || ''}
                                     onChange={async (e) => {
@@ -114,80 +127,77 @@ export function PaymentAccountsManager() {
                                             toast.success(e.target.value
                                                 ? `Счёт «${acc.label}» теперь в ${e.target.value}`
                                                 : `Валюта у счёта «${acc.label}» снята`);
-                                        } catch { toast.error('Ошибка при сохранении'); }
+                                        } catch (err) {
+                                            toast.error(apiErrorMessage(err, 'Не удалось сменить валюту счёта — попробуйте ещё раз'));
+                                        }
                                     }}
+                                    aria-label={`Валюта счёта «${acc.label}»`}
                                     title="Валюта счёта — подставится в платёж при выборе этого счёта"
-                                    className="text-xs text-ink-60 border border-unbox-light rounded-lg px-1.5 py-1 bg-card/80 focus:outline-none"
+                                    className="ui-input w-auto text-small"
                                 >
-                                    <option value="">валюта —</option>
+                                    <option value="">Валюта не задана</option>
                                     {CURRENCIES.map(cur => (
                                         <option key={cur.code} value={cur.code}>{cur.symbol} {cur.code}</option>
                                     ))}
                                 </select>
                                 <button
+                                    type="button"
                                     onClick={() => { setEditing(acc.id); setEditLabel(acc.label); }}
                                     aria-label={`Переименовать счёт «${acc.label}»`}
                                     title="Переименовать"
-                                    className="p-1 text-ink-60 hover:text-unbox-dark hover:bg-gray-100 rounded-lg transition-colors"
+                                    className={ICON_BTN}
                                 >
-                                    <Pencil size={14} />
+                                    <Pencil size={16} aria-hidden="true" />
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => handleDelete(acc.id)}
                                     aria-label={`Удалить счёт «${acc.label}»`}
                                     title="Удалить"
-                                    className="p-1 text-ink-60 hover:text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] rounded-lg transition-colors"
+                                    className={`${ICON_BTN} hover:!text-[var(--status-danger-fg)] hover:!bg-[var(--status-danger-bg)]`}
                                 >
-                                    <Trash2 size={14} />
+                                    <Trash2 size={16} aria-hidden="true" />
                                 </button>
                             </>
                         )}
-                    </div>
+                    </li>
                 ))}
-            </div>
+            </ul>
 
             {adding ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <input
                         type="text"
                         value={newLabel}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-                        placeholder="Название счёта (напр. Mono)..."
-                        className="flex-1 px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20"
+                        placeholder="Например, Mono"
+                        aria-label="Название нового счёта"
+                        className="ui-input flex-1 min-w-[160px]"
                         autoFocus
                     />
                     <select
                         value={newCurrency}
                         onChange={(e) => setNewCurrency(e.target.value)}
-                        className="px-2 py-2 rounded-xl border border-unbox-light text-sm bg-card focus:outline-none"
+                        aria-label="Валюта нового счёта"
+                        className="ui-input w-auto"
                     >
-                        <option value="">валюта —</option>
+                        <option value="">Валюта не задана</option>
                         {CURRENCIES.map(cur => (
                             <option key={cur.code} value={cur.code}>{cur.symbol} {cur.code}</option>
                         ))}
                     </select>
-                    <button
-                        onClick={handleAdd}
-                        disabled={!newLabel.trim()}
-                        className="p-2 text-unbox-green hover:bg-unbox-light rounded-xl transition-colors disabled:opacity-40"
-                    >
-                        <Check size={18} />
-                    </button>
-                    <button
-                        onClick={() => { setAdding(false); setNewLabel(''); }}
-                        className="p-2 text-ink-60 hover:bg-gray-100 rounded-xl transition-colors"
-                    >
-                        <X size={18} />
-                    </button>
+                    <Button variant="primary" onClick={handleAdd} disabled={!newLabel.trim()}>
+                        Добавить
+                    </Button>
+                    <Button variant="quiet" onClick={() => { setAdding(false); setNewLabel(''); }}>
+                        Отмена
+                    </Button>
                 </div>
             ) : (
-                <button
-                    onClick={() => setAdding(true)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-unbox-green/40 text-unbox-green text-sm font-medium hover:bg-unbox-light/40 transition-colors w-full justify-center"
-                >
-                    <Plus size={16} /> Добавить счёт
-                </button>
+                <Button variant="secondary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setAdding(true)}>
+                    Добавить счёт
+                </Button>
             )}
         </div>
     );

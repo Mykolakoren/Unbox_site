@@ -1,8 +1,13 @@
 /**
  * CRM Settings page — payment accounts, currencies, calendar sync, etc.
+ *
+ * Волна 3 (пакет D): общая шапка PageHeader; переключатель «Google Календарь
+ * главный» — настоящий role="switch" (вопрос при включении остался); курсы
+ * валют правят только owner / senior_admin — остальным только чтение
+ * (сервер всё равно проверяет роль в PUT /settings/exchange_rates).
  */
 import { useEffect, useState } from 'react';
-import { Settings, Calendar, Link2, Coins, ShieldCheck, Save, Copy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Link2, ShieldCheck, Save, Copy, CheckCircle, AlertCircle, Plus } from 'lucide-react';
 import { PaymentAccountsManager } from '../../components/crm/PaymentAccountsManager';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
@@ -12,9 +17,20 @@ import { CURRENCIES, EXCHANGE_RATES, fetchExchangeRates, registerCurrenciesFromR
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { STATUS } from '../../design/tokens';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { useUserStore } from '../../store/userStore';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Field, Input } from '../../components/ui/Field';
+import { apiErrorMessage } from '../../utils/errors';
+
+/** Кто может менять курсы валют — то же правило, что на сервере
+ *  (settings.py: PUT /settings/exchange_rates). */
+const RATE_EDITOR_ROLES = ['owner', 'senior_admin'];
 
 export function CrmSettings() {
-        const { fetchPaymentAccounts } = useCrmStore();
+    const { fetchPaymentAccounts } = useCrmStore();
+    const role = useUserStore(st => st.currentUser?.role);
+    const canEditRates = RATE_EDITOR_ROLES.includes(role || '');
     const { confirm } = useConfirmDialog();
     const [calendarId, setCalendarId] = useState('');
     const [calendarSaved, setCalendarSaved] = useState(false);
@@ -59,7 +75,7 @@ export function CrmSettings() {
         } catch (e: any) {
             setConnTest({
                 state: 'error',
-                message: e?.response?.data?.detail || 'Сервер не ответил — попробуйте через минуту',
+                message: apiErrorMessage(e, 'Сервер не ответил — попробуйте через минуту'),
             });
         }
     };
@@ -78,10 +94,10 @@ export function CrmSettings() {
         try {
             await crmApi.updateSettings({ calendarId: calendarId || null });
             setCalendarSaved(true);
-            toast.success('Настройки сохранены');
+            toast.success('Календарь сохранён');
             setTimeout(() => setCalendarSaved(false), 2000);
-        } catch {
-            toast.error('Ошибка при сохранении');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось сохранить календарь — проверьте интернет и попробуйте ещё раз'));
         }
     };
 
@@ -91,7 +107,7 @@ export function CrmSettings() {
         // поэтому спрашиваем; выключение (защитный режим) — сразу (G5-25).
         if (newVal) {
             const ok = await confirm({
-                title: 'Сделать Google Calendar главным?',
+                title: 'Сделать Google Календарь главным?',
                 body: 'Удалили событие в Google — сессия отменится, а привязанная бронь кабинета снимется автоматически. Удаляйте события осознанно.',
                 confirmLabel: 'Сделать главным',
                 cancelLabel: 'Оставить защитный режим',
@@ -103,9 +119,9 @@ export function CrmSettings() {
         try {
             await crmApi.updateSettings({ googleCalendarSourceOfTruth: newVal });
             setSourceOfTruth(newVal);
-            toast.success(newVal ? 'Google Calendar — источник правды' : 'Режим отключён');
-        } catch {
-            toast.error('Ошибка при сохранении');
+            toast.success(newVal ? 'Google Календарь теперь главный' : 'Включён защитный режим');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось переключить режим — попробуйте ещё раз'));
         } finally {
             setSotSaving(false);
         }
@@ -118,8 +134,8 @@ export function CrmSettings() {
             // Update in-memory rates
             Object.assign(EXCHANGE_RATES, rates);
             toast.success('Курсы сохранены');
-        } catch {
-            toast.error('Ошибка при сохранении курсов');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось сохранить курсы — попробуйте ещё раз'));
         } finally {
             setRatesSaving(false);
         }
@@ -139,6 +155,7 @@ export function CrmSettings() {
                 setRates={setRates}
                 ratesSaving={ratesSaving}
                 hasRateChanges={hasRateChanges}
+                canEditRates={canEditRates}
                 onSaveCalendar={handleSaveCalendar}
                 onToggleSourceOfTruth={handleToggleSourceOfTruth}
                 onSaveRates={handleSaveRates}
@@ -157,14 +174,7 @@ export function CrmSettings() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const GHS_HAIRLINE = `1px solid ${GH.ink10}`;
-const GHS_MONO_LABEL: React.CSSProperties = {
-    fontFamily: GH_MONO,
-    fontSize: 12,
-    fontWeight: 500,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: GH.ink60,
-};
+const GHS_NOTE: React.CSSProperties = { fontSize: 14, lineHeight: 1.5, color: GH.ink60, margin: '0 0 16px' };
 
 type ConnTestState =
     | { state: 'idle' }
@@ -182,6 +192,7 @@ function GridHouseCrmSettings({
     setRates,
     ratesSaving,
     hasRateChanges,
+    canEditRates,
     onSaveCalendar,
     onToggleSourceOfTruth,
     onSaveRates,
@@ -200,6 +211,7 @@ function GridHouseCrmSettings({
     setRates: React.Dispatch<React.SetStateAction<Record<string, number>>>;
     ratesSaving: boolean;
     hasRateChanges: boolean;
+    canEditRates: boolean;
     onSaveCalendar: () => Promise<void>;
     onToggleSourceOfTruth: () => Promise<void>;
     onSaveRates: () => Promise<void>;
@@ -209,23 +221,6 @@ function GridHouseCrmSettings({
     connTest: ConnTestState;
     onTestConnection: () => Promise<void>;
 }) {
-    const inkBtn = (disabled?: boolean): React.CSSProperties => ({
-        background: GH.ink,
-        color: GH.paper,
-        fontFamily: GH_MONO,
-        fontSize: 12,
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        padding: '12px 18px',
-        border: 'none',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 10,
-    });
-
     // 07.09 (владелец): добавление своей валюты (например UAH для счёта Mono).
     const [newCurCode, setNewCurCode] = useState('');
     const [newCurRate, setNewCurRate] = useState('');
@@ -242,182 +237,134 @@ function GridHouseCrmSettings({
         toast.info(`${code} добавлена — нажмите «Сохранить курсы», чтобы применить для всех`);
     };
 
-    const inputStyle: React.CSSProperties = {
-        width: '100%',
-        padding: '10px 0',
-        border: 'none',
-        borderBottom: `2px solid ${GH.ink}`,
-        outline: 'none',
-        background: 'transparent',
-        fontFamily: GH_SANS,
-        fontSize: 16,
-        color: GH.ink,
-    };
-
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, maxWidth: 820 }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: GHS_HAIRLINE, paddingBottom: 28, marginBottom: 36 }}>
-                <div style={{ ...GHS_MONO_LABEL, marginBottom: 14 }}>Раздел · Настройки</div>
-                <h1
-                    style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 800,
-                        fontSize: 'clamp(36px, 4.5vw, 56px)',
-                        lineHeight: 0.95,
-                        letterSpacing: '-0.02em',
-                        margin: 0,
-                    }}
-                >
-                    Конфигурация CRM.
-                </h1>
-                <div style={{ ...GHS_MONO_LABEL, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Settings size={12} /> Счета · Валюты · Интеграции
-                </div>
-            </div>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 820 }}>
+            <PageHeader title="Настройки" description="Счета для оплаты, валюты и Google Календарь." />
 
-            {/* ── Section 01 · Payment accounts (legacy component) ── */}
-            <GHSSection num={1} title="Платёжные счета">
-                <div style={{ border: `1px solid ${GH.ink10}`, padding: 20, background: GH.paper }}>
-                    <PaymentAccountsManager />
-                </div>
+            <GHSSection title="Счета для оплаты">
+                <PaymentAccountsManager />
             </GHSSection>
 
-            {/* ── Section 02 · Currencies & rates ── */}
-            <GHSSection num={2} title="Валюты и курсы">
-                <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Coins size={12} /> Курсы к лари (₾) для расчёта эквивалента
-                </div>
+            <GHSSection title="Валюты и курсы">
+                <p style={GHS_NOTE}>Курсы к лари (₾) — по ним считаем эквивалент платежей в других валютах.</p>
 
-                <div style={{ borderTop: `2px solid ${GH.ink}` }}>
-                    {CURRENCIES.map((c, idx) => (
+                <div style={{ borderTop: GHS_HAIRLINE }}>
+                    {CURRENCIES.map((c) => (
                         <div
                             key={c.code}
                             style={{
                                 display: 'grid',
-                                gridTemplateColumns: '40px 40px 1fr auto',
+                                gridTemplateColumns: '40px 1fr auto',
                                 gap: 16,
                                 alignItems: 'center',
-                                padding: '16px 0',
-                                borderBottom: idx === CURRENCIES.length - 1 ? `2px solid ${GH.ink}` : GHS_HAIRLINE,
+                                padding: '12px 0',
+                                borderBottom: GHS_HAIRLINE,
                             }}
                         >
-                            <div style={{ ...GHS_MONO_LABEL, fontVariantNumeric: 'tabular-nums' }}>
-                                {String(idx + 1).padStart(2, '0')}
-                            </div>
-                            <div
-                                style={{
-                                    fontFamily: GH_SANS,
-                                    fontWeight: 800,
-                                    fontSize: 22,
-                                    letterSpacing: '-0.02em',
-                                    color: GH.ink,
-                                    width: 40,
-                                    textAlign: 'center',
-                                }}
-                            >
+                            <div style={{ fontWeight: 600, fontSize: 20, textAlign: 'center' }} aria-hidden="true">
                                 {c.symbol}
                             </div>
-                            <div
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    letterSpacing: '0.06em',
-                                    color: GH.ink,
-                                }}
-                            >
-                                {c.code}
-                            </div>
-                            {c.code !== 'GEL' ? (
-                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>1 {c.code} =</span>
+                            <div className="num" style={{ fontSize: 14, fontWeight: 600 }}>{c.code}</div>
+                            {c.code === 'GEL' ? (
+                                <span style={{ fontSize: 14, color: GH.ink60 }}>Базовая валюта</span>
+                            ) : canEditRates ? (
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: GH.ink60 }}>
+                                    <span className="num">1 {c.code} =</span>
                                     <input
                                         type="number"
                                         step="0.001"
                                         value={rates[c.code] ?? ''}
                                         onChange={(e) => setRates((r) => ({ ...r, [c.code]: parseFloat(e.target.value) || 0 }))}
-                                        style={{
-                                            width: 80,
-                                            padding: '4px 0',
-                                            border: 'none',
-                                            borderBottom: `1px solid ${GH.ink}`,
-                                            outline: 'none',
-                                            background: 'transparent',
-                                            fontFamily: GH_MONO,
-                                            fontSize: 14,
-                                            textAlign: 'right',
-                                            color: GH.ink,
-                                            fontVariantNumeric: 'tabular-nums',
-                                        }}
+                                        aria-label={`Курс ${c.code} к лари`}
+                                        className="ui-input tabular-nums"
+                                        style={{ width: 110, textAlign: 'right' }}
                                     />
-                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>₾</span>
-                                </div>
+                                    <span>₾</span>
+                                </label>
                             ) : (
-                                <span style={{ ...GHS_MONO_LABEL, color: GH.ink, fontWeight: 600 }}>
-                                    Базовая валюта
+                                <span className="num" style={{ fontSize: 14, color: GH.ink }}>
+                                    1 {c.code} = {rates[c.code] ?? EXCHANGE_RATES[c.code] ?? '—'} ₾
                                 </span>
                             )}
                         </div>
                     ))}
                 </div>
 
-                {/* Добавление валюты (07.09) */}
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 20, flexWrap: 'wrap' }}>
-                    <input
-                        type="text"
-                        value={newCurCode}
-                        onChange={(e) => setNewCurCode(e.target.value)}
-                        placeholder="Код (UAH)"
-                        maxLength={6}
-                        style={{ ...inputStyle, width: 110, textTransform: 'uppercase' }}
-                    />
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>1 ед. =</span>
-                        <input
-                            type="number"
-                            step="0.001"
-                            value={newCurRate}
-                            onChange={(e) => setNewCurRate(e.target.value)}
-                            placeholder="0.065"
-                            style={{ ...inputStyle, width: 90, textAlign: 'right' }}
-                        />
-                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>₾</span>
-                    </div>
-                    <button onClick={addCurrency} style={{ ...inkBtn(), padding: '10px 14px' }}>
-                        ＋ Добавить валюту
-                    </button>
-                </div>
-                <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginTop: 8 }}>
-                    Валюту счёта можно привязать в «Платёжных счетах» — платёж этим счётом сразу пойдёт в ней
-                </div>
+                {canEditRates ? (
+                    <>
+                        {/* Добавление валюты (07.09) */}
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginTop: 20, flexWrap: 'wrap' }}>
+                            <Field label="Код валюты">
+                                <Input
+                                    value={newCurCode}
+                                    onChange={(e) => setNewCurCode(e.target.value)}
+                                    placeholder="UAH"
+                                    maxLength={6}
+                                    style={{ width: 120, textTransform: 'uppercase' }}
+                                />
+                            </Field>
+                            <Field label="Курс: 1 единица =">
+                                <Input
+                                    type="number"
+                                    step="0.001"
+                                    value={newCurRate}
+                                    onChange={(e) => setNewCurRate(e.target.value)}
+                                    placeholder="0.065"
+                                    suffix="₾"
+                                    style={{ width: 140 }}
+                                />
+                            </Field>
+                            <Button variant="secondary" icon={<Plus size={16} aria-hidden="true" />} onClick={addCurrency}>
+                                Добавить валюту
+                            </Button>
+                        </div>
+                        <p style={{ ...GHS_NOTE, marginTop: 8 }}>
+                            Валюту можно привязать к счёту выше — платёж этим счётом сразу пойдёт в ней.
+                        </p>
 
-                {hasRateChanges && (
-                    <button onClick={onSaveRates} disabled={ratesSaving} style={{ ...inkBtn(ratesSaving), marginTop: 20 }}>
-                        <Save size={14} />
-                        {ratesSaving ? 'Сохраняем…' : 'Сохранить курсы'}
-                    </button>
+                        {hasRateChanges && (
+                            <Button
+                                variant="primary"
+                                loading={ratesSaving}
+                                icon={<Save size={16} aria-hidden="true" />}
+                                onClick={onSaveRates}
+                                style={{ marginTop: 16 }}
+                            >
+                                Сохранить курсы
+                            </Button>
+                        )}
+                    </>
+                ) : (
+                    // Волна 3 (G5-M2): специалист видит курсы, но не правит —
+                    // сохранить их может только owner / senior_admin.
+                    <p style={{ ...GHS_NOTE, marginTop: 12 }}>
+                        Курсы задаёт администратор центра.{' '}
+                        <a
+                            href="https://t.me/UnboxCenter"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: GH.ink, textDecoration: 'underline', textUnderlineOffset: 2 }}
+                        >
+                            Попросить добавить валюту
+                        </a>
+                    </p>
                 )}
             </GHSSection>
 
-            {/* ── Section 03 · Google Calendar sync ── */}
-            <GHSSection num={3} title="Синхронизация Google Calendar">
-                <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Calendar size={12} /> ID календаря для автосинхронизации
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 20 }}>
-                    <input
-                        type="text"
-                        value={calendarId}
-                        onChange={(e) => setCalendarId(e.target.value)}
-                        placeholder="example@group.calendar.google.com"
-                        style={inputStyle}
-                    />
-                    <button onClick={onSaveCalendar} style={inkBtn()}>
-                        <Link2 size={14} />
+            <GHSSection title="Google Календарь">
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 20 }}>
+                    <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                        <Field label="ID календаря" hint="Сессии CRM будут появляться в этом календаре">
+                            <Input
+                                value={calendarId}
+                                onChange={(e) => setCalendarId(e.target.value)}
+                                placeholder="example@group.calendar.google.com"
+                            />
+                        </Field>
+                    </div>
+                    <Button variant="primary" icon={<Link2 size={16} aria-hidden="true" />} onClick={onSaveCalendar}>
                         {calendarSaved ? 'Сохранено' : 'Сохранить'}
-                    </button>
+                    </Button>
                 </div>
 
                 {/* Connection panel — service-account email + test button.
@@ -425,15 +372,8 @@ function GridHouseCrmSettings({
                     user not having shared their calendar with the bot;
                     surfacing the bot's email here + a one-click smoke test
                     cuts that out. */}
-                <div
-                    style={{
-                        border: GHS_HAIRLINE,
-                        background: GH.paper,
-                        padding: 18,
-                        marginBottom: 28,
-                    }}
-                >
-                    <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginBottom: 8 }}>
+                <div style={{ border: GHS_HAIRLINE, padding: 16, marginBottom: 24 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: GH.ink60, marginBottom: 8 }}>
                         Сервисный аккаунт Unbox
                     </div>
                     <div
@@ -441,10 +381,11 @@ function GridHouseCrmSettings({
                             display: 'flex',
                             alignItems: 'center',
                             gap: 10,
-                            padding: '10px 12px',
+                            padding: '8px 12px',
                             background: GH.ink5,
                             border: `1px solid ${GH.ink10}`,
-                            marginBottom: 14,
+                            marginBottom: 12,
+                            flexWrap: 'wrap',
                         }}
                     >
                         <code
@@ -458,90 +399,52 @@ function GridHouseCrmSettings({
                         >
                             {serviceAccount}
                         </code>
-                        <button
-                            type="button"
+                        <Button
+                            variant="secondary"
+                            size="compact"
+                            icon={saCopied ? <CheckCircle size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
                             onClick={onCopyServiceAccount}
-                            style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                                padding: '6px 10px',
-                                background: 'transparent',
-                                border: `1px solid ${GH.ink}`,
-                                cursor: 'pointer',
-                                color: GH.ink,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                whiteSpace: 'nowrap',
-                            }}
                         >
-                            {saCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
                             {saCopied ? 'Скопировано' : 'Копировать'}
-                        </button>
+                        </Button>
                     </div>
-                    <p
-                        style={{
-                            fontFamily: GH_SANS,
-                            fontSize: 13,
-                            lineHeight: 1.55,
-                            color: GH.ink60,
-                            margin: '0 0 14px',
-                        }}
-                    >
+                    <p style={{ ...GHS_NOTE, margin: '0 0 12px' }}>
                         Чтобы синхронизация работала, поделитесь своим Google
-                        Calendar с этим адресом: в календаре «Настройки и общий
+                        Календарём с этим адресом: в календаре «Настройки и общий
                         доступ» → «Поделиться с конкретными пользователями» → доступ
                         «Внесение изменений в события».
                     </p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                        <button
-                            type="button"
+                        <Button
+                            variant="secondary"
+                            loading={connTest.state === 'loading'}
+                            icon={<ShieldCheck size={16} aria-hidden="true" />}
                             onClick={onTestConnection}
-                            disabled={connTest.state === 'loading'}
-                            style={{
-                                ...inkBtn(connTest.state === 'loading'),
-                                padding: '10px 14px',
-                            }}
                         >
-                            {connTest.state === 'loading'
-                                ? <Loader2 size={14} className="animate-spin" />
-                                : <ShieldCheck size={14} />}
                             {connTest.state === 'loading' ? 'Проверяем…' : 'Проверить подключение'}
-                        </button>
+                        </Button>
                         {connTest.state === 'ok' && (
-                            <span
-                                style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                    fontFamily: GH_SANS,
-                                    fontSize: 13,
-                                    color: STATUS.ok.fg,
-                                }}
-                            >
-                                <CheckCircle size={14} /> {connTest.message}
+                            <span role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, color: STATUS.ok.fg }}>
+                                <CheckCircle size={14} aria-hidden="true" /> {connTest.message}
                             </span>
                         )}
                     </div>
                     {connTest.state === 'error' && (
                         <div
+                            role="alert"
                             style={{
-                                marginTop: 14,
+                                marginTop: 12,
                                 padding: '10px 14px',
-                                border: `1px solid ${GH.danger}`,
                                 background: STATUS.danger.bg,
                                 color: STATUS.danger.fg,
-                                fontFamily: GH_SANS,
-                                fontSize: 13,
-                                lineHeight: 1.55,
+                                fontSize: 14,
+                                lineHeight: 1.5,
                                 display: 'flex',
                                 alignItems: 'flex-start',
                                 gap: 8,
                             }}
                         >
-                            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 3 }} aria-hidden="true" />
                             <span>{connTest.message}</span>
                         </div>
                     )}
@@ -550,107 +453,65 @@ function GridHouseCrmSettings({
                 {/* 31.08: тумблер вернулся НАСТОЯЩИМ — бэкенд теперь хранит
                     флаг (crm_data.gcal_source_of_truth), а синк его читает.
                     Выключен (по умолчанию) = защитный режим: удаления из
-                    Google не трогают сессии и брони, приходит уведомление. */}
-                <div style={{ borderTop: GHS_HAIRLINE, paddingTop: 20 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 20, alignItems: 'start' }}>
-                        <button
-                            onClick={onToggleSourceOfTruth}
-                            disabled={sotSaving}
+                    Google не трогают сессии и брони, приходит уведомление.
+                    Волна 3 (G5-14): role="switch" + aria-checked — диктор
+                    называет состояние; при включении — тот же вопрос. */}
+                <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 16, alignItems: 'start', borderTop: GHS_HAIRLINE, paddingTop: 20 }}>
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={sourceOfTruth}
+                        aria-labelledby="gcal-main-label"
+                        aria-describedby="gcal-main-desc"
+                        onClick={onToggleSourceOfTruth}
+                        disabled={sotSaving}
+                        style={{
+                            width: 48,
+                            height: 28,
+                            border: `2px solid ${GH.ink}`,
+                            background: sourceOfTruth ? GH.ink : GH.paper,
+                            position: 'relative',
+                            cursor: sotSaving ? 'default' : 'pointer',
+                            padding: 0,
+                            opacity: sotSaving ? 0.6 : 1,
+                        }}
+                    >
+                        <span
+                            aria-hidden="true"
                             style={{
-                                width: 48,
-                                height: 24,
-                                border: `2px solid ${GH.ink}`,
-                                background: sourceOfTruth ? GH.ink : GH.paper,
-                                position: 'relative',
-                                cursor: sotSaving ? 'default' : 'pointer',
-                                padding: 0,
-                                marginTop: 2,
+                                position: 'absolute',
+                                top: 4,
+                                left: sourceOfTruth ? 24 : 4,
+                                width: 16,
+                                height: 16,
+                                background: sourceOfTruth ? GH.paper : GH.ink,
+                                transition: 'left 150ms ease',
                             }}
-                            aria-label="Переключить: Google Calendar — источник правды"
-                        >
-                            <span
-                                style={{
-                                    position: 'absolute',
-                                    top: 2,
-                                    left: sourceOfTruth ? 26 : 2,
-                                    width: 16,
-                                    height: 16,
-                                    background: sourceOfTruth ? GH.paper : GH.ink,
-                                    transition: 'left 150ms ease',
-                                }}
-                            />
-                        </button>
-                        <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                                <ShieldCheck size={14} color={sourceOfTruth ? GH.ink : GH.ink60} />
-                                <div
-                                    style={{
-                                        fontFamily: GH_SANS,
-                                        fontSize: 16,
-                                        fontWeight: 700,
-                                        letterSpacing: '-0.01em',
-                                        color: GH.ink,
-                                    }}
-                                >
-                                    Google Calendar — источник правды
-                                </div>
-                            </div>
-                            <div
-                                style={{
-                                    fontFamily: GH_SANS,
-                                    fontSize: 13,
-                                    lineHeight: 1.5,
-                                    color: GH.ink60,
-                                    maxWidth: 520,
-                                }}
-                            >
-                                {sourceOfTruth
-                                    ? 'Включено: календарь главный. Удалили событие в Google — сессия отменится, привязанная бронь кабинета будет снята автоматически. Удаляйте события осознанно.'
-                                    : 'Выключено (защитный режим): удаление события в Google НЕ трогает сессию и бронь — придёт уведомление, решение за вами. Переносы событий применяются в обоих режимах.'}
-                            </div>
+                        />
+                    </button>
+                    <div>
+                        <div id="gcal-main-label" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+                            Google Календарь главный
+                        </div>
+                        <div id="gcal-main-desc" style={{ fontSize: 14, lineHeight: 1.5, color: GH.ink60, maxWidth: 520 }}>
+                            {sourceOfTruth
+                                ? 'Включено: удалили событие в Google — сессия отменится, привязанная бронь кабинета будет снята автоматически. Удаляйте события осознанно.'
+                                : 'Выключено (защитный режим): удаление события в Google не трогает сессию и бронь — придёт уведомление, решение за вами. Переносы событий применяются в обоих режимах.'}
                         </div>
                     </div>
                 </div>
             </GHSSection>
-
-            {/* Footer */}
-            <div style={{ ...GHS_MONO_LABEL, textAlign: 'center', padding: '32px 0 24px', color: GH.ink60 }}>
-                Unbox · Конфигурация · {new Date().getFullYear()}
-            </div>
         </div>
     );
 }
 
-function GHSSection({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
+function GHSSection({ title, children }: { title: string; children: React.ReactNode }) {
     return (
-        <section style={{ marginBottom: 40, paddingBottom: 40, borderBottom: GHS_HAIRLINE }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 20, marginBottom: 24 }}>
-                <div
-                    style={{
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        letterSpacing: '0.06em',
-                        color: GH.ink60,
-                        fontVariantNumeric: 'tabular-nums',
-                        paddingTop: 6,
-                    }}
-                >
-                    {String(num).padStart(2, '0')}
-                </div>
-                <h2
-                    style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 700,
-                        fontSize: 22,
-                        letterSpacing: '-0.01em',
-                        color: GH.ink,
-                        margin: 0,
-                    }}
-                >
-                    {title}
-                </h2>
-            </div>
-            <div style={{ paddingLeft: 80 }}>{children}</div>
+        <section style={{ marginBottom: 32, paddingBottom: 32, borderBottom: GHS_HAIRLINE }}>
+            <h2 style={{ fontFamily: GH_SANS, fontWeight: 600, fontSize: 20, color: GH.ink, margin: '0 0 16px' }}>
+                {title}
+            </h2>
+            {children}
         </section>
     );
 }

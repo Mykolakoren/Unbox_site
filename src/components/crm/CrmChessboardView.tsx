@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
@@ -10,7 +10,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell, Repeat, ArrowLeftRight, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, UserPlus, Bell, Repeat, ArrowLeftRight, Check, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -31,6 +31,10 @@ import { CURRENCIES } from '../../utils/currency';
 import { formatDayMonth } from '../../utils/format';
 import { ruPlural } from '../../utils/plural';
 import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
+import { Sheet } from '../ui/Sheet';
+import { Button } from '../ui/Button';
+import { Chip } from '../ui/Chip';
+import { Field, Input } from '../ui/Field';
 
 /** «GEL» → «₾» в подписях полей («Стоимость, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -152,157 +156,109 @@ function CrmQuickBookModal({
         }
     };
 
+    // Волна 3 (X4-04): общая шторка Sheet вместо самодельного оверлея —
+    // Esc, фокус внутри, подвал с кнопкой всегда виден. Логика брони, цены,
+    // способа оплаты и серии (handleBook) — прежняя, поменялась только обёртка.
+    const occWord = ruPlural(recurringOccurrences, ['бронь', 'брони', 'броней']);
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-            <div
-                className="bg-card rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="flex items-start justify-between p-5 border-b border-gray-100">
-                    <div>
-                        <h3 className="font-bold text-base">Забронировать кабинет</h3>
-                        <p className="text-sm text-gray-500 mt-0.5">
-                            {resource?.name || slot.resId} · {formatDayMonth(slot.date, { withYear: 'auto' })}
-                        </p>
-                    </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
-                        <X size={18} className="text-gray-500" />
-                    </button>
+        <Sheet
+            open
+            onClose={onClose}
+            dismissible={!saving}
+            title="Забронировать кабинет"
+            description={`${resource?.name || slot.resId} · ${formatDayMonth(slot.date, { withYear: 'auto' })}`}
+            width={480}
+            footer={
+                <>
+                    <Button variant="primary" loading={saving} onClick={handleBook}>
+                        {recurringPattern ? `Создать серию · ${recurringOccurrences} ${occWord}` : selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
+                    </Button>
+                    <Button variant="secondary" disabled={saving} onClick={onClose}>Отмена</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Время */}
+                <div className="num" style={{ fontSize: 'var(--text-title)', fontWeight: 600 }}>
+                    {slot.time} – {endTime}
                 </div>
 
-                <div className="p-5 space-y-4">
-                    {/* Time + Duration */}
-                    <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
-                            <div className="text-xs text-gray-500 mb-0.5">Начало</div>
-                            <div className="font-bold text-lg">{slot.time}</div>
-                        </div>
-                        <div className="text-ink-60">→</div>
-                        <div className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
-                            <div className="text-xs text-gray-500 mb-0.5">Конец</div>
-                            <div className="font-bold text-lg">{endTime}</div>
-                        </div>
+                {/* Длительность */}
+                <div>
+                    <div style={PICK_LABEL}>Длительность</div>
+                    <div className="ui-chip-row" role="group" aria-label="Длительность">
+                        {DURATIONS.map(d => (
+                            <Chip key={d} selected={duration === d} onClick={() => setDuration(d)}>
+                                {durationLabel(d)}
+                            </Chip>
+                        ))}
                     </div>
+                </div>
 
-                    {/* Duration picker */}
-                    <div>
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Длительность</div>
-                        <div className="flex gap-2">
-                            {DURATIONS.map(d => (
-                                <button
-                                    key={d}
-                                    onClick={() => setDuration(d)}
-                                    className={clsx(
-                                        'flex-1 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                        duration === d
-                                            ? 'bg-unbox-green text-white border-unbox-green'
-                                            : 'border-gray-200 text-gray-600 hover:border-unbox-green hover:text-unbox-green'
-                                    )}
-                                >
-                                    {d < 60 ? `${d}м` : `${d / 60}ч`}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* CRM Client picker (optional) */}
-                    <div>
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                            <Link2 size={12} />
-                            Привязать клиента CRM <span className="font-normal text-ink-60">(необязательно)</span>
-                        </div>
-                        <div className="relative mb-2">
-                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
-                            <input
-                                value={search}
-                                onChange={e => setSearch(e.target.value)}
-                                placeholder="Поиск клиента..."
-                                className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
-                            />
-                        </div>
-                        <div className="max-h-36 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
-                            {/* No client option */}
-                            <button
-                                onClick={() => setSelectedClientId('')}
-                                className={clsx(
-                                    'w-full text-left px-3 py-2 text-sm flex items-center gap-2 border-b border-gray-100 transition-colors',
-                                    !selectedClientId ? 'bg-gray-100 text-gray-700 font-medium' : 'hover:bg-card text-ink-60 italic'
-                                )}
+                {/* Клиент CRM (необязательно) */}
+                <div>
+                    <Field label="Клиент" optional>
+                        <Input
+                            kind="search"
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            placeholder="Имя, телефон или код"
+                        />
+                    </Field>
+                    <PickList label="Клиенты">
+                        <PickRow selected={!selectedClientId} onClick={() => setSelectedClientId('')}>
+                            Без клиента
+                        </PickRow>
+                        {filteredClients.slice(0, 6).map(client => (
+                            <PickRow
+                                key={client.id}
+                                selected={selectedClientId === client.id}
+                                onClick={() => setSelectedClientId(client.id)}
+                                meta={client.aliasCode ? `#${client.aliasCode}` : undefined}
                             >
-                                Без клиента
-                            </button>
-                            {filteredClients.slice(0, 6).map(client => (
-                                <button
-                                    key={client.id}
-                                    onClick={() => setSelectedClientId(client.id)}
-                                    className={clsx(
-                                        'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
-                                        selectedClientId === client.id
-                                            ? 'bg-unbox-green/10 text-unbox-dark'
-                                            : 'hover:bg-card'
-                                    )}
-                                >
-                                    <div className={clsx(
-                                        'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                        selectedClientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
-                                    )}>
-                                        {client.name?.[0]?.toUpperCase() ?? '?'}
-                                    </div>
-                                    <span className="text-sm font-medium truncate">{client.name}</span>
-                                    {selectedClientId === client.id && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
-                                </button>
-                            ))}
-                            {filteredClients.length === 0 && search && (
-                                <div className="p-3 text-center text-xs text-ink-60">Не найдено</div>
-                            )}
-                        </div>
+                                {client.name}
+                            </PickRow>
+                        ))}
+                        {filteredClients.length === 0 && search && (
+                            <div style={PICK_EMPTY}>Никого не нашли — проверьте имя или код</div>
+                        )}
+                    </PickList>
 
-                        {/* Price if client selected */}
-                        {selectedClient && (
-                            <div className="mt-3">
-                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                    Стоимость, {currencySign(selectedClient.currency)}
-                                </div>
-                                <input
+                    {/* Стоимость сессии — если выбран клиент */}
+                    {selectedClient && (
+                        <div style={{ marginTop: 16 }}>
+                            <Field label="Стоимость сессии">
+                                {/* type="number" — как раньше: та же разборка суммы. */}
+                                <Input
+                                    kind="money"
                                     type="number"
                                     value={price}
                                     onChange={e => setPrice(e.target.value)}
                                     placeholder={String(selectedClient.basePrice || 0)}
-                                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
+                                    suffix={currencySign(selectedClient.currency)}
                                 />
-                            </div>
-                        )}
-                    </div>
+                            </Field>
+                        </div>
+                    )}
                 </div>
 
-                {/* Recurring pattern */}
-                <div className="px-5 space-y-2">
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Повторение</div>
-                    <div className="grid grid-cols-4 gap-1.5">
+                {/* Повторение */}
+                <div>
+                    <div style={PICK_LABEL}>Повторение</div>
+                    <div className="ui-chip-row" role="group" aria-label="Повторение">
                         {([
                             { id: '', label: 'Разово' },
-                            { id: 'weekly', label: 'Кажд. неделю' },
-                            { id: 'biweekly', label: 'Раз в 2 нед.' },
+                            { id: 'weekly', label: 'Каждую неделю' },
+                            { id: 'biweekly', label: 'Раз в 2 недели' },
                             { id: 'monthly', label: 'Раз в 4 недели' },
                         ] as const).map(p => (
-                            <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => setRecurringPattern(p.id)}
-                                className={clsx(
-                                    'py-1.5 rounded-lg border text-xs font-medium transition-colors text-center',
-                                    recurringPattern === p.id
-                                        ? 'bg-unbox-green text-white border-unbox-green'
-                                        : 'border-gray-200 text-gray-600 hover:border-unbox-green hover:text-unbox-green'
-                                )}
-                            >
+                            <Chip key={p.id} selected={recurringPattern === p.id} onClick={() => setRecurringPattern(p.id)}>
                                 {p.label}
-                            </button>
+                            </Chip>
                         ))}
                     </div>
                     {recurringPattern && (
-                        <div className="flex items-center gap-2 pt-1">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
                             <input
                                 type="number"
                                 value={recurringOccurrences}
@@ -312,10 +268,12 @@ function CrmQuickBookModal({
                                 }}
                                 min={2}
                                 max={recurringPattern === 'monthly' ? 24 : 52}
-                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                aria-label="Сколько раз повторить"
+                                className="ui-input tabular-nums"
+                                style={{ width: 88, textAlign: 'center' }}
                             />
-                            <span className="text-xs text-gray-500">
-                                повторений · {recurringPattern === 'monthly'
+                            <span style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)' }}>
+                                {occWord} · {recurringPattern === 'monthly'
                                     ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                     : recurringPattern === 'biweekly'
                                         ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
@@ -324,23 +282,71 @@ function CrmQuickBookModal({
                         </div>
                     )}
                 </div>
-
-                {/* Footer */}
-                <div className="flex gap-3 p-5 pt-3">
-                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer">
-                        Отмена
-                    </button>
-                    <button
-                        onClick={handleBook}
-                        disabled={saving}
-                        className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                        {saving && <Loader2 size={14} className="animate-spin" />}
-                        {recurringPattern ? `Создать серию · ${recurringOccurrences} броней` : selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
-                    </button>
-                </div>
             </div>
+        </Sheet>
+    );
+}
+
+/** Enter / пробел на клетке-брони — то же, что клик (клавиатура, G5-14). */
+function activateOnKey(e: KeyboardEvent<HTMLElement>) {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.currentTarget.click();
+    }
+}
+
+/** «30 мин», «1 ч», «1,5 ч», «2 ч». */
+function durationLabel(min: number): string {
+    if (min < 60) return `${min} мин`;
+    const h = min / 60;
+    return `${String(h).replace('.', ',')} ч`;
+}
+
+const PICK_LABEL: CSSProperties = {
+    fontSize: 'var(--text-small)', fontWeight: 500, color: 'var(--color-ink-60)', marginBottom: 8,
+};
+const PICK_EMPTY: CSSProperties = {
+    fontSize: 'var(--text-small)', color: 'var(--color-ink-60)', padding: '12px 4px',
+};
+
+/** Список выбора клиента в шторках брони: строки 44 px, выбранная — с
+ *  галочкой и подложкой акцента, озвучивается через aria-pressed. */
+export function PickList({ label, children }: { label: string; children: ReactNode }) {
+    return (
+        <div
+            role="group"
+            aria-label={label}
+            style={{
+                display: 'flex', flexDirection: 'column', maxHeight: 220, overflowY: 'auto',
+                border: '1px solid var(--color-ink-10)', borderRadius: 'var(--radius-control)', marginTop: 8,
+            }}
+        >
+            {children}
         </div>
+    );
+}
+
+export function PickRow({ selected, onClick, meta, children }: {
+    /** undefined — строка-действие («Открепить клиента»), не выбор. */
+    selected?: boolean; onClick: () => void; meta?: ReactNode; children: ReactNode;
+}) {
+    return (
+        <button
+            type="button"
+            aria-pressed={selected}
+            onClick={onClick}
+            style={{
+                display: 'flex', alignItems: 'center', gap: 12, minHeight: 44, padding: '0 12px',
+                textAlign: 'left', border: 0, borderBottom: '1px solid var(--color-ink-08)',
+                background: selected ? 'var(--color-accent-soft)' : 'transparent',
+                color: 'var(--color-ink)', fontSize: 'var(--text-small)', fontWeight: selected ? 600 : 400,
+                cursor: 'pointer', flexShrink: 0,
+            }}
+        >
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{children}</span>
+            {meta && <span className="num" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }}>{meta}</span>}
+            {selected && <Check size={16} aria-hidden="true" style={{ color: 'var(--color-accent-ink)', flexShrink: 0 }} />}
+        </button>
     );
 }
 
@@ -511,104 +517,99 @@ function LinkBookingModal({
 
     const assignedCount = slots.filter(s => s.clientId).length;
 
+    const canTrimOrSplit = duration >= 120
+        && (booking.status === 'confirmed' || (booking.status as any) === undefined)
+        && !booking.isReRentListed;
+
+    // Волна 3 (X4-04): общая шторка Sheet вместо самодельного оверлея.
+    // Сохранение (onSaveMulti, защита savingRef от двойного клика), серии,
+    // удаление/обрезка/разделение брони — прежние; поменялась только обёртка.
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-            <div
-                className="bg-card rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200 max-h-[90vh] overflow-y-auto"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="flex items-start justify-between p-5 border-b border-gray-100">
-                    <div>
-                        <h3 className="font-bold text-base flex items-center gap-2">
-                            <Link2 size={15} className="text-unbox-green" />
-                            Распределить клиентов
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            {resource?.name || 'Кабинет'} · {bookingDateStr} · {duration} мин ({numSlots} {numSlots === 1 ? 'сессия' : numSlots < 5 ? 'сессии' : 'сессий'})
-                        </p>
+        <Sheet
+            open
+            onClose={onClose}
+            dismissible={!saving && !deleting}
+            title="Распределить клиентов"
+            description={`${resource?.name || 'Кабинет'} · ${bookingDateStr} · ${duration} мин (${numSlots} ${ruPlural(numSlots, ['сессия', 'сессии', 'сессий'])})`}
+            width={480}
+            headerAction={
+                <Button
+                    variant="quiet"
+                    size="compact"
+                    onClick={handleDelete}
+                    disabled={saving}
+                    loading={deleting}
+                    icon={<Trash2 size={16} aria-hidden="true" />}
+                    aria-label="Удалить эту бронь"
+                    title="Удалить эту бронь"
+                    style={{ color: 'var(--status-danger-fg)' }}
+                />
+            }
+            footer={
+                <>
+                    <Button
+                        variant="primary"
+                        loading={saving}
+                        disabled={assignedCount === 0 && !recurringPattern}
+                        onClick={handleSave}
+                    >
+                        {assignedCount > 0
+                            ? `Сохранить (${assignedCount}/${numSlots})${recurringPattern ? ` × ${recurringOccurrences}` : ''}`
+                            : recurringPattern
+                                ? `Повторить бронь × ${recurringOccurrences}`
+                                : 'Сохранить'}
+                    </Button>
+                    <Button variant="secondary" disabled={saving} onClick={onClose}>Отмена</Button>
+                </>
+            }
+        >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Слоты по часу */}
+                {numSlots > 1 && (
+                    <div className="ui-chip-row" role="group" aria-label="Час брони">
+                        {slots.map((slot, idx) => {
+                            const client = crmClients.find(c => c.id === slot.clientId);
+                            return (
+                                <Chip
+                                    key={idx}
+                                    selected={activeSlotIdx === idx}
+                                    onClick={() => { setActiveSlotIdx(idx); setSearch(''); }}
+                                >
+                                    <span className="num">{slot.label.split(' – ')[0]}</span>
+                                    <span style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 400 }}>
+                                        · {client ? client.name : 'без клиента'}
+                                    </span>
+                                </Chip>
+                            );
+                        })}
                     </div>
-                    <div className="flex items-center gap-1">
-                        <button
-                            onClick={handleDelete}
-                            disabled={deleting || saving}
-                            title="Удалить эту бронь"
-                            aria-label="Удалить эту бронь"
-                            className="p-1.5 rounded-lg hover:bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] disabled:opacity-50 transition-colors"
-                        >
-                            {deleting ? <Loader2 size={16} className="animate-spin" /> : (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                            )}
-                        </button>
-                        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
-                            <X size={18} className="text-gray-500" />
-                        </button>
-                    </div>
-                </div>
+                )}
 
-                <div className="p-5 space-y-4">
-                    {/* Slot tabs */}
-                    {numSlots > 1 && (
-                        <div className="flex gap-1.5">
-                            {slots.map((slot, idx) => {
-                                const client = crmClients.find(c => c.id === slot.clientId);
-                                return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => { setActiveSlotIdx(idx); setSearch(''); }}
-                                        className={clsx(
-                                            'flex-1 py-2 px-1.5 rounded-xl text-xs font-medium transition-all border-2 text-center',
-                                            activeSlotIdx === idx
-                                                ? 'border-unbox-green bg-unbox-green/5 text-unbox-dark'
-                                                : slot.clientId
-                                                    ? 'border-[var(--status-ok-bg)] bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]'
-                                                    : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300'
-                                        )}
-                                    >
-                                        <div className="font-bold">{slot.label.split(' – ')[0]}</div>
-                                        <div className="text-xs mt-0.5 truncate">
-                                            {client ? client.name : '—'}
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {/* Active slot label */}
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                        Слот {activeSlot.label}
-                    </div>
-
-                    {/* Search */}
-                    <div className="relative">
-                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
-                        <input
+                <div>
+                    <Field label={<>Клиент на <span className="num">{activeSlot.label}</span></>}>
+                        <Input
+                            kind="search"
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            placeholder="Поиск клиента..."
-                            className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
+                            placeholder="Имя, телефон или код"
                         />
-                    </div>
-
-                    {/* Client list */}
-                    <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
-                        {/* Unlink option */}
+                    </Field>
+                    <PickList label="Клиенты">
+                        {/* Открепить клиента от этого часа */}
                         {activeSlot.clientId && (
-                            <button
-                                onClick={() => updateSlot(activeSlotIdx, null)}
-                                className="w-full text-left px-3 py-2 text-sm border-b border-gray-100 text-ink-60 hover:bg-card italic transition-colors"
-                            >
+                            <PickRow onClick={() => updateSlot(activeSlotIdx, null)}>
                                 Открепить клиента
-                            </button>
+                            </PickRow>
                         )}
                         {filteredClients.slice(0, 8).map(client => {
                             const isSelected = activeSlot.clientId === client.id;
-                            // Check if this client is already assigned to another slot
-                            const assignedToOther = slots.some((s, i) => i !== activeSlotIdx && s.clientId === client.id);
+                            // Клиент уже стоит на другом часе этой брони — показываем, на каком.
+                            const otherSlot = slots.find((s, i) => i !== activeSlotIdx && s.clientId === client.id);
                             return (
-                                <button
+                                <PickRow
                                     key={client.id}
+                                    selected={isSelected}
+                                    meta={otherSlot && !isSelected ? `уже на ${otherSlot.label.split(' – ')[0]}` : undefined}
                                     onClick={() => {
                                         updateSlot(activeSlotIdx, client.id, client.basePrice || 0);
                                         // Auto-advance to next empty slot
@@ -617,157 +618,92 @@ function LinkBookingModal({
                                             if (nextEmpty >= 0) setTimeout(() => setActiveSlotIdx(nextEmpty), 150);
                                         }
                                     }}
-                                    className={clsx(
-                                        'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
-                                        isSelected ? 'bg-unbox-green/10 text-unbox-dark' :
-                                            assignedToOther ? 'bg-[var(--status-info-bg)]/50 text-[var(--status-info-fg)]' : 'hover:bg-card'
-                                    )}
                                 >
-                                    <div className={clsx(
-                                        'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                        isSelected ? 'bg-unbox-green text-white' :
-                                            assignedToOther ? 'bg-[var(--status-info-bg)] text-[var(--status-info-fg)]' : 'bg-gray-200 text-gray-600'
-                                    )}>
-                                        {client.name?.[0]?.toUpperCase() ?? '?'}
-                                    </div>
-                                    <span className="text-sm font-medium truncate">{client.name}</span>
-                                    {isSelected && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
-                                    {assignedToOther && !isSelected && (
-                                        <span className="ml-auto text-xs text-[var(--status-info-fg)] shrink-0">
-                                            {slots.find((s, i) => i !== activeSlotIdx && s.clientId === client.id)?.label.split(' – ')[0]}
-                                        </span>
-                                    )}
-                                </button>
+                                    {client.name}
+                                </PickRow>
                             );
                         })}
                         {filteredClients.length === 0 && (
-                            <div className="p-3 text-center text-xs text-ink-60">Клиенты не найдены</div>
+                            <div style={PICK_EMPTY}>Никого не нашли — проверьте имя или код</div>
                         )}
-                    </div>
+                    </PickList>
+                </div>
 
-                    {/* Price for active client */}
-                    {activeClient && (
-                        <div>
-                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Стоимость, {currencySign(activeClient.currency)}
-                            </div>
+                {/* Стоимость сессии для выбранного клиента */}
+                {activeClient && (
+                    <Field label="Стоимость сессии">
+                        {/* type="number" — как раньше: та же разборка суммы. */}
+                        <Input
+                            kind="money"
+                            type="number"
+                            value={activeSlot.price || ''}
+                            onChange={e => updateSlot(activeSlotIdx, activeSlot.clientId, Number(e.target.value) || 0)}
+                            placeholder={String(activeClient.basePrice || 0)}
+                            suffix={currencySign(activeClient.currency)}
+                        />
+                    </Field>
+                )}
+
+                {/* Повторение — видно всегда, даже без клиента. С клиентом —
+                    будущие сессии CRM (pushToCalendar=true, в Google Календарь
+                    специалиста). Без клиента — серия броней кабинета через
+                    createRecurringBooking. */}
+                <div>
+                    <div style={PICK_LABEL}>Повторять</div>
+                    <div className="ui-chip-row" role="group" aria-label="Повторять">
+                        {([
+                            { id: '', label: 'Не повторять' },
+                            { id: 'weekly', label: 'Каждую неделю' },
+                            { id: 'biweekly', label: 'Раз в 2 недели' },
+                            { id: 'monthly', label: 'Раз в 4 недели' },
+                        ] as const).map(p => (
+                            <Chip key={p.id} selected={recurringPattern === p.id} onClick={() => setRecurringPattern(p.id as any)}>
+                                {p.label}
+                            </Chip>
+                        ))}
+                    </div>
+                    {recurringPattern && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, fontSize: 'var(--text-small)', color: 'var(--color-ink-60)' }}>
+                            <span>Сколько раз:</span>
                             <input
                                 type="number"
-                                value={activeSlot.price || ''}
-                                onChange={e => updateSlot(activeSlotIdx, activeSlot.clientId, Number(e.target.value) || 0)}
-                                placeholder={String(activeClient.basePrice || 0)}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
+                                min={2}
+                                max={recurringPattern === 'monthly' ? 24 : 52}
+                                value={recurringOccurrences}
+                                onChange={(e) => {
+                                    const max = recurringPattern === 'monthly' ? 24 : 52;
+                                    const v = Math.max(2, Math.min(max, parseInt(e.target.value) || 8));
+                                    setRecurringOccurrences(v);
+                                }}
+                                aria-label="Сколько раз повторить"
+                                className="ui-input tabular-nums"
+                                style={{ width: 88, textAlign: 'center' }}
                             />
+                            <span>включая эту</span>
                         </div>
                     )}
                 </div>
 
-                {/* Recurring options — visible always, even when no client
-                    is linked. With a client → spawn future CRM sessions
-                    (with pushToCalendar=true so they land in the specialist's
-                    Google Calendar). Without a client → just clone the
-                    cabinet booking via createRecurringBooking. */}
-                {true && (
-                    <div className="px-5 pb-3 pt-0">
-                        <div className="text-xs uppercase tracking-wider text-ink-60 mb-2">Повторять</div>
-                        <div className="flex flex-wrap gap-1.5 mb-2">
-                            {([
-                                { id: '', label: 'Не повторять' },
-                                { id: 'weekly', label: 'Каждую неделю' },
-                                { id: 'biweekly', label: 'Раз в 2 недели' },
-                                { id: 'monthly', label: 'Раз в 4 недели' },
-                            ] as const).map(p => (
-                                <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => setRecurringPattern(p.id as any)}
-                                    className={clsx(
-                                        'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
-                                        recurringPattern === p.id
-                                            ? 'bg-unbox-green text-white border-unbox-green'
-                                            : 'bg-card text-gray-600 border-gray-200 hover:border-unbox-green/50'
-                                    )}
-                                >
-                                    {p.label}
-                                </button>
-                            ))}
-                        </div>
-                        {recurringPattern && (
-                            <div className="flex items-center gap-2 text-xs text-gray-600">
-                                <span>Сколько раз:</span>
-                                <input
-                                    type="number"
-                                    min={2}
-                                    max={recurringPattern === 'monthly' ? 24 : 52}
-                                    value={recurringOccurrences}
-                                    onChange={(e) => {
-                                        const max = recurringPattern === 'monthly' ? 24 : 52;
-                                        const v = Math.max(2, Math.min(max, parseInt(e.target.value) || 8));
-                                        setRecurringOccurrences(v);
-                                    }}
-                                    className="w-16 px-2 py-1 rounded border border-gray-200 text-center"
-                                />
-                                <span className="text-ink-60">
-                                    (включая текущую)
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Partial cancel ("trim") — only for normal active bookings ≥ 2h. */}
-                {duration >= 120
-                    && (booking.status === 'confirmed' || (booking.status as any) === undefined)
-                    && !booking.isReRentListed && (
-                    <div className="px-5 pb-3 pt-0">
-                        <button
-                            onClick={() => onTrim(booking)}
+                {/* Отменить часть / Разделить — только для обычных активных броней от 2 ч.
+                    «Разделить» — несколько самостоятельных броней (отменить или
+                    перенести только один час, разные плательщики). Цена не меняется. */}
+                {canTrimOrSplit && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--color-ink-08)', paddingTop: 16 }}>
+                        <Button variant="secondary" disabled={deleting || saving} onClick={() => onSplit(booking)}>
+                            Разделить на отдельные брони
+                        </Button>
+                        <Button
+                            variant="secondary"
                             disabled={deleting || saving}
-                            className="w-full py-2 rounded-xl border border-[var(--status-danger-fg)]/30 text-sm font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] disabled:opacity-50 transition-colors"
+                            onClick={() => onTrim(booking)}
+                            style={{ color: 'var(--status-danger-fg)' }}
                         >
                             Отменить часть
-                        </button>
+                        </Button>
                     </div>
                 )}
-
-                {/* Разделить бронь на отдельные — когда части надо вести раздельно
-                    (отменить или перенести только один час, разные плательщики).
-                    Отличается от вкладок выше: там одна бронь и несколько сессий,
-                    здесь — несколько самостоятельных броней. Цена не меняется. */}
-                {duration >= 120
-                    && (booking.status === 'confirmed' || (booking.status as any) === undefined)
-                    && !booking.isReRentListed && (
-                    <div className="px-5 pb-3 pt-0">
-                        <button
-                            onClick={() => onSplit(booking)}
-                            disabled={deleting || saving}
-                            className="w-full py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                        >
-                            Разделить на отдельные брони
-                        </button>
-                    </div>
-                )}
-
-                {/* Footer */}
-                <div className="flex gap-3 p-5 pt-0">
-                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                        Отмена
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={saving || (assignedCount === 0 && !recurringPattern)}
-                        className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                    >
-                        {saving && <Loader2 size={14} className="animate-spin" />}
-                        {assignedCount > 0
-                            ? `Сохранить (${assignedCount}/${numSlots})${recurringPattern ? ` × ${recurringOccurrences}` : ''}`
-                            : recurringPattern
-                                ? `Повторить бронь × ${recurringOccurrences}`
-                                : 'Сохранить'}
-                    </button>
-                </div>
             </div>
-        </div>
+        </Sheet>
     );
 }
 
@@ -1488,14 +1424,24 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // ── Shared controls (used in both mobile and desktop) ──
     const weekNav = (
         <div className="flex items-center gap-2">
-            <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                <ChevronLeft size={16} />
+            <button
+                type="button"
+                onClick={() => setWeekStart(subWeeks(weekStart, 1))}
+                aria-label="Предыдущая неделя"
+                className="p-2.5 border border-ink-20 text-ink hover:bg-ink-05 transition-colors"
+            >
+                <ChevronLeft size={16} aria-hidden="true" />
             </button>
             <span className="text-sm font-medium min-w-[100px] md:min-w-[160px] text-center">
                 {formatDayMonth(weekStart)} – {formatDayMonth(endOfWeek(weekStart, { weekStartsOn: 1 }))}
             </span>
-            <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                <ChevronRight size={16} />
+            <button
+                type="button"
+                onClick={() => setWeekStart(addWeeks(weekStart, 1))}
+                aria-label="Следующая неделя"
+                className="p-2.5 border border-ink-20 text-ink hover:bg-ink-05 transition-colors"
+            >
+                <ChevronRight size={16} aria-hidden="true" />
             </button>
         </div>
     );
@@ -1508,17 +1454,20 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 return (
                     <button
                         key={day.toISOString()}
+                        type="button"
                         onClick={() => setSelectedDate(day)}
+                        aria-pressed={active}
+                        aria-label={formatDayMonth(day) + (today ? ', сегодня' : '')}
                         className={clsx(
-                            'flex flex-col items-center px-2.5 md:px-3 py-2 rounded-xl min-w-[44px] md:min-w-[52px] text-sm transition-colors border',
+                            'flex flex-col items-center px-2.5 md:px-3 py-2 min-w-[44px] md:min-w-[52px] text-sm transition-colors border',
                             active
-                                ? 'bg-unbox-green text-white border-unbox-green'
+                                ? 'bg-accent text-on-accent border-accent'
                                 : today
-                                    ? 'border-unbox-green text-unbox-green hover:bg-unbox-light/30'
-                                    : 'border-transparent text-gray-500 hover:bg-gray-50'
+                                    ? 'border-accent text-accent-ink hover:bg-accent-soft'
+                                    : 'border-transparent text-ink-60 hover:bg-ink-05'
                         )}
                     >
-                        <span className="text-xs uppercase font-semibold opacity-70">
+                        <span className="text-xs uppercase font-semibold">
                             {format(day, 'EEEEEE', { locale: ru })}
                         </span>
                         <span className="font-bold text-base leading-none">{format(day, 'd')}</span>
@@ -1532,7 +1481,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // ("Кабинет 5 · 10:00-11:00", "Кабинет 5 · 15:00-16:00") shows
     // both periods with independent × buttons.
     const selectedBar = selectedBlocks.length > 0 ? (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-unbox-green/10 border border-unbox-green/30 rounded-xl px-3 sm:px-4 py-2.5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-accent-soft border border-accent/30 px-3 sm:px-4 py-2.5">
             <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
                 {selectedBlocks.map((b, i) => {
                     const resName = RESOURCES.find(r => r.id === b.resId)?.name || b.resId;
@@ -1542,16 +1491,17 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     return (
                         <div
                             key={`${b.resId}-${b.start}-${i}`}
-                            className="inline-flex items-center gap-1.5 bg-card border border-unbox-green/30 rounded-lg px-2 py-1 text-xs font-semibold text-unbox-dark"
+                            className="inline-flex items-center gap-1.5 bg-card border border-accent/30 px-2 py-1 text-xs font-semibold text-ink"
                         >
                             <span className="text-ink-60 font-normal">{resName}</span>
                             <span className="font-mono">{startT}–{endT}</span>
-                            <span className="text-ink-60 font-normal">· {mins >= 60 ? `${(mins / 60).toString().replace(/\.0$/, '')}ч` : `${mins}м`}</span>
+                            <span className="text-ink-60 font-normal">· {durationLabel(mins)}</span>
                             <button
+                                type="button"
                                 onClick={() => removeBlock(b)}
-                                className="ml-1 rounded-full hover:bg-[var(--status-danger-bg)] p-0.5 transition-colors"
+                                className="ml-1 hover:bg-[var(--status-danger-bg)] p-1 transition-colors"
                                 title="Убрать этот период"
-                                aria-label="Убрать этот период"
+                                aria-label={`Убрать ${resName}, ${startT}–${endT}`}
                             >
                                 <X size={12} className="text-[var(--status-danger-fg)]" />
                             </button>
@@ -1560,12 +1510,12 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 })}
             </div>
             <div className="flex gap-2 shrink-0">
-                <button onClick={() => setNewSlots([])} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-card text-gray-600 hover:bg-gray-50">
+                <Button variant="secondary" onClick={() => setNewSlots([])}>
                     Сбросить
-                </button>
-                <button onClick={handleContinue} className="px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
+                </Button>
+                <Button variant="primary" onClick={handleContinue}>
                     Забронировать{selectedBlocks.length > 1 ? ` (${selectedBlocks.length})` : ''} →
-                </button>
+                </Button>
             </div>
         </div>
     ) : null;
@@ -1630,13 +1580,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             openWaitlistFor(booking);
                         }}
                         title={isMine ? undefined : claimable ? 'Слот на пересдаче — нажмите, чтобы забрать' : 'Нажмите, чтобы следить за слотом'}
+                        // Волна 3 (G5-16): свои — тёмная заливка, чужие — тонкая рамка.
                         className={clsx(
-                            'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px] active:scale-[0.97]',
+                            'group flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px] active:scale-[0.97]',
                             isMine
-                                ? 'bg-unbox-green/10 border border-unbox-green/30 text-unbox-dark'
+                                ? 'bg-ink border border-ink text-on-ink'
                                 : claimable
                                     ? 'bg-[var(--status-pending-bg)] border border-[var(--status-pending-fg)]/40 border-dashed text-[var(--status-pending-fg)] hover:bg-[var(--status-pending-bg)]/70'
-                                    : 'bg-gray-100 border border-gray-200 text-gray-600 hover:bg-gray-200'
+                                    : 'bg-transparent border border-ink-20 text-ink-60'
                         )}
                     >
                         <div className="min-w-0">
@@ -1645,7 +1596,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 {isMine
                                     ? (linkedSessions.length > 1
                                         ? `${linkedSessions.length} ${ruPlural(linkedSessions.length, ['клиент', 'клиента', 'клиентов'])}`
-                                        : linkedClient?.name || 'Привязать клиента')
+                                        : linkedClient?.name || 'Без клиента — привязать')
                                     : claimable
                                         ? 'На пересдаче — нажмите, чтобы забрать'
                                         : 'Занято — нажмите, чтобы следить'
@@ -1653,10 +1604,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             </div>
                         </div>
                         {isMine
-                            ? <UserPlus size={12} className="text-unbox-green shrink-0" />
+                            ? <UserPlus size={14} className="shrink-0" aria-hidden="true" />
                             : claimable
-                                ? <ArrowLeftRight size={12} className="shrink-0" aria-hidden="true" />
-                                : <Bell size={12} className="text-gray-500 shrink-0" aria-hidden="true" />}
+                                ? <ArrowLeftRight size={14} className="shrink-0" aria-hidden="true" />
+                                : <Bell size={14} className="shrink-0 opacity-0 group-focus-visible:opacity-100" aria-hidden="true" />}
                     </button>
                 );
             }
@@ -1675,23 +1626,21 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     className={clsx(
                         'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
                         past
-                            ? 'bg-gray-50 text-ink-60 cursor-not-allowed'
+                            ? 'bg-sunken text-ink-60 cursor-not-allowed'
                             : selected
-                                ? 'bg-unbox-green text-white shadow-sm'
+                                ? 'bg-accent text-on-accent'
                                 : isPeakTime(slot)
                                     ? 'bg-[var(--status-pending-bg)]/60 text-[var(--status-pending-fg)] border border-[var(--status-pending-fg)]/15 active:scale-[0.97]'
-                                    : 'bg-card text-gray-700 border border-gray-100 active:scale-[0.97]'
+                                    : 'bg-card text-ink border border-ink-10 active:scale-[0.97]'
                     )}
                 >
-                    <span className={clsx('text-sm font-bold tabular-nums', selected ? 'text-white' : past ? 'text-ink-60' : 'text-gray-700')}>
+                    <span className={clsx('text-sm font-semibold tabular-nums', selected ? 'text-on-accent' : past ? 'text-ink-60' : 'text-ink')}>
                         {slot}
                     </span>
                     {selected ? (
-                        <div className="w-5 h-5 rounded-full bg-card/20 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                        </div>
+                        <Check size={16} strokeWidth={3} aria-hidden="true" />
                     ) : !past ? (
-                        <div className="w-5 h-5 rounded-full border-2 border-gray-200" />
+                        <div className="w-5 h-5 rounded-full border-2 border-ink-20" aria-hidden="true" />
                     ) : null}
                 </button>
             );
@@ -1703,27 +1652,19 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 {daySelector}
 
                 {/* Resource tabs */}
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" role="group" aria-label="Кабинет">
                     {filteredResources.map((r, idx) => (
-                        <button
-                            key={r.id}
-                            onClick={() => setMobileResIdx(idx)}
-                            className={clsx(
-                                'shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors',
-                                mobileResIdx === idx
-                                    ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-card text-gray-500 border-gray-200'
-                            )}
-                        >
+                        <Chip key={r.id} className="shrink-0" selected={mobileResIdx === idx} onClick={() => setMobileResIdx(idx)}>
                             {r.name}
-                        </button>
+                        </Chip>
                     ))}
                 </div>
+                <p className="text-small text-ink-60">Нажмите на свободное время, чтобы забронировать.</p>
 
                 {selectedBar}
 
                 {/* 2-column time grid */}
-                <div className="rounded-2xl bg-card border border-gray-100 p-2 space-y-1">
+                <div className="rounded-2xl bg-card border border-ink-10 p-2 space-y-1">
                     {mobileHourPairs.map(([left, right]) => {
                         const leftRendered = renderMobileSlot(left, true);
                         const rightRendered = right ? renderMobileSlot(right, false) : <div className="flex-1" />;
@@ -1797,20 +1738,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 <div className="shrink-0">
                     {weekNav}
                 </div>
-                <div className="flex gap-1.5 flex-wrap ml-auto">
-                    {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
-                        <button
-                            key={loc.id}
-                            onClick={() => setFilterLocation(loc.id)}
-                            className={clsx(
-                                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                filterLocation === loc.id
-                                    ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-card text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
-                            )}
-                        >
+                <div className="ui-chip-row ml-auto" role="group" aria-label="Филиал">
+                    {[{ id: 'all', name: 'Все филиалы' }, ...LOCATIONS].map(loc => (
+                        <Chip key={loc.id} selected={filterLocation === loc.id} onClick={() => setFilterLocation(loc.id)}>
                             {loc.name}
-                        </button>
+                        </Chip>
                     ))}
                 </div>
             </div>
@@ -1824,14 +1756,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 <table className="border-collapse" style={{ minWidth: `${180 + TIME_SLOTS.length * SLOT_W}px` }}>
                     <thead>
                         <tr>
-                            <th className="sticky left-0 z-10 bg-card border-b border-r border-gray-100 px-3 py-2 text-left text-xs text-ink-60 font-medium min-w-[180px]">
+                            <th className="sticky left-0 z-10 bg-card border-b border-r border-ink-10 px-3 py-2 text-left text-xs text-ink-60 font-medium min-w-[180px]">
                                 Кабинет
                             </th>
                             {TIME_SLOTS.map((slot, i) => (
                                 <th
                                     key={slot}
                                     className={clsx(
-                                        "border-b border-gray-50 text-xs font-normal py-1 text-center",
+                                        "border-b border-ink-08 text-xs font-normal py-1 text-center",
                                         isPeakTime(slot) ? "text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]/30" : "text-ink-60"
                                     )}
                                     style={{ width: SLOT_W, minWidth: SLOT_W }}
@@ -1846,7 +1778,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             const cells = rowCellsMap.get(resource.id) ?? [];
                             return (
                                 <tr key={resource.id} className="group/row">
-                                    <td className="sticky left-0 z-10 bg-card border-b border-r border-gray-100 px-3 py-2 text-sm font-medium text-gray-700 group-hover/row:bg-gray-50 transition-colors">
+                                    <td className="sticky left-0 z-10 bg-card border-b border-r border-ink-10 px-3 py-2 text-sm font-medium text-ink group-hover/row:bg-ink-05 transition-colors">
                                         {resource.name}
                                     </td>
                                     {cells.map((cell) => {
@@ -1877,12 +1809,12 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                 ? clientById.get(firstSession.clientId)
                                                 : (booking.crmClientId && !allCancelled ? clientById.get(booking.crmClientId) : undefined);
 
-                                            // Multi-client split view. Wave 1: без синего/жёлтого/
-                                            // фиолетового для красоты — два тона бирюзы по очереди,
-                                            // клиентов разделяет пунктир.
+                                            // Несколько клиентов в одной своей брони. Волна 3 (G5-16):
+                                            // свои брони — сплошная тёмная заливка; клиентов
+                                            // разделяет светлая пунктирная черта.
                                             const SEGMENT_COLORS = [
-                                                'bg-unbox-green/15 border-unbox-green/40 hover:bg-unbox-green/25',
-                                                'bg-unbox-green/5 border-unbox-green/30 hover:bg-unbox-green/15',
+                                                'bg-ink border-ink hover:bg-ink-80',
+                                                'bg-ink-80 border-ink hover:bg-ink',
                                             ];
 
                                             const hasMultipleClients = isMine && linkedSessions.length > 1;
@@ -1891,12 +1823,16 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                 <td
                                                     key={`${resource.id}-${cell.slot}`}
                                                     colSpan={colspan}
-                                                    className="border-b border-gray-50 py-1 px-0.5"
+                                                    className="border-b border-ink-08 py-1 px-0.5"
                                                 >
                                                     {hasMultipleClients ? (
                                                         <div
-                                                            className="h-8 flex rounded-md overflow-hidden cursor-pointer"
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-label={`Моя бронь, клиентов: ${linkedSessions.length} — изменить`}
+                                                            className="h-8 flex overflow-hidden cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                                                             onClick={() => setLinkBooking(booking)}
+                                                            onKeyDown={activateOnKey}
                                                         >
                                                             {linkedSessions
                                                                 .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -1910,11 +1846,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                             key={sess.id}
                                                                             style={{ width: `${pct}%` }}
                                                                             className={clsx(
-                                                                                'h-full border-y first:border-l last:border-r first:rounded-l-md last:rounded-r-md',
+                                                                                'h-full border-y first:border-l last:border-r',
                                                                                 'text-xs font-semibold flex items-center px-1 overflow-hidden select-none transition-colors',
-                                                                                'text-unbox-dark',
+                                                                                'text-on-ink',
                                                                                 color,
-                                                                                idx > 0 && 'border-l border-dashed border-gray-300'
+                                                                                idx > 0 && 'border-l border-dashed border-l-on-ink/50'
                                                                             )}
                                                                             title={cl ? `${cl.name} · ${sess.durationMinutes || 60} мин` : `Слот ${idx + 1}`}
                                                                         >
@@ -1934,6 +1870,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         const claimable = !isMine && booking.isReRentListed;
                                                         return (
                                                         <div
+                                                            // Клавиатура: Tab до брони, Enter/пробел — то же, что клик.
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            onKeyDown={activateOnKey}
                                                             // pointerdown → start drag-to-move; click → open link modal.
                                                             // The drag handler waits for pointer-move before
                                                             // committing to "move" so a plain tap still opens
@@ -1969,13 +1909,17 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                         e.stopPropagation();
                                                                         openWaitlistFor(booking);
                                                                     }}
+                                                            // Волна 3 (G5-16): свои — сплошная тёмная заливка,
+                                                            // чужие — тонкая рамка без заливки, колокольчик
+                                                            // «следить» — только при наведении или фокусе.
                                                             className={clsx(
-                                                                'h-8 rounded-md border text-xs font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
+                                                                'group h-8 border text-xs font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1 transition-colors',
+                                                                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                                                                 isMine
-                                                                    ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-grab active:cursor-grabbing hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
+                                                                    ? 'bg-ink text-on-ink border-ink cursor-grab active:cursor-grabbing hover:bg-ink-80'
                                                                     : claimable
-                                                                        ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/40 border-dashed cursor-pointer hover:bg-[var(--status-pending-bg)]/70 transition-colors'
-                                                                        : 'bg-gray-100 text-gray-600 border-gray-200 cursor-pointer hover:bg-gray-200 hover:text-gray-700 transition-colors',
+                                                                        ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/40 border-dashed cursor-pointer hover:bg-[var(--status-pending-bg)]/70'
+                                                                        : 'bg-transparent text-ink-60 border-ink-20 font-medium cursor-pointer hover:border-ink-40 hover:text-ink',
                                                                 reschedSaving && 'opacity-60 pointer-events-none'
                                                             )}
                                                             title={isMine
@@ -1991,22 +1935,28 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                     <Repeat size={12} aria-label="Постоянная бронь (серия)" />
                                                                 </span>
                                                             )}
-                                                            {isMine && !linkedClient && <Check size={12} className="shrink-0" aria-hidden="true" />}
                                                             <span className="truncate flex-1">
                                                                 {isMine
-                                                                    ? (linkedClient ? linkedClient.name : 'Моё')
+                                                                    ? (linkedClient ? linkedClient.name : 'Без клиента')
                                                                     : claimable
                                                                         ? 'На пересдаче'
                                                                         : 'Занято'}
                                                             </span>
                                                             {claimable && <ArrowLeftRight size={12} className="shrink-0" aria-hidden="true" />}
-                                                            {!isMine && !claimable && <Bell size={12} className="text-gray-500 shrink-0" aria-hidden="true" />}
+                                                            {!isMine && !claimable && (
+                                                                <Bell
+                                                                    size={12}
+                                                                    className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity"
+                                                                    aria-hidden="true"
+                                                                />
+                                                            )}
                                                             {isMine && (
                                                                 <UserPlus
                                                                     size={12}
+                                                                    aria-hidden="true"
                                                                     className={clsx(
                                                                         'shrink-0 transition-opacity',
-                                                                        linkedClient ? 'opacity-0 group-hover:opacity-60' : 'opacity-40 group-hover:opacity-100'
+                                                                        linkedClient ? 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100' : 'opacity-70 group-hover:opacity-100'
                                                                     )}
                                                                 />
                                                             )}
@@ -2035,21 +1985,21 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                     if (!past) handleDragEnter(resource.id, slot);
                                                 }}
                                                 className={clsx(
-                                                    'border-b border-r border-gray-50 py-1 px-0.5 transition-colors',
+                                                    'border-b border-r border-ink-08 py-1 px-0.5 transition-colors',
                                                     past
-                                                        ? 'bg-gray-50 cursor-not-allowed'
+                                                        ? 'bg-sunken cursor-not-allowed'
                                                         : isSelected
-                                                            ? 'bg-unbox-green/20 cursor-pointer'
+                                                            ? 'bg-accent-soft cursor-pointer'
                                                             : (dragModeRef.current === 'move' && moveHover?.resId === resource.id && moveHover?.time === slot)
-                                                                ? 'bg-unbox-green/20 ring-2 ring-unbox-green cursor-copy'
+                                                                ? 'bg-accent-soft ring-2 ring-accent cursor-copy'
                                                                 : isPeakTime(slot)
                                                                     ? 'bg-[var(--status-pending-bg)]/40 hover:bg-[var(--status-pending-bg)]/70 cursor-pointer'
-                                                                    : 'hover:bg-unbox-light/40 cursor-pointer'
+                                                                    : 'hover:bg-accent-soft cursor-pointer'
                                                 )}
                                                 style={{ width: SLOT_W, minWidth: SLOT_W, height: 40 }}
                                             >
                                                 {isSelected && (
-                                                    <div className="h-full w-full rounded-sm bg-unbox-green/30" />
+                                                    <div className="h-full w-full bg-accent/30" />
                                                 )}
                                             </td>
                                         );
@@ -2061,20 +2011,34 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 </table>
             </ChessboardScroller>
 
-            {/* Legend */}
-            <div className="flex gap-4 text-xs text-gray-500">
-                <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-unbox-green/15 border border-unbox-green/40 inline-block" />
-                    Мои бронирования
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-gray-100 border border-gray-200 inline-block" />
-                    Занято
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-unbox-green/20 border border-unbox-green/40 inline-block" />
+            {/* Легенда (волна 3, G5-16): объясняет КАЖДЫЙ вид клетки на сетке,
+                теми же стилями, что и сами клетки. */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-small text-ink-60" aria-label="Обозначения">
+                <span>Чтобы забронировать, выделите мышью свободное время в строке кабинета.</span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 bg-ink border border-ink inline-block" aria-hidden="true" />
+                    Мои брони
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 border border-ink-20 inline-block" aria-hidden="true" />
+                    Чужие — нажмите, чтобы следить
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 bg-[var(--status-pending-bg)] border border-dashed border-[var(--status-pending-fg)]/40 inline-block" aria-hidden="true" />
+                    На пересдаче — можно забрать
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 bg-[var(--status-pending-bg)]/40 inline-block" aria-hidden="true" />
+                    Пиковые часы
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 bg-accent/30 inline-block" aria-hidden="true" />
                     Выбрано
-                </div>
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-4 h-3 bg-sunken inline-block" aria-hidden="true" />
+                    Прошло
+                </span>
             </div>
 
             {/* New booking modal (drag-to-select) */}
