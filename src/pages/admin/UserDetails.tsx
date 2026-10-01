@@ -3,7 +3,7 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LegacyButton as Button } from '../../components/ui/LegacyButton';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet, AlertTriangle } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet, AlertTriangle, MoreHorizontal } from 'lucide-react';
 import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrectionModal';
 import { hasPermission } from '../../utils/permissions';
 import { format } from 'date-fns';
@@ -12,7 +12,7 @@ import { fmtFreezeDays, freezeBudget, subscriptionBadge, subscriptionLifecycle }
 import { bookingsApi } from '../../api/bookings';
 import { usersApi } from '../../api/users';
 import type { BookingHistoryItem } from '../../store/types';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -43,6 +43,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Button as UiButton } from '../../components/ui/Button';
 import { Field, Input, type InputKind } from '../../components/ui/Field';
 import { statusLabel } from '../../design/statuses';
+import { COLOR, SHADOW, STATUS, Z } from '../../design/tokens';
 import { formatGel, formatDayMonth, formatTime } from '../../utils/format';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -401,6 +402,27 @@ export function AdminUserDetails() {
         }
     };
 
+    // Архив / возврат из архива (Excel #11, мягкое удаление) — из меню «⋯ Ещё».
+    // Иерархию проверяет сервер (админ не архивирует админа, владельца — никто).
+    const handleArchiveToggle = async () => {
+        if (!user.archivedAt) { setEditField('archive'); return; }
+        const ok = await confirm({
+            title: 'Вернуть из архива?',
+            body: `${user.email} снова сможет входить на сайт и появится в обычных списках.`,
+            confirmLabel: 'Вернуть из архива',
+            cancelLabel: 'Оставить в архиве',
+        });
+        if (!ok) return;
+        try {
+            const { usersApi } = await import('../../api/users');
+            await usersApi.unarchiveUser(user.id);
+            toast.success('Пользователь восстановлен');
+            await useUserStore.getState().fetchUsers();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Не удалось восстановить');
+        }
+    };
+
     // Analytics
     const completedBookings = sortedBookings.filter(b => b.status === 'completed');
     const firstBookingDate = sortedBookings.length > 0 ? sortedBookings[sortedBookings.length - 1].date : null;
@@ -596,6 +618,96 @@ export function AdminUserDetails() {
                                     );
                                 })()}
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Волна 4 (G7-03): деньги — первыми. Клиент спрашивает «сколько у
+                        меня на балансе?» — ответ крупно под именем, а не мелким серым
+                        под «Общей суммой оплат». Минус — красным (цвет + знак «−»). */}
+                    <div data-testid="client-money-summary" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 32, marginTop: 20 }}>
+                        <div>
+                            <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 4 }}>Баланс</div>
+                            <div className="num" style={{
+                                fontSize: 32, fontWeight: 600, lineHeight: 1.1,
+                                color: Number(user.balance || 0) < 0 ? STATUS.danger.fg : GH.ink,
+                            }}>
+                                {formatGel(Number(user.balance || 0))}
+                            </div>
+                            {Number(user.balance || 0) < 0 && (
+                                <div style={{ fontSize: 12, color: STATUS.danger.fg, marginTop: 2 }}>клиент должен</div>
+                            )}
+                            <button
+                                type="button"
+                                // Право finance.balance_correction (решение владельца 27.08):
+                                // без него бэк вернёт 403 — говорим об этом сразу.
+                                onClick={() => {
+                                    if (!hasPermission(currentUser, 'finance.balance_correction')) {
+                                        toast.error('Корректировка баланса — только для старших администраторов');
+                                        return;
+                                    }
+                                    setIsBalanceCorrectionOpen(true);
+                                }}
+                                title="Скорректировать баланс (вручную, с указанием причины)"
+                                style={{ marginTop: 4, padding: 0, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12, color: GH.ink60, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                                <Wallet size={12} aria-hidden="true" /> Корректировка
+                            </button>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 4 }}>Кредитный лимит</div>
+                            <button
+                                type="button"
+                                onClick={() => setIsEditLimitOpen(true)}
+                                aria-label={`Кредитный лимит ${formatGel(user.creditLimit || 0)} — изменить`}
+                                className="num"
+                                style={{ padding: 0, background: 'transparent', border: 'none', borderBottom: `1px dashed ${GH.ink30}`, cursor: 'pointer', fontSize: 20, fontWeight: 600, color: GH.ink, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            >
+                                {formatGel(user.creditLimit || 0)} <Pencil size={14} aria-hidden="true" />
+                            </button>
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 4 }}>Абонемент</div>
+                            <div style={{ fontSize: 16, fontWeight: 500, color: GH.ink }}>
+                                {(() => {
+                                    const sub = user.subscription;
+                                    const life = subscriptionLifecycle(sub as any);
+                                    if (!sub || life === 'none') return 'нет';
+                                    const total = Number(sub.totalHours || 0) + Number(sub.bonusHours || 0);
+                                    const until = sub.expiryDate ? formatDayMonth(sub.expiryDate, { withYear: 'auto' }) : null;
+                                    if (life === 'completed') return `закончился${until ? ` ${until}` : ''}`;
+                                    const base = `осталось ${sub.remainingHours} из ${total} ч${until && !sub.flexible ? ` до ${until}` : ''}`;
+                                    return life === 'frozen' ? `${base} · на паузе` : base;
+                                })()}
+                            </div>
+                        </div>
+                        <div style={{ flex: 1 }} />
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                            <UiButton variant="primary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setIsAddFundsOpen(true)}>
+                                Пополнить
+                            </UiButton>
+                            <UiButton variant="secondary" icon={<RotateCcw size={16} aria-hidden="true" />} onClick={() => setIsAssignSubOpen(true)}>
+                                Абонемент
+                            </UiButton>
+                            {user.phone && (
+                                <a
+                                    href={`tel:${user.phone.replace(/[^+\d]/g, '')}`}
+                                    className="ui-btn ui-btn--secondary"
+                                    style={{ textDecoration: 'none' }}
+                                >
+                                    <Phone size={16} aria-hidden="true" /> Позвонить
+                                </a>
+                            )}
+                            {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
+                                <ClientMoreMenu
+                                    archived={!!user.archivedAt}
+                                    canEditEmail={currentUser?.role === 'senior_admin' || currentUser?.role === 'owner'}
+                                    canMerge={currentUser?.role === 'senior_admin' || currentUser?.role === 'owner'}
+                                    onResetPassword={() => setIsResetPasswordOpen(true)}
+                                    onChangeEmail={() => setEditField('email')}
+                                    onArchiveToggle={handleArchiveToggle}
+                                    onMerge={() => setIsMergeOpen(true)}
+                                />
+                            )}
                         </div>
                     </div>
                 </div>
@@ -809,101 +921,9 @@ export function AdminUserDetails() {
                             </button>
                         </div>
 
-                        {/* ── Password Change ── */}
-                        {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
-                            <div className="border-t border-unbox-light pt-4">
-                                <div className="text-xs font-semibold text-ink-60 uppercase tracking-wider mb-3">Безопасность</div>
-                                <button
-                                    // Excel #46 — «Сбросить пароль» (админ задаёт новый без старого).
-                                    // Аудит 29.09: окно со скрытым полем и показом пароля один раз
-                                    // вместо двух prompt() с паролем открытым текстом.
-                                    onClick={() => setIsResetPasswordOpen(true)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
-                                >
-                                    <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
-                                        <Shield size={14} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="text-sm font-medium text-unbox-dark">Сбросить пароль</div>
-                                        <div className="text-caption text-ink-60">Админ-override без старого пароля. Записывается в журнал.</div>
-                                    </div>
-                                </button>
-
-                                {/* Change email (Excel #47) — senior_admin/owner only */}
-                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
-                                    <button
-                                        onClick={() => setEditField('email')}
-                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
-                                    >
-                                        <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
-                                            <Shield size={14} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="text-sm font-medium text-unbox-dark">Изменить email</div>
-                                            <div className="text-caption text-ink-60">Каскадно обновляет брони, waitlist и транзакции</div>
-                                        </div>
-                                    </button>
-                                )}
-
-                                {/* Archive / Unarchive — Excel #11 soft delete.
-                                    Available to any admin role; the backend
-                                    enforces hierarchy (admins can't archive
-                                    each other, nobody can archive owner). */}
-                                <button
-                                    onClick={async () => {
-                                        if (!user.archivedAt) { setEditField('archive'); return; }
-                                        const ok = await confirm({
-                                            title: 'Вернуть из архива?',
-                                            body: `${user.email} снова сможет входить на сайт и появится в обычных списках.`,
-                                            confirmLabel: 'Вернуть из архива',
-                                            cancelLabel: 'Оставить в архиве',
-                                        });
-                                        if (!ok) return;
-                                        try {
-                                            const { usersApi } = await import('../../api/users');
-                                            await usersApi.unarchiveUser(user.id);
-                                            toast.success('Пользователь восстановлен');
-                                            await useUserStore.getState().fetchUsers();
-                                        } catch (err: any) {
-                                            toast.error(err.response?.data?.detail || 'Не удалось восстановить');
-                                        }
-                                    }}
-                                    className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
-                                >
-                                    <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
-                                        <Shield size={14} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="text-sm font-medium text-unbox-dark">
-                                            {user.archivedAt ? 'Восстановить из архива' : 'Архивировать пользователя'}
-                                        </div>
-                                        <div className="text-caption text-ink-60">
-                                            {user.archivedAt
-                                                ? `В архиве с ${safeFormat(user.archivedAt, 'd.MM.yyyy', undefined, '—')}`
-                                                : 'Заблокирует вход, сохранит всю историю. Обратимо.'}
-                                        </div>
-                                    </div>
-                                </button>
-
-                                {/* Merge two accounts — senior_admin/owner only */}
-                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
-                                    <button
-                                        // Аудит 29.09: раньше email дубликата вводили вслепую в prompt().
-                                        // Теперь поиск + предпросмотр обоих аккаунтов до подтверждения.
-                                        onClick={() => setIsMergeOpen(true)}
-                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
-                                    >
-                                        <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
-                                            <Shield size={14} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="text-sm font-medium text-unbox-dark">Слить с аккаунтом</div>
-                                            <div className="text-caption text-ink-60">Объединить дубликаты (TG-placeholder + сайт)</div>
-                                        </div>
-                                    </button>
-                                )}
-                            </div>
-                        )}
+                        {/* Сброс пароля, смена email, архив, склейка — в «⋯ Ещё» в шапке
+                            (волна 4, G7-03): редкие и опасные действия не стоят рядом с
+                            контактами клиента. */}
                     </Card>
 
                     {/* ── Admin Picker Modal (fixed, escapes overflow:hidden) ── */}
@@ -1090,90 +1110,18 @@ export function AdminUserDetails() {
                                 </Card>
                             )}
 
+                            {/* Волна 4: «Общая сумма оплат», «Всего часов» и «Средний чек» —
+                                только во вкладке «Финансы» (раньше этот блок повторялся дважды),
+                                баланс и лимит — в шапке. Здесь — подробности абонемента. */}
                             <Card className="p-6">
-                                <div className="flex justify-between items-center mb-6">
+                                <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-lg flex items-center gap-2">
-                                        <CreditCard size={20} className="text-ink-60" />
-                                        Финансы и Статистика
+                                        <CreditCard size={20} className="text-ink-60" aria-hidden="true" />
+                                        Абонемент
                                     </h3>
-                                    <div className="flex gap-2">
-                                        <Button size="sm" variant="outline" onClick={() => setIsAddFundsOpen(true)}>
-                                            <Plus size={16} className="mr-2" />
-                                            Пополнить
-                                        </Button>
-                                        <Button size="sm" variant="outline" onClick={() => setIsAssignSubOpen(true)}>
-                                            <RotateCcw size={16} className="mr-2" />
-                                            Абонемент
-                                        </Button>
-                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    {/* 1. Общая сумма оплат (Real Money In) */}
-                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-ink-60 mb-1">Общая сумма оплат</div>
-                                        <div className="text-2xl font-bold">
-                                            {totalPaid !== null ? formatGel(totalPaid) : '—'}
-                                        </div>
-                                        <div
-                                            className="text-xs text-ink-60 mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
-                                            // Право finance.balance_correction (решение владельца 27.08):
-                                            // без него бэк вернёт 403 — не дразним кликабельностью.
-                                            onClick={() => {
-                                                if (!hasPermission(currentUser, 'finance.balance_correction')) {
-                                                    toast.error('Корректировка баланса — только для старших администраторов');
-                                                    return;
-                                                }
-                                                setIsBalanceCorrectionOpen(true);
-                                            }}
-                                            title="Скорректировать баланс (вручную, с указанием причины)"
-                                        >
-                                            <Wallet size={11} className="text-ink-60 group-hover/balance:text-unbox-green transition-colors" />
-                                            <span>Баланс: <span className="font-semibold border-b border-dashed border-unbox-light group-hover/balance:border-unbox-green group-hover/balance:text-unbox-green transition-colors">{formatGel(user.balance)}</span></span>
-                                        </div>
-                                        {/* Credit Limit UI */}
-                                        <div
-                                            className="text-xs text-ink-60 mt-1 flex items-center gap-1 group/limit cursor-pointer"
-                                            onClick={() => setIsEditLimitOpen(true)}
-                                        >
-                                            Кредитный лимит:
-                                            <span className="font-semibold text-ink-60 border-b border-dashed border-unbox-light group-hover/limit:border-ink group-hover/limit:text-unbox-green transition-colors">
-                                                {formatGel(user.creditLimit || 0)}
-                                            </span>
-                                            <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* 2. Всего забронировано часов */}
-                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-ink-60 mb-1">Всего часов</div>
-                                        <div className="text-2xl font-bold">
-                                            {bookingsLoading ? '…' : userBookings
-                                                .filter(b => b.status === 'completed' || b.status === 'confirmed')
-                                                .reduce((sum, b) => sum + (b.duration / 60), 0)
-                                                .toFixed(1)} ч
-                                        </div>
-                                        <div className="text-xs text-ink-60 mt-1">
-                                            {bookingsLoading ? '…' : sortedBookings.length} бронирований
-                                        </div>
-                                    </div>
-
-                                    {/* 3. Средний чек */}
-                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-ink-60 mb-1">Средний чек</div>
-                                        <div className="text-2xl font-bold">
-                                            {(() => {
-                                                const completed = userBookings.filter(b => b.status === 'completed');
-                                                if (completed.length === 0) return formatGel(0);
-                                                const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
-                                                return formatGel(totalValue / completed.length, { fraction: 0 });
-                                            })()}
-                                        </div>
-                                        <div className="text-xs text-ink-60 mt-1">за посещение</div>
-                                    </div>
-
+                                <div className="grid grid-cols-1 gap-6">
                                     {/* 5. Активный абонемент */}
                                     <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-sunken border-ink-10" : "bg-unbox-light/30 border-unbox-light")}>
                                         <div className="relative z-10 flex justify-between items-start">
@@ -1528,45 +1476,21 @@ export function AdminUserDetails() {
                     {/* Finance Tab Content (Extended) */}
                     {activeTab === 'finance' && (
                         <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="flex justify-between items-center">
-                                <h2 className="text-xl font-bold">Финансы и Статистика</h2>
-                                <div className="flex gap-2">
-                                    <Button size="sm" variant="outline" onClick={() => setIsAddFundsOpen(true)}>
-                                        <Plus size={16} className="mr-2" />
-                                        Пополнить
-                                    </Button>
-                                    <Button size="sm" variant="outline" onClick={() => setIsAssignSubOpen(true)}>
-                                        <RotateCcw size={16} className="mr-2" />
-                                        Абонемент
-                                    </Button>
-                                </div>
-                            </div>
+                            {/* «Пополнить» и «Абонемент» — в шапке карточки, здесь не дублируем. */}
+                            <h2 className="text-xl font-bold">Финансы</h2>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {/* 1. Общая сумма оплат (Real Money In) */}
-                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                <div className="bg-card p-4 border border-ink-10">
                                     <div className="text-sm text-ink-60 mb-1">Общая сумма оплат</div>
                                     <div className="text-2xl font-bold">
                                         {totalPaid !== null ? formatGel(totalPaid) : '—'}
                                     </div>
-                                    <div className="text-xs text-ink-60 mt-1">Баланс: {formatGel(user.balance)}</div>
-                                    {/* Credit Limit UI */}
-                                    <div
-                                        className="text-xs text-ink-60 mt-1 flex items-center gap-1 group/limit cursor-pointer"
-                                        onClick={() => setIsEditLimitOpen(true)}
-                                    >
-                                        Кредитный лимит:
-                                        <span className="font-semibold text-ink-60 border-b border-dashed border-unbox-light group-hover/limit:border-ink group-hover/limit:text-unbox-green transition-colors">
-                                            {formatGel(user.creditLimit || 0)}
-                                        </span>
-                                        <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                                        </div>
-                                    </div>
+                                    <div className="text-xs text-ink-60 mt-1">все оплаты клиента в кассу</div>
                                 </div>
 
                                 {/* 2. Всего забронировано часов */}
-                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                <div className="bg-card p-4 border border-ink-10">
                                     <div className="text-sm text-ink-60 mb-1">Всего часов</div>
                                     <div className="text-2xl font-bold">
                                         {bookingsLoading ? '…' : userBookings
@@ -1580,7 +1504,7 @@ export function AdminUserDetails() {
                                 </div>
 
                                 {/* 3. Средний чек */}
-                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                <div className="bg-card p-4 border border-ink-10">
                                     <div className="text-sm text-ink-60 mb-1">Средний чек</div>
                                     <div className="text-2xl font-bold">
                                         {(() => {
@@ -1779,5 +1703,83 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
                 </Field>
             )}
         </Sheet>
+    );
+}
+
+// ── «⋯ Ещё» в шапке карточки (волна 4, G7-03) ─────────────────────────────
+// Сброс пароля, смена email, архив и склейка раньше стояли блоком «Безопасность»
+// в левой колонке рядом с телефоном. Действия и права — прежние, только место.
+function ClientMoreMenu({ archived, canEditEmail, canMerge, onResetPassword, onChangeEmail, onArchiveToggle, onMerge }: {
+    archived: boolean;
+    canEditEmail: boolean;
+    canMerge: boolean;
+    onResetPassword: () => void;
+    onChangeEmail: () => void;
+    onArchiveToggle: () => void;
+    onMerge: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!open) return;
+        const onDown = (e: MouseEvent) => {
+            if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onDown);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [open]);
+    const pick = (fn: () => void) => () => { setOpen(false); fn(); };
+    const items: { label: string; hint: string; onClick: () => void }[] = [
+        { label: 'Сбросить пароль', hint: 'Новый пароль без старого. Записывается в журнал.', onClick: onResetPassword },
+        ...(canEditEmail ? [{ label: 'Изменить email', hint: 'Брони, лист ожидания и операции перейдут на новый адрес', onClick: onChangeEmail }] : []),
+        { label: archived ? 'Восстановить из архива' : 'Архивировать', hint: archived ? 'Клиент снова сможет входить' : 'Заблокирует вход, история сохранится. Обратимо.', onClick: onArchiveToggle },
+        ...(canMerge ? [{ label: 'Слить с аккаунтом', hint: 'Объединить дубликаты (Telegram + сайт)', onClick: onMerge }] : []),
+    ];
+    return (
+        <div ref={rootRef} style={{ position: 'relative' }}>
+            <UiButton
+                variant="quiet"
+                icon={<MoreHorizontal size={16} aria-hidden="true" />}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen(o => !o)}
+            >
+                Ещё
+            </UiButton>
+            {open && (
+                <div
+                    role="menu"
+                    aria-label="Ещё действия с аккаунтом"
+                    style={{
+                        position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: Z.dropdown,
+                        minWidth: 280, background: COLOR.card, border: `1px solid ${GH.ink10}`, boxShadow: SHADOW.pop,
+                        padding: 4,
+                    }}
+                >
+                    <div style={{ padding: '8px 12px 4px', fontSize: 12, color: GH.ink60 }}>Безопасность</div>
+                    {items.map(it => (
+                        <button
+                            key={it.label}
+                            type="button"
+                            role="menuitem"
+                            onClick={pick(it.onClick)}
+                            className="hover:bg-ink-05"
+                            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '8px 12px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                        >
+                            <Shield size={14} aria-hidden="true" style={{ marginTop: 3, color: GH.ink60, flexShrink: 0 }} />
+                            <span>
+                                <span style={{ display: 'block', fontSize: 14, fontWeight: 500, color: GH.ink }}>{it.label}</span>
+                                <span style={{ display: 'block', fontSize: 12, color: GH.ink60 }}>{it.hint}</span>
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
     );
 }
