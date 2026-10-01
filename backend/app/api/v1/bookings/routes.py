@@ -80,16 +80,27 @@ def _booking_hours_until_start(booking: Booking) -> float:
     return (start_tb - now_utc).total_seconds() / 3600.0
 
 
-def _sync_linked_session_to_booking(db_session: Session, booking: Booking) -> None:
+def _sync_linked_session_to_booking(
+    db_session: Session,
+    booking: Booking,
+    old_booking_duration: Optional[int] = None,
+) -> Optional[dict]:
     """Helper for booking↔session autosync (owner 2026-05-27).
 
     If `booking` has a CRM session attached via `session.booking_id`, move
     the session's `date` to match the booking's new wall-clock time so the
-    two never drift apart after a reschedule. No GCal sync here — the
-    session has its own `google_event_id` and a separate CRM-calendar job
-    picks up the change. No commit either — the caller batches the write.
-    Best-effort: a failure here must not break the user-visible booking
-    move, so we log and swallow exceptions.
+    two never drift apart after a reschedule. No commit — the caller batches
+    the write. Best-effort: a failure here must not break the user-visible
+    booking move, so we log and swallow exceptions.
+
+    01.10: длительность тоже переносится (если сессия совпадала с прежней
+    длительностью брони), а событие в личном календаре специалиста двигает
+    вызывающий ПОСЛЕ commit — через _push_session_moves_to_gcal(...) по
+    возвращённому описанию переноса. Раньше событие оставалось на старом
+    времени, и автосинк через ≤20 мин откатывал сессию и бронь назад
+    (или, у сессии без id, рождал дубль).
+
+    Возвращает {"session_id", "old_date", "old_duration"} при переносе, иначе None.
     """
     try:
         from app.models.therapy_session import TherapySession as _TS
@@ -111,15 +122,32 @@ def _sync_linked_session_to_booking(db_session: Session, booking: Booking) -> No
             return
         tb_dt = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
         new_utc = _t2u(tb_dt)
-        if linked.date != new_utc:
+        old_date = linked.date
+        old_duration = linked.duration_minutes or 60
+        new_duration = old_duration
+        if (
+            old_booking_duration
+            and booking.duration
+            and booking.duration != old_booking_duration
+            and old_duration == old_booking_duration
+        ):
+            new_duration = int(booking.duration)
+        if linked.date != new_utc or new_duration != old_duration:
             logger.info(
-                "[autosync] booking %s → session %s moved %s → %s",
-                booking.id, linked.id, linked.date, new_utc,
+                "[autosync] booking %s → session %s moved %s → %s (%s → %s мин)",
+                booking.id, linked.id, linked.date, new_utc, old_duration, new_duration,
             )
             linked.date = new_utc
+            linked.duration_minutes = new_duration
             linked.is_booked = True
             linked.updated_at = datetime.now()
             db_session.add(linked)
+            return {
+                "session_id": str(linked.id),
+                "old_date": old_date,
+                "old_duration": old_duration,
+            }
+        return None
     except Exception:
         logger.exception("[autosync] failed to sync session for booking %s", booking.id)
         # Сбрасываем возможно-сломанную транзакцию, чтобы следующий commit
@@ -128,6 +156,115 @@ def _sync_linked_session_to_booking(db_session: Session, booking: Booking) -> No
             db_session.rollback()
         except Exception:
             logger.exception("[autosync] rollback after sync failure also failed")
+        return None
+
+
+def _push_session_moves_to_gcal(db_session: Session, moves: list) -> None:
+    """Двигает события личного календаря специалиста вслед за перенесёнными
+    сессиями (01.10). Зовётся ПОСЛЕ commit переноса брони.
+
+    • у сессии есть google_event_id → patch события;
+    • id нет → ищем событие клиента на СТАРОМ времени (минута в минуту),
+      привязываем (если оно ничьё) и двигаем; не нашли → create_or_link_event
+      на новом времени.
+    Best-effort: ошибка Google не ломает перенос брони — логируем и шлём
+    специалисту уведомление, иначе автосинк молча вернёт старое время.
+    """
+    if not moves:
+        return
+    from app.models.therapy_session import TherapySession as _TS
+    from app.models.therapist_client import TherapistClient as _TC
+    from app.models.notification import Notification as _Notif
+    from app.api.v1.crm import get_crm_calendar_id as _get_cal
+    from app.services.crm_calendar import move_or_attach_event as _move_ev
+
+    for mv in moves:
+        if not mv:
+            continue
+        ts = None
+        try:
+            ts = db_session.get(_TS, mv["session_id"])
+            if not ts or ts.status in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST"):
+                continue
+            try:
+                owner = db_session.get(User, UUID(str(ts.specialist_id)))
+            except (ValueError, TypeError):
+                owner = None
+            cal_id = _get_cal(owner) if owner else None
+            if not cal_id:
+                continue
+            cl = db_session.get(_TC, ts.client_id)
+            sid = str(ts.id)
+
+            def _taken(gid: str, _sid=sid) -> bool:
+                other = db_session.exec(
+                    select(_TS.id).where(_TS.google_event_id == gid)
+                ).first()
+                return other is not None and str(other) != _sid
+
+            res = _move_ev(
+                cal_id,
+                event_id=ts.google_event_id,
+                client_name=cl.name if cl else "Сессия",
+                alias_code=cl.alias_code if cl else None,
+                new_date=ts.date,
+                new_duration=ts.duration_minutes or 60,
+                old_date=mv.get("old_date"),
+                old_duration=mv.get("old_duration") or 60,
+                is_taken=_taken,
+                session_id=sid,
+                booking_id=ts.booking_id,
+            )
+            gid = res.get("event_id")
+            if gid and not ts.google_event_id and not _taken(gid):
+                ts.google_event_id = gid
+                db_session.add(ts)
+                db_session.commit()
+            if res.get("action") == "conflict":
+                db_session.add(_Notif(
+                    recipient_id=str(ts.specialist_id),
+                    type="calendar_conflict",
+                    title="Календарь: возможный дубль при переносе",
+                    description=(
+                        f"Бронь перенесена, но рядом с новым временем уже стоит событие "
+                        f"«{res.get('summary')}» ({res.get('conflict_start') or '—'}). "
+                        "Второе событие НЕ создано — проверьте Google Календарь."
+                    ),
+                    icon="AlertTriangle",
+                    link="/crm/sessions",
+                ))
+                db_session.commit()
+            logger.info("[autosync] session %s → GCal %s (%s)", sid, gid, res.get("action"))
+        except Exception as e:  # noqa: BLE001 — календарь не ломает перенос
+            logger.warning("[autosync] GCal move failed for session %s: %r", mv.get("session_id"), e)
+            try:
+                db_session.rollback()
+                if ts is not None:
+                    db_session.add(_Notif(
+                        recipient_id=str(ts.specialist_id),
+                        type="calendar_push_failed",
+                        title="Перенос не попал в Google Календарь",
+                        description=(
+                            "Бронь и сессия перенесены, но событие в Google Календаре "
+                            "осталось на старом времени. Перенесите его вручную — иначе "
+                            "синхронизация вернёт сессию на прежнее время."
+                        ),
+                        icon="AlertTriangle",
+                        link="/crm/sessions",
+                    ))
+                    db_session.commit()
+            except Exception:
+                logger.exception("[autosync] failed to record GCal move failure")
+
+
+def _push_session_moves_to_gcal_bg(moves: list) -> None:
+    """Фоновая обёртка: своя сессия БД, чтобы медленный Google не держал запрос."""
+    from app.db.session import engine as _engine
+    try:
+        with Session(_engine) as bg_session:
+            _push_session_moves_to_gcal(bg_session, moves)
+    except Exception:
+        logger.exception("[autosync] background GCal move crashed")
 
 
 def _gcal_recreate_in_background(booking_id: str, user_name: str, old_event_id: Optional[str], old_resource_id: Optional[str]) -> None:
@@ -2743,6 +2880,8 @@ def extend_recurring_series(
     # exists (2026-05-22 — Анастасия Черепанова bug).
     ext_crm_client = None
     ext_session_group_id = None
+    ext_crm_calendar_id = None
+    _ext_gcal_conflicts: list[str] = []
     if template.crm_client_id:
         from app.models.therapist_client import TherapistClient as _TC
         ext_crm_client = session.get(_TC, template.crm_client_id)
@@ -2758,6 +2897,8 @@ def extend_recurring_series(
             ).first()
             ext_session_group_id = (_linked.recurring_group_id if _linked
                                     else str(gen_uuid4()))
+            from app.api.v1.crm import get_crm_calendar_id as _get_crm_cal_ext
+            ext_crm_calendar_id = _get_crm_cal_ext(booking_owner)
         else:
             ext_crm_client = None  # other specialist's client — don't touch
 
@@ -2899,7 +3040,7 @@ def extend_recurring_series(
                     existing_ts.updated_at = datetime.now()
                     session.add(existing_ts)
                 else:
-                    session.add(_TS(
+                    _ext_ts = _TS(
                         client_id=str(ext_crm_client.id),
                         specialist_id=str(booking_owner.id),
                         date=session_date,
@@ -2911,12 +3052,54 @@ def extend_recurring_series(
                         is_booked=True,
                         booking_id=str(new_booking.id),
                         recurring_group_id=ext_session_group_id,
-                    ))
+                    )
+                    # 01.10: продлённые даты тоже уходят в личный календарь
+                    # специалиста (как при создании серии) — пуш С ПОИСКОМ,
+                    # «почти совпало» → сигнал, второе событие не создаём.
+                    if ext_crm_calendar_id:
+                        try:
+                            from app.services.crm_calendar import create_or_link_event as _crm_push_ext
+                            _res = _crm_push_ext(
+                                calendar_id=ext_crm_calendar_id,
+                                client_name=ext_crm_client.name,
+                                alias_code=ext_crm_client.alias_code,
+                                session_date=session_date,
+                                duration_minutes=template.duration,
+                                session_id=str(_ext_ts.id),
+                                booking_id=str(new_booking.id),
+                            )
+                            if _res["action"] == "conflict":
+                                _ext_gcal_conflicts.append(d.strftime("%d.%m"))
+                            elif _res.get("event_id"):
+                                _clash = session.exec(
+                                    select(_TS).where(_TS.google_event_id == _res["event_id"])
+                                ).first()
+                                if _clash is None:
+                                    _ext_ts.google_event_id = _res["event_id"]
+                        except Exception as e:
+                            logger.warning(f"[extend] CRM GCal push failed for {d}: {e}")
+                    session.add(_ext_ts)
             except Exception as e:
                 logger.warning(f"[extend] CRM session link failed for {d}: {e}")
 
         created += 1
         total_cost += new_booking.final_price
+
+    if _ext_gcal_conflicts and booking_owner is not None:
+        from app.models.notification import Notification as _NotifExt
+        session.add(_NotifExt(
+            type="calendar_conflict",
+            title="Календарь: возможные дубли в продлении серии",
+            description=(
+                f"Даты: {', '.join(_ext_gcal_conflicts[:8])}"
+                f"{'…' if len(_ext_gcal_conflicts) > 8 else ''}. "
+                "Рядом уже стояли события в Google — вторые НЕ созданы. "
+                "Проверьте время в календаре и в CRM."
+            ),
+            recipient_id=str(booking_owner.id),
+            icon="AlertTriangle",
+            link="/crm/sessions",
+        ))
 
     session.commit()
 
@@ -3748,8 +3931,13 @@ def reschedule_booking(
 
     # Auto-sync linked CRM session — keep its time in lock-step with the
     # booking it's attached to. See `_sync_linked_session_to_booking`.
-    _sync_linked_session_to_booking(session, booking)
+    _session_move = _sync_linked_session_to_booking(
+        session, booking, old_booking_duration=old_duration,
+    )
     session.commit()
+    if _session_move:
+        # 01.10: событие в личном календаре специалиста — вслед за сессией.
+        background_tasks.add_task(_push_session_moves_to_gcal_bg, [_session_move])
 
     if old_gcal_event:
         background_tasks.add_task(
@@ -4315,6 +4503,7 @@ def reschedule_booking_series(
     new_resource = data.new_resource_id or old_anchor_resource
 
     propagated = 0
+    _series_session_moves: list = []
     skipped: list[dict] = []
     for sib in siblings:
         # Skip rows already in the past — moving them isn't meaningful and
@@ -4388,10 +4577,14 @@ def reschedule_booking_series(
         session.add(sib)
         # Sync sibling's linked CRM session (if any) onto the new time.
         # Helper is no-commit; we batch with the single commit below.
-        _sync_linked_session_to_booking(session, sib)
+        _sib_move = _sync_linked_session_to_booking(session, sib)
+        if _sib_move:
+            _series_session_moves.append(_sib_move)
         propagated += 1
 
     session.commit()
+    if _series_session_moves:
+        background_tasks.add_task(_push_session_moves_to_gcal_bg, _series_session_moves)
 
     # Re-fetch to get the final state of the anchor after both writes.
     session.refresh(booking)

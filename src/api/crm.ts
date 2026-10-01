@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { api } from './client';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -94,6 +95,9 @@ export interface CrmSessionCreate {
     bookingId?: string;
     recurringGroupId?: string;
     pushToCalendar?: boolean;
+    /** «Всё равно создать», когда в календаре рядом уже есть встреча клиента
+     *  (иначе сервер отвечает 409 code=calendar_near). */
+    force?: boolean;
 }
 
 export interface CrmSessionUpdate {
@@ -331,6 +335,11 @@ export const crmApi = {
 
     updateSession: async (id: string, data: CrmSessionUpdate): Promise<CrmSession> => {
         const response = await api.patch(`/crm/sessions/${id}`, data);
+        // 01.10: перенос сохранён, но Google Календарь не обновился — говорим
+        // об этом сразу (иначе синк молча вернёт старое время). Один раз здесь
+        // вместо каждого места переноса.
+        const warning = (response.data as { calendarWarning?: string | null })?.calendarWarning;
+        if (warning) toast.warning(warning, { duration: 10000 });
         return response.data;
     },
 

@@ -741,11 +741,15 @@ def test_calendar_safe_mode_gates_deletions():
     assert 'gcal_source_of_truth' in sync_src, "синк не читает флаг режима"
     assert sync_src.count("if not gcal_master:") >= 2, \
         "гейт должен стоять и в cancel-matched, и в orphan-блоке"
-    for destroyer in ("_cancel_booking_behind_session", "_delete_session_safely"):
-        i = sync_src.find("deleted_on_cancel = 0")
+    i = sync_src.find("deleted_on_cancel = 0")
+    for destroyer in ("_delete_session_safely(", "_keep_valuable_session("):
         j = sync_src.find(destroyer, i)
         g = sync_src.find("if not gcal_master:", i)
         assert 0 < g < j, f"{destroyer} вызывается раньше проверки режима"
+    # 01.10 (guard_crm_sync_dedupe): синк больше НЕ снимает бронь кабинета и не
+    # возвращает деньги сам — только отменяет ценную сессию и шлёт уведомление.
+    assert "_cancel_booking_behind_session(session" not in sync_src[i:], \
+        "синк снова сам отменяет бронь с возвратом денег при удалении события"
     dash_src = (base / "app/api/v1/crm/dashboard.py").read_text()
     assert 'google_calendar_source_of_truth' in dash_src and 'gcal_source_of_truth' in dash_src, \
         "настройки снова потеряли флаг (тумблер станет декорацией)"

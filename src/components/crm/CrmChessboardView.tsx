@@ -44,6 +44,7 @@ const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code ||
 // AdminChessboardView и CrmChessboardView. Теперь — общие.
 // parseUTC заменяет локальный parseBookingDate (тело идентичное).
 import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
+import { createSessionResolvingCalendar, type SeriesCalendarChoice } from '../../utils/crmCalendarConflict';
 
 const _minToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1148,13 +1149,16 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         if (clientId && bookingId) {
             const bookingDate = format(selectedDate, 'yyyy-MM-dd');
             const timeStr = bookSlot?.time || '00:00';
-            await createSession({
+            // 01.10: сессия сразу уходит в Google Календарь (если подключён) —
+            // иначе синк потом делал из события специалиста вторую сессию.
+            await createSessionResolvingCalendar(createSession, updateSession, {
                 clientId,
                 date: `${bookingDate}T${timeStr}:00`,
                 durationMinutes: bookSlot?.duration || 60,
                 price: price || undefined,
                 bookingId,
                 isBooked: true,
+                pushToCalendar: true,
             });
         }
         await fetchBookings();
@@ -1213,13 +1217,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     await deleteSession(slot.existingSessionId);
                 }
             } else if (slot.clientId) {
-                await createSession({
+                await createSessionResolvingCalendar(createSession, updateSession, {
                     clientId: slot.clientId,
                     date: sessionDate,
                     durationMinutes: 60,
                     price: slot.price || undefined,
                     bookingId: booking.id,
                     isBooked: true,
+                    pushToCalendar: true,
                 });
             }
         }
@@ -1246,6 +1251,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 // the delete UI later offer "this one vs this+future" the way
                 // Google Calendar does. Generated once per click, not per slot,
                 // so multi-client recurring (rare but possible) shares a group.
+                // Один ответ на near-конфликты календаря на всю серию (не 24 вопроса подряд).
+                const seriesCalendarChoice: SeriesCalendarChoice = {};
                 const recurringGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : `rg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1265,7 +1272,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         const m = slot.hour % 60;
                         const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
                         try {
-                            await createSession({
+                            const made = await createSessionResolvingCalendar(createSession, updateSession, {
                                 clientId: slot.clientId,
                                 date: `${nextDateStr}T${timeStr}:00`,
                                 durationMinutes: 60,
@@ -1276,8 +1283,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 pushToCalendar: true,
                                 recurringGroupId,
                                 isBooked: false,
-                            });
-                            recurringCreated++;
+                            }, seriesCalendarChoice);
+                            if (made) recurringCreated++;
                         } catch (e) {
                             // Don't swallow silently — earlier we did, and a
                             // missing gcal_event_id was invisible to the

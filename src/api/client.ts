@@ -103,7 +103,10 @@ api.interceptors.response.use(
             // списком броней (MaintenanceConflictSheet) — второй тост рядом не нужен.
             const isMaintenanceConflict = String(error.config?.url ?? '').includes('maintenance')
                 && typeof detail === 'object' && Array.isArray((detail as { conflicts?: unknown }).conflicts);
-            if (!isMaintenanceConflict) {
+            // calendar_near (01.10) — не ошибка, а вопрос специалисту: экран
+            // сам предложит «Перенести существующую / Всё равно создать».
+            const isCalendarNear = typeof detail === 'object' && detail.code === 'calendar_near';
+            if (!isMaintenanceConflict && !isCalendarNear) {
                 showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
             }
         } else if (isTimeoutError(error)) {
