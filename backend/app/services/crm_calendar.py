@@ -8,6 +8,7 @@ CRM Google Calendar Service — синхронизация личного кал
 """
 import os
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -15,6 +16,10 @@ from typing import Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+# find_matching_event логировал через `logger`, которого в модуле не было:
+# сбой поиска событий превращался в NameError, и пуш падал целиком.
+logger = logging.getLogger(__name__)
 
 # ─── Credentials ──────────────────────────────────────────────────────────────
 
@@ -40,6 +45,8 @@ def _get_calendar_service():
 # ─── Core helpers ─────────────────────────────────────────────────────────────
 
 _TZ_TBILISI = timezone(timedelta(hours=4))
+# Часовой пояс для повторяющихся событий (RRULE требует явный timeZone).
+RECURRING_TZ = "Asia/Tbilisi"
 
 
 def tbilisi_naive_to_utc_naive(dt: datetime) -> datetime:
@@ -305,12 +312,16 @@ def create_recurring_event(
     if booking_group_id:
         private_props["unbox_booking_group"] = str(booking_group_id)
 
+    # 01.10: повторяющемуся событию Google ОБЯЗАТЕЛЕН timeZone в start/end —
+    # без него insert с RRULE отвергается («Missing time zone definition for
+    # start time»), и серия всегда уходила запасным по-датным путём. Тбилиси
+    # без перехода на летнее время, так что UTC-instance-id ниже не плывут.
     master = service.events().insert(
         calendarId=calendar_id,
         body={
             "summary": summary,
-            "start": {"dateTime": _dt_to_rfc3339(start)},
-            "end": {"dateTime": _dt_to_rfc3339(end)},
+            "start": {"dateTime": _dt_to_rfc3339(start), "timeZone": RECURRING_TZ},
+            "end": {"dateTime": _dt_to_rfc3339(end), "timeZone": RECURRING_TZ},
             "recurrence": [f"RRULE:FREQ=WEEKLY;INTERVAL={interval_weeks};COUNT={count}"],
             "extendedProperties": {"private": private_props},
         },
@@ -354,6 +365,67 @@ def update_calendar_event(
         eventId=event_id,
         body=body,
     ).execute()
+
+
+def move_or_attach_event(
+    calendar_id: str,
+    *,
+    event_id: Optional[str],
+    client_name: str,
+    alias_code: Optional[str],
+    new_date: datetime,
+    new_duration: int = 60,
+    old_date: Optional[datetime] = None,
+    old_duration: int = 60,
+    find_name: Optional[str] = None,
+    find_alias: Optional[str] = None,
+    is_taken=None,
+    session_id: Optional[str] = None,
+    booking_id: Optional[str] = None,
+) -> dict:
+    """Перенос встречи из CRM → то же событие в личном календаре (01.10).
+
+    Раньше переносы двигали событие только если у сессии УЖЕ был
+    google_event_id; иначе событие оставалось на старом времени, автосинк
+    находил его и плодил дубль сессии (или откатывал перенос). Теперь:
+
+      1) id есть            → patch этого события            (action='moved');
+      2) id нет, на СТАРОМ времени стоит событие того же клиента минута в
+         минуту и оно ничьё (is_taken(id) == False)
+                             → привязываем и двигаем          (action='linked_moved');
+      3) иначе create_or_link_event на НОВОМ времени
+                             → 'linked' | 'created' | 'conflict' (near ±3 ч).
+
+    Ошибки Google НЕ глотаются — вызывающий решает, как предупредить
+    специалиста. `find_name/find_alias` — имя для поиска на старом времени
+    (при смене клиента событие стоит под ПРЕЖНИМ именем).
+    """
+    if event_id:
+        update_calendar_event(
+            calendar_id, event_id, client_name, alias_code, new_date, new_duration,
+        )
+        return {"event_id": event_id, "action": "moved", "summary": None}
+
+    if old_date is not None:
+        ev, status = find_matching_event(
+            calendar_id, find_name or client_name,
+            find_alias if find_name else alias_code,
+            old_date, old_duration,
+        )
+        if status == "exact" and ev and not (is_taken and is_taken(ev["id"])):
+            update_calendar_event(
+                calendar_id, ev["id"], client_name, alias_code, new_date, new_duration,
+            )
+            return {"event_id": ev["id"], "action": "linked_moved", "summary": ev.get("summary")}
+
+    res = create_or_link_event(
+        calendar_id, client_name, alias_code, new_date, new_duration,
+        notes=None, session_id=session_id, booking_id=booking_id,
+    )
+    if res.get("action") == "linked" and is_taken and is_taken(res["event_id"]):
+        # Событие на новом времени уже держит другая сессия — второй раз не вяжем.
+        return {"event_id": None, "action": "taken", "summary": res.get("summary")}
+    return res
 
 
 def patch_event_summary(calendar_id: str, event_id: str, new_summary: str) -> None:
