@@ -50,6 +50,15 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
             ? `Подставлена цена брони: ${formatGel(price)} (спишется с баланса за сутки до начала)`
             : undefined;
 
+    // Долга по этой брони нет («оплачено» / «покрыто балансом») — кнопка рядом с
+    // балансом не «Принять оплату» (админ принимал деньги за уже оплаченную с
+    // баланса бронь), а «Пополнить баланс». Подсказка в окне — про предоплату;
+    // если у клиента всё же минус на балансе, остаётся подсказка про долг.
+    const noDebtOnBooking = !!due && due.due <= 0;
+    const payLabel = noDebtOnBooking ? 'Пополнить баланс' : undefined;
+    const payHint = noDebtOnBooking && debt <= 0
+        ? 'Долга по этой брони нет — это предоплата, деньги лягут на баланс клиента'
+        : suggestedHint;
 
     let weeklyLine: string | null = null;
     if (est && est.applies) {
@@ -99,7 +108,7 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                     <span className="text-ink-60 shrink-0">Баланс</span>
                     <span className="flex items-center gap-2">
                         <span className={`font-medium ${balance < 0 ? 'text-[var(--status-danger-fg)]' : 'text-unbox-dark'}`}>{formatGel(balance)}</span>
-                        <AcceptPaymentButton client={client} defaultAmount={suggested} hint={suggestedHint} branch={cashBranchOfBooking(booking)} />
+                        <AcceptPaymentButton client={client} defaultAmount={suggested} hint={payHint} label={payLabel} branch={cashBranchOfBooking(booking)} />
                     </span>
                 </div>
             )}

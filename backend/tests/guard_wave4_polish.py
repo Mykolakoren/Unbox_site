@@ -375,7 +375,8 @@ def test_desktop_due_segment_counts_clients():
     dash = _code(ADMIN + "Dashboard.tsx")
     assert "label: `Должны · ${summary.clients}`" in dash, "«Должны · N» на компьютере снова считает брони, а не клиентов"
     mob = _code(MADMIN + "MobileAdminDashboard.tsx")
-    assert "`Должны · ${owing.length}`" in mob
+    # 01.10 (guard_pay_clarity_2026_10): на телефоне «Должны · N» — только клиенты с today > 0, как на компьютере.
+    assert "`Должны · ${owingToday.length}`" in mob
 
 
 def test_cash_line_reloads_after_payment():
