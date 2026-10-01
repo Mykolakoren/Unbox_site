@@ -168,12 +168,18 @@ def test_sheets_on_shared_sheet():
         assert "from '../../../components/ui/Sheet'" in code, f"{rel}: не на общем Sheet"
         assert "<Sheet" in code, f"{rel}: шторка не рендерит общий Sheet"
         assert "position: 'fixed', inset: 0" not in code, f"{rel}: вернулся самодельный оверлей"
-    # Три шторки с прилипающим низом (сторож C) остаются самодельными, но на
-    # токенах: подложка и тень — из дизайн-системы, крестик — 44 px с подписью.
-    for name in ("MobileAdminUsers.tsx", "MobileAdminFinance.tsx", "MobileAdminCabinets.tsx"):
+    # Волна 4 (пакет A): последние три самодельные шторки — «Пополнить
+    # баланс» (теперь TopupSheet.tsx), «Новая операция» (касса) и «Закрыть
+    # кабинет» — тоже на общем Sheet. Тень, слой, крестик 44 px с подписью
+    # «Закрыть» и подвал с кнопкой теперь даёт сам Sheet, поэтому проверяем
+    # то же, что и у остальных: общий Sheet и никакого своего оверлея.
+    for name in ("TopupSheet.tsx", "MobileAdminFinance.tsx", "MobileAdminCabinets.tsx"):
         code = _code(ROOT / "src/pages/mobile/admin" / name)
-        assert "boxShadow: 'var(--shadow-pop)'" in code, f"{name}: тень шторки мимо токена"
-        assert 'aria-label="Закрыть"' in code, f"{name}: у крестика шторки нет подписи"
+        assert "from '../../../components/ui/Sheet'" in code, f"{name}: не на общем Sheet"
+        assert "<Sheet" in code and "footer={" in code, f"{name}: шторка без общего Sheet с подвалом"
+        assert "position: 'fixed', inset: 0" not in code, f"{name}: вернулся самодельный оверлей"
+        assert "SHEET_FOOTER" not in code and "zIndex: Z_SHEET" not in code, \
+            f"{name}: снова самодельная шторка на sheetLayers"
 
 
 def test_shell_header_targets_and_no_dead_desktop_button():
@@ -186,7 +192,8 @@ def test_shell_header_targets_and_no_dead_desktop_button():
     assert "sessionStorage.setItem('forceDesktop'" not in crm, \
         "вернулась мёртвая кнопка «десктоп» (App.tsx не читает sessionStorage.forceDesktop)"
     admin = _code(ROOT / "src/pages/mobile/admin/MobileAdminLayout.tsx")
-    assert 'label="Клиенты"' in admin and 'label="Главная"' in admin
+    # Волна 4: первая вкладка — «Сегодня» (лента дня), «Финансы» — «Касса».
+    assert 'label="Клиенты"' in admin and 'label="Сегодня"' in admin
 
 
 def test_loading_error_empty_are_distinct():
@@ -218,7 +225,7 @@ def test_loading_error_empty_are_distinct():
 PARSER = "src/pages/mobile/admin/parseMoneyInput.ts"
 MONEY_FIELDS = (
     "src/pages/mobile/admin/MobileCloseShiftSheet.tsx",   # факт в кассе
-    "src/pages/mobile/admin/MobileAdminUsers.tsx",        # пополнение баланса
+    "src/pages/mobile/admin/TopupSheet.tsx",              # пополнение баланса (волна 4: вынесено из MobileAdminUsers)
     "src/pages/mobile/admin/MobileAdminFinance.tsx",      # операция кассы
     "src/pages/mobile/admin/bookingSheets.tsx",           # цена брони
     "src/pages/mobile/crm/SessionActionSheet.tsx",        # цена сессии CRM

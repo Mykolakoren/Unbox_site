@@ -248,17 +248,28 @@ def test_admin_overlays_never_under_tabbar():
 
 
 def test_three_sheets_keep_cta_visible():
-    """У трёх шторок главная кнопка в прилипающем низу, а сама шторка
-    ограничена по высоте и прокручивается внутри."""
-    for name, cta in (("MobileAdminUsers.tsx", "Пополнить на"),
-                      ("MobileAdminFinance.tsx", "Сохранить"),
+    """У трёх шторок («Пополнить баланс», «Новая операция», «Закрыть
+    кабинет») главная кнопка всегда видна над нижним меню.
+
+    Волна 4 (пакет A): шторки переехали на общий Sheet — он сам рендерится
+    порталом на слое --z-sheet (выше меню), ограничен по высоте экрана,
+    тело прокручивается, а `footer` прилипает к низу с отступом под
+    «домашнюю полоску». Поэтому проверяем: шторка — <Sheet …> из общего
+    компонента, и главная кнопка лежит внутри footer={…}, а не в теле.
+    «Пополнить» вынесена в TopupSheet.tsx (общая для «Клиентов», карточки
+    клиента и «Сегодня»)."""
+    for name, cta in (("TopupSheet.tsx", "Пополнить на"),
+                      ("MobileAdminFinance.tsx", "ctaLabel"),
                       ("MobileAdminCabinets.tsx", "Закрыть кабинет\n")):
         src = _read(ADMIN_M, name)
-        assert "zIndex: Z_SHEET" in src, f"{name}: шторка не на слое Z_SHEET"
-        assert "maxHeight: SHEET_MAX_HEIGHT" in src, f"{name}: нет ограничения высоты"
-        i = src.find("<div style={SHEET_FOOTER}>")
-        assert i != -1, f"{name}: главная кнопка не в прилипающем низу"
-        assert cta in src[i:i + 2500], f"{name}: «{cta.strip()}» не внутри SHEET_FOOTER"
+        assert "from '../../../components/ui/Sheet'" in src, f"{name}: шторка не на общем Sheet"
+        assert "<Sheet" in src, f"{name}: шторка не рендерит общий Sheet"
+        assert "position: 'fixed', inset: 0" not in src, f"{name}: вернулся самодельный оверлей"
+        i = src.find("footer={")
+        assert i != -1, f"{name}: у шторки нет подвала с главной кнопкой"
+        assert cta in src[i:i + 1500], f"{name}: «{cta.strip()}» не в подвале шторки (footer)"
+    users = _read(ADMIN_M, "MobileAdminUsers.tsx")
+    assert "<TopupSheet" in users, "«Клиенты» больше не открывают общую TopupSheet"
 
 
 if __name__ == "__main__":

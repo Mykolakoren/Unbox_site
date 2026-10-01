@@ -94,7 +94,7 @@ export function MobileAdminSpecialists() {
         const approving = next && r.applicationStatus === 'pending';
         if (!next || approving) {
             const name = `${r.firstName} ${r.lastName}`.trim();
-            const ok = await confirm(approving ? {
+            const ok = await confirm({ ...(approving ? {
                 title: `Опубликовать анкету «${name}»?`,
                 body: 'Заявка будет одобрена, анкета появится в каталоге на сайте. Проверили документы и текст?',
                 confirmLabel: 'Одобрить и опубликовать',
@@ -104,8 +104,8 @@ export function MobileAdminSpecialists() {
                 body: 'Анкета пропадёт из каталога специалистов. Вернуть можно кнопкой «Опубликовать».',
                 confirmLabel: 'Скрыть с сайта',
                 cancelLabel: 'Оставить',
-                tone: 'danger',
-            });
+                tone: 'danger' as const,
+            }) });
             if (!ok) return;
         }
         setBusyId(r.id);
