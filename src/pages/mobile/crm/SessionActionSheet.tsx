@@ -22,7 +22,7 @@ import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/
 import { useCrmStore } from '../../../store/crmStore';
 import { nextSessionLabel } from './crmFlows';
 import { SessionPaymentBlock } from '../../../components/crm/SessionPaymentBlock';
-import { partialPayment } from '../../../utils/sessionMoney';
+import { paidLocally, partialPayment } from '../../../utils/sessionMoney';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -183,7 +183,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 const res = await crmApi.quickPaySession(session.id);
                 // Цену и валюту сессии из платежа НЕ подставляем (платёж мог быть в другой
                 // валюте и цена превратилась бы в сумму платежа) — перечитываем сессию.
-                onChange({ ...session, isPaid: true, remaining: 0 });
+                onChange(paidLocally(session));
                 refreshSession();
                 const added = res.added ?? res.amount;
                 toast.success(

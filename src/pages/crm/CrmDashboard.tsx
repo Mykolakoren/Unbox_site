@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { STATUS } from '../../design/tokens';
-import { partialPayment, sessionDebt } from '../../utils/sessionMoney';
+import { paidLocally, partialPayment, quickPayUndoable, sessionDebt } from '../../utils/sessionMoney';
 import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Sheet } from '../../components/ui/Sheet';
@@ -235,7 +235,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     const handlePay = async (s: CrmSession) => {
         if (payingId) return;
         setPayingId(s.id);
-        let res: { amount: number; currency: string; added?: number };
+        let res: { amount: number; currency: string; added?: number; created?: boolean };
         try {
             // ТОЛЬКО quickPaySession: платёж на счёт клиента по умолчанию,
             // повторный клик ловит стор (_quickPayInFlight).
@@ -246,12 +246,17 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
             return;
         }
         setPayingId(null);
-        setTodayList(list => list?.map(x => (x.id === s.id ? { ...x, isPaid: true } : x)) ?? list);
+        setTodayList(list => list?.map(x => (x.id === s.id ? paidLocally(x) : x)) ?? list);
         reloadDashboard();
         const added = res.added ?? res.amount;
         const sum = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
         // «Вернуть» — тот же путь, что снятие оплаты в шторке сессии:
         // unmarkPaidSession снимает отметку и удаляет платёж.
+        if (!quickPayUndoable(res)) {
+            // Доплата к уже внесённому: «Вернуть» стёрло бы всю оплату сессии — не предлагаем.
+            toast.success(`Доплата принята${sum}`);
+            return;
+        }
         undoToast(`Отмечено${sum}`, async () => {
             try {
                 await crmApi.unmarkPaidSession(s.id);

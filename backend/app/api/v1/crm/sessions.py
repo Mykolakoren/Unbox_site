@@ -948,6 +948,10 @@ def quick_pay_session(
             # Сколько денег добавилось ЭТИМ нажатием (для тоста): при простой
             # сверке — 0, при доплате остатка — сумма доплаты.
             "added": topped_up,
+            # Платёж уже существовал (сверка или доплата остатка) — этим нажатием он НЕ
+            # создан. Фронт по этому флагу не предлагает «Вернуть»: откат через unmark-paid
+            # удалил бы всю прежнюю оплату, а не только доплату.
+            "created": False,
         }
 
     client = session.get(TherapistClient, ts.client_id)
@@ -991,7 +995,8 @@ def quick_pay_session(
         session.refresh(payment)
         push_payment(payment, client.name)
     return {"ok": True, "amount": price, "currency": ts.currency or client.currency, "account": account,
-            "added": price if price and price > 0 else 0}
+            "added": price if price and price > 0 else 0,
+            "created": True}
 
 
 @router.post("/sessions/{session_id}/unmark-paid")

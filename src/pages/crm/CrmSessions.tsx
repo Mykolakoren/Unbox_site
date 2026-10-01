@@ -43,7 +43,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
-import { sessionDebt, sessionCurrencyOf, partialPayment } from '../../utils/sessionMoney';
+import { sessionDebt, sessionCurrencyOf, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -97,10 +97,10 @@ function getEffectiveStatus(session: CrmSession): string {
  *  снимает отметку и удаляет платёж. */
 async function payWithUndo(
     sessionId: string,
-    quickPay: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>,
+    quickPay: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>,
     onChanged: () => void,
 ): Promise<void> {
-    let res: { amount: number; currency: string; added?: number };
+    let res: { amount: number; currency: string; added?: number; created?: boolean };
     try {
         res = await quickPay(sessionId);
     } catch {
@@ -110,6 +110,11 @@ async function payWithUndo(
     onChanged();
     const added = res.added ?? res.amount;
     const sum = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
+    if (!quickPayUndoable(res)) {
+        // Доплата к уже внесённому: «Вернуть» стёрло бы всю оплату сессии — не предлагаем.
+        toast.success(`Доплата принята${sum}`);
+        return;
+    }
     undoToast(`Отмечено${sum}`, async () => {
         try {
             await crmApi.unmarkPaidSession(sessionId);
@@ -925,7 +930,7 @@ interface GHSessionsProps {
     onReload: () => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>;
     handleBookCab: (session: CrmSession, clientName: string) => void;
     navigate: ReturnType<typeof useNavigate>;
 }
@@ -1446,7 +1451,7 @@ interface GHSessionRowProps {
     highlightId: string | null;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
     /** Перечитать сессии и платежи месяца. */
     onReload: () => void;

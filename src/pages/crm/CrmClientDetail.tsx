@@ -35,7 +35,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Field, Input, Select, TextArea } from '../../components/ui/Field';
 import { undoToast } from '../../components/ui/undoToast';
 import { statusLabel } from '../../design/statuses';
-import { partialPayment, sessionCurrencyOf, sessionDebt } from '../../utils/sessionMoney';
+import { paidLocally, partialPayment, sessionCurrencyOf, sessionDebt } from '../../utils/sessionMoney';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../mobile/admin/parseMoneyInput';
 
 /**
@@ -272,7 +272,7 @@ export function CrmClientDetail() {
     const handleQuickPay = async (sessionId: string, account?: string) => {
         try {
             const result = await crmApi.quickPaySession(sessionId, account);
-            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
+            setSessions(prev => prev.map(s => s.id === sessionId ? paidLocally(s) : s));
             const accLabel = result.account ? (paymentAccounts.find(a => a.id === result.account)?.label || result.account) : '';
             // Сколько добавилось ЭТИМ нажатием (при доплате остатка — только он), а не весь платёж.
             const addedNow = result.added ?? result.amount;

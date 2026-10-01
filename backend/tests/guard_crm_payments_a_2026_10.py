@@ -828,6 +828,84 @@ def test_front_review_fixes_hold():
     assert "const debt = unpaid.reduce" not in detail, "вернулся неиспользуемый stats.debt"
 
 
+# ─── Ревью денег (02.10): «Вернуть» после доплаты, локальные патчи ─────────
+
+def test_quick_pay_marks_whether_this_click_created_the_payment():
+    """«Вернуть» (unmark-paid) стирает ВСЕ платежи сессии — предлагать его можно только если
+    платёж создан этим нажатием. Сервер говорит об этом флагом created."""
+    from sqlmodel import Session
+    from app.api.v1.crm.sessions import quick_pay_session
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=185, sid="s1")
+        _seed(s, price=185, paid=85, sid="s2")
+    br = _Bridge()
+    try:
+        with Session(eng) as s:
+            assert quick_pay_session(session_id="s1", payload={}, session=s, current_user=_user())["created"] is True
+        with Session(eng) as s:
+            r = quick_pay_session(session_id="s2", payload={}, session=s, current_user=_user())
+            assert r["created"] is False and r["added"] == 100, r
+    finally:
+        br.undo()
+
+
+def test_front_undo_not_offered_after_topup_and_local_patches():
+    """Фронт: после доплаты — «Доплата принята» без «Вернуть»; локальная пометка «оплачено»
+    ставит внесённое = цене; createPayment в сторе не ставит isPaid наугад."""
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    for rel in ("src/pages/crm/CrmDashboard.tsx", "src/pages/crm/CrmSessions.tsx", "src/pages/mobile/crm/crmFlows.tsx"):
+        code = _code(rel)
+        assert "quickPayUndoable(res)" in code and "Доплата принята" in code, \
+            f"{rel}: после доплаты снова предлагается «Вернуть» (оно стёрло бы всю оплату сессии)"
+        assert code.index("quickPayUndoable(res)") < code.index("undoToast(`Отмечено"), f"{rel}: проверка после undoToast"
+    for rel in ("src/store/crmStore.ts", DETAIL, "src/pages/mobile/crm/SessionActionSheet.tsx",
+                "src/pages/mobile/crm/crmFlows.tsx", "src/pages/crm/CrmDashboard.tsx"):
+        assert "paidLocally(" in _code(rel), f"{rel}: локальная пометка «оплачено» оставляет устаревшее paidAmount"
+    assert "isPaid: true } : s" not in _code(DETAIL) and "isPaid: true }" not in _code("src/store/crmStore.ts"), \
+        "где-то снова ставится isPaid: true без внесённого"
+    store = _code("src/store/crmStore.ts")
+    body = store[store.index("createPayment: async (data)"):store.index("fetchNotes: async")]
+    assert "isPaid: true" not in body and "getSessions({ clientId: data.clientId })" in body, \
+        "createPayment в сторе ставит «оплачено» при любом платеже — частичный платёж не закрывает сессию"
+    blk = _code(BLOCK)
+    assert "currency: res.added != null ? res.currency : cur" in blk, "тост доплаты подписан валютой сессии, а не платежа"
+    api = _code("src/api/crm.ts")
+    assert "created?: boolean" in api
+    node = shutil.which("node")
+    if not node:
+        return
+    src = re.sub(r"^import [^\n]*\n", "", _src("src/utils/sessionMoney.ts"), flags=re.M)
+    prog = ("const EXCHANGE_RATES: Record<string, number> = { GEL: 1 };\ntype CrmSession = any;\n" + src + """
+console.log(JSON.stringify({
+  created: quickPayUndoable({ amount: 185, added: 185, created: true }),
+  topup: quickPayUndoable({ amount: 185, added: 100, created: false }),
+  oldServerTopup: quickPayUndoable({ amount: 185, added: 100 }),
+  oldServerNew: quickPayUndoable({ amount: 185, added: 185 }),
+  patched: paidLocally({ id: 'x', isPaid: false, price: 185, remaining: 85, paidAmount: 100 } as any),
+  patchedNoPrice: paidLocally({ id: 'x', isPaid: false, remaining: 85, paidAmount: 100 } as any),
+  mismatchAfter: !!paymentMismatch(paidLocally({ id: 'x', isPaid: false, price: 185, paidAmount: 100 } as any), { currency: 'GEL' }),
+}));
+""")
+    with tempfile.TemporaryDirectory() as d:
+        f = pathlib.Path(d) / "m.mts"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([node, "--experimental-strip-types", "--no-warnings", str(f)],
+                           capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        if "strip-types" in r.stderr or "bad option" in r.stderr:
+            return
+        raise AssertionError(f"node упал: {r.stderr[:500]}")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["created"] is True and out["topup"] is False and out["oldServerTopup"] is False and out["oldServerNew"] is True, out
+    assert out["patched"]["paidAmount"] == 185 and out["patched"]["remaining"] == 0 and out["patched"]["isPaid"] is True, out
+    assert out["patchedNoPrice"].get("paidAmount") is None, out
+    assert out["mismatchAfter"] is False, "после локальной пометки на миг всплывает «Доплатить»"
+
+
 if __name__ == "__main__":
     fails = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]

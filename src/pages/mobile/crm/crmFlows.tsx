@@ -8,6 +8,7 @@ import { undoToast } from '../../../components/ui/undoToast';
 import { toastApiError } from '../../../utils/errors';
 import { formatDayMonthShort, formatMoney, formatWeekdayShort } from '../../../utils/format';
 import { suggestNextSession, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
+import { paidLocally, quickPayUndoable } from '../../../utils/sessionMoney';
 
 /**
  * Общие сценарии мобильной CRM (волна 3, пакет A).
@@ -135,10 +136,15 @@ export function useQuickPay(
         try {
             const res = await quickPaySession(session.id);
             // Цену и валюту сессии из платежа не подставляем — onSettled перечитает данные.
-            onPatched({ ...session, isPaid: true, remaining: 0 });
+            onPatched(paidLocally(session));
             const added = res.added ?? res.amount;
             const money = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
-            undoToast(`Отмечено${money}`, () => undo(session));
+            if (quickPayUndoable(res)) {
+                undoToast(`Отмечено${money}`, () => undo(session));
+            } else {
+                // Доплата к уже внесённому: «Вернуть» стёрло бы всю оплату сессии — не предлагаем.
+                toast.success(`Доплата принята${money}`);
+            }
         } catch {
             // Тост об ошибке уже показал стор (quickPaySession).
         } finally {

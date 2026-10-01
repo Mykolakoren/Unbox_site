@@ -63,7 +63,8 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
                 // Частичная оплата: «Доплатить» = закрыть остаток. Это идемпотентный
                 // quick-pay: повторный тап получит «уже оплачена», а не вторую доплату.
                 const res = await crmApi.quickPaySession(session.id);
-                toast.success(`Доплата записана: ${formatMoney(res.added ?? topUpAmount, { currency: cur })}`);
+                // Сумма доплаты сервер считает в валюте ПЛАТЕЖА — так и подписываем.
+                toast.success(`Доплата записана: ${formatMoney(res.added ?? topUpAmount, { currency: res.added != null ? res.currency : cur })}`);
             } else {
                 // Цену подняли после оплаты: доплата по POST /payments, но с capToRemaining —
                 // сервер не примет сумму больше остатка (двойной клик не задвоит платёж).

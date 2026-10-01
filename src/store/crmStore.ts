@@ -3,12 +3,13 @@ import { toast } from 'sonner';
 import { crmApi } from '../api/crm';
 import { calendarNearConflict } from '../utils/crmCalendarConflict';
 import { toastApiError } from '../utils/errors';
+import { paidLocally } from '../utils/sessionMoney';
 
 // Dedup concurrent quick-pay calls per session id — a double-tap on the "Оплатить"
 // button (the flag flips isPaid only AFTER the await) would otherwise fire two
 // payment API calls. Returning the same in-flight promise = one call, both
 // callers get the real result.
-const _quickPayInFlight = new Map<string, Promise<{ amount: number; currency: string; added?: number }>>();
+const _quickPayInFlight = new Map<string, Promise<{ amount: number; currency: string; added?: number; created?: boolean }>>();
 import type {
     CrmClient, CrmClientCreate, CrmClientUpdate,
     CrmSession, CrmSessionCreate, CrmSessionUpdate,
@@ -52,7 +53,7 @@ interface CrmStore {
     createSession: (data: CrmSessionCreate) => Promise<CrmSession>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>;
 
     // Payments
     fetchPayments: (params?: { clientId?: string; dateFrom?: string; dateTo?: string }) => Promise<void>;
@@ -232,10 +233,10 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
                 const result = await crmApi.quickPaySession(id, account);
                 set((s) => ({
                     sessions: s.sessions.map((sess) =>
-                        sess.id === id ? { ...sess, isPaid: true, remaining: 0 } : sess
+                        sess.id === id ? paidLocally(sess) : sess
                     ),
                 }));
-                return { amount: result.amount, currency: result.currency, added: result.added };
+                return { amount: result.amount, currency: result.currency, added: result.added, created: result.created };
             } catch (error) {
                 toast.error('Не удалось отметить оплату');
                 throw error;
@@ -267,11 +268,17 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
             const payment = await crmApi.createPayment(data);
             set((s) => ({ payments: [payment, ...s.payments] }));
             if (data.sessionId) {
-                set((s) => ({
-                    sessions: s.sessions.map((sess) =>
-                        sess.id === data.sessionId ? { ...sess, isPaid: true } : sess
-                    ),
-                }));
+                // «Оплачено» решает сервер: частичный платёж сессию не закрывает. Берём из
+                // базы свежую сессию (isPaid, внесено, остаток), а не ставим галочку наугад.
+                try {
+                    const fresh = (await crmApi.getSessions({ clientId: data.clientId }))
+                        .find(x => x.id === data.sessionId);
+                    if (fresh) {
+                        set((s) => ({
+                            sessions: s.sessions.map((sess) => (sess.id === fresh.id ? fresh : sess)),
+                        }));
+                    }
+                } catch { /* платёж записан; сессии обновятся при следующей загрузке */ }
             }
             return payment;
         } catch (error) {

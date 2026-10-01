@@ -61,6 +61,24 @@ export function sessionDebtIn(s: CrmSession, client: ClientMoney | null | undefi
     return Math.round(convertMoney(d.amount, d.currency, into) * 100) / 100;
 }
 
+/**
+ * Локальная пометка «оплачена» сразу после quick-pay, пока экран не перечитал сессию:
+ * остаток 0, внесено = цена (иначе устаревшее paidAmount на миг покажет «Цена и оплата
+ * не совпадают» с кнопкой «Доплатить»). Цены нет — paidAmount сбрасываем: сравнивать не с чем.
+ */
+export function paidLocally<T extends CrmSession>(s: T): T {
+    return { ...s, isPaid: true, remaining: 0, paidAmount: s.price ?? undefined };
+}
+
+/**
+ * Можно ли предлагать «Вернуть» после quick-pay. Только если ЭТО нажатие создало платёж:
+ * при доплате остатка «Вернуть» (unmark-paid) стёрло бы всю прежнюю оплату, а не доплату.
+ */
+export function quickPayUndoable(res: { amount: number; added?: number; created?: boolean }): boolean {
+    if (res.created !== undefined) return res.created;
+    return res.added == null || res.added >= res.amount - 0.005;
+}
+
 /** Частичная оплата: внесено что-то, но не всё. Нет — null. */
 export function partialPayment(
     s: CrmSession,
