@@ -185,10 +185,12 @@ def test_with_stats_next_and_last_past_session():
     from app.models.therapist_client import TherapistClient
     from app.models.therapy_session import TherapySession
     from app.models.therapist_payment import TherapistPayment
+    from app.models.app_setting import AppSetting
     from app.api.v1.crm.clients import list_clients
 
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    for model in (TherapistClient, TherapySession, TherapistPayment):
+    # 02.10: AppSetting — долг в списке клиентов считается через общие курсы валют.
+    for model in (TherapistClient, TherapySession, TherapistPayment, AppSetting):
         model.__table__.create(engine)
     s = Session(engine)
     me, other = str(uuid4()), str(uuid4())

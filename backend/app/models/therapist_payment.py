@@ -37,3 +37,12 @@ class TherapistPaymentRead(TherapistPaymentBase):
     id: str
     specialist_id: str
     created_at: datetime
+
+
+class TherapistPaymentUpdate(SQLModel):
+    """Правка платежа: сумма, валюта, счёт и дата. Клиента и сессию менять нельзя —
+    для этого платёж удаляют и вносят заново."""
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    account: Optional[str] = None
+    date: Optional[datetime] = None

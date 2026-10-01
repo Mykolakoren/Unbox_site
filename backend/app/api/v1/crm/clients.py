@@ -12,6 +12,7 @@ from app.models.therapist_client import (
 from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
 from app.models.therapist_note import TherapistNote
+from app.services import session_balance as sb
 
 router = APIRouter()
 
@@ -181,6 +182,10 @@ def list_clients(
     client_ids = [str(c.id) for c in clients]
     sessions_by_client: dict[str, list] = defaultdict(list)
     paid_by_client: dict[str, float] = defaultdict(float)
+    # Долг = цена минус внесённое (services/session_balance), в валюте клиента.
+    from app.api.v1.settings import get_exchange_rates
+    rates = get_exchange_rates(session)
+    pays_by_session = sb.load_payments_by_session(session, target_uid)
 
     if client_ids:
         for s in session.exec(
@@ -230,7 +235,9 @@ def list_clients(
 
         # Unpaid sum — only COMPLETED sessions count as debt
         unpaid = [s for s in sessions_all if not s.is_paid and s.status == "COMPLETED"]
-        c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
+        c_dict["unpaidSum"] = round(sum(
+            sb.remaining_in(s, c, pays_by_session.get(s.id, ()), rates, c.currency) for s in unpaid
+        ), 2)
 
         # LTV = sum of REAL payments the client made. Earlier we computed
         # this from is_paid+COMPLETED sessions × price; that double-counts
@@ -272,12 +279,16 @@ def get_client_balance(
     base = client.base_price or 0
     default_cur = client.currency or "GEL"
 
+    from app.api.v1.settings import get_exchange_rates
+    rates = get_exchange_rates(session)
+    pays_by_session = sb.load_payments_by_session(session, uid, client_id)
+
     def _group_by_currency(sessions_list):
+        # Долг по сессии = цена минус внесённое, в валюте самой сессии.
         totals = {}
         for s in sessions_list:
-            cur = s.currency or default_cur
-            price = s.price if s.price is not None else base
-            totals[cur] = round(totals.get(cur, 0) + price, 2)
+            m = sb.session_money(s, client, pays_by_session.get(s.id, ()), rates)
+            totals[m.currency] = round(totals.get(m.currency, 0) + m.remaining, 2)
         return totals
 
     # Unpaid COMPLETED sessions only (future PLANNED sessions are not debt)

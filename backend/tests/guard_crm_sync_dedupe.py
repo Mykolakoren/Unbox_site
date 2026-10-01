@@ -48,12 +48,15 @@ def _engine():
     from app.models.therapist_note import TherapistNote
     from app.models.therapist_payment import TherapistPayment
     from app.models.therapy_session import TherapySession
+    from app.models.app_setting import AppSetting
 
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    # 02.10: AppSetting — ответ правки сессии теперь несёт «внесено/остаток»,
+    # а курсы валют лежат в app_settings.
     SQLModel.metadata.create_all(eng, tables=[
         User.__table__, Booking.__table__, Notification.__table__,
         TherapistClient.__table__, TherapySession.__table__,
-        TherapistPayment.__table__, TherapistNote.__table__,
+        TherapistPayment.__table__, TherapistNote.__table__, AppSetting.__table__,
     ])
     return eng
 

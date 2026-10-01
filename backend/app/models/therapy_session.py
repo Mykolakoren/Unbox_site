@@ -67,6 +67,11 @@ class TherapySessionRead(TherapySessionBase):
     specialist_id: str
     created_at: datetime
     updated_at: datetime
+    # Деньги по сессии (services/session_balance): внесено и остаток в валюте
+    # сессии. Считаются при выдаче списка/правки, в базе не лежат. None — не
+    # считали (например, ответ создания): экран тогда берёт цену целиком.
+    paid_amount: Optional[float] = None
+    remaining: Optional[float] = None
 
 
 class TherapySessionUpdateResult(TherapySessionRead):
@@ -81,6 +86,10 @@ class TherapySessionUpdate(SQLModel):
     duration_minutes: Optional[int] = None
     status: Optional[str] = None
     price: Optional[float] = None
+    # Раньше форма правки слала только price, а валюта и счёт терялись:
+    # у сессии есть «замороженные» currency/account, и менять их можно только здесь.
+    currency: Optional[str] = None
+    account: Optional[str] = None
     is_paid: Optional[bool] = None
     is_booked: Optional[bool] = None
     notes: Optional[str] = None

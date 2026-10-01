@@ -9,6 +9,7 @@ from app.models.specialist import Specialist
 from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
+from app.services import session_balance as sb
 
 router = APIRouter()
 
@@ -218,6 +219,10 @@ def crm_dashboard(
         )
     ).all()
 
+    # 02.10: долг по сессии = цена МИНУС уже внесённое (services/session_balance),
+    # в валюте клиента. Раньше частично оплаченная сессия (внесли 100 из 185)
+    # висела в долгу целиком — 185.
+    pays_by_session = sb.load_payments_by_session(session, uid)
     debt_map: dict = {}
     for us in unpaid_sessions_all:
         cid = us.client_id
@@ -225,11 +230,11 @@ def crm_dashboard(
         # Skip inactive clients — their debt doesn't count in dashboard totals
         if client and not client.is_active:
             continue
-        price = us.price if us.price is not None else (client.base_price if client else 0)
         currency = client.currency if client else "GEL"
+        owed = sb.remaining_in(us, client, pays_by_session.get(us.id, ()), GEL_RATES, currency)
         if cid not in debt_map:
             debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0, "currency": currency}
-        debt_map[cid]["total_debt"] += price
+        debt_map[cid]["total_debt"] += owed
         debt_map[cid]["unpaid_sessions_count"] += 1
 
     debt_by_client = sorted(debt_map.values(), key=lambda x: x["total_debt"], reverse=True)

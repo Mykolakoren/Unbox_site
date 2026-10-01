@@ -77,6 +77,20 @@ def push_payment(payment, client_name: Optional[str]) -> None:
         logger.error("finance_bridge push %s не долетел: %s", payment.id, exc)
 
 
+def resync_payment(payment, client_name: Optional[str], old_account: Optional[str]) -> None:
+    """Платёж ИСПРАВИЛИ (сумма, валюта, счёт, дата) — приводим след в финансах в порядок.
+
+    Наличный — шлём тем же id (upsert, как доплата): новая запись заменяет
+    старую. Был наличным, а стал картой/переводом — в книге ему больше не место
+    (карточные приходят с выпиской), поэтому отзываем прежнюю запись. Платёж,
+    который не был наличным ни до, ни после, мост не трогает.
+    """
+    if _is_cash(payment.account):
+        push_payment(payment, client_name)
+    elif _is_cash(old_account):
+        retract_payment(payment.id, payment.specialist_id)
+
+
 def retract_payment(payment_id: str, specialist_id: str) -> None:
     """Платёж удалили — отзываем и его след в финансах.
 

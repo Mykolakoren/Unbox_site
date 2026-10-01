@@ -15,9 +15,52 @@ from app.models.therapy_session import (
 )
 from app.models.therapist_payment import TherapistPayment
 from app.services.finance_bridge import push_payment, retract_payment
+from app.services import session_balance as sb
 from app.api.v1.crm import get_crm_calendar_id
 
 router = APIRouter()
+
+
+def _sessions_with_money(db: Session, uid: str, sessions, client_id: Optional[str] = None) -> List[TherapySessionRead]:
+    """Сессии для выдачи + деньги по каждой: внесено и остаток (в валюте сессии).
+    Платежи и клиенты берутся двумя запросами на весь список, не по запросу на
+    сессию. Экраны долга читают `remaining` и больше не считают «долг = цена»."""
+    if not sessions:
+        return []
+    from app.api.v1.settings import get_exchange_rates
+    rates = get_exchange_rates(db)
+    clients = {
+        c.id: c for c in db.exec(
+            select(TherapistClient).where(TherapistClient.specialist_id == uid)
+        ).all()
+    }
+    pays = sb.load_payments_by_session(db, uid, client_id)
+    out: List[TherapySessionRead] = []
+    for ts in sessions:
+        row = TherapySessionRead.model_validate(ts)
+        m = sb.session_money(ts, clients.get(ts.client_id), pays.get(ts.id, ()), rates)
+        row.paid_amount = m.paid
+        row.remaining = m.remaining
+        out.append(row)
+    return out
+
+
+def _top_up_partial_payment(db: Session, ts: TherapySession, client, payment: TherapistPayment) -> float:
+    """У сессии уже есть ЧАСТИЧНЫЙ платёж, а её отмечают «оплаченной» целиком:
+    дописываем в тот же платёж недостающий остаток (в валюте платежа) и возвращаем
+    добавленную сумму. Вторую строку создать нельзя (uq_therapist_payment_session),
+    а оставить сессию закрытой с недоплатой — значит потерять остаток из долга."""
+    from app.api.v1.settings import get_exchange_rates
+    rates = get_exchange_rates(db)
+    cur = sb.session_currency(ts, client)
+    price = sb.session_price(ts, client)
+    paid = sb.paid_in([payment], cur, rates)
+    if sb.covers(price, paid, sb.slack([payment], cur, rates)):
+        return 0.0
+    added = round(sb.convert(price - paid, cur, payment.currency, rates), 2)
+    payment.amount = round(float(payment.amount or 0) + added, 2)
+    db.add(payment)
+    return added
 
 
 @router.get("/sessions", response_model=List[TherapySessionRead])
@@ -40,7 +83,7 @@ def list_sessions(
     if status:
         stmt = stmt.where(TherapySession.status == status)
     stmt = stmt.order_by(TherapySession.date.desc())
-    return session.exec(stmt).all()
+    return _sessions_with_money(session, uid, session.exec(stmt).all(), client_id)
 
 
 @router.post("/sessions/auto-complete")
@@ -306,6 +349,31 @@ def update_session(
         if not _new_cl or _new_cl.specialist_id != str(current_user.id):
             raise HTTPException(404, "Клиент не найден")
 
+    # 02.10: цена, валюта и счёт сессии. Форма правки раньше слала только цену,
+    # а валюта и счёт терялись. Здесь же проверяем значения: валюта — из тех, что
+    # заведены в курсах (или уже стоят у клиента/сессии), счёт — непустой.
+    # null не стирает «замороженное» значение — просто не трогаем поле.
+    for _k in ("currency", "account"):
+        if _k in update_data and update_data[_k] is None:
+            del update_data[_k]
+    if update_data.get("price") is not None and update_data["price"] < 0:
+        raise HTTPException(400, "Цена сессии не может быть отрицательной")
+    if "currency" in update_data:
+        from app.api.v1.settings import get_exchange_rates
+        _cl_for_cur = session.get(TherapistClient, ts.client_id)
+        try:
+            update_data["currency"] = sb.clean_currency(
+                update_data["currency"], get_exchange_rates(session),
+                ts.currency, getattr(_cl_for_cur, "currency", None),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+    if "account" in update_data:
+        update_data["account"] = (update_data["account"] or "").strip()
+        if not update_data["account"] or len(update_data["account"]) > 64:
+            raise HTTPException(400, "Укажите счёт для оплаты")
+    _money_touched = "price" in update_data or "currency" in update_data
+
     # ── Auto-sync linked cabinet booking ─────────────────────────────────
     # Owner asked 2026-05-27: when a session is moved in CRM, the
     # attached cabinet booking must follow so they stay in lock-step.
@@ -399,6 +467,29 @@ def update_session(
     for key, value in update_data.items():
         setattr(ts, key, value)
     ts.updated_at = datetime.now()
+
+    # Цену или валюту опустили так, что уже внесённого хватает, — закрываем
+    # сессию (иначе она висела бы «неоплаченной» с нулевым остатком). В обратную
+    # сторону — подняли цену у оплаченной — НЕ переоткрываем: платёж и цена
+    # расходятся, и карточка показывает «Цена и оплата не совпадают» с кнопкой
+    # «Доплатить», решает специалист. Явный is_paid в запросе главнее.
+    if _money_touched and "is_paid" not in update_data and not ts.is_paid:
+        _pays = session.exec(
+            select(TherapistPayment).where(
+                TherapistPayment.session_id == session_id,
+                TherapistPayment.specialist_id == str(current_user.id),
+            )
+        ).all()
+        if _pays:
+            from app.api.v1.settings import get_exchange_rates as _get_rates
+            _rates = _get_rates(session)
+            _cl_pay = session.get(TherapistClient, ts.client_id)
+            _cur = sb.session_currency(ts, _cl_pay)
+            if sb.covers(
+                sb.session_price(ts, _cl_pay), sb.paid_in(_pays, _cur, _rates),
+                sb.slack(_pays, _cur, _rates),
+            ):
+                ts.is_paid = True
     calendar_warning: Optional[str] = None
 
     # Этап 2 календарного плана (27.08): перенос/смена длительности сессии из
@@ -507,6 +598,9 @@ def update_session(
 
     out = TherapySessionUpdateResult.model_validate(ts)
     out.calendar_warning = calendar_warning
+    _row = _sessions_with_money(session, str(current_user.id), [ts], ts.client_id)
+    if _row:
+        out.paid_amount, out.remaining = _row[0].paid_amount, _row[0].remaining
     return out
 
 
@@ -816,15 +910,12 @@ def quick_pay_session(
         )
     ).first()
     if existing_payment:
-        # Частичная оплата (возможна только через POST /crm/payments, который
-        # копит сумму в той же записи) этой кнопкой не закрывается — иначе
-        # недоплата молча выпала бы из долга клиента.
-        if ts.price is not None and float(existing_payment.amount or 0) + 0.01 < float(ts.price):
-            raise HTTPException(
-                409,
-                f"По сессии уже внесено {existing_payment.amount} "
-                f"{existing_payment.currency} из {ts.price} — доплату проведите через «Финансы»",
-            )
+        # Частичная оплата (через POST /crm/payments, который копит сумму в той
+        # же записи): «Отметить оплату» закрывает ОСТАТОК — дописывает недостающее
+        # в этот платёж. Раньше тут был отказ 409, а теперь у частично оплаченной
+        # сессии на кнопке стоит сумма остатка, и она должна работать.
+        _cl = session.get(TherapistClient, ts.client_id)
+        topped_up = _top_up_partial_payment(session, ts, _cl, existing_payment)
         logger.warning(
             "[quick-pay] reconcile: у сессии %s был живой платёж при is_paid=False "
             "(рассинхрон) — чиню флаг, второй платёж не создаю", session_id,
@@ -839,12 +930,16 @@ def quick_pay_session(
         ts.updated_at = datetime.now()
         session.add(ts)
         session.commit()
+        if topped_up:
+            session.refresh(existing_payment)
+            push_payment(existing_payment, _cl.name if _cl else None)
         return {
             "ok": True,
             "amount": existing_payment.amount,
             "currency": existing_payment.currency,
             "account": existing_payment.account,
             "reconciled": True,
+            "topped_up": topped_up,
         }
 
     client = session.get(TherapistClient, ts.client_id)
@@ -956,6 +1051,10 @@ def mark_all_sessions_paid(
 
     count = 0
     created_payments = []
+    # Платёж на сессию один (uq_therapist_payment_session). Если по сессии уже
+    # внесена часть, второй платёж не создаём: дописываем остаток в тот же.
+    # Раньше такая сессия роняла «Отметить все» ошибкой уникальности.
+    existing_by_session = sb.load_payments_by_session(session, uid, client_id)
     for ts in unpaid:
         price = ts.price if ts.price is not None else client.base_price or 0
         # Fill session price from client base_price if NULL
@@ -966,8 +1065,12 @@ def mark_all_sessions_paid(
         # 09.09: проставленные на сессии значения главнее клиентских (см. quick-pay).
         ts.currency = ts.currency or client.currency
         ts.account = ts.account or client.default_account
+        _prev = (existing_by_session.get(ts.id) or [None])[0]
+        if _prev is not None:
+            if _top_up_partial_payment(session, ts, client, _prev):
+                created_payments.append(_prev)
         # Create payment only if amount > 0
-        if price and price > 0:
+        elif price and price > 0:
             payment = TherapistPayment(
                 client_id=client.id,
                 specialist_id=uid,
