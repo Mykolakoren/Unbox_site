@@ -265,6 +265,22 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # booking.hours_pool / booking.extra_hours_deducted (обещания тарифов 01.10,
+    # шаг 4/2б): из какого пула абонемента списаны часы брони — основного или
+    # доп. (часы капсулы / «4 ч индивидуально»). NULL у всех старых броней =
+    # основной пул, т.е. ровно прежнее поведение. Колонки обнуляемые и без
+    # дефолта: старый код (без полей в модели) их просто не видит.
+    for _col, _typ in (("hours_pool", "VARCHAR"), ("extra_hours_deducted", "FLOAT")):
+        with engine.connect() as conn:
+            try:
+                if dialect == 'postgresql':
+                    conn.execute(text(f"ALTER TABLE booking ADD COLUMN IF NOT EXISTS {_col} {_typ}"))
+                else:
+                    conn.execute(text(f"ALTER TABLE booking ADD COLUMN {_col} {_typ}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
     # ── Hot-path indexes (2026-07-13 audit) ───────────────────────────────
     # `booking` carried indexes only on user_id / created_at / payment_status /
     # reminder_sent_at / created_by_id, while ~69 queries filter on date,

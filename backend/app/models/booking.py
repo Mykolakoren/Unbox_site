@@ -84,6 +84,20 @@ class Booking(BookingBase, table=True):
     created_by_id: Optional[str] = Field(default=None, index=True)
     created_by_name: Optional[str] = Field(default=None)
 
+    # ── Из какого пула абонемента списаны часы (обещания тарифов, 01.10) ──
+    # У абонемента два пула: основной (remaining_hours) и дополнительный —
+    # «часы капсулы» (Пробный 1, Тёплый 4, Регулярный 6, Профи+ 10) или
+    # «4 ч индивидуально» у Группового мастера. Возврат (отмена, сокращение,
+    # вырезка) обязан вернуть часы РОВНО туда, откуда их сняли.
+    #   hours_deducted        — всего часов абонемента (как раньше);
+    #   extra_hours_deducted  — из них из доп. пула (NULL/0 = всё из основного);
+    #   hours_pool            — ярлык для отчётов: 'main' | 'extra' | 'mixed',
+    #                           NULL = как раньше (основной пул).
+    # Только в таблице и в ответе — НЕ в BookingCreate: клиент не должен
+    # присылать, из какого пула ему списать.
+    hours_pool: Optional[str] = Field(default=None)
+    extra_hours_deducted: Optional[float] = Field(default=None)
+
 class BookingCreate(BookingBase):
     # Override required fields from BookingBase — backend computes pricing server-side
     final_price: float = 0.0
@@ -98,6 +112,8 @@ class BookingRead(BookingBase):
     created_at: datetime
     gcal_sync_failed: bool = False
     recurring_group_id: Optional[str] = None
+    hours_pool: Optional[str] = None
+    extra_hours_deducted: Optional[float] = None
 
 
 class BookingPublicRead(SQLModel):
