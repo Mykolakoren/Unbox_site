@@ -9,6 +9,7 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel } from '../../../utils/format';
 import { TopupSheet } from './TopupSheet';
+import { userCanAccessFinance } from '../../../utils/permissions';
 
 /**
  * Mobile admin — users search & quick view.
@@ -34,7 +35,9 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function MobileAdminUsers() {
-    const { users, fetchUsers } = useUserStore();
+    const { users, fetchUsers, currentUser } = useUserStore();
+    // «＋₾» — только с правом на кассу (как вкладка «Касса», волна 4 доработка).
+    const canCash = userCanAccessFinance(currentUser);
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState<Filter>('all');
     const [loading, setLoading] = useState(false);
@@ -237,7 +240,7 @@ export function MobileAdminUsers() {
                                     )}
                                 </div>
                             </Link>
-                            <button
+                            {canCash && <button
                                 onClick={() => setTopupUser(u)}
                                 aria-label={`Пополнить баланс: ${u.name || u.email}`}
                                 style={{
@@ -254,13 +257,13 @@ export function MobileAdminUsers() {
                                 }}
                             >
                                 ＋₾
-                            </button>
+                            </button>}
                         </div>
                     );
                 })}
             </div>
 
-            <div style={{ padding: '0 16px' }}>
+            {canCash && <div style={{ padding: '0 16px' }}>
                 <div style={{
                     background: 'var(--color-sunken)',
                     color: 'var(--color-ink-80)',
@@ -272,9 +275,9 @@ export function MobileAdminUsers() {
                     Кнопка «＋₾» пополняет баланс клиента прямо с телефона — приход в кассу и зачисление одной операцией.
                     Тонкие настройки клиента удобнее менять на компьютере.
                 </div>
-            </div>
+            </div>}
 
-            {topupUser && (
+            {canCash && topupUser && (
                 <TopupSheet
                     user={topupUser}
                     onClose={() => setTopupUser(null)}

@@ -966,7 +966,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 {resourceName} · {booking.locationId === 'unbox_one' ? 'One' : 'Uni'} · {(booking.duration ?? 0) / 60}ч
                                             </div>
                                         </div>
-                                        <div><DueBadge due={info?.due} paid={!!info} /></div>
+                                        <div><DueBadge due={info?.due} paid={!!info} charged={info?.charged} /></div>
                                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                             {rowActions(booking, true)}
                                         </div>
@@ -1059,7 +1059,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     )}
                                                 </td>
                                                 <td style={{ padding: '12px 10px' }}>
-                                                    <DueBadge due={info?.due} paid={!!info} />
+                                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
                                                 </td>
                                                 <td className="num" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 600, color: GH.ink }}>
                                                     {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}

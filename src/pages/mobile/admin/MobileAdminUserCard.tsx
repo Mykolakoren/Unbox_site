@@ -21,6 +21,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import { TopupSheet } from './TopupSheet';
+import { userCanAccessFinance } from '../../../utils/permissions';
 import { DesktopLink } from './DesktopLink';
 
 /**
@@ -38,10 +39,14 @@ import { DesktopLink } from './DesktopLink';
  * — computeDueByBooking, как в шахматке.
  */
 export function MobileAdminUserCard() {
+    // useParams уже раскодировал :email — второй decodeURIComponent ронял
+    // страницу (URIError) на почте или id со знаком «%».
     const { email: rawParam } = useParams();
-    const param = decodeURIComponent(rawParam || '');
+    const param = rawParam || '';
     const navigate = useNavigate();
-    const { users, fetchUsers } = useUserStore();
+    const { users, fetchUsers, currentUser } = useUserStore();
+    // «Пополнить» — только с правом на кассу (как вкладка «Касса»).
+    const canCash = userCanAccessFinance(currentUser);
     const setBookingForUser = useBookingStore(s => s.setBookingForUser);
     const [usersTried, setUsersTried] = useState(users.length > 0);
     const [topupOpen, setTopupOpen] = useState(false);
@@ -172,10 +177,12 @@ export function MobileAdminUserCard() {
             </section>
 
             {/* Главные действия. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <Button icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
-                    Пополнить
-                </Button>
+            <div style={{ display: 'grid', gridTemplateColumns: canCash ? '1fr 1fr' : '1fr', gap: 8 }}>
+                {canCash && (
+                    <Button icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
+                        Пополнить
+                    </Button>
+                )}
                 <Button
                     variant="secondary"
                     icon={<CalendarPlus size={16} aria-hidden="true" />}
@@ -216,7 +223,7 @@ export function MobileAdminUserCard() {
                                             {b.status === 'pending_approval' ? ' · ждёт одобрения' : ''}
                                         </div>
                                     </div>
-                                    <DueBadge due={info?.due} paid={!!info} />
+                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
                                 </div>
                             );
                         })}
@@ -249,7 +256,7 @@ export function MobileAdminUserCard() {
                 </div>
             </section>
 
-            {topupOpen && (
+            {canCash && topupOpen && (
                 <TopupSheet
                     user={user}
                     onClose={() => setTopupOpen(false)}

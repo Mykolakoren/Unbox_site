@@ -336,7 +336,7 @@ function GridHouseToday({
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
                                             </td>
                                             <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                                <DueBadge due={r.due} paid={r.paid} />
+                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} />
                                             </td>
                                         </tr>
                                     );

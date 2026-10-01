@@ -6,10 +6,13 @@ import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi, type CashboxPeriodSummary } from '../../../api/cashbox';
+import { Navigate } from 'react-router-dom';
 import { useUserStore } from '../../../store/userStore';
+import { userCanAccessFinance } from '../../../utils/permissions';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { Sheet } from '../../../components/ui/Sheet';
 import { undoToast } from '../../../components/ui/undoToast';
+import { claimCashUndo, releaseCashUndo } from '../../../components/admin/cashbox/cashMoney';
 import { toastApiError } from '../../../utils/errors';
 import { Button } from '../../../components/ui/Button';
 import { Chip, Segmented } from '../../../components/ui/Chip';
@@ -87,7 +90,19 @@ function getRange(period: Period, offset: number): { from: Date; to: Date; label
  * админу удалить сегодняшнюю операцию (DELETE /cashbox/transactions/{id};
  * старое — только senior/owner).
  */
+/**
+ * Волна 4 (доработка): вкладка «Касса» спрятана без права на кассу
+ * (userCanAccessFinance, как пункт «Финансы» на компьютере) — и по прямой
+ * ссылке /m/admin/finance без права уводим в «Сегодня».
+ */
 export function MobileAdminFinance() {
+    const currentUser = useUserStore(s => s.currentUser);
+    if (!currentUser) return null;
+    if (!userCanAccessFinance(currentUser)) return <Navigate to="/m/admin/dashboard" replace />;
+    return <MobileAdminFinanceScreen />;
+}
+
+function MobileAdminFinanceScreen() {
     const {
         balances, fetchBalance,
         transactions, fetchTransactions, isLoading,
@@ -208,10 +223,13 @@ export function MobileAdminFinance() {
         const what = `${payload.type === 'income' ? 'Доход' : 'Расход'} ${formatGel(payload.amount)} записан`;
         if (!id) { toast.success(what); return; }
         undoToast(what, async () => {
+            // Двойной тап по «Вернуть» — второй вызов ничего не делает (флаг по id).
+            if (!claimCashUndo(id)) return;
             try {
                 await cashboxApi.deleteTransaction(id);
                 toast.success('Операция удалена');
             } catch (e) {
+                releaseCashUndo(id);
                 toastApiError(e, 'Не получилось вернуть — попросите старшего админа удалить операцию');
             } finally {
                 await reloadAll();

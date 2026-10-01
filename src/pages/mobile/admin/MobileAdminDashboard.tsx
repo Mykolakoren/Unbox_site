@@ -8,9 +8,10 @@ import { useBookingStore } from '../../../store/bookingStore';
 import { bookingsApi } from '../../../api/bookings';
 import type { BookingHistoryItem } from '../../../store/types';
 import { RESOURCES } from '../../../utils/data';
-import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow } from '../../../utils/adminToday';
+import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
-import { useAdminDueMap, acceptPaymentFor, type AcceptPayment } from './adminPayment';
+import { useAdminDueMap, acceptPaymentFor, branchOfBooking, type AcceptPayment } from './adminPayment';
+import { userCanAccessFinance } from '../../../utils/permissions';
 import { TopupSheet } from './TopupSheet';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import { Button } from '../../../components/ui/Button';
@@ -99,15 +100,24 @@ export function MobileAdminDashboard() {
     // Брони могли уже лежать в сторе (открывали «Брони») — тогда показываем их.
     const bookingsPending = !bookingsLoaded && bookings.length === 0;
     const isOwnerish = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
+    // «Принять оплату» — только с правом на кассу (как вкладка «Касса»).
+    const canCash = userCanAccessFinance(currentUser);
 
     const openRow = (r: TodayRow) => {
         const b = bookings.find(x => x.id === r.bookingId);
         if (b) setActiveBooking(b);
     };
 
-    const openPayFor = (userId: string, total: number, today: number) => {
-        const user = users.find(u => String(u.id || u.email) === userId || u.email === userId);
-        if (user) setPay({ user, total, today });
+    // Филиал — по кабинету первой сегодняшней брони клиента (rows отсортированы
+    // по времени), так же, как acceptPaymentFor берёт его по брони. Раньше не
+    // передавался, и шторка подставляла «Unbox Uni» даже клиенту One.
+    const openPayFor = (c: TodayClient) => {
+        const user = users.find(u => String(u.id || u.email) === c.userId || u.email === c.userId);
+        const first = c.rows[0];
+        if (user) setPay({
+            user, total: c.total, today: c.today,
+            branch: first ? branchOfBooking({ resourceId: first.cabinetId }) : undefined,
+        });
     };
 
     return (
@@ -223,14 +233,16 @@ export function MobileAdminDashboard() {
                                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                         {c.rows.map(r => `${r.time} ${r.cabinet}`).join(' · ')}
                                     </div>
-                                    <Button
-                                        block
-                                        icon={<Wallet size={16} aria-hidden="true" />}
-                                        disabled={!(c.total > 0)}
-                                        onClick={() => openPayFor(c.userId, c.total, c.today)}
-                                    >
-                                        Принять оплату · {formatGel(c.total)}
-                                    </Button>
+                                    {canCash && (
+                                        <Button
+                                            block
+                                            icon={<Wallet size={16} aria-hidden="true" />}
+                                            disabled={!(c.total > 0)}
+                                            onClick={() => openPayFor(c)}
+                                        >
+                                            Принять оплату · {formatGel(c.total)}
+                                        </Button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -323,7 +335,7 @@ export function MobileAdminDashboard() {
                 }}
             />
 
-            {pay && (
+            {canCash && pay && (
                 <TopupSheet
                     user={pay.user}
                     defaultAmount={pay.total}
@@ -399,7 +411,7 @@ function DayRow({ row, onOpen }: { row: TodayRow; onOpen: () => void }) {
                     {row.cabinet}{note}
                 </span>
             </span>
-            <DueBadge due={row.due} paid={row.paid} />
+            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} />
         </button>
     );
 }

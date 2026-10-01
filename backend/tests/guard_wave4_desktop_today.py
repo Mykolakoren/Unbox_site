@@ -218,7 +218,7 @@ def test_bookings_list_one_table_and_show_more():
     assert "Показать ещё" in code and "setLimit(l => l + PAGE)" in code and "const PAGE = 50;" in code, \
         "нет «Показать ещё 50»"
     assert "filteredBookings.slice(0, limit)" in code
-    assert "<DueBadge due={info?.due} paid={!!info} />" in code, "в списке нет «к оплате / оплачено»"
+    assert "<DueBadge due={info?.due} paid={!!info}" in code, "в списке нет «к оплате / оплачено»"
     assert "onOpenInGrid(booking.id)" in code, "клик по строке не открывает панель брони"
     assert "padStart" not in code, "нули «001» вернулись в список броней"
 

@@ -51,6 +51,9 @@ export const STATUS_DICTIONARY: Record<StatusKind, Record<string, StatusDef>> = 
         partial:  { label: 'Оплачено частично', tone: 'pending', icon: 'minus' },
         // Сервер списывает за сутки до начала — до этого «ждёт списания».
         pending:  { label: 'Ждёт списания', tone: 'pending', icon: 'clock' },
+        // Бронь уже прошла, а списания так и не было (сбой крона) — для админа
+        // «посмотрите», не «долг»: в суммы «к оплате» не входит (DueBadge).
+        not_charged: { label: 'Не списана', tone: 'pending', icon: 'alert' },
         waived:   { label: 'Без оплаты', tone: 'muted', icon: 'minus' },
         refunded: { label: 'Возвращено', tone: 'muted', icon: 'undo' },
     },

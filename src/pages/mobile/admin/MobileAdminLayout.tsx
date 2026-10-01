@@ -11,6 +11,7 @@ import { Z_TABBAR } from './sheetLayers';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
 import { forceUnlockScroll } from '../useScrollLock';
 import { canUsePsyCrm } from '../crmAccess';
+import { userCanAccessFinance, userCanAccessRights } from '../../../utils/permissions';
 // Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
 import { COLOR, FONT, TEXT } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
@@ -115,6 +116,8 @@ export function MobileAdminLayout() {
         navigate('/m', { replace: true });
         return null;
     }
+    // Вкладка «Касса» — только с правом на кассу (как «Финансы» на компьютере).
+    const canCash = userCanAccessFinance(currentUser);
 
     return (
         <div style={{
@@ -192,7 +195,7 @@ export function MobileAdminLayout() {
                 background: COLOR.card,
                 borderTop: `1px solid ${COLOR.ink08}`,
                 display: 'grid',
-                gridTemplateColumns: 'repeat(6, 1fr)',
+                gridTemplateColumns: `repeat(${canCash ? 6 : 5}, 1fr)`,
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 // Шторки страниц — общий Sheet (слой выше), меню их не закрывает.
                 zIndex: Z_TABBAR,
@@ -200,7 +203,7 @@ export function MobileAdminLayout() {
                 <TabLink to="/m/admin/dashboard" icon={CalendarClock} label="Сегодня" />
                 <TabLink to="/m/admin/bookings" icon={CalendarDays} label="Брони" />
                 <TabLink to="/m/admin/tasks" icon={CheckSquare} label="Задачи" />
-                <TabLink to="/m/admin/finance" icon={Wallet} label="Касса" />
+                {canCash && <TabLink to="/m/admin/finance" icon={Wallet} label="Касса" />}
                 <TabLink to="/m/admin/users" icon={Users} label="Клиенты" />
                 <TabLink to="/m/admin/inbox" icon={Inbox} label="Заявки" badge={requests ?? 0} />
             </nav>
@@ -209,12 +212,12 @@ export function MobileAdminLayout() {
                 open={switcherOpen}
                 onClose={() => setSwitcherOpen(false)}
                 canCrm={canUsePsyCrm(currentUser)}
-                canRights={currentUser.role === 'owner' || currentUser.role === 'senior_admin'}
+                canRights={userCanAccessRights(currentUser)}
                 pathname={location.pathname}
                 onGo={(to) => { setSwitcherOpen(false); navigate(to); }}
             />
 
-            {tourOpen && <MobileAdminTour onClose={() => setTourOpen(false)} />}
+            {tourOpen && <MobileAdminTour canCash={canCash} onClose={() => setTourOpen(false)} />}
         </div>
     );
 }

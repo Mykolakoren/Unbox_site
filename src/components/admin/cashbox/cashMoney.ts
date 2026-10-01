@@ -113,3 +113,27 @@ export function canUndoCashTx(role: string | null | undefined, txDate: string, n
     const utcToday = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
     return serverDayKey(txDate) === utcToday;
 }
+
+/**
+ * В5 — «Вернуть» по одной операции срабатывает один раз (доработка волны 4).
+ * Двойной тап по кнопке в тосте успевал отправить два DELETE подряд: второй
+ * падал 404 и пугал админа ошибкой, хотя операция уже удалена. Флаг «уже
+ * нажато» — по id операции, на уровне модуля: тост живёт дольше окна, которое
+ * его показало (окно закрывается сразу после записи).
+ *
+ *   if (!claimCashUndo(id)) return;      // второй вызов ничего не делает
+ *   try { await deleteTransaction(id) } catch { releaseCashUndo(id) }
+ *
+ * При ошибке флаг снимаем — повторить можно (например, из журнала).
+ */
+const cashUndoClaimed = new Set<string>();
+
+export function claimCashUndo(id: string): boolean {
+    if (!id || cashUndoClaimed.has(id)) return false;
+    cashUndoClaimed.add(id);
+    return true;
+}
+
+export function releaseCashUndo(id: string): void {
+    cashUndoClaimed.delete(id);
+}

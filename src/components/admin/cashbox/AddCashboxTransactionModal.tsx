@@ -11,7 +11,7 @@ import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
 import { undoToast } from '../../ui/undoToast';
 import { cashboxApi } from '../../../api/cashbox';
 import { useUserStore } from '../../../store/userStore';
-import { canUndoCashTx } from './cashMoney';
+import { canUndoCashTx, claimCashUndo, releaseCashUndo } from './cashMoney';
 
 interface Props {
     isOpen: boolean;
@@ -277,12 +277,15 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                 // сервер сам откатывает с его баланса (topup_reversal).
                 if (created?.id && canUndoCashTx(role, created.date)) {
                     undoToast(doneText, async () => {
+                        // Двойной тап по «Вернуть» — второй вызов ничего не делает.
+                        if (!claimCashUndo(created.id)) return;
                         try {
                             await cashboxApi.deleteTransaction(created.id);
                             try { await useCashboxStore.getState().fetchBalance(); } catch { /* ниже обновит экран */ }
                             toast.success('Операция отменена');
                             onUndone?.();
                         } catch (err: any) {
+                            releaseCashUndo(created.id);
                             toast.error(err?.response?.data?.detail || 'Не удалось отменить операцию — удалите её в журнале');
                         }
                     });

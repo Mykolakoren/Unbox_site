@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
+import { userCanAccessFinance } from '../../../utils/permissions';
 import { bookingsApi } from '../../../api/bookings';
 import { RESOURCES } from '../../../utils/data';
 import type { BookingHistoryItem, User } from '../../../store/types';
@@ -51,6 +52,9 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
 }) {
     const navigate = useNavigate();
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
+    // «Принять оплату» (пополнение баланса) — только с правом на кассу, как
+    // вкладка «Касса» (волна 4, доработка). Одна проверка на «Сегодня» и «Брони».
+    const canCash = userCanAccessFinance(useUserStore(s => s.currentUser));
     const [busy, setBusy] = useState<string | null>(null);
     const { confirm } = useConfirmDialog();
     // Отмена и смена цены — через нижние шторки. Раньше это были 2-3 системных
@@ -190,7 +194,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
                     onEditPrice={() => doEditPrice(booking)}
                     onExtend={() => doExtend(booking)}
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(booking.userId)}`)}
-                    pay={acceptPayment ? acceptPayment(booking) : null}
+                    pay={canCash && acceptPayment ? acceptPayment(booking) : null}
                 />
             )}
 

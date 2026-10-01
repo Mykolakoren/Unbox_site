@@ -85,6 +85,13 @@ export interface TodayRow {
     paid: boolean;
     /** true — бронь уже списана с баланса (DueInfo.charged). */
     charged: boolean;
+    /**
+     * true — бронь прошла (completed), а с баланса так и не списана
+     * (payment_status = 'pending', сбой крона). Записи в dueMap у неё нет
+     * (dueAmounts.ts её нарочно пропускает), поэтому раньше строка была без
+     * плашки. Только подпись «не списана» — в суммы «взять» не входит.
+     */
+    uncharged: boolean;
 }
 
 export interface TodaySummary {
@@ -225,6 +232,8 @@ export function todayRows({
             due,
             paid: !!info && due !== null && due <= 0,
             charged: !!info?.charged,
+            uncharged: !info && b.status === 'completed' && b.paymentStatus === 'pending'
+                && (Number(b.finalPrice) || 0) > 0,
         });
     }
     rows.sort((a, b) => a.time.localeCompare(b.time) || a.cabinet.localeCompare(b.cabinet) || a.client.localeCompare(b.client));

@@ -106,11 +106,15 @@ const ADMIN_STEPS: Step[] = [
     },
 ];
 
-export function MobileAdminTour({ onClose }: { onClose: () => void }) {
+/** canCash = false — вкладки «Касса» в меню нет, шаг про неё пропускаем. */
+export function MobileAdminTour({ onClose, canCash = true }: { onClose: () => void; canCash?: boolean }) {
+    const steps = canCash
+        ? ADMIN_STEPS
+        : ADMIN_STEPS.filter(s => s.targetSelector !== 'a[href="/m/admin/finance"]');
     return (
         <OnboardingTour
             onClose={onClose}
-            steps={ADMIN_STEPS}
+            steps={steps}
             storagePrefix={ADMIN_TOUR_PREFIX}
         />
     );
