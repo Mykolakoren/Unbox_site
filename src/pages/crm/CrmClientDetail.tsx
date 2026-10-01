@@ -597,9 +597,15 @@ export function CrmClientDetail() {
                 actions={
                     <>
                         {contact && (
-                            <a href={contact.href} target="_blank" rel="noopener noreferrer" className="ui-btn ui-btn--secondary" aria-label={contact.label}>
-                                <Send size={16} aria-hidden="true" /> Написать
-                            </a>
+                            contact.href.startsWith('tel:') ? (
+                                <a href={contact.href} className="ui-btn ui-btn--secondary">
+                                    <Phone size={16} aria-hidden="true" /> {contact.label}
+                                </a>
+                            ) : (
+                                <a href={contact.href} target="_blank" rel="noopener noreferrer" className="ui-btn ui-btn--secondary" aria-label={contact.label}>
+                                    <Send size={16} aria-hidden="true" /> Написать
+                                </a>
+                            )
                         )}
                         {!viewingOther && (
                             <>
