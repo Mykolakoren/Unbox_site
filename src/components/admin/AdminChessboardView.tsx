@@ -41,6 +41,7 @@ import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
 import { statusLabel } from '../../design/statuses';
 import { formatGel, formatDateLabel, formatDayMonth, formatTime } from '../../utils/format';
 import { BATUMI_TZ } from '../../utils/dateUtils';
+import { useArchivedClients } from '../../hooks/useArchivedClients';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -219,10 +220,22 @@ export function AdminChessboardView() {
     );
 
     // ── User name helper ──────────────────────────────────────────────────────
+    // Брони клиента, чей аккаунт в архиве (склейка дублей), — именем из
+    // архива с пометкой, а не началом почты. Только подпись: dueMap ниже
+    // считается по обычному списку, у таких броней отметки оплаты нет.
+    const missingUserIds = useMemo(() => {
+        const known = new Set<string>();
+        for (const u of users) { if (u.id) known.add(String(u.id)); if (u.email) known.add(u.email); }
+        return bookings.filter(b => b.userId && !known.has(b.userId)).map(b => b.userId);
+    }, [bookings, users]);
+    const archivedClients = useArchivedClients(missingUserIds);
+
     const getUserName = (userId: string | undefined | null) => {
         if (!userId || typeof userId !== 'string') return 'Гость';
         const u = users.find(u => u.email === userId || u.id === userId);
         if (u?.name) return u.name;
+        const arch = archivedClients.get(userId);
+        if (arch?.name) return `${arch.name} (архив)`;
         if (userId.includes('@')) return userId.split('@')[0];
         return userId.slice(0, 10);
     };

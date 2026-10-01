@@ -397,6 +397,8 @@ def test_archived_clients_named_not_counted():
         assert ">архив<" in src, f"{rel}: нет пометки «архив»"
         assert feed in src, f"{rel}: архивные клиенты подмешаны в деньги «Сегодня»"
         assert "byClient(rows, users)" in src or "byClient(rowsToday, users)" in src
+    chess = _code("src/components/admin/AdminChessboardView.tsx")
+    assert "useArchivedClients(missingUserIds)" in chess and "(архив)" in chess, "шахматка: архивный клиент снова началом почты"
 
 
 def test_visual_polish_today_chess_team_users():
