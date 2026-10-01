@@ -1,49 +1,47 @@
 import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    PieChart, Pie, Cell, Legend,
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { useCashboxStore } from '../../../store/cashboxStore';
+import type { CashboxAnalytics as CashboxAnalyticsData } from '../../../api/cashbox';
 import { COLOR, SHADOW, STATUS } from '../../../design/tokens';
-import { formatDayMonth, formatGel } from '../../../utils/format';
+import { formatDayMonthShort, formatDayMonth, formatGel } from '../../../utils/format';
 
-// Категории — монохром + бирюза (wave 1): без радуги красного/синего/фиолетового.
-// Различаем оттенком, а точные суммы — в подсказке и легенде.
-const COLORS = [COLOR.accent, COLOR.ink, COLOR.ink60, COLOR.ink30, COLOR.accentHover, COLOR.ink80, COLOR.ink40, COLOR.ink20];
+interface Props {
+    /** Аналитика периода УЖЕ без корректировок (см. cashMoney.excludeAdjustments). */
+    analytics: CashboxAnalyticsData | null;
+    /** «22–28 сент.» — тот же период, что в итогах наверху страницы. */
+    periodLabel: string;
+}
 
-export function CashboxAnalytics() {
-    const { analytics } = useCashboxStore();
-
+/**
+ * «Динамика кассы» и «Расходы по категориям» за выбранный период (волна 4).
+ * Раньше: сглаженные кривые за последние 30 дней при любом выбранном периоде
+ * и подпись «За выбранный период» (G7-admin-core-M3, G7-19). Теперь — столбики
+ * по дням ровно за период из фильтра; корректировки не считаются деньгами (N2).
+ * Сервер считает аналитику по всей сети — так и подписываем: «все филиалы».
+ */
+export function CashboxAnalytics({ analytics, periodLabel }: Props) {
     if (!analytics) return null;
 
     const { dailyData, categoryBreakdown, totalIncome, totalExpense } = analytics;
 
     if (dailyData.length === 0 && categoryBreakdown.length === 0) {
-        return null;
+        return <p className="text-small text-ink-60">За {periodLabel} движения денег нет.</p>;
     }
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Income vs Expense Area Chart */}
-            <div className="lg:col-span-2 bg-card p-6 rounded-2xl border border-unbox-light/50">
-                <h3 className="font-bold text-lg mb-1 text-unbox-dark">Динамика кассы</h3>
-                <p className="text-xs text-gray-500 mb-6">
-                    Приход: <span className="font-medium num text-[var(--status-ok-fg)]">{formatGel(totalIncome ?? 0)}</span>
-                    {' / '}
-                    Расход: <span className="font-medium num text-[var(--status-danger-fg)]">{formatGel(totalExpense ?? 0)}</span>
+            {/* Приход и расход по дням */}
+            <div className="lg:col-span-2 bg-card p-6 border border-ink-10">
+                <h3 className="font-semibold text-title mb-1 text-ink">Динамика кассы</h3>
+                <p className="text-small text-ink-60 mb-6">
+                    За {periodLabel} · все филиалы · без корректировок ·{' '}
+                    приход <span className="font-medium num text-[var(--status-ok-fg)]">{formatGel(totalIncome ?? 0, { sign: true })}</span>
+                    {', '}
+                    расход <span className="font-medium num text-[var(--status-danger-fg)]">{formatGel(-(totalExpense ?? 0))}</span>
                 </p>
                 <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <defs>
-                                <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor={STATUS.ok.fg} stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor={STATUS.ok.fg} stopOpacity={0} />
-                                </linearGradient>
-                                <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor={STATUS.danger.fg} stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor={STATUS.danger.fg} stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
+                        <BarChart data={dailyData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={COLOR.ink10} />
                             <XAxis
                                 dataKey="date"
@@ -51,80 +49,46 @@ export function CashboxAnalytics() {
                                 tickLine={false}
                                 tick={{ fontSize: 12, fill: COLOR.ink60 }}
                                 dy={10}
-                                tickFormatter={(v: string) => formatDayMonth(v)} // «30 августа», было «08-30»
+                                tickFormatter={(v: string) => formatDayMonthShort(v)} // «30 авг.», было «08-30»
                             />
                             <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: COLOR.ink60 }} />
                             <Tooltip
-                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: SHADOW.pop }}
+                                contentStyle={{ border: `1px solid ${COLOR.ink10}`, boxShadow: SHADOW.pop }}
                                 labelFormatter={(label: any) => formatDayMonth(String(label))}
                                 formatter={(value: any, name: any) => [
                                     formatGel(Number(value)),
                                     name === 'income' ? 'Приход' : 'Расход',
                                 ]}
                             />
-                            <Area
-                                type="monotone"
-                                dataKey="income"
-                                stroke={STATUS.ok.fg}
-                                strokeWidth={2}
-                                fillOpacity={1}
-                                fill="url(#colorIncome)"
-                                activeDot={{ r: 5, strokeWidth: 0, fill: STATUS.ok.fg }}
-                            />
-                            <Area
-                                type="monotone"
-                                dataKey="expense"
-                                stroke={STATUS.danger.fg}
-                                strokeWidth={2}
-                                fillOpacity={1}
-                                fill="url(#colorExpense)"
-                                activeDot={{ r: 5, strokeWidth: 0, fill: STATUS.danger.fg }}
-                            />
-                        </AreaChart>
+                            <Bar dataKey="income" fill={STATUS.ok.fg} radius={[2, 2, 0, 0]} />
+                            <Bar dataKey="expense" fill={STATUS.danger.fg} radius={[2, 2, 0, 0]} />
+                        </BarChart>
                     </ResponsiveContainer>
                 </div>
             </div>
 
-            {/* Expense Breakdown Pie Chart */}
-            <div className="bg-card p-6 rounded-2xl border border-unbox-light/50 flex flex-col">
-                <h3 className="font-bold text-lg mb-2 text-unbox-dark">Расходы по категориям</h3>
-                <p className="text-xs text-gray-500 mb-4">За выбранный период</p>
+            {/* Расходы по категориям — список с суммами и долями, без «бублика без цифр» */}
+            <div className="bg-card p-6 border border-ink-10 flex flex-col">
+                <h3 className="font-semibold text-title mb-1 text-ink">Расходы по категориям</h3>
+                <p className="text-small text-ink-60 mb-4">За {periodLabel} · все филиалы</p>
                 {categoryBreakdown.length === 0 ? (
-                    <div className="flex-1 flex items-center justify-center text-ink-60 text-sm">
-                        Нет данных
-                    </div>
+                    <p className="text-small text-ink-60">Расходов за период нет.</p>
                 ) : (
-                    <div className="flex-1 min-h-[200px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={categoryBreakdown}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={55}
-                                    outerRadius={75}
-                                    paddingAngle={4}
-                                    dataKey="total"
-                                    nameKey="categoryName"
-                                    stroke="none"
-                                >
-                                    {categoryBreakdown.map((_, i) => (
-                                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: SHADOW.pop }}
-                                    formatter={(value: any) => [formatGel(Number(value))]}
-                                />
-                                <Legend
-                                    verticalAlign="bottom"
-                                    height={36}
-                                    iconType="circle"
-                                    formatter={(value) => <span className="text-xs font-medium text-gray-700 ml-1">{value}</span>}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <ul className="space-y-3">
+                        {categoryBreakdown.map(c => (
+                            <li key={c.categoryName}>
+                                <div className="flex justify-between gap-3 text-small">
+                                    <span className="text-ink truncate">{c.categoryName}</span>
+                                    <span className="num text-ink whitespace-nowrap">
+                                        {formatGel(c.total, { fraction: 0 })} <span className="text-ink-60">· {c.percentage}%</span>
+                                    </span>
+                                </div>
+                                <div className="mt-1 h-1.5 bg-sunken" aria-hidden="true">
+                                    <div className="h-full bg-ink-60" style={{ width: `${Math.min(100, c.percentage)}%` }} />
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 )}
             </div>
         </div>

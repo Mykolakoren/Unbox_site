@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, X, Sun, Check, AlertTriangle } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, CalendarDays, X, Sun, Check, AlertTriangle, MoreHorizontal, ChevronDown } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
     startOfDay, endOfDay, addDays, addWeeks, addMonths, format,
@@ -19,64 +19,62 @@ import { PreCloseShiftChecklist } from '../../components/admin/cashbox/PreCloseS
 import { ShiftReportsTable } from '../../components/admin/cashbox/ShiftReportsTable';
 import { CashboxAnalytics } from '../../components/admin/cashbox/CashboxAnalytics';
 import { ReconciliationExport } from '../../components/admin/cashbox/ReconciliationExport';
-import type { CashboxTransaction } from '../../api/cashbox';
-import clsx from 'clsx';
+import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
+import { excludeAdjustments } from '../../components/admin/cashbox/cashMoney';
+import { cashboxApi, type CashboxTransaction, type CashboxPeriodSummary, type CashboxAnalytics as CashboxAnalyticsData } from '../../api/cashbox';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { formatBatumi } from '../../utils/dateUtils';
+import { formatBatumi, parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
-import { STATUS } from '../../design/tokens';
-import { formatGel } from '../../utils/format';
+import { COLOR, SHADOW, STATUS, Z } from '../../design/tokens';
+import { formatGel, formatDayMonth, formatDayMonthShort, formatMonthLabel, formatTime } from '../../utils/format';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Segmented } from '../../components/ui/Chip';
 
 type Tab = 'transactions' | 'categories' | 'shifts';
 type PeriodMode = 'day' | 'week' | 'month' | 'custom';
 type TxType = 'all' | 'income' | 'expense';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
+/** Короткие имена филиалов для подписей («Uni», «One»). */
+const BRANCH_SHORT: Record<string, string> = { 'Unbox Uni': 'Uni', 'Unbox One': 'One' };
 
 // Сколько операций за период тянем за раз — это потолок бэкенда
 // (/cashbox/transactions, limit ≤ 1000). Было 200: за «Диапазон» или
 // насыщенный месяц ранние операции молча выпадали из итогов.
 const TX_LIMIT = 1000;
 
-const TABS: { id: Tab; label: string }[] = [
-    { id: 'transactions', label: 'Транзакции' },
-    { id: 'categories', label: 'Категории' },
-    { id: 'shifts', label: 'Смены' },
-];
-
+/** Подпись периода для строки итогов: «сегодня», «22–28 сент.», «сентябрь 2026». */
 function getPeriodRange(mode: PeriodMode, offset: number): { from: Date; to: Date; label: string } {
     const now = new Date();
     if (mode === 'day') {
         const base = addDays(now, offset);
         const start = startOfDay(base);
         const end = endOfDay(base);
-        // Period labels rendered in Batumi tz so admins on remote browsers see
-        // the same day/month label the centre operates by.
+        // Подписи — по Батуми, как работает центр.
         const label = offset === 0
-            ? 'Сегодня'
+            ? 'сегодня'
             : offset === -1
-            ? 'Вчера'
-            : formatBatumi(base, 'd MMMM', ru);
+            ? 'вчера'
+            : formatDayMonth(base, { timeZone: BATUMI_TZ, withYear: 'auto' });
         return { from: start, to: end, label };
     }
     if (mode === 'week') {
         const start = startOfWeek(addWeeks(now, offset), { locale: ru });
         const end = endOfWeek(addWeeks(now, offset), { locale: ru });
-        const label = offset === 0
-            ? 'Эта неделя'
-            : offset === -1
-            ? 'Прошлая неделя'
-            : `${formatBatumi(start, 'd MMM', ru)} – ${formatBatumi(end, 'd MMM', ru)}`;
-        return { from: start, to: end, label };
-    } else {
-        const base = addMonths(now, offset);
-        const start = startOfMonth(base);
-        const end = endOfMonth(base);
-        const label = offset === 0
-            ? 'Этот месяц'
-            : formatBatumi(base, 'LLLL yyyy', ru);
-        return { from: start, to: end, label };
+        return { from: start, to: end, label: rangeLabel(start, end) };
     }
+    const base = addMonths(now, offset);
+    const start = startOfMonth(base);
+    const end = endOfMonth(base);
+    return { from: start, to: end, label: formatMonthLabel(base) };
+}
+
+/** «22–28 сент.» / «29 сент. – 5 окт.» — короткий диапазон дат. */
+function rangeLabel(from: Date, to: Date): string {
+    const sameMonth = from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear();
+    if (sameMonth) return `${from.getDate()}–${formatDayMonthShort(to, { withYear: 'auto' })}`;
+    return `${formatDayMonthShort(from, { withYear: 'auto' })} – ${formatDayMonthShort(to, { withYear: 'auto' })}`;
 }
 
 export function AdminFinance() {
@@ -108,7 +106,7 @@ export function AdminFinance() {
     const [txType, setTxType] = useState<TxType>('all');
 
     const currentUser = useUserStore(s => s.currentUser);
-    const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions, shiftReports } = useCashboxStore();
+    const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions } = useCashboxStore();
 
     // Yesterday's shift status (Excel #61) — was yesterday closed?
     // Филиалы с «зависшей» вчерашней сменой (открыта и не закрыта с прошлого дня).
@@ -131,9 +129,9 @@ export function AdminFinance() {
         if (periodMode === 'custom') {
             const from = customFrom ? new Date(customFrom) : new Date(0);
             const to = customTo ? new Date(customTo + 'T23:59:59') : new Date();
-            // Подпись с датами: итоги в «01 Баланс» подписаны периодом, и
+            // Подпись с датами: итоги подписаны периодом, и
             // «Диапазон» без дат не говорил, за что эти цифры.
-            const label = `${customFrom ? format(from, 'd MMM yyyy', { locale: ru }) : 'с начала'} – ${format(to, 'd MMM yyyy', { locale: ru })}`;
+            const label = customFrom ? rangeLabel(from, to) : `всё время по ${formatDayMonthShort(to, { withYear: 'auto' })}`;
             return { from, to, label };
         }
         return getPeriodRange(periodMode, periodOffset);
@@ -143,8 +141,7 @@ export function AdminFinance() {
         fetchBalance(selectedBranch || undefined);
         fetchCategories();
         fetchShiftReports();
-        fetchAnalytics();
-    }, [fetchBalance, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
+    }, [fetchBalance, fetchCategories, fetchShiftReports, selectedBranch]);
 
     // Excel #81 — disable "Открыть смену" when a shift is already open in
     // the selected branch (or anywhere if "Все филиалы"). Without this,
@@ -154,14 +151,12 @@ export function AdminFinance() {
     const [currentOpenShift, setCurrentOpenShift] = useState<any | null>(null);
     const refetchShiftState = useCallback(async () => {
         try {
-            const { cashboxApi } = await import('../../api/cashbox');
             const open = await cashboxApi.getCurrentOpenShift(selectedBranch || undefined);
             setCurrentOpenShift(open);
         } catch {
             setCurrentOpenShift(null);
         }
         try {
-            const { cashboxApi } = await import('../../api/cashbox');
             const p = await cashboxApi.getPendingCloseShifts();
             setPendingCloseBranches((p.pending || []).map(x => x.branch));
         } catch {
@@ -170,21 +165,75 @@ export function AdminFinance() {
     }, [selectedBranch]);
     useEffect(() => { refetchShiftState(); }, [refetchShiftState]);
 
+    // Итоги периода — с сервера (/cashbox/summary): по ВСЕМ операциям периода,
+    // корректировки отдельно. Тот же вызов, что у телефона, — цифры совпадают.
+    const [summary, setSummary] = useState<CashboxPeriodSummary | null>(null);
+    const [summaryFailed, setSummaryFailed] = useState(false);
+    const summarySeq = useRef(0);
+    const loadSummary = useCallback(async () => {
+        const seq = ++summarySeq.current;
+        setSummary(null);
+        try {
+            const s = await cashboxApi.getPeriodSummary({
+                dateFrom: period.from.toISOString(),
+                dateTo: period.to.toISOString(),
+                branch: selectedBranch || undefined,
+            });
+            if (seq !== summarySeq.current) return;
+            setSummary(s);
+            setSummaryFailed(false);
+        } catch {
+            if (seq === summarySeq.current) setSummaryFailed(true);
+        }
+    }, [period, selectedBranch]);
+    useEffect(() => { loadSummary(); }, [loadSummary]);
+
     const refetchTransactions = () => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
         fetchTransactions({ dateFrom, dateTo, limit: TX_LIMIT });
+        loadSummary();
     };
 
     useEffect(() => {
-        refetchTransactions();
+        const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
+        const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
+        fetchTransactions({ dateFrom, dateTo, limit: TX_LIMIT });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchTransactions, period.from.getTime(), period.to.getTime()]);
+
+    // ── Аналитика (свёрнута; графики переехали сюда с /admin) ─────────────
+    // Грузим только когда раздел открыт, и ровно за выбранный период
+    // (раньше — всегда последние 30 дней при любом фильтре, G7-admin-core-M3).
+    const [analyticsOpen, setAnalyticsOpen] = useState(false);
+    const [adjustments, setAdjustments] = useState<CashboxTransaction[]>([]);
+    const rawAnalytics = useCashboxStore(s => s.analytics);
+    const bookings = useUserStore(s => s.bookings);
+    const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
+    useEffect(() => {
+        if (!analyticsOpen) return;
+        const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
+        const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
+        fetchAnalytics(dateFrom, dateTo);
+        // N2: корректировки того же периода — их вычтем из графиков на фронте.
+        cashboxApi.getTransactions({ dateFrom, dateTo, paymentMethod: 'adjustment', limit: TX_LIMIT })
+            .then(setAdjustments)
+            .catch(() => setAdjustments([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [analyticsOpen, fetchAnalytics, period.from.getTime(), period.to.getTime()]);
+    useEffect(() => {
+        if (analyticsOpen && bookings.length === 0) void fetchAllBookings();
+    }, [analyticsOpen, bookings.length, fetchAllBookings]);
+    // N2: корректировки (недельная скидка, правка баланса клиента) — не деньги.
+    const analytics = useMemo(
+        () => (rawAnalytics ? excludeAdjustments(rawAnalytics, adjustments) : null),
+        [rawAnalytics, adjustments],
+    );
 
     const canGoNext = periodMode !== 'custom' && periodOffset < 0;
 
     // Операции периода и филиала — БЕЗ фильтра «Приходы/Расходы» журнала.
-    // Итоги в «01 Баланс» считаются отсюда: раньше они брали отфильтрованный
+    // Итоги считаются отсюда (запасной расчёт), раньше они брали отфильтрованный
     // журнал, и после клика «Приходы» внизу «Расход» наверху становился 0
     // (аудит 29.09, G7-admin-core-M2).
     const periodTx = useMemo((): CashboxTransaction[] => {
@@ -206,7 +255,6 @@ export function AdminFinance() {
     const totalsTruncated = transactions.length >= TX_LIMIT;
 
     return (
-
             <GridHouseAdminFinance
                 tab={tab} setTab={setTab}
                 showAddTx={showAddTx} setShowAddTx={setShowAddTx}
@@ -231,6 +279,11 @@ export function AdminFinance() {
                 filtered={filtered}
                 periodTx={periodTx}
                 totalsTruncated={totalsTruncated}
+                summary={summary}
+                summaryFailed={summaryFailed}
+                analyticsOpen={analyticsOpen} setAnalyticsOpen={setAnalyticsOpen}
+                analytics={analytics}
+                bookings={bookings}
                 canManageCategories={canManageCategories}
                 canCorrectBalance={canCorrectBalance}
                 refetchTransactions={refetchTransactions}
@@ -268,6 +321,12 @@ type GHAFProps = {
     /** Операции периода и филиала без фильтра типа — для итогов. */
     periodTx: CashboxTransaction[];
     totalsTruncated: boolean;
+    summary: CashboxPeriodSummary | null;
+    summaryFailed: boolean;
+    analyticsOpen: boolean; setAnalyticsOpen: (v: boolean) => void;
+    /** Аналитика периода уже без корректировок (N2). */
+    analytics: CashboxAnalyticsData | null;
+    bookings: any[];
     canManageCategories: boolean;
     canCorrectBalance: boolean;
     refetchTransactions: () => void;
@@ -278,17 +337,53 @@ type GHAFProps = {
     refetchShiftState: () => void;
 };
 
-function GHFSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
+/** Меню «⋯» в шапке кассы: редкие действия (корректировка, недельные кредиты, выгрузка). */
+function FinanceMoreMenu({ children }: { children: (close: () => void) => React.ReactNode }) {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!open) return;
+        const onDown = (e: MouseEvent) => {
+            if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onDown);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [open]);
     return (
-        <section style={{ marginBottom: 40 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginBottom: 20 }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, minWidth: 32 }}>{number}</div>
-                <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(20px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', color: GH.ink, margin: 0 }}>{title}</h2>
-            </div>
-            <div>{children}</div>
-        </section>
+        <div ref={rootRef} style={{ position: 'relative' }}>
+            <Button
+                variant="secondary"
+                icon={<MoreHorizontal size={16} aria-hidden="true" />}
+                aria-label="Ещё действия кассы"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen(o => !o)}
+            />
+            {open && (
+                <div
+                    role="menu"
+                    style={{
+                        position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: Z.dropdown,
+                        minWidth: 300, background: COLOR.card, border: `1px solid ${GH.ink10}`, boxShadow: SHADOW.pop,
+                        padding: 8, display: 'flex', flexDirection: 'column', gap: 4,
+                    }}
+                >
+                    {children(() => setOpen(false))}
+                </div>
+            )}
+        </div>
     );
 }
+
+const menuItemStyle: React.CSSProperties = {
+    display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+    background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: GH_SANS, fontSize: 14, color: GH.ink,
+};
 
 function GridHouseAdminFinance(p: GHAFProps) {
     const currentUser = useUserStore(s => s.currentUser);
@@ -327,444 +422,272 @@ function GridHouseAdminFinance(p: GHAFProps) {
         color: GH.ink,
     };
 
-    const periodTabs: { id: PeriodMode; label: string }[] = [
-        { id: 'day', label: 'День' },
-        { id: 'week', label: 'Неделя' },
-        { id: 'month', label: 'Месяц' },
-        { id: 'custom', label: 'Диапазон' },
-    ];
+    // Недельные кредиты — тот же расчёт и то же подтверждение, что раньше
+    // (кнопка переехала в меню «⋯»).
+    const handleWeeklyRebate = async () => {
+        const { toast } = await import('sonner');
+        const { pricingApi } = await import('../../api/pricing');
+        try {
+            const preview = await pricingApi.runWeeklyRebate(true);
+            if (!preview.users_credited) {
+                toast.info(`За неделю с ${preview.week_start} начислять нечего`);
+                return;
+            }
+            const ok = await confirm({
+                title: `Начислить недельные кредиты за неделю с ${preview.week_start}?`,
+                body: `${preview.users_credited} клиент(ов), всего ${formatGel(preview.total_credited)}. `
+                    + 'Деньги зачислятся на их балансы; повторно за эту неделю не начислим.',
+                confirmLabel: `Начислить ${formatGel(preview.total_credited)}`,
+                cancelLabel: 'Не начислять',
+            });
+            if (!ok) return;
+            const real = await pricingApi.runWeeklyRebate(false);
+            toast.success(`Начислено ${formatGel(real.total_credited)} · ${real.users_credited} клиент(ов)`);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');
+        }
+    };
 
-    const typeTabs: { id: TxType; label: string }[] = [
-        { id: 'all', label: 'Все' },
-        { id: 'income', label: 'Приходы' },
-        { id: 'expense', label: 'Расходы' },
-    ];
+    const shiftOpen = !!p.currentOpenShift;
+    const openedAt = p.currentOpenShift?.openedAt ? formatTime(parseUTC(p.currentOpenShift.openedAt), { timeZone: BATUMI_TZ }) : null;
+    const branchLabel = p.selectedBranch ? (BRANCH_SHORT[p.selectedBranch] || p.selectedBranch) : 'все филиалы';
 
-    const tabs: { id: Tab; label: string }[] = [
-        { id: 'transactions', label: 'Транзакции' },
-        { id: 'categories', label: 'Категории' },
-        { id: 'shifts', label: 'Смены' },
+    const periodTabs: { value: PeriodMode; label: string }[] = [
+        { value: 'day', label: 'День' },
+        { value: 'week', label: 'Неделя' },
+        { value: 'month', label: 'Месяц' },
+        { value: 'custom', label: 'Диапазон' },
+    ];
+    const typeTabs: { value: TxType; label: string }[] = [
+        { value: 'all', label: 'Все' },
+        { value: 'income', label: 'Приходы' },
+        { value: 'expense', label: 'Расходы' },
+    ];
+    const tabs: { value: Tab; label: string }[] = [
+        { value: 'transactions', label: 'Операции' },
+        ...(p.canManageCategories ? [{ value: 'categories' as Tab, label: 'Категории' }] : []),
+        { value: 'shifts', label: 'Смены' },
     ];
 
     return (
-        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-            <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
-                {/* HEAD */}
-                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 24, marginBottom: 32 }}>
-                    <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12 }}>
-                            Раздел · Финансы
-                        </div>
-                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(28px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
-                            Касса и поток средств.
-                        </h1>
-                    </div>
-                    {/* Action bar — three zones:
-                        • left: shift status (text marker) + shift control panel
-                        • right: correction (secondary link) + primary "+ Новая операция"
-                        Visual hierarchy collapses six look-alike buttons into one
-                        primary + one grouped tri-control + one text marker + one link. */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                        {/* Yesterday shift — marker when healthy, urgent button when missed */}
-                        {p.yesterdayShiftStatus === 'closed' ? (
+        // Без своего контейнера с maxWidth/padding/minHeight: отступы даёт
+        // AdminLayout (G7-14, G7-07 — двойной контейнер съедал ~96 px журнала).
+        <div style={{ color: GH.ink, fontFamily: GH_SANS }}>
+            <PageHeader
+                title="Касса"
+                actions={(
+                    <>
+                        {/* Статус смены — текст статуса, а не погашенная кнопка (X4-M2). */}
+                        {shiftOpen ? (
                             <span
-                                title="Вчерашняя смена была закрыта."
+                                role="status"
                                 style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    color: GH.ink60,
-                                    whiteSpace: 'nowrap',
+                                    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 12px', height: 36,
+                                    background: STATUS.ok.bg, color: STATUS.ok.fg, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap',
                                 }}
                             >
-                                <Check size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Вчера закрыта
+                                <Check size={14} aria-hidden="true" />
+                                Смена открыта{openedAt ? ` с ${openedAt}` : ''}
                             </span>
                         ) : (
-                            <button
-                                onClick={() => p.setShowCloseChecklist(true)}
-                                title="Вчерашняя смена не была закрыта. Нажмите, чтобы закрыть."
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    background: GH.ink,
-                                    color: GH.paper,
-                                    border: `1px solid ${GH.ink}`,
-                                    padding: '10px 14px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                <AlertTriangle size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Вчера не закрыта · закрыть →
-                            </button>
+                            <Button variant="secondary" icon={<Sun size={16} aria-hidden="true" />} onClick={() => p.setShowOpenShift(true)}>
+                                Открыть смену
+                            </Button>
                         )}
-
-                        {/* Shift control — three segments share one crisp 1px ink
-                            border and 1px ink dividers. Reads as a single panel,
-                            the select doesn't look orphaned anymore. Branch picker
-                            sits between open/close so scope is chosen before
-                            either action (Excel #68). */}
-                        <div
-                            style={{
-                                display: 'flex',
-                                alignItems: 'stretch',
-                                border: `1px solid ${GH.ink}`,
-                                background: GH.paper,
-                            }}
-                        >
-                            {(() => {
-                                // Excel #81 — disable when a shift is already
-                                // open for the selected scope. Visually: faded
-                                // label + "cursor: not-allowed" so админ
-                                // видит что кнопка не «ничего не делает»,
-                                // а «уже нечего делать».
-                                const shiftOpen = !!p.currentOpenShift;
-                                return (
-                                    <button
-                                        onClick={() => { if (!shiftOpen) p.setShowOpenShift(true); }}
-                                        disabled={shiftOpen}
-                                        title={
-                                            shiftOpen
-                                                ? 'Смена уже открыта'
-                                                : 'Зафиксировать начало рабочей смены'
-                                        }
-                                        // Аудит X4-M2: открытая смена была погашенной кнопкой
-                                        // (контраст 1.4:1) — теперь это зелёный статус «Смена открыта».
-                                        style={{
-                                            fontFamily: GH_MONO,
-                                            fontSize: 12,
-                                            letterSpacing: '0.06em',
-                                            textTransform: 'uppercase',
-                                            background: shiftOpen ? STATUS.ok.bg : 'transparent',
-                                            color: shiftOpen ? STATUS.ok.fg : GH.ink,
-                                            border: 'none',
-                                            borderRight: `1px solid ${GH.ink}`,
-                                            padding: '10px 14px',
-                                            cursor: shiftOpen ? 'default' : 'pointer',
-                                        }}
-                                    >
-                                        {shiftOpen
-                                            ? <Check size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                            : <Sun size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />}
-                                        {shiftOpen ? 'Смена открыта' : 'Открыть смену'}
-                                    </button>
-                                );
-                            })()}
-                            <select
-                                value={p.selectedBranch}
-                                onChange={e => p.setSelectedBranch(e.target.value)}
-                                title="Филиал для закрытия смены"
-                                style={{
-                                    padding: '10px 28px 10px 14px',
-                                    fontSize: 12,
-                                    fontFamily: GH_MONO,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    border: 'none',
-                                    borderRight: `1px solid ${GH.ink}`,
-                                    background: 'transparent',
-                                    color: GH.ink,
-                                    cursor: 'pointer',
-                                    appearance: 'none',
-                                    backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(-45deg, transparent 50%, currentColor 50%)',
-                                    backgroundPosition: 'calc(100% - 14px) 50%, calc(100% - 9px) 50%',
-                                    backgroundSize: '5px 5px',
-                                    backgroundRepeat: 'no-repeat',
-                                }}
-                            >
-                                <option value="">Все филиалы</option>
-                                <option value="Unbox Uni">Unbox Uni</option>
-                                <option value="Unbox One">Unbox One</option>
-                            </select>
-                            <button
-                                onClick={() => p.setShowCloseChecklist(true)}
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    background: 'transparent',
-                                    color: GH.ink,
-                                    border: 'none',
-                                    padding: '10px 14px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Закрыть
-                            </button>
-                        </div>
-
-                        {/* Pushes the primary action to the right edge */}
-                        <div style={{ flex: 1 }} />
-
-                        {/* Correction — rare, demoted to a quiet text link */}
-                        {p.canCorrectBalance && (
-                            <button
-                                onClick={() => { p.setCorrBranch(p.selectedBranch); p.setShowCorrection(true); }}
-                                title="Корректировка остатка на счёте"
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    background: 'transparent',
-                                    color: GH.ink60,
-                                    border: 'none',
-                                    padding: '10px 4px',
-                                    cursor: 'pointer',
-                                    textDecoration: 'underline',
-                                    textUnderlineOffset: 4,
-                                }}
-                            >
-                                Корректировка
-                            </button>
-                        )}
-
-                        <button
-                            onClick={async () => {
-                                const { toast } = await import('sonner');
-                                const { pricingApi } = await import('../../api/pricing');
-                                try {
-                                    const preview = await pricingApi.runWeeklyRebate(true);
-                                    if (!preview.users_credited) {
-                                        toast.info(`За неделю с ${preview.week_start} начислять нечего`);
-                                        return;
-                                    }
-                                    const ok = await confirm({
-                                        title: `Начислить недельные кредиты за неделю с ${preview.week_start}?`,
-                                        body: `${preview.users_credited} клиент(ов), всего ${formatGel(preview.total_credited)}. `
-                                            + 'Деньги зачислятся на их балансы; повторно за эту неделю не начислим.',
-                                        confirmLabel: `Начислить ${formatGel(preview.total_credited)}`,
-                                        cancelLabel: 'Не начислять',
-                                    });
-                                    if (!ok) return;
-                                    const real = await pricingApi.runWeeklyRebate(false);
-                                    toast.success(`Начислено ${formatGel(real.total_credited)} · ${real.users_credited} клиент(ов)`);
-                                } catch (e: any) {
-                                    toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');
-                                }
-                            }}
-                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 12, background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink}` }}
-                            title="Начислить недельные кредиты за завершившуюся неделю (cron делает это автоматически по понедельникам)"
-                        >
-                            Недельные кредиты
-                        </button>
-
-                        <ReconciliationExport />
-
-                        <button
-                            onClick={() => p.setShowAddTx(true)}
-                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 12 }}
-                        >
-                            <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                        <Button variant="secondary" onClick={() => p.setShowCloseChecklist(true)}>
+                            {shiftOpen ? 'Закрыть' : 'Закрыть смену'}
+                        </Button>
+                        <Button variant="primary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => p.setShowAddTx(true)}>
                             Новая операция
-                        </button>
-                    </div>
-                </div>
+                        </Button>
+                        <FinanceMoreMenu>
+                            {(close) => (
+                                <>
+                                    {p.canCorrectBalance && (
+                                        <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="hover:bg-ink-05"
+                                            style={menuItemStyle}
+                                            onClick={() => { close(); p.setCorrBranch(p.selectedBranch); p.setShowCorrection(true); }}
+                                        >
+                                            Корректировка остатка
+                                            <span style={{ display: 'block', fontSize: 12, color: GH.ink60 }}>Установить фактический остаток на счёте</span>
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        className="hover:bg-ink-05"
+                                        style={menuItemStyle}
+                                        title="Начислить недельные кредиты за завершившуюся неделю (cron делает это автоматически по понедельникам)"
+                                        onClick={() => { close(); void handleWeeklyRebate(); }}
+                                    >
+                                        Недельные кредиты
+                                        <span style={{ display: 'block', fontSize: 12, color: GH.ink60 }}>Обычно начисляются сами по понедельникам</span>
+                                    </button>
+                                    <div style={{ padding: '8px 12px 4px', borderTop: `1px solid ${GH.ink10}`, marginTop: 4 }}>
+                                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 8 }}>Выгрузка для сверки (Excel за месяц)</div>
+                                        <ReconciliationExport />
+                                    </div>
+                                </>
+                            )}
+                        </FinanceMoreMenu>
+                    </>
+                )}
+            />
 
-                {/* 01 — Баланс */}
-                <GHFSection number="01" title="Баланс.">
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 24 }}>
-                        <BalanceCard
-                            filteredTransactions={p.periodTx}
-                            periodLabel={p.period.label}
-                            truncated={p.totalsTruncated}
+            {/* Вчерашняя смена не закрыта — заметно и с действием. */}
+            {p.yesterdayShiftStatus === 'missed' && (
+                <div
+                    role="alert"
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', marginBottom: 24,
+                        background: STATUS.pending.bg, color: STATUS.pending.fg, fontSize: 14,
+                    }}
+                >
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <span style={{ flex: 1, minWidth: 200 }}>Вчерашняя смена не закрыта{p.selectedBranch ? ` (${branchLabel})` : ''}.</span>
+                    <Button variant="secondary" onClick={() => p.setShowCloseChecklist(true)}>Закрыть вчерашнюю смену</Button>
+                </div>
+            )}
+
+            {/* ОДИН фильтр «Филиал · Период» — над всеми цифрами, которыми он управляет (G7-08). */}
+            <div
+                data-testid="cash-filter"
+                style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, paddingBottom: 20, marginBottom: 24, borderBottom: `1px solid ${GH.ink10}` }}
+            >
+                <Segmented
+                    aria-label="Филиал"
+                    value={p.selectedBranch || 'all'}
+                    onChange={(v) => p.setSelectedBranch(v === 'all' ? '' : v)}
+                    options={[
+                        { value: 'all', label: 'Все филиалы' },
+                        ...BRANCHES.map(b => ({ value: b, label: BRANCH_SHORT[b] || b })),
+                    ]}
+                />
+                <Segmented
+                    aria-label="Период"
+                    value={p.periodMode}
+                    onChange={(v) => { p.setPeriodMode(v); p.setPeriodOffset(0); }}
+                    options={periodTabs}
+                />
+                {p.periodMode !== 'custom' ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Button
+                            variant="quiet"
+                            icon={<ChevronLeft size={16} />}
+                            aria-label="Предыдущий период"
+                            onClick={() => p.setPeriodOffset((o: number) => o - 1)}
+                        />
+                        <span className="num" style={{ fontSize: 14, fontWeight: 500, minWidth: 128, textAlign: 'center' }}>
+                            {p.period.label.charAt(0).toUpperCase() + p.period.label.slice(1)}
+                        </span>
+                        <Button
+                            variant="quiet"
+                            icon={<ChevronRight size={16} />}
+                            aria-label="Следующий период"
+                            disabled={!p.canGoNext}
+                            onClick={() => p.canGoNext && p.setPeriodOffset((o: number) => o + 1)}
                         />
                     </div>
-                </GHFSection>
-
-                {/* 02 — Период и локация */}
-                <GHFSection number="02" title="Период и локация.">
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 20 }}>
-                        {/* Period mode tabs */}
-                        <div style={{ display: 'flex', border: `1px solid ${GH.ink10}`, flexWrap: 'wrap' }}>
-                            {periodTabs.map(t => (
-                                <button
-                                    key={t.id}
-                                    onClick={() => { p.setPeriodMode(t.id); p.setPeriodOffset(0); }}
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.06em',
-                                        textTransform: 'uppercase',
-                                        padding: '10px 12px',
-                                        background: p.periodMode === t.id ? GH.ink : 'transparent',
-                                        color: p.periodMode === t.id ? GH.paper : GH.ink,
-                                        border: 'none',
-                                        borderRight: `1px solid ${GH.ink10}`,
-                                        cursor: 'pointer',
-                                        whiteSpace: 'nowrap',
-                                    }}
-                                >
-                                    {t.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Nav arrows or custom dates */}
-                        {p.periodMode !== 'custom' ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <button
-                                    onClick={() => p.setPeriodOffset((o: number) => o - 1)}
-                                    aria-label="Предыдущий период"
-                                    style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                >
-                                    <ChevronLeft size={14} />
-                                </button>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', minWidth: 140, textAlign: 'center' }}>
-                                    {p.period.label}
-                                </span>
-                                <button
-                                    onClick={() => p.canGoNext && p.setPeriodOffset((o: number) => o + 1)}
-                                    aria-label="Следующий период"
-                                    disabled={!p.canGoNext}
-                                    style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: p.canGoNext ? 'pointer' : 'not-allowed', opacity: p.canGoNext ? 1 : 0.3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                >
-                                    <ChevronRight size={14} />
-                                </button>
-                            </div>
-                        ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <CalendarDays size={14} color={GH.ink60} />
-                                <input
-                                    type="date"
-                                    value={p.customFrom}
-                                    onChange={e => p.setCustomFrom(e.target.value)}
-                                    style={{ ...hairlineInput, width: 140, fontFamily: GH_MONO, fontSize: 12 }}
-                                />
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>—</span>
-                                <input
-                                    type="date"
-                                    value={p.customTo}
-                                    onChange={e => p.setCustomTo(e.target.value)}
-                                    max={formatBatumi(new Date(), 'yyyy-MM-dd')}
-                                    style={{ ...hairlineInput, width: 140, fontFamily: GH_MONO, fontSize: 12 }}
-                                />
-                            </div>
-                        )}
-
-                        {/* Branch dropdown */}
-                        <div>
-                            <select
-                                value={p.selectedBranch}
-                                onChange={e => p.setSelectedBranch(e.target.value)}
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    background: 'transparent',
-                                    color: GH.ink,
-                                    border: `1px solid ${GH.ink10}`,
-                                    padding: '10px 16px',
-                                    outline: 'none',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                <option value="">Общая касса</option>
-                                {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-                            </select>
-                        </div>
+                ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <CalendarDays size={14} color={GH.ink60} aria-hidden="true" />
+                        <input
+                            type="date"
+                            aria-label="Начало периода"
+                            value={p.customFrom}
+                            onChange={e => p.setCustomFrom(e.target.value)}
+                            style={{ ...hairlineInput, width: 140, fontFamily: GH_MONO, fontSize: 14 }}
+                        />
+                        <span style={{ fontSize: 14, color: GH.ink60 }}>—</span>
+                        <input
+                            type="date"
+                            aria-label="Конец периода"
+                            value={p.customTo}
+                            onChange={e => p.setCustomTo(e.target.value)}
+                            max={formatBatumi(new Date(), 'yyyy-MM-dd')}
+                            style={{ ...hairlineInput, width: 140, fontFamily: GH_MONO, fontSize: 14 }}
+                        />
                     </div>
-                </GHFSection>
+                )}
+            </div>
 
-                {/* 03 — Журнал */}
-                <GHFSection number="03" title="Журнал операций.">
-                    {/* Tab selector */}
-                    <div style={{ display: 'flex', border: `2px solid ${GH.ink}`, width: '100%', maxWidth: 'fit-content', marginBottom: 24, overflowX: 'auto' }}>
-                        {tabs.map((t, idx) => {
-                            if (t.id === 'categories' && !p.canManageCategories) return null;
-                            const active = p.tab === t.id;
-                            return (
-                                <button
-                                    key={t.id}
-                                    onClick={() => p.setTab(t.id)}
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.06em',
-                                        textTransform: 'uppercase',
-                                        padding: '12px 16px',
-                                        background: active ? GH.ink : 'transparent',
-                                        color: active ? GH.paper : GH.ink,
-                                        border: 'none',
-                                        borderLeft: idx > 0 ? `1px solid ${active ? GH.paper : GH.ink}` : 'none',
-                                        cursor: 'pointer',
-                                        whiteSpace: 'nowrap',
-                                        flex: '1 0 auto',
-                                    }}
-                                >
-                                    {t.label}
-                                </button>
-                            );
-                        })}
-                    </div>
+            {/* Сейчас (не зависит от периода) → Период (getPeriodSummary) */}
+            <div style={{ marginBottom: 40 }}>
+                <BalanceCard
+                    filteredTransactions={p.periodTx}
+                    periodLabel={p.period.label}
+                    branchLabel={branchLabel}
+                    summary={p.summary}
+                    summaryFailed={p.summaryFailed}
+                    truncated={p.totalsTruncated}
+                />
+            </div>
 
-                    {/* Type filter (transactions tab only) */}
+            {/* Журнал */}
+            <section style={{ marginBottom: 40 }} aria-labelledby="cash-journal-title">
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, borderTop: `1px solid ${GH.ink}`, paddingTop: 16, marginBottom: 16 }}>
+                    <h2 id="cash-journal-title" style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Журнал</h2>
+                    <Segmented aria-label="Раздел журнала" value={p.tab} onChange={p.setTab} options={tabs} />
                     {p.tab === 'transactions' && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                            <div style={{ display: 'flex', border: `1px solid ${GH.ink10}` }}>
-                                {typeTabs.map(t => {
-                                    const active = p.txType === t.id;
-                                    return (
-                                        <button
-                                            key={t.id}
-                                            onClick={() => p.setTxType(t.id)}
-                                            style={{
-                                                fontFamily: GH_MONO,
-                                                fontSize: 12,
-                                                letterSpacing: '0.06em',
-                                                textTransform: 'uppercase',
-                                                padding: '8px 12px',
-                                                background: active ? GH.ink : 'transparent',
-                                                color: active ? GH.paper : GH.ink,
-                                                border: 'none',
-                                                borderRight: `1px solid ${active ? GH.paper : GH.ink10}`,
-                                                cursor: 'pointer',
-                                                whiteSpace: 'nowrap',
-                                            }}
-                                        >
-                                            {t.label}
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                        <>
+                            <Segmented aria-label="Тип операций" value={p.txType} onChange={p.setTxType} options={typeTabs} />
                             {p.filtered.length > 0 && (
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontSize: 14, color: GH.ink60, whiteSpace: 'nowrap' }}>
                                     {p.filtered.length} операций · {p.period.label}
                                 </span>
                             )}
-                        </div>
+                        </>
                     )}
-
-                    {/* Tab content */}
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 'clamp(8px, 2vw, 24px)', background: GH.paper, overflowX: 'auto' }}>
-                        {p.tab === 'transactions' && <CashboxTransactionTable filteredTransactions={p.filtered} onRefresh={p.refetchTransactions} />}
-                        {p.tab === 'categories' && p.canManageCategories && <CategoryManager />}
-                        {p.tab === 'shifts' && <ShiftReportsTable />}
-                    </div>
-                </GHFSection>
-
-                {/* 04 — Аналитика */}
-                <GHFSection number="04" title="Аналитика.">
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 24 }}>
-                        <CashboxAnalytics />
-                    </div>
-                </GHFSection>
-
-                {/* Footer */}
-                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 32, display: 'flex', justifyContent: 'space-between', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
-                    <span>Unbox · Касса · {new Date().getFullYear()}</span>
-                    <span>{p.period.label}</span>
                 </div>
-            </div>
+                <div style={{ border: `1px solid ${GH.ink10}`, background: GH.paper }}>
+                    {p.tab === 'transactions' && <CashboxTransactionTable filteredTransactions={p.filtered} onRefresh={p.refetchTransactions} />}
+                    {p.tab === 'categories' && p.canManageCategories && <div style={{ padding: 16 }}><CategoryManager /></div>}
+                    {p.tab === 'shifts' && <ShiftReportsTable />}
+                </div>
+            </section>
+
+            {/* Аналитика — свёрнута; графики переехали сюда с /admin (волна 4). */}
+            <section style={{ marginBottom: 40 }}>
+                <button
+                    type="button"
+                    aria-expanded={p.analyticsOpen}
+                    aria-controls="cash-analytics"
+                    onClick={() => p.setAnalyticsOpen(!p.analyticsOpen)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                        background: 'transparent', border: 'none', borderTop: `1px solid ${GH.ink}`, padding: '16px 0',
+                        cursor: 'pointer', fontFamily: GH_SANS, color: GH.ink,
+                    }}
+                >
+                    <span style={{ fontSize: 20, fontWeight: 600 }}>Аналитика</span>
+                    <span style={{ fontSize: 14, color: GH.ink60 }}>за {p.period.label} · все филиалы</span>
+                    <ChevronDown size={18} aria-hidden="true" style={{ marginLeft: 'auto', transform: p.analyticsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 140ms' }} />
+                </button>
+                {p.analyticsOpen && (
+                    <div id="cash-analytics" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                        <CashboxAnalytics analytics={p.analytics} periodLabel={p.period.label} />
+                        <AnalyticsCharts
+                            bookings={p.bookings}
+                            revenueDaily={p.analytics?.dailyData}
+                            from={p.period.from}
+                            to={p.period.to}
+                            periodLabel={p.period.label}
+                        />
+                    </div>
+                )}
+            </section>
 
             {/* Modals */}
-            <AddCashboxTransactionModal isOpen={p.showAddTx} onClose={() => { p.setShowAddTx(false); p.refetchTransactions(); }} />
+            <AddCashboxTransactionModal
+                isOpen={p.showAddTx}
+                onClose={() => { p.setShowAddTx(false); p.refetchTransactions(); }}
+                // В5: «Вернуть» удалил операцию — обновить журнал, итоги и остатки.
+                onUndone={() => { p.refetchTransactions(); p.fetchBalance(p.selectedBranch || undefined); }}
+                defaultBranch={p.selectedBranch}
+            />
             <PreCloseShiftChecklist
                 isOpen={p.showCloseChecklist}
                 onClose={() => p.setShowCloseChecklist(false)}
@@ -778,11 +701,16 @@ function GridHouseAdminFinance(p: GHAFProps) {
             />
             <EndShiftModal
                 isOpen={p.showEndShift}
-                onClose={() => { p.setShowEndShift(false); p.setChecklistSkipReason(null); }}
+                onClose={() => { p.setShowEndShift(false); p.setChecklistSkipReason(null); p.refetchShiftState(); }}
                 branch={p.selectedBranch || undefined}
                 checklistSkipReason={p.checklistSkipReason || undefined}
             />
-            <OpenShiftModal isOpen={p.showOpenShift} onClose={() => p.setShowOpenShift(false)} branch={p.selectedBranch || undefined} />
+            <OpenShiftModal
+                isOpen={p.showOpenShift}
+                onClose={() => p.setShowOpenShift(false)}
+                onOpened={p.refetchShiftState}
+                branch={p.selectedBranch || undefined}
+            />
 
             {/* Excel #54 variant B — morning checklist, soft reminder only.
                 Shown at most once per day per admin. Closing doesn't block

@@ -8,10 +8,18 @@ import type { ExpenseCategory } from '../../../api/cashbox';
 import { formatBatumi } from '../../../utils/dateUtils';
 import { formatGel } from '../../../utils/format';
 import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
+import { undoToast } from '../../ui/undoToast';
+import { cashboxApi } from '../../../api/cashbox';
+import { useUserStore } from '../../../store/userStore';
+import { canUndoCashTx } from './cashMoney';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    /** В5: операцию отменили кнопкой «Вернуть» — экрану обновить журнал и итоги. */
+    onUndone?: () => void;
+    /** Филиал из фильтра экрана — подставляем, чтобы не выбирать дважды. */
+    defaultBranch?: string;
 }
 
 // Excel #64 — admins were confused by the difference between methods.
@@ -69,8 +77,9 @@ const ACCOUNTS = [
 ] as const;
 
 
-export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
+export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultBranch }: Props) {
     const { createTransaction, categories } = useCashboxStore();
+    const role = useUserStore(s => s.currentUser?.role);
     const { confirm } = useConfirmDialog();
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('income');
     const [amount, setAmount] = useState('');
@@ -104,13 +113,13 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
         setCategoryId('');
         setSelectedPlan('');
         setDescription('');
-        setBranch('');
+        setBranch(defaultBranch && BRANCHES.some(b => b.id === defaultBranch) ? defaultBranch : '');
         setTransferTo('card_tbc');
         setClientId('');
         setClientSearch('');
         setShowClientDropdown(false);
         setTxDate(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
-    }, []);
+    }, [defaultBranch]);
 
     // Чистая карточка при каждом открытии (owner 2026-07-22).
     // Окно не пересоздаётся — при закрытии оно лишь возвращает null, а вся
@@ -126,6 +135,20 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     if (!isOpen) return null;
 
     const flatCats = flattenCategories(categories, type);
+
+    // В5: сводка на кнопке — что именно запишем, до нажатия.
+    // «Записать расход 50 ₾ · Наличные · Uni».
+    const submitLabel = (() => {
+        const v = parseFloat(amount);
+        const verb = type === 'income' ? 'приход' : type === 'expense' ? 'расход' : 'перевод';
+        if (isNaN(v) || v <= 0) return `Записать ${verb}`;
+        const method = ACCOUNTS.find(a => a.id === paymentMethod)?.label || paymentMethod;
+        const where = type === 'transfer'
+            ? `${method} → ${ACCOUNTS.find(a => a.id === transferTo)?.label || transferTo}`
+            : method;
+        const br = BRANCHES.find(b => b.id === branch)?.label || 'без филиала';
+        return `Записать ${verb} ${formatGel(v)} · ${where} · ${br}`;
+    })();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -229,7 +252,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                 });
                 toast.success('Перевод записан');
             } else {
-                await createTransaction({
+                // В5 (волна 4): то же тело запроса, что и раньше, но через
+                // cashboxApi — нужен id новой операции для «Вернуть».
+                const created = await cashboxApi.createTransaction({
                     type,
                     amount: value,
                     payment_method: paymentMethod,
@@ -242,7 +267,26 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     // Клиент выбран → деньги его, зачисляем всегда.
                     credit_user_balance: (type === 'income' && !!clientId),
                 } as any);
-                toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
+                try { await useCashboxStore.getState().fetchBalance(); } catch { /* обновится при следующем открытии */ }
+                const doneText = `${type === 'income' ? 'Приход' : 'Расход'} ${formatGel(value)} записан`;
+                // «Вернуть» — только если сервер даст удалить: owner/senior —
+                // любую операцию, админ — с сегодняшней датой (transactions.py,
+                // DELETE /cashbox/transactions/{id}). Удаление прихода с клиентом
+                // сервер сам откатывает с его баланса (topup_reversal).
+                if (created?.id && canUndoCashTx(role, created.date)) {
+                    undoToast(doneText, async () => {
+                        try {
+                            await cashboxApi.deleteTransaction(created.id);
+                            try { await useCashboxStore.getState().fetchBalance(); } catch { /* ниже обновит экран */ }
+                            toast.success('Операция отменена');
+                            onUndone?.();
+                        } catch (err: any) {
+                            toast.error(err?.response?.data?.detail || 'Не удалось отменить операцию — удалите её в журнале');
+                        }
+                    });
+                } else {
+                    toast.success(doneText);
+                }
             }
             resetForm();
             onClose();
@@ -589,7 +633,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             disabled={saving}
                             className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60"
                         >
-                            {saving ? 'Записываем…' : 'Записать'}
+                            {saving ? 'Записываем…' : submitLabel}
                         </button>
                     </div>
                 </form>

@@ -1,28 +1,42 @@
-import { Wallet, TrendingUp, TrendingDown, Banknote, CreditCard, Landmark } from 'lucide-react';
+import { Wallet, Banknote, CreditCard, Landmark } from 'lucide-react';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { useMemo } from 'react';
-import type { CashboxTransaction } from '../../../api/cashbox';
-import clsx from 'clsx';
-import { formatGel } from '../../../utils/format';
+import type { CashboxTransaction, CashboxPeriodSummary } from '../../../api/cashbox';
+import { formatGel, formatTime } from '../../../utils/format';
+import { BATUMI_TZ } from '../../../utils/dateUtils';
 
 interface Props {
-    /** Операции выбранного периода и филиала (без фильтра типа журнала). */
+    /** Операции выбранного периода и филиала (без фильтра типа журнала).
+     *  Запасной расчёт итогов, пока сервер не ответил / если ответ не пришёл. */
     filteredTransactions: CashboxTransaction[];
+    /** «22–28 сент.», «сегодня», «сентябрь 2026». */
     periodLabel: string;
-    /** Сервер отдал потолок операций — итоги за период могут быть неполными. */
+    /** «Uni», «One» или «все филиалы». */
+    branchLabel?: string;
+    /** Итоги периода с сервера (/cashbox/summary) — по ВСЕМ операциям, без корректировок. */
+    summary?: CashboxPeriodSummary | null;
+    /** Сервер итогов не ответил — показываем запасной расчёт по журналу. */
+    summaryFailed?: boolean;
+    /** Сервер отдал потолок операций — запасные итоги могут быть неполными. */
     truncated?: boolean;
 }
 
-export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Props) {
+/**
+ * Касса «Сейчас → Период» (волна 4, вариант владельца).
+ *  1) «Сейчас в кассе на 10:42» — остатки по счетам. От периода НЕ зависят.
+ *  2) «За 22–28 сент.: +1 087 ₾ · −38 ₾ · = +1 049 ₾» — итоги периода
+ *     из getPeriodSummary (сервер считает все операции, корректировки отдельно).
+ */
+export function BalanceCard({ filteredTransactions, periodLabel, branchLabel, summary, summaryFailed, truncated }: Props) {
     const { balances } = useCashboxStore();
 
-    const stats = useMemo(() => {
+    // Запасной расчёт (пока нет ответа сервера). Корректировки
+    // (payment_method='adjustment': правка баланса клиента, недельная скидка) —
+    // бухгалтерские проводки, а не деньги в кассе: в итоги не входят.
+    const local = useMemo(() => {
         let income = 0;
         let expense = 0;
         for (const tx of filteredTransactions) {
-            // Корректировки (payment_method='adjustment': правка баланса клиента,
-            // недельная скидка) — бухгалтерские проводки, а не деньги в кассе:
-            // в остатки по счетам они тоже не входят. В журнале видны, в итогах — нет.
             if (tx.paymentMethod === 'adjustment') continue;
             if (tx.type === 'income') income += tx.amount;
             else expense += tx.amount;
@@ -34,85 +48,66 @@ export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Pr
         };
     }, [filteredTransactions]);
 
+    const stats = summary
+        ? { income: Number(summary.income || 0), expense: Number(summary.expense || 0), net: Number(summary.net || 0) }
+        : local;
+    const adjCount = summary ? Number(summary.adjustmentCount || 0) : 0;
+
     const b: any = balances || {};
     const accounts = [
-        // Счета различаем значком, не цветом (wave 1: без зелёного/синего/фиолетового «для красоты»).
-        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote, color: 'text-ink-60', bg: 'bg-sunken' },
-        { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard, color: 'text-ink-60', bg: 'bg-sunken' },
-        { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark, color: 'text-ink-60', bg: 'bg-sunken' },
+        // Счета различаем значком и подписью, не цветом (Grid House).
+        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote },
+        { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard },
+        { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark },
+        { key: 'total', label: 'Всего на счетах', value: b.balance ?? 0, icon: Wallet },
     ];
-
-    const allAccounts = [
-        ...accounts,
-        { key: 'total', label: 'Итого', value: b.balance ?? 0, icon: Wallet, color: 'text-ink', bg: 'bg-sunken' },
-    ];
+    const nowLabel = formatTime(new Date(), { timeZone: BATUMI_TZ });
 
     return (
-        <div className="space-y-4">
-            {/* Account balances — 4 cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {allAccounts.map(acc => (
-                    <div key={acc.key} className="bg-white rounded-2xl border border-unbox-light/50 shadow-sm p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3">
-                        <div className={clsx("w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-lg sm:rounded-xl flex items-center justify-center", acc.bg)}>
-                            <acc.icon size={16} className={acc.color} aria-hidden="true" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <div className="text-xs sm:text-xs text-ink-60 font-medium">{acc.label}</div>
-                            <div className={clsx(
-                                "text-sm sm:text-lg font-bold tabular-nums leading-tight",
-                                acc.value < 0 ? "text-[var(--status-danger-fg)]" : "text-unbox-dark"
-                            )}>
-                                <span className="num">{formatGel(Number(acc.value ?? 0))}</span>
+        <div className="space-y-6">
+            {/* 1. Сейчас — не зависит от периода */}
+            <section aria-labelledby="cash-now-title">
+                <h2 id="cash-now-title" className="text-small font-semibold text-ink mb-3">
+                    Сейчас в кассе на {nowLabel}
+                    {branchLabel && <span className="font-normal text-ink-60"> · {branchLabel}</span>}
+                </h2>
+                <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-l border-ink-10">
+                    {accounts.map(acc => (
+                        <div key={acc.key} className="bg-card border-r border-b border-ink-10 p-4 flex items-start gap-3">
+                            <acc.icon size={16} className="text-ink-60 mt-0.5 shrink-0" aria-hidden="true" />
+                            <div className="min-w-0">
+                                <div className="text-caption text-ink-60">{acc.label}</div>
+                                <div className={`num text-title font-semibold leading-tight ${Number(acc.value) < 0 ? 'text-[var(--status-danger-fg)]' : 'text-ink'}`}>
+                                    {formatGel(Number(acc.value ?? 0))}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ))}
-            </div>
+                    ))}
+                </div>
+            </section>
 
-            {/* Period stats row */}
-            <div className="text-xs text-ink-60">
-                За период: <span className="font-medium text-unbox-dark">{periodLabel}</span> · без корректировок баланса
-                {truncated && (
-                    <span className="block text-[var(--status-pending-fg)] font-medium mt-0.5">
-                        Операций больше, чем загрузилось, — итог неполный. Выберите период короче.
-                    </span>
+            {/* 2. Период — цифры со знаком и подписью периода */}
+            <section aria-label={`Итоги за ${periodLabel}`} data-testid="cash-period-line">
+                <p className="text-body text-ink">
+                    <span className="font-semibold">За {periodLabel}:</span>{' '}
+                    <span className="num text-[var(--status-ok-fg)]" title="Приход">{formatGel(stats.income, { sign: true, fraction: 0 })}</span>
+                    <span className="text-ink-60"> · </span>
+                    <span className="num text-[var(--status-danger-fg)]" title="Расход">{formatGel(-stats.expense, { fraction: 0 })}</span>
+                    <span className="text-ink-60"> · = </span>
+                    <span className="num font-semibold" title="Разница за период">{formatGel(stats.net, { sign: true, fraction: 0 })}</span>
+                </p>
+                <p className="text-caption text-ink-60 mt-1">
+                    приход · расход · разница{branchLabel ? ` · ${branchLabel}` : ''} · без корректировок баланса
+                    {adjCount > 0 && ` (их за период ${adjCount} — видны в журнале)`}
+                </p>
+                {!summary && (summaryFailed || truncated) && (
+                    <p className="text-caption text-[var(--status-pending-fg)] font-medium mt-1">
+                        {summaryFailed
+                            ? 'Итоги с сервера не загрузились — посчитали по журналу ниже.'
+                            : 'Операций больше, чем загрузилось, — итог неполный. Выберите период короче.'}
+                    </p>
                 )}
-            </div>
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                <div className="bg-white rounded-xl sm:rounded-2xl border border-unbox-light/50 shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-[var(--status-ok-bg)] flex items-center justify-center">
-                        <TrendingUp size={14} className="text-[var(--status-ok-fg)]" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0 text-center sm:text-left">
-                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Приход</div>
-                        <div className="text-xs sm:text-base font-bold text-[var(--status-ok-fg)] num leading-tight">{formatGel(stats.income, { sign: true, fraction: 0 })}</div>
-                    </div>
-                </div>
-                <div className="bg-white rounded-xl sm:rounded-2xl border border-unbox-light/50 shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-[var(--status-danger-bg)] flex items-center justify-center">
-                        <TrendingDown size={14} className="text-[var(--status-danger-fg)]" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0 text-center sm:text-left">
-                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Расход</div>
-                        <div className="text-xs sm:text-base font-bold text-[var(--status-danger-fg)] num leading-tight">{formatGel(-stats.expense, { fraction: 0 })}</div>
-                    </div>
-                </div>
-                <div className={clsx(
-                    "bg-white rounded-xl sm:rounded-2xl border shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3",
-                    "border-unbox-light/50"
-                )}>
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg flex items-center justify-center bg-sunken">
-                        <Wallet size={14} className="text-ink-60" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0 text-center sm:text-left">
-                        {/* «Разница» за период — не путать с «Итого» по всем счетам выше. */}
-                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Разница</div>
-                        <div className="text-xs sm:text-base font-bold num leading-tight text-unbox-dark">
-                            {formatGel(stats.net, { sign: true, fraction: 0 })}
-                        </div>
-                    </div>
-                </div>
-            </div>
+            </section>
         </div>
     );
 }
