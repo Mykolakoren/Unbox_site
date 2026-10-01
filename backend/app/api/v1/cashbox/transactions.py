@@ -342,18 +342,20 @@ def _find_recent_duplicate(
     return session.exec(stmt).first()
 
 
-def _duplicate_payment_error(prev: CashboxTransaction) -> HTTPException:
+def _duplicate_payment_error(prev: CashboxTransaction, current_admin_id: str) -> HTTPException:
     secs = max(0, int((datetime.now() - prev.created_at).total_seconds()))
     cur = "₾" if prev.currency == "GEL" else prev.currency
     amount_txt = f"{prev.amount:g}".replace(".", ",")
     method = _METHOD_RU.get(prev.payment_method, prev.payment_method)
+    # Первую запись сделал другой администратор — скажем, кто (может, коллега с телефона).
+    by = f", записал(а) {prev.admin_name}" if prev.admin_name and prev.admin_id != current_admin_id else ""
     return HTTPException(
         status_code=409,
         detail={
             "code": "duplicate_recent",
             "message": (
                 f"Такая же операция по этому клиенту уже записана {_ago_ru(secs)} "
-                f"({amount_txt} {cur}, {method}). "
+                f"({amount_txt} {cur}, {method}{by}). "
                 "Если это не ошибка, подтвердите ещё одну запись."
             ),
             "existing": {
@@ -424,7 +426,7 @@ def create_transaction(
         if not payload.confirm_duplicate:
             prev = _find_recent_duplicate(session, payload, target_user)
             if prev is not None:
-                raise _duplicate_payment_error(prev)
+                raise _duplicate_payment_error(prev, str(current_user.id))
 
     # ── Normalise the operation date to UTC-naive ──
     # Frontend sends Tbilisi wall-clock as a naive ISO string
