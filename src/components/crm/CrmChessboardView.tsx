@@ -1682,6 +1682,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 {/* Modals */}
                 {bookSlot && (
                     <CrmQuickBookModal
+                        key={`${bookSlot.resId}|${bookSlot.time}|${bookSlot.duration}`} // новый период — новое окно: иначе 2-й и далее брались с длительностью 1-го
                         slot={bookSlot}
                         crmClients={clients}
                         // Cancel at any point in the queue → drop remaining
@@ -2044,6 +2045,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             {/* New booking modal (drag-to-select) */}
             {bookSlot && (
                 <CrmQuickBookModal
+                    key={`${bookSlot.resId}|${bookSlot.time}|${bookSlot.duration}`} // новый период — новое окно: иначе 2-й и далее брались с длительностью 1-го
                     slot={bookSlot}
                     crmClients={clients.filter(c => c.isActive)}
                     onClose={() => {

@@ -205,6 +205,17 @@ def test_copy_words():
     assert "Часы приёма" in _read(SCHEDULE), "экран называется не «Часы приёма» (В4)"
 
 
+
+def test_quick_book_modal_resets_per_period():
+    """Деньги (ревью 01.10): при нескольких выделенных периодах окно быстрой брони
+    переиспользовалось, и 2-й и далее бронировались с длительностью (и ценой) 1-го.
+    key по слоту пересоздаёт окно на каждый период."""
+    import re as _re
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[2] / "src/components/crm/CrmChessboardView.tsx").read_text(encoding="utf-8")
+    n = len(_re.findall(r"<CrmQuickBookModal\s+key=\{`\$\{bookSlot\.resId\}\|\$\{bookSlot\.time\}\|\$\{bookSlot\.duration\}`\}", src))
+    assert n == src.count("<CrmQuickBookModal"), "CrmQuickBookModal без key по слоту — следующий период возьмёт длительность первого"
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
