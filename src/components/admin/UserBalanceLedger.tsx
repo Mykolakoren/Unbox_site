@@ -4,6 +4,7 @@ import { usersApi, type BalanceLedgerResponse } from '../../api/users';
 import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { formatDayMonth, formatGel, formatTime } from '../../utils/format';
 import { ruCountWord } from '../../utils/plural';
+import { REASON_LABELS } from '../../utils/ledgerReasons';
 import { SkeletonList } from '../ui/Skeleton';
 import { ErrorBar } from '../ui/ErrorBar';
 import { EmptyState } from '../ui/EmptyState';
@@ -21,34 +22,6 @@ import { EmptyState } from '../ui/EmptyState';
  * лента — про депозит клиента. Инвариант «сумма ленты == баланс» показываем
  * прямо в шапке: если он сломан, значит баланс правили мимо кошелька.
  */
-
-const REASON_LABELS: Record<string, string> = {
-    topup: 'Пополнение',
-    baseline: 'Стартовый остаток',
-    booking_charge: 'Списание за бронь',
-    booking_refund: 'Возврат за бронь',
-    booking_charge_revert: 'Откат списания',
-    extend_charge: 'Доплата за продление',
-    extras_charge: 'Допы',
-    shorten_refund: 'Возврат за сокращение',
-    weekly_rebate: 'Недельная скидка',
-    consecutive_recompute: 'Пересчёт «часы подряд»',
-    correction: 'Ручная корректировка',
-    merge: 'Перенос со склеенного профиля',
-    subscription_purchase: 'Оплата абонемента',
-    booking_to_subscription: 'Бронь переведена на абонемент',
-    double_charge_refund: 'Возврат двойного списания',
-    // Причины, которые сервер пишет, а подписи не было — в колонке стоял
-    // английский код (аудит 29.09, X3-10).
-    price_change: 'Изменение цены брони',
-    reschedule_diff: 'Разница при переносе',
-    format_change: 'Смена формата брони',
-    trim_booking: 'Сокращение брони',
-    trim_refund: 'Возврат за сокращение',
-    extras_refund: 'Возврат за допы',
-    topup_adjust: 'Правка пополнения',
-    topup_reversal: 'Отмена пополнения',
-};
 
 export function UserBalanceLedger({ userId }: { userId: string }) {
     const [data, setData] = useState<BalanceLedgerResponse | null>(null);

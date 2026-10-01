@@ -15,6 +15,15 @@ import type { BookingHistoryItem } from '../store/types';
  *
  * Итог по клиенту всегда сходится: сумма «к оплате» = долг + ещё не покрытые
  * будущие брони. Только отображение — денег не трогает.
+ *
+ * Прошедшие брони (решение владельца В2, 01.10). Сервер отдаёт прошедшую
+ * confirmed как 'completed' (enrich_booking_status) — раньше она сюда не
+ * попадала, у неё не было записи, и в клетке висела цена без «✓», которую
+ * читали как «взять». Теперь completed считается как остальные: списанная
+ * встаёт в очередь по времени, долг ложится на самые свежие, а у покрытых
+ * прошедших — запись с due = 0 («✓ оплачено»). Прошедшая, но не списанная
+ * (completed + pending) записи не получает. Долг клиента (минус на балансе)
+ * от этого не меняется — меняется только то, на какие брони он разложен.
  */
 export interface DueInfo {
     /** Сколько взять за эту бронь, ₾. */
@@ -26,6 +35,8 @@ export interface DueInfo {
 }
 
 const MONEY_METHODS = new Set(['balance', 'bonus', '', undefined, null]);
+/** Брони, за которые берём деньги: будущие, ждущие подтверждения и прошедшие (В2). */
+const DUE_STATUSES = new Set<string>(['confirmed', 'pending_approval', 'completed']);
 
 function startKey(b: BookingHistoryItem): string {
     const raw: any = b.date;
@@ -40,7 +51,10 @@ export function computeDueByBooking(
     const out = new Map<string, DueInfo>();
     const byClient = new Map<string, BookingHistoryItem[]>();
     for (const b of bookings) {
-        if (!b || (b.status !== 'confirmed' && b.status !== 'pending_approval')) continue;
+        if (!b || !DUE_STATUSES.has(b.status)) continue;
+        // Прошедшая, но так и не списанная (сбой крона) — на балансе её нет. Не даём
+        // ей забрать плюс баланса у будущих броней: их суммы остаются прежними (В2).
+        if (b.status === 'completed' && b.paymentStatus === 'pending') continue;
         if (!b.userId) continue;
         const price = Number(b.finalPrice || 0);
         // Абонемент без пиковой доплаты, обслуживание, прощённые — к оплате нечего.

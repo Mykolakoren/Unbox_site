@@ -141,3 +141,46 @@ sheet 200/201 · dialog 10050 · toast 10100 · tooltip 10200`.
 Список клиентов `getClients(…, withStats=true)` теперь отдаёт `nextSessionDate` и `lastPastSessionDate`
 (UTC-naive, читать через `parseUTC`). `html, body` — `overflow-x: clip` (не `hidden`: тот ломал `sticky`).
 Сторож: `backend/tests/guard_wave3_foundation.py`.
+
+## Волна 4 — админка (шаг 0, 01.10)
+
+### «К оплате» и «✓ оплачено» (решение владельца В2)
+
+Владелец: неоплаченные брони должны бросаться в глаза, чтобы админы были внимательнее.
+Сумма «к оплате» по брони — только из `computeDueByBooking` (`src/utils/dueAmounts.ts`), своих формул нет.
+
+| Состояние | Когда | Как выглядит |
+|---|---|---|
+| **к оплате** | `due > 0` — прошедшая или будущая | тон **danger**: заливка/рамка `--status-danger-bg`, текст `--status-danger-fg` «к оплате 36 ₾» + значок `AlertCircle` |
+| **✓ оплачено** | запись в dueMap есть, `due ≤ 0` | спокойный тон **ok**: `--status-ok-bg` / `--status-ok-fg`, «✓ оплачено» |
+| ничего | записи нет (абонемент без доплаты, обслуживание, прощённая) | не рисуем ни цвета, ни подписи |
+
+Всегда цвет **и** текст (и значок), не только цвет. Где показывать: шахматка (на каждой брони;
+на 30-минутной — значок в углу с той же подписью в `aria-label`/`title`), «Сегодня» на компьютере
+и телефоне, список броней. Легенда шахматки объясняет оба состояния словами «к оплате» / «✓ оплачено».
+
+Прошедшие брони (сервер отдаёт их как `completed`) теперь тоже получают запись в dueMap:
+долг ложится на самые свежие списанные брони, покрытые прошедшие — «✓ оплачено». Долг
+клиента от этого не меняется, только то, на какие брони он разложен.
+
+Общий компонент — `src/components/admin/DueBadge.tsx` (не в `ui/*`):
+
+```tsx
+const info = dueMap.get(b.id);
+<DueBadge due={info?.due} paid={!!info} />            // плашка
+<DueBadge due={info?.due} paid={!!info} variant="dot" /> // плотная таблица Grid House
+```
+
+### Основа для пакетов A–D
+
+| Модуль | Что даёт |
+|---|---|
+| `maintenanceApi` (`src/api/maintenance.ts`) | `list({dateFrom,dateTo,resourceId})`, `create(input)`, `remove(id)`, `removeGroup(groupId)`. На пересечение с бронями `create` бросает `MaintenanceConflictError` (`isMaintenanceConflict(e)`, `e.conflicts`). |
+| `MaintenanceConflictSheet` (`src/components/admin/`) | Шторка на `Sheet`: «В это время есть брони — сначала перенесите или отмените их», список (дата, время, клиент, «к оплате / оплачено»), ссылка из `linkFor(booking)`, кнопка «Понятно». Сама ничего не отменяет (В1). |
+| `src/utils/adminToday.ts` (без импортов) | `todayRows({bookings, users, dueMap, dayKey, resources?})` → строки дня (время, клиент, телефон, кабинет, статус, due); `todaySummary(rows)` → «взять 86 ₾ с 2 клиентов»; `byClient(rows, users)` → «Взять сегодня»: за сегодня, весь долг, лимит, «сверх лимита»; `batumiDayKey()` — «сегодня» по Батуми. Обслуживание исключено, `completed` остаётся. |
+| `src/utils/ledgerReasons.ts` | `REASON_LABELS` — подписи движений баланса (общие для карточки на компьютере и телефоне). |
+
+Сервер: `POST /maintenance-blocks` поверх брони клиента (`confirmed` / `pending_approval`) → **409**
+`{message, conflicts: [{booking_id, date, start_time, duration, client: {name, email}, payment_status, final_price}]}`,
+ничего не создаёт; `DELETE /maintenance-blocks/group/{id}` снимает серию (только строки обслуживания).
+Сторож: `backend/tests/guard_wave4_foundation.py`.
