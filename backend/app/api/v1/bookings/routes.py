@@ -440,16 +440,10 @@ def _refund_booking_to_owner(
                 # Бронь из прошлой недели недельного пакета — её часы сгорели
                 # вместе с неделей; в пул новой недели не возвращаем.
                 refund_hours = 0.0
-            rem = subscription_pool.get_float(new_sub, "remaining_hours")
             # Mirror waive_charge in billing_defer.py: refunding hours back to
             # the pool must also decrement used_hours, or the pool drifts
             # (remaining + used no longer sums to the plan total).
-            used = subscription_pool.get_float(new_sub, "used_hours")
-            owner.subscription = new_sub = subscription_pool.update(
-                new_sub,
-                remaining_hours=rem + refund_hours,
-                used_hours=max(0.0, used - refund_hours),
-            )
+            owner.subscription = new_sub = subscription_pool.credit_hours(new_sub, refund_hours)
             session.add(owner)
             refund_meta["refunded_hours"] = refund_hours
             refund_meta["retained_hours_unbox_income"] = retained_hours
@@ -1198,13 +1192,8 @@ def create_booking(
                     detail="Абонемент не покрывает эту бронь: не хватает часов или этот формат кабинета не входит в тариф",
                 )
             if not defer_charge_single and booking_owner.subscription:
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=max(0.0, rem - quote.hours_deducted),
-                    used_hours=used + quote.hours_deducted,
-                )
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, quote.hours_deducted)
         else:
             if not defer_charge_single:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -1280,13 +1269,8 @@ def create_booking(
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
-                    rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                    booking_owner.subscription = subscription_pool.update(
-                        booking_owner.subscription,
-                        remaining_hours=rem + quote.hours_deducted,
-                        used_hours=max(0.0, used - quote.hours_deducted),
-                    )
+                    booking_owner.subscription = subscription_pool.credit_hours(
+                        booking_owner.subscription, quote.hours_deducted)
                 # Аудит 2026-08-27: пиковая надбавка — реальные ДЕНЬГИ, списанные
                 # выше (wallet.debit(peak_debt) на не-отложенном пути; hot всегда
                 # не-отложенный). Часы откатили — откатываем и деньги, иначе
@@ -1748,18 +1732,13 @@ def create_multi_slot_booking(
                 # or never decrements a snake_case pool. Mirror the
                 # single/recurring paths and normalize to snake on write.
                 remaining = subscription_pool.get_float(new_sub, "remaining_hours")
-                used = subscription_pool.get_float(new_sub, "used_hours")
                 hours_deducted = quote.hours_deducted or 0
                 if remaining < hours_deducted:
                     raise HTTPException(
                         400,
                         f"Not enough subscription hours for slot {s.date} {s.start_time}",
                     )
-                booking_owner.subscription = new_sub = subscription_pool.update(
-                    new_sub,
-                    remaining_hours=max(0.0, remaining - hours_deducted),
-                    used_hours=used + hours_deducted,
-                )
+                booking_owner.subscription = new_sub = subscription_pool.debit_hours(new_sub, hours_deducted)
         else:  # balance (и bonus — остаток сверх бонусных часов)
             if not defer_charge_multi:
                 available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
@@ -2350,13 +2329,8 @@ def create_recurring_booking(
                     400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
                 )
             if not defer_charge and booking_owner.subscription:
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=max(0.0, rem - quote.hours_deducted),
-                    used_hours=used + quote.hours_deducted,
-                )
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, quote.hours_deducted)
         else:
             if not defer_charge:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -4226,13 +4200,7 @@ def trim_booking(
         # used_hours (floored at 0) — subscription_pool keeps both dialects.
         if (not pending and removed_hours > 0 and owner and owner.subscription
                 and subscription_pool.hours_return_allowed(owner.subscription, booking.date)):
-            rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-            used = subscription_pool.get_float(owner.subscription, "used_hours")
-            owner.subscription = subscription_pool.update(
-                owner.subscription,
-                remaining_hours=rem + removed_hours,
-                used_hours=max(0.0, used - removed_hours),
-            )
+            owner.subscription = subscription_pool.credit_hours(owner.subscription, removed_hours)
             session.add(owner)
         # Peak-hour surcharge on a subscription booking is charged to BALANCE at
         # creation (final_price = subscription_peak_debt). If the trimmed slice
@@ -4859,13 +4827,13 @@ def change_booking_format(
     settled_now = False
     if booking.payment_status == "paid":
         if (booking.payment_method or "").lower() == "subscription":
-            rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-            used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-            booking_owner.subscription = subscription_pool.update(
-                booking_owner.subscription,
-                remaining_hours=max(0.0, rem - delta_hours),
-                used_hours=max(0.0, used + delta_hours),
-            )
+            # Знаковая разница: >0 — дописать часы, <0 — вернуть.
+            if delta_hours > 0:
+                booking_owner.subscription = subscription_pool.debit_hours(
+                    booking_owner.subscription, delta_hours)
+            else:
+                booking_owner.subscription = subscription_pool.credit_hours(
+                    booking_owner.subscription, -delta_hours)
         else:
             # delta_price знаковая: >0 — доплата, <0 — возврат.
             wallet.apply(session, booking_owner, -delta_price, reason="format_change",
@@ -5020,13 +4988,8 @@ def set_booking_price(
             new_hours = old_hours * (new_price / old_price) if old_price > 0 else old_hours
             hours_delta = round(old_hours - new_hours, 4)
             if subscription_pool.hours_return_allowed(booking_owner.subscription, booking.date):
-                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-                booking_owner.subscription = subscription_pool.update(
-                    booking_owner.subscription,
-                    remaining_hours=rem + hours_delta,
-                    used_hours=max(0.0, used - hours_delta),
-                )
+                booking_owner.subscription = subscription_pool.credit_hours(
+                    booking_owner.subscription, hours_delta)
             booking.hours_deducted = round(new_hours, 4)
         else:
             # delta знаковая: >0 — возврат клиенту, <0 — доплата.
@@ -5609,13 +5572,7 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
     #    списание (Валерия Костенецкая 29.09: 6 ч).
     is_pending = booking.payment_status == "pending"
     if not is_pending:
-        rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-        used = subscription_pool.get_float(owner.subscription, "used_hours")
-        owner.subscription = subscription_pool.update(
-            owner.subscription,
-            remaining_hours=max(0.0, rem - hours),
-            used_hours=used + hours,
-        )
+        owner.subscription = subscription_pool.debit_hours(owner.subscription, hours)
         session.add(owner)
 
     # 3. Перекраска брони.
@@ -5785,13 +5742,8 @@ def shorten_booking(
         if target_user:
             if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
                 if subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
-                    rem = subscription_pool.get_float(target_user.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(target_user.subscription, "used_hours")
-                    target_user.subscription = subscription_pool.update(
-                        target_user.subscription,
-                        remaining_hours=rem + refund_hours,
-                        used_hours=max(0.0, used - refund_hours),
-                    )
+                    target_user.subscription = subscription_pool.credit_hours(
+                        target_user.subscription, refund_hours)
             else:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
                               description="Возврат за сокращённое время брони",
@@ -6213,14 +6165,8 @@ def approve_booking(
     if b_owner:
         if booking.payment_method == "subscription":
             if b_owner.subscription:
-                rem = subscription_pool.get_float(b_owner.subscription, "remaining_hours")
-                used = subscription_pool.get_float(b_owner.subscription, "used_hours")
                 hrs = float(booking.hours_deducted or 0)
-                b_owner.subscription = subscription_pool.update(
-                    b_owner.subscription,
-                    remaining_hours=max(0.0, rem - hrs),
-                    used_hours=used + hrs,
-                )
+                b_owner.subscription = subscription_pool.debit_hours(b_owner.subscription, hrs)
         else:
             wallet.debit(session, b_owner, float(booking.final_price or 0), reason="booking_charge",
                          description="Списание при подтверждении брони (approve)",

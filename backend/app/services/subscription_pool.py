@@ -91,6 +91,51 @@ def update(sub: Optional[dict], **fields: Any) -> dict:
     return new
 
 
+# ── Движение часов ───────────────────────────────────────────────────────────
+# ЕДИНСТВЕННОЕ место, где меняются remaining_hours / used_hours. Раньше каждое
+# из ~18 мест (бронь, крон T-24ч, отмена, перенос, вырезка, сокращение, смена
+# формата/цены, подтверждение, Telegram, пополнение, продажа) писало пул руками
+# — и правило «вернуть ровно туда, откуда сняли» пришлось бы чинить в каждом.
+# Сторож guard_hours_pool_moves запрещает прямые записи вне этого файла.
+
+def debit_hours(sub: Optional[dict], hours: float) -> dict:
+    """Списать ``hours`` часов абонемента: остаток −hours (не ниже 0),
+    израсходовано +hours."""
+    h = float(hours or 0)
+    rem = get_float(sub, "remaining_hours")
+    used = get_float(sub, "used_hours")
+    return update(sub, remaining_hours=max(0.0, rem - h), used_hours=used + h)
+
+
+def credit_hours(sub: Optional[dict], hours: float) -> dict:
+    """Вернуть ``hours`` часов в пул: остаток +hours, израсходовано −hours
+    (не ниже 0). ``hours`` может быть отрицательным (ручная цена абонементной
+    брони выше прежней — легаси-поведение set_booking_price)."""
+    h = float(hours or 0)
+    rem = get_float(sub, "remaining_hours")
+    used = get_float(sub, "used_hours")
+    return update(sub, remaining_hours=rem + h, used_hours=max(0.0, used - h))
+
+
+def grant_hours(sub: Optional[dict], hours: float) -> dict:
+    """Пополнение пула админом: остаток и «всего» +hours (израсходовано не трогаем)."""
+    h = float(hours or 0)
+    rem = get_float(sub, "remaining_hours")
+    total = get_float(sub, "total_hours")
+    return update(sub, remaining_hours=round(rem + h, 2), total_hours=round(total + h, 2))
+
+
+def pool_fields(total: float, bonus: float = 0.0, used: float = 0.0) -> dict:
+    """Поля нового пула (snake_case; запишет update): всего, бонус, остаток, израсходовано."""
+    total, bonus, used = float(total), float(bonus), float(used)
+    return {
+        "total_hours": total,
+        "bonus_hours": bonus,
+        "remaining_hours": round(max(0.0, total + bonus - used), 2),
+        "used_hours": used,
+    }
+
+
 def sync(sub: Optional[dict]) -> dict:
     """Mirror every known field into both dialects — repairs legacy one-sided pools."""
     new = dict(sub or {})

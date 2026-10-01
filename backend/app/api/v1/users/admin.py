@@ -671,13 +671,7 @@ def topup_subscription(
     # Write both dialects: this used to be camelCase-only, so billing_defer
     # (snake-only) saw remaining_hours=0, fell back to cash and charged the
     # client's balance for hours they had just paid for. See subscription_pool.
-    current_hours = subscription_pool.get_float(user.subscription, "remaining_hours")
-    total_hours = subscription_pool.get_float(user.subscription, "total_hours")
-    user.subscription = subscription_pool.update(
-        user.subscription,
-        remaining_hours=round(current_hours + hours, 2),
-        total_hours=round(total_hours + hours, 2),
-    )
+    user.subscription = subscription_pool.grant_hours(user.subscription, hours)
 
     comment_history = list(user.comment_history or [])
     log_text = (

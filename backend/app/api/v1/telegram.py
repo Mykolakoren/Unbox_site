@@ -1924,14 +1924,8 @@ def _handle_hot_booking_callback(
         if owner:
             if (booking.payment_method or "").lower() == "subscription":
                 if owner.subscription:
-                    rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-                    used = subscription_pool.get_float(owner.subscription, "used_hours")
                     hrs = float(booking.hours_deducted or 0)
-                    owner.subscription = subscription_pool.update(
-                        owner.subscription,
-                        remaining_hours=max(0.0, rem - hrs),
-                        used_hours=used + hrs,
-                    )
+                    owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs)
                 session.add(owner)
             else:
                 from app.services import wallet as _wallet

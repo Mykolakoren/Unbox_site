@@ -163,14 +163,9 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
         # then fell through to the cash fallback below and charged the client's
         # balance for hours they had already paid for.
         rem = subscription_pool.get_float(user.subscription, "remaining_hours")
-        used = subscription_pool.get_float(user.subscription, "used_hours")
         hrs = float(b.hours_deducted or (b.duration or 0) / 60.0)
         if rem >= hrs > 0:
-            user.subscription = subscription_pool.update(
-                user.subscription,
-                remaining_hours=max(0.0, rem - hrs),
-                used_hours=used + hrs,
-            )
+            user.subscription = subscription_pool.debit_hours(user.subscription, hrs)
             snapshot = hrs
             # Пиковая надбавка абонемента (pricing: final_price = subscription_peak_debt)
             # — это РЕАЛЬНЫЕ деньги, часами не покрывается. Немедленный путь списывает
@@ -314,13 +309,7 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
     hours_actually_used = float(b.hours_deducted or 0)
     if method == "subscription" and hours_actually_used > 0:
         if subscription_pool.hours_return_allowed(user.subscription, b.date):
-            rem = subscription_pool.get_float(user.subscription, "remaining_hours")
-            used = subscription_pool.get_float(user.subscription, "used_hours")
-            user.subscription = subscription_pool.update(
-                user.subscription,
-                remaining_hours=rem + hours_actually_used,
-                used_hours=max(0.0, used - hours_actually_used),
-            )
+            user.subscription = subscription_pool.credit_hours(user.subscription, hours_actually_used)
         # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
         # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
         _peak = float(b.final_price or 0)

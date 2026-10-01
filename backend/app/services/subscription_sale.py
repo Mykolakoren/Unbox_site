@@ -78,8 +78,7 @@ def build_subscription(plan_id: str, now: datetime, carry_hours: float = 0.0) ->
     total = float(p["hours"])
     return subscription_pool.update({}, **{
         "id": str(uuid4()), "plan_id": plan_id, "name": p["name"],
-        "total_hours": total, "bonus_hours": round(bonus, 2),
-        "remaining_hours": round(total + bonus, 2), "used_hours": 0.0,
+        **subscription_pool.pool_fields(total, round(bonus, 2)),
         "free_reschedules": p["free_reschedules"], "free_reschedules_used": 0,
         "expiry_date": (now + timedelta(days=p["duration_days"])).isoformat(),
         "is_frozen": False, "freeze_count": 0, "discount_percent": p["discount_percent"],
