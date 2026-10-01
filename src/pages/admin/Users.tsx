@@ -9,6 +9,9 @@ import { api } from '../../api/client';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { formatGel } from '../../utils/format';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { STATUS } from '../../design/tokens';
 
 export function AdminUsers() {
         const { users, updateUserById, fetchUsers } = useUserStore();
@@ -290,66 +293,25 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
-                <div style={{ ...monoLabel, color: GH.ink60, marginBottom: narrow ? 8 : 14 }}>Админка · клиенты</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
-                    <h1 style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 800,
-                        fontSize: 'clamp(24px, 3.5vw, 42px)',
-                        lineHeight: 1.1,
-                        letterSpacing: '-0.02em',
-                        margin: 0,
-                    }}>
-                        Реестр клиентов
-                    </h1>
-                    <button
-                        onClick={() => setShowAddUser(true)}
-                        style={{
-                            background: GH.ink,
-                            color: GH.paper,
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            padding: narrow ? '10px 14px' : '14px 22px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 8,
-                        }}
-                    >
-                        <Plus size={narrow ? 12 : 14} /> {narrow ? '+ Новый' : 'Новый клиент'}
-                    </button>
-                </div>
-            </div>
-
-            {/* ── KPI strip ── */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 20 : 32, marginBottom: narrow ? 16 : 32, flexWrap: 'wrap' }}>
-                <div>
-                    <p style={{ ...ghMono, color: GH.ink60, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
-                        {allFmt}
-                    </span>
-                </div>
-                <div>
-                    <p style={{ ...ghMono, color: GH.ink60, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
-                        {totalFmt}
-                    </span>
-                </div>
-                {debtorCount > 0 && (
-                    <div>
-                        <p style={{ ...ghMono, color: GH.ink60, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger, fontVariantNumeric: 'tabular-nums' }}>
-                            {debtorCount}
-                        </span>
-                    </div>
-                )}
-            </div>
+            {/* ── Шапка: H1 = пункт меню «Клиенты» (adminTitleFor), общий PageHeader,
+                как на остальных страницах админки. Счётчики — строкой под заголовком
+                вместо плакатных цифр. ── */}
+            <PageHeader
+                title="Клиенты"
+                description={
+                    <>
+                        Всего <span className="num">{allFmt}</span> · показано <span className="num">{totalFmt}</span>
+                        {debtorCount > 0 && (
+                            <> · <span style={{ color: STATUS.danger.fg }}>в минусе <span className="num">{debtorCount}</span></span></>
+                        )}
+                    </>
+                }
+                actions={
+                    <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => setShowAddUser(true)}>
+                        Новый клиент
+                    </Button>
+                }
+            />
 
             {/* ── Search ── */}
             <div style={{ marginBottom: 28 }}>

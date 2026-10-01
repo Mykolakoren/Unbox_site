@@ -134,7 +134,9 @@ export function MobileAdminBookings() {
     }, [bookings, dayKey]);
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        // Нижний отступ под плавающий «+» (56 px + зазор): иначе он закрывал
+        // отметку «к оплате / ✓» у последней брони списка.
+        <div style={{ paddingTop: 12, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '0 16px' }}>
                 <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
                     Все брони

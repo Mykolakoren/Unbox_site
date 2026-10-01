@@ -1722,21 +1722,28 @@ export function AdminChessboardView() {
                                                         ) : (() => {
                                                             const d = dueMap.get(b.id);
                                                             const wide = (cell.colspan ?? 1) >= 3;
+                                                            // Слова «к оплате» / «оплачено» влезают рядом со временем
+                                                            // только от 2 часов (4 клетки). В 1,5 ч — «09:00 ✓»: слово
+                                                            // обрезалось («оплачеі»), подпись целиком — в title/aria-label.
+                                                            const roomy = (cell.colspan ?? 1) >= 4;
+                                                            const markLabel = d ? (d.due > 0 ? `к оплате ${formatGel(d.due)}` : 'оплачено') : '';
                                                             return (
                                                                 <div className="text-xs leading-tight truncate tabular-nums flex items-center gap-1">
                                                                     {wide && <span className="font-normal">{b.startTime}</span>}
                                                                     {d && d.due > 0 ? (
-                                                                        <span className="font-semibold inline-flex items-center gap-0.5">
+                                                                        <span className="font-semibold inline-flex items-center gap-0.5" title={markLabel} aria-label={markLabel}>
                                                                             <AlertCircle size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
-                                                                            {wide ? 'к оплате ' : ''}{formatGel(d.due)}
+                                                                            {roomy ? 'к оплате ' : ''}{formatGel(d.due)}
                                                                         </span>
                                                                     ) : d ? (
-                                                                        <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]">
+                                                                        <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]" title={markLabel} aria-label={markLabel}>
                                                                             <Check size={12} strokeWidth={3} className="shrink-0" aria-hidden="true" />
-                                                                            {wide ? 'оплачено' : formatGel(b.finalPrice)}
+                                                                            {roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}
                                                                         </span>
                                                                     ) : (
-                                                                        <span className="font-normal">{b.paymentMethod === 'subscription' ? 'абонемент' : formatGel(b.finalPrice)}</span>
+                                                                        <span className="font-normal" title={b.paymentMethod === 'subscription' ? 'абонемент' : undefined}>
+                                                                            {b.paymentMethod === 'subscription' ? (wide ? 'абонемент' : 'абон.') : formatGel(b.finalPrice)}
+                                                                        </span>
                                                                     )}
                                                                 </div>
                                                             );

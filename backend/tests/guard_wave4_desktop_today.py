@@ -138,7 +138,9 @@ def test_chessboard_due_mark_on_every_booking():
     d = src[src.index("// ── DESKTOP VIEW ──"):]
     assert "cell.colspan === 1 ? (" in d, "30-минутная бронь без отметки оплаты (нужна ветка colspan === 1)"
     assert "<CellDueMark info={dueMap.get(b.id)} corner />" in d, "у 30-минутной брони нет значка в углу"
-    assert "{wide ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
+    # Сумма «к оплате» — на любой брони ≥ 1 ч; слово «к оплате» — от 2 ч (roomy):
+    # в 1,5 ч оно обрезалось (доработка 01.10, guard_wave4_polish).
+    assert "{roomy ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
     helper = _between(src, "function CellDueMark(", "function LegendItem(")
     assert "aria-label={label}" in helper and "title={label}" in helper, "значок в углу без подписи"
     assert "`к оплате ${formatGel(info.due)}`" in helper

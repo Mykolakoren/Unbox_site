@@ -105,6 +105,9 @@ export function MobileAdminTeam() {
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {sorted.map(m => {
+                        const roleLabel = ROLE_LABEL[m.roleType] || 'Другое';
+                        // «Основатель» в плашке и «Основатель» в подписи — не повторяем.
+                        const showRole = !!m.role && m.role.trim().toLowerCase() !== roleLabel.toLowerCase();
                         return (
                             <div key={m.id} style={{
                                 background: 'var(--color-card)',
@@ -142,13 +145,18 @@ export function MobileAdminTeam() {
                                     <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {m.name}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                        <span className="ui-badge ui-badge--muted">
-                                            {ROLE_LABEL[m.roleType] || 'Другое'}
+                                    {/* Роль — плашкой во всю ширину (с обрезкой), подпись «кем
+                                        работает» — строкой ниже с переносом. Раньше обе стояли в
+                                        одну строку, и «Старший администратор» уходил под кнопку. */}
+                                    <div style={{ marginTop: 2, minWidth: 0 }}>
+                                        <span className="ui-badge ui-badge--muted" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {roleLabel}
                                         </span>
-                                        <span style={{ fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {!m.isActive && 'Выключен · '}{m.role}
-                                        </span>
+                                        {(!m.isActive || showRole) && (
+                                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflowWrap: 'anywhere' }}>
+                                                {!m.isActive && 'Выключен'}{!m.isActive && showRole && ' · '}{showRole && m.role}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <Button
