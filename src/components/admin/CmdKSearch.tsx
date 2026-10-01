@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, User as UserIcon, Calendar, MapPin, BookOpen, Wallet, ArrowRight } from 'lucide-react';
+import { Search, X, User as UserIcon, Calendar, MapPin, BookOpen, ArrowRight } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { COLOR, FONT, SHADOW } from '../../design/tokens';
+import { COLOR, FONT, SHADOW, Z } from '../../design/tokens';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { formatDayMonth, formatGel, formatMoney } from '../../utils/format';
@@ -29,6 +29,14 @@ import { formatDayMonth, formatGel, formatMoney } from '../../utils/format';
  * by `<CmdKProvider>` so the binding works on every admin page.
  */
 
+/** Событие «открыть поиск» — кнопка «Найти клиента или бронь ⌘K» в шапке админки. */
+const OPEN_EVENT = 'unbox:cmdk-open';
+
+/** Открыть поиск ⌘K из любого места (кнопка в шапке). */
+export function openCmdK(): void {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(OPEN_EVENT));
+}
+
 interface ResultItem {
     id: string;
     kind: 'user' | 'crm_client' | 'cabinet' | 'location' | 'booking';
@@ -45,13 +53,18 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
 
     const users = useUserStore(s => s.users);
     const bookings = useUserStore(s => s.bookings);
+    const fetchUsers = useUserStore(s => s.fetchUsers);
     const clients = useCrmStore(s => s.clients);
 
     useEffect(() => {
         if (open) {
             setQ('');
             setTimeout(() => inputRef.current?.focus(), 30);
+            // Открыли поиск со страницы, где клиенты ещё не загружены
+            // (например, «Кабинеты») — подгружаем, иначе «ничего не найдено».
+            if (users.length === 0) fetchUsers();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
     const results = useMemo(() => {
@@ -77,7 +90,8 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     kind: 'user',
                     title: u.name || u.email,
                     sub: `${u.email}${u.phone ? ' · ' + u.phone : ''} · баланс ${formatGel(u.balance ?? 0, { fraction: 0 })}`,
-                    href: `/admin/users/${u.id}`,
+                    // Маршрут карточки — /admin/users/:email (по id карточка не открывалась).
+                    href: `/admin/users/${encodeURIComponent(u.email)}`,
                     score: s,
                 });
             }
@@ -147,7 +161,8 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     kind: 'booking',
                     title: `${resName} · ${b.startTime}`,
                     sub: `${dayLabel} · ${b.userId} · ${formatGel(b.finalPrice ?? 0, { fraction: 0 })}`,
-                    href: `/admin/bookings?focus=${b.id}`,
+                    // Шахматка понимает ?highlight= — откроет день и карточку брони.
+                    href: `/admin/bookings?view=grid&highlight=${b.id}`,
                     score: s - 10,  // bookings are noisier — small penalty
                 });
             }
@@ -171,7 +186,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
         return <Calendar size={14} />;
     };
     const labelFor = (k: ResultItem['kind']) => ({
-        user: 'Юзер', crm_client: 'CRM',
+        user: 'Клиент', crm_client: 'CRM',
         cabinet: 'Кабинет', location: 'Локация', booking: 'Бронь',
     })[k];
 
@@ -179,7 +194,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
         <div
             onClick={onClose}
             style={{
-                position: 'fixed', inset: 0, zIndex: 10000,
+                position: 'fixed', inset: 0, zIndex: Z.dialog,
                 background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
                 display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
                 paddingTop: 'min(15vh, 100px)',
@@ -188,10 +203,13 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
             }}
         >
             <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Поиск по админке"
                 onClick={e => e.stopPropagation()}
                 style={{
                     width: '100%', maxWidth: 560,
-                    background: COLOR.card, borderRadius: 14,
+                    background: COLOR.card, borderRadius: 0,
                     overflow: 'hidden',
                     boxShadow: SHADOW.pop,
                     display: 'flex', flexDirection: 'column',
@@ -214,11 +232,11 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                             if (e.key === 'Escape') onClose();
                             if (e.key === 'Enter' && results[0]) go(results[0].href);
                         }}
-                        placeholder="Имя, email, кабинет, бронь… (Esc — закрыть)"
+                        placeholder="Имя, телефон, почта, кабинет…"
                         aria-label="Поиск по админке"
                         style={{
                             flex: 1, border: 'none', outline: 'none',
-                            fontSize: 15, fontFamily: 'inherit',
+                            fontSize: 16, fontFamily: 'inherit',
                             color: COLOR.ink, background: 'transparent',
                         }}
                     />
@@ -235,7 +253,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 <div style={{ overflowY: 'auto', flex: 1 }}>
                     {q.trim().length < 2 ? (
                         <div style={{ padding: 24, textAlign: 'center', color: COLOR.ink60, fontSize: 14 }}>
-                            Начните вводить — найдём юзеров, клиентов, кабинеты, брони.
+                            Начните вводить — найдём клиентов, кабинеты и брони.
                         </div>
                     ) : results.length === 0 ? (
                         <div style={{ padding: 24, textAlign: 'center', color: COLOR.ink60, fontSize: 14 }}>
@@ -323,8 +341,13 @@ export function CmdKProvider() {
                 setOpen(o => !o);
             }
         };
+        const onOpen = () => setOpen(true);
         window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
+        window.addEventListener(OPEN_EVENT, onOpen);
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            window.removeEventListener(OPEN_EVENT, onOpen);
+        };
     }, []);
 
     return <CmdKSearch open={open} onClose={() => setOpen(false)} />;

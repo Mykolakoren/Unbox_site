@@ -1,39 +1,68 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
-    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
-    CreditCard, Gift, UserCircle, Newspaper, BarChart3, CalendarDays, ExternalLink,
+    BookOpen, ClipboardList, Menu, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
+    CreditCard, Gift, UserCircle, Newspaper, BarChart3, CalendarDays, ExternalLink, Search, Filter,
+    LogOut, ArrowLeft, Briefcase,
 } from 'lucide-react';
-import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
-import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 import { NotificationBell } from '../../components/admin/NotificationBell';
+import { openCmdK } from '../../components/admin/CmdKSearch';
 import { hasPermission } from '../../utils/permissions';
 import { loginPathWithRedirect } from '../../utils/loginRedirect';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { COLOR } from '../../design/tokens';
+import { COLOR, Z } from '../../design/tokens';
 
-const NAV_ITEMS = [
-    { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
-    { path: '/admin/bookings',    icon: Calendar,        label: 'Бронирования' },
-    { path: '/admin/tasks',       icon: ClipboardList,   label: 'Задачи' },
-    { path: '/admin/users',       icon: Users,           label: 'Клиенты' },
-    { path: '/admin/cabinets',    icon: Box,             label: 'Кабинеты' },
-    { path: '/admin/maintenance', icon: Wrench,          label: 'Обслуживание' },
-    { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
-    { path: '/admin/posts',       icon: Newspaper,       label: 'Новости и статьи' },
-    { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
-    { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
-    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База знаний' },
-];
+/**
+ * Оболочка компьютерной админки (Grid House) — волна 4, пакет D.
+ *
+ * Меню — четыре группы без номеров, по образцу CrmLayout (G7-16, G8-07, X2-20):
+ * «Каждый день / Пространство / Люди и контент / Система». Номера 01–14
+ * убраны: у разных сотрудников они означали разные пункты (G7-13).
+ * Личные «Абонемент / Бонусы / Профиль» — в меню под именем, а не рядом
+ * значков над разделами. Шапка и вкладка браузера берут название из карты
+ * путь → название; неизвестный путь — «Админка», не «Дашборд» (G8-08, X4-18).
+ */
+
+type IconType = React.ComponentType<{ size?: number; 'aria-hidden'?: boolean | 'true' }>;
+export interface AdminNavItem { path: string; label: string; icon: IconType; exact?: boolean }
+export interface AdminNavGroup { title: string; items: AdminNavItem[] }
 
 const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
 
-// Тёплый фон боковой панели Grid House. Своего токена пока нет (запрос
-// в needs_foundation волны 1) — держим значения в одном месте, а не в 8.
-const SIDEBAR_BG = COLOR.sidebar;
-const SIDEBAR_BG_NARROW = COLOR.sidebarNarrow;
+/** Личные разделы под админской оболочкой — открываются из меню под именем. */
+const PERSONAL_ITEMS: AdminNavItem[] = [
+    { path: '/admin/subscription', label: 'Абонемент', icon: CreditCard },
+    { path: '/admin/bonuses', label: 'Бонусы', icon: Gift },
+    { path: '/admin/my-waitlist', label: 'Слежу за слотами', icon: Clock },
+    { path: '/admin/account', label: 'Профиль', icon: UserCircle },
+];
+
+/**
+ * Карта путь → название (шапка и вкладка браузера). Пункты меню попадают
+ * сюда сами; здесь — то, чего в меню нет. Самый длинный совпавший путь главнее.
+ */
+const EXTRA_TITLES: Array<{ path: string; title: string; group: string }> = [
+    { path: '/admin/users/', title: 'Карточка клиента', group: 'Каждый день' },
+];
+
+/** Название раздела по пути: точное совпадение → самый длинный префикс → «Админка». */
+export function adminTitleFor(pathname: string, groups: AdminNavGroup[]): { title: string; group: string | null } {
+    const entries: Array<{ path: string; title: string; group: string | null; exact?: boolean }> = [];
+    for (const g of groups) for (const i of g.items) entries.push({ path: i.path, title: i.label, group: g.title, exact: i.exact });
+    for (const i of PERSONAL_ITEMS) entries.push({ path: i.path, title: i.label, group: 'Личное' });
+    for (const e of EXTRA_TITLES) entries.push(e);
+    let best: (typeof entries)[number] | null = null;
+    for (const e of entries) {
+        const hit = e.exact
+            ? pathname === e.path || pathname === e.path + '/'
+            : pathname === e.path || pathname.startsWith(e.path.endsWith('/') ? e.path : e.path + '/');
+        if (hit && (!best || e.path.length > best.path.length)) best = e;
+    }
+    return best ? { title: best.title, group: best.group } : { title: 'Админка', group: null };
+}
 
 export function AdminLayout() {
     const location = useLocation();
@@ -42,25 +71,49 @@ export function AdminLayout() {
     const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
     const canAccessFinance = hasPermission(currentUser, 'finance.manage_cashbox')
         || hasPermission(currentUser, 'finance.view_reports');
-    const navItems = (() => {
-        const items = [...NAV_ITEMS];
-        // Insert Финансы after Бронирования (index 1)
-        if (canAccessFinance) {
-            items.splice(2, 0, { path: '/admin/finance', icon: Wallet, label: 'Финансы' });
-        }
-        // Аналитика — строго персонально владельцу (не роль, конкретный аккаунт).
-        if ((currentUser?.email || '').toLowerCase() === 'koren.nikolas@gmail.com') {
-            const at = items.findIndex(i => i.path === '/admin/finance');
-            items.splice(at >= 0 ? at + 1 : 2, 0, { path: '/admin/analytics', icon: BarChart3, label: 'Аналитика' });
-        }
-        // Права доступа — в конец
-        if (canAccessRights) {
-            items.push({ path: '/admin/access-rights', icon: Shield, label: 'Права доступа' });
-        }
-        return items;
-    })();
-    const [mobileOpen, setMobileOpen] = useState(false);
-    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    // Аналитика — строго персонально владельцу (не роль, конкретный аккаунт).
+    const canSeeAnalytics = (currentUser?.email || '').toLowerCase() === 'koren.nikolas@gmail.com';
+
+    const navGroups: AdminNavGroup[] = [
+        {
+            title: 'Каждый день',
+            items: [
+                { path: '/admin', icon: LayoutDashboard, label: 'Сегодня', exact: true },
+                { path: '/admin/bookings', icon: Calendar, label: 'Бронирования' },
+                { path: '/admin/tasks', icon: ClipboardList, label: 'Задачи' },
+                { path: '/admin/users', icon: Users, label: 'Клиенты' },
+                ...(canAccessFinance ? [{ path: '/admin/finance', icon: Wallet, label: 'Финансы' }] : []),
+            ],
+        },
+        {
+            title: 'Пространство',
+            items: [
+                { path: '/admin/cabinets', icon: Box, label: 'Кабинеты' },
+                { path: '/admin/maintenance', icon: Wrench, label: 'Обслуживание' },
+                { path: '/admin/waitlist', icon: Clock, label: 'Лист ожидания' },
+            ],
+        },
+        {
+            title: 'Люди и контент',
+            items: [
+                { path: '/admin/specialists', icon: Star, label: 'Специалисты' },
+                { path: '/admin/team', icon: UsersRound, label: 'Команда' },
+                { path: '/admin/posts', icon: Newspaper, label: 'Новости' },
+                { path: '/admin/knowledge-base', icon: BookOpen, label: 'База знаний' },
+                { path: '/admin/crm', icon: Filter, label: 'Воронка клиентов' },
+            ],
+        },
+        {
+            title: 'Система',
+            items: [
+                ...(canSeeAnalytics ? [{ path: '/admin/analytics', icon: BarChart3, label: 'Аналитика' }] : []),
+                ...(canAccessRights ? [{ path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }] : []),
+            ],
+        },
+    ].filter(g => g.items.length > 0);
+
+    const { title, group } = adminTitleFor(location.pathname, navGroups);
+    useDocumentTitle(`${title} · Админка`);
 
     // ── Access Guard ──────────────────────────────────────────────────────────
     const hasToken = Boolean(localStorage.getItem('token'));
@@ -75,228 +128,53 @@ export function AdminLayout() {
     if (!ADMIN_ROLES.includes(currentUser.role ?? '')) return <Navigate to="/" replace />;
     // ─────────────────────────────────────────────────────────────────────────
 
-    const isActive = (path: string, exact?: boolean) => {
-        if (exact) return location.pathname === path;
-        return location.pathname.startsWith(path);
-    };
-
     const handleLogout = () => {
         logout();
         window.location.href = '/login';
     };
 
-    return <GridHouseAdminShell navItems={navItems} currentUser={currentUser} onLogout={handleLogout} />;
-
-    // Legacy admin shell removed — Grid House is the only layout (see git history pre-fb20491).
-    // Unreachable `return` below is intentionally preserved inside the function so the
-    // tree-shaker strips it without forcing a 175-line manual delete. Keep until full rewrite.
-    // eslint-disable-next-line no-unreachable
+    // Старая тёмная «стеклянная» оболочка не рендерилась с весны — удалена
+    // в волне 4 (история — git до fb20491). Grid House — единственная.
     return (
-        <div className="min-h-screen flex flex-col text-unbox-dark relative">
-            {/* Background — photo layer for glass mode */}
-            <div className="fixed inset-0 z-0">
-                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
-                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
-            </div>
-
-            {/* ── Top Navigation Bar ── */}
-            <header
-                className="fixed top-0 left-0 right-0 z-20 h-14"
-                style={{
-                    background: 'rgba(22,34,31,0.92)',
-                    backdropFilter: 'blur(24px) saturate(160%)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-                    borderBottom: '1px solid rgba(255,255,255,0.08)',
-                    boxShadow: '0 2px 24px rgba(0,0,0,0.18)',
-                }}
-            >
-                <div className="max-w-[1400px] mx-auto h-full flex items-center gap-4 px-4">
-                    {/* Logo */}
-                    <Link to="/" className="shrink-0 mr-2">
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-8 object-contain brightness-0 invert opacity-90 hover:opacity-100 transition-opacity" />
-                    </Link>
-
-                    {/* Admin badge */}
-                    <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-unbox-green/20 text-unbox-green text-caption font-bold uppercase tracking-wider border border-unbox-green/30 shrink-0">
-                        Admin
-                    </span>
-                    <Link
-                        to="/"
-                        className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-caption font-medium text-white/50 hover:text-white/90 hover:bg-white/10 transition-all shrink-0"
-                    >
-                        На сайт
-                    </Link>
-
-                    {/* Desktop Nav — Excel #36.
-                        Keep no-scrollbar so the thin bar isn't ugly on the dark
-                        header; instead drop items into a "More ▾" overflow menu
-                        on narrow viewports. */}
-                    <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
-                        {navItems.map(item => (
-                            <Link
-                                key={item.path}
-                                to={item.path}
-                                className={clsx(
-                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 shrink-0',
-                                    isActive(item.path, item.exact)
-                                        ? 'bg-white/15 text-white'
-                                        : 'text-white/55 hover:text-white/85 hover:bg-white/8'
-                                )}
-                            >
-                                <item.icon size={15} />
-                                {item.label}
-                            </Link>
-                        ))}
-                    </nav>
-
-                    {/* Right side */}
-                    <div className="ml-auto flex items-center gap-2 shrink-0">
-                        {/* Integration status — compact */}
-                        <div className="hidden lg:block">
-                            <IntegrationStatus compact />
-                        </div>
-
-                        <NotificationBell />
-
-                        {/* User menu */}
-                        <div className="relative">
-                            <button
-                                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors"
-                            >
-                                <div className="w-7 h-7 rounded-lg bg-unbox-green/80 text-white flex items-center justify-center text-xs font-bold">
-                                    {currentUser?.name?.[0]?.toUpperCase() ?? 'A'}
-                                </div>
-                                <span className="hidden md:block text-sm text-white/80 font-medium max-w-[100px] truncate">
-                                    {currentUser?.name}
-                                </span>
-                                <ChevronDown size={14} className={clsx('text-white/50 transition-transform', userMenuOpen && 'rotate-180')} />
-                            </button>
-
-                            {userMenuOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-10" onClick={() => setUserMenuOpen(false)} />
-                                    <div
-                                        className="absolute right-0 top-full mt-2 w-52 rounded-xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-150"
-                                        style={{
-                                            background: 'rgba(22,34,31,0.97)',
-                                            backdropFilter: 'blur(20px)',
-                                            border: '1px solid rgba(255,255,255,0.10)',
-                                            boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
-                                        }}
-                                    >
-                                        <div className="px-4 py-3 border-b border-white/10">
-                                            <div className="text-sm font-semibold text-white">{currentUser?.name}</div>
-                                            <div className="text-xs text-white/50 capitalize">
-                                                {currentUser?.role === 'owner' ? 'Владелец' : currentUser?.role === 'senior_admin' ? 'Ст. Администратор' : 'Администратор'}
-                                            </div>
-                                        </div>
-                                        <div className="p-2">
-                                            <Link
-                                                to="/dashboard"
-                                                onClick={() => setUserMenuOpen(false)}
-                                                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/10 transition-colors w-full"
-                                            >
-                                                <LayoutDashboard size={14} />
-                                                Личный кабинет
-                                            </Link>
-                                            <button
-                                                onClick={handleLogout}
-                                                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[color:var(--status-danger-fg)] hover:bg-[color:var(--status-danger-bg)] transition-colors w-full text-left mt-0.5"
-                                            >
-                                                <LogOut size={14} />
-                                                Выйти
-                                            </button>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Mobile menu button */}
-                        <button
-                            onClick={() => setMobileOpen(!mobileOpen)}
-                            className="md:hidden p-2 text-white/70 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-                        >
-                            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            {/* Mobile nav drawer */}
-            {mobileOpen && (
-                <>
-                    <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
-                    <div
-                        className="fixed top-14 left-0 right-0 z-40 md:hidden animate-in slide-in-from-top-2 duration-200 max-h-[calc(100vh-56px)] overflow-y-auto"
-                        style={{
-                            background: 'rgba(22,34,31,0.97)',
-                            backdropFilter: 'blur(20px)',
-                            borderBottom: '1px solid rgba(255,255,255,0.08)',
-                        }}
-                    >
-                        <nav className="p-3 grid grid-cols-2 gap-1">
-                            {navItems.map(item => (
-                                <Link
-                                    key={item.path}
-                                    to={item.path}
-                                    onClick={() => setMobileOpen(false)}
-                                    className={clsx(
-                                        'flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
-                                        isActive(item.path, item.exact)
-                                            ? 'bg-white/15 text-white'
-                                            : 'text-white/55 hover:text-white hover:bg-white/10'
-                                    )}
-                                >
-                                    <item.icon size={16} />
-                                    {item.label}
-                                </Link>
-                            ))}
-                        </nav>
-                        <div className="px-3 pb-3">
-                            <IntegrationStatus />
-                        </div>
-                    </div>
-                </>
-            )}
-
-            {/* Main Content */}
-            <main className="flex-1 pt-14 relative z-0">
-                <div className="max-w-[1400px] mx-auto p-4 pt-6 md:p-8">
-                    <Outlet />
-                </div>
-            </main>
-        </div>
+        <GridHouseAdminShell
+            navGroups={navGroups}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+            title={title}
+            group={group}
+        />
     );
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// GRID HOUSE VARIANT — sidebar shell, mono nav, hairline surfaces
-// Rollback: delete everything below + the early-return block above.
+// GRID HOUSE — боковое меню группами, тонкие линии
 // ═════════════════════════════════════════════════════════════════════════
-
-type GHNavItem = {
-    path: string;
-    label: string;
-    exact?: boolean;
-};
 
 type CurrentUser = ReturnType<typeof useUserStore.getState>['currentUser'];
 
+const SIDEBAR_WIDTH = 260;
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+
 function GridHouseAdminShell({
-    navItems,
+    navGroups,
     currentUser,
     onLogout,
+    title,
+    group,
 }: {
-    navItems: Array<{ path: string; label: string; icon: React.FC<{ size?: number }>; exact?: boolean }>;
+    navGroups: AdminNavGroup[];
     currentUser: CurrentUser;
     onLogout: () => void;
+    title: string;
+    group: string | null;
 }) {
     const location = useLocation();
     const navigate = useNavigate();
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 960);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const userMenuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const h = () => setNarrow(window.innerWidth < 960);
@@ -304,18 +182,211 @@ function GridHouseAdminShell({
         return () => window.removeEventListener('resize', h);
     }, []);
 
-    const hairline = `1px solid ${GH.ink10}`;
+    // Меню на узком окне и меню под именем закрываются по Esc.
+    useEffect(() => {
+        if (!mobileOpen && !userMenuOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            setUserMenuOpen(false);
+            setMobileOpen(false);
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [mobileOpen, userMenuOpen]);
 
-    const ghNav: GHNavItem[] = navItems.map(i => ({ path: i.path, label: i.label, exact: i.exact }));
-    const isActive = (item: GHNavItem) =>
-        item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
-    const activeItem = ghNav.find(isActive) ?? ghNav[0];
-    const activeIndex = ghNav.findIndex(isActive);
+    // Клик мимо меню под именем — закрыть.
+    useEffect(() => {
+        if (!userMenuOpen) return;
+        const onDown = (e: MouseEvent) => {
+            if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+        };
+        document.addEventListener('mousedown', onDown);
+        return () => document.removeEventListener('mousedown', onDown);
+    }, [userMenuOpen]);
+
+    // Переход — меню закрываются.
+    useEffect(() => {
+        setUserMenuOpen(false);
+        setMobileOpen(false);
+    }, [location.pathname]);
+
+    const hairline = `1px solid ${GH.ink10}`;
+    const sidebarBg = narrow ? COLOR.sidebarNarrow : COLOR.sidebar;
+    const sidebarHidden = narrow && !mobileOpen;
+
+    const isActive = (item: AdminNavItem) =>
+        item.exact
+            ? location.pathname === item.path || location.pathname === item.path + '/'
+            : location.pathname === item.path || location.pathname.startsWith(item.path + '/');
 
     const roleLabel =
         currentUser?.role === 'owner' ? 'Владелец'
         : currentUser?.role === 'senior_admin' ? 'Старший админ'
         : 'Администратор';
+
+    const monoLabel: React.CSSProperties = {
+        fontFamily: GH_MONO,
+        fontSize: 12,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: GH.ink60,
+        fontWeight: 500,
+    };
+
+    const menuLink: React.CSSProperties = {
+        display: 'flex', alignItems: 'center', gap: 10,
+        minHeight: 40, padding: '0 16px',
+        fontSize: 14, color: GH.ink, textDecoration: 'none',
+        background: 'none', border: 'none', width: '100%', textAlign: 'left',
+        fontFamily: GH_SANS, cursor: 'pointer',
+    };
+
+    const sidebar = (
+        <aside
+            aria-label="Меню админки"
+            // Спрятанное за край меню не должно ловить Tab.
+            inert={sidebarHidden || undefined}
+            style={{
+                width: SIDEBAR_WIDTH,
+                minWidth: SIDEBAR_WIDTH,
+                background: sidebarBg,
+                borderRight: narrow ? `1px solid ${GH.ink}` : hairline,
+                position: narrow ? 'fixed' : 'sticky',
+                top: 0,
+                left: 0,
+                height: '100vh',
+                transform: sidebarHidden ? 'translateX(-100%)' : 'translateX(0)',
+                transition: 'transform 0.2s ease',
+                zIndex: 60,
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: narrow && mobileOpen ? 'var(--shadow-pop)' : 'none',
+            }}
+        >
+            {/* Brand */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: hairline }}>
+                <Link to="/" style={{ textDecoration: 'none', color: GH.ink }}>
+                    <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1 }}>Unbox</div>
+                    <div style={{ ...monoLabel, marginTop: 4 }}>Админка</div>
+                </Link>
+            </div>
+
+            {/* Кто вошёл + личное меню под именем */}
+            <div ref={userMenuRef} style={{ position: 'relative', borderBottom: hairline }}>
+                <button
+                    type="button"
+                    onClick={() => setUserMenuOpen(o => !o)}
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="menu"
+                    aria-controls="admin-user-menu"
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        padding: '12px 24px', background: 'none', border: 'none',
+                        cursor: 'pointer', textAlign: 'left', fontFamily: GH_SANS, color: GH.ink,
+                    }}
+                >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ ...monoLabel, display: 'block' }}>{roleLabel}</span>
+                        <span style={{
+                            display: 'block', fontSize: 14, fontWeight: 600, marginTop: 2,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                            {currentUser?.name ?? '—'}
+                        </span>
+                    </span>
+                    <ChevronDown
+                        size={16}
+                        aria-hidden="true"
+                        style={{ color: GH.ink60, transform: userMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}
+                    />
+                </button>
+                {userMenuOpen && (
+                    <div
+                        id="admin-user-menu"
+                        role="menu"
+                        aria-label="Личное"
+                        style={{
+                            position: 'absolute', left: 12, right: 12, top: '100%', marginTop: 4,
+                            background: COLOR.card, border: `1px solid ${GH.ink}`,
+                            boxShadow: 'var(--shadow-pop)', zIndex: Z.dropdown,
+                            padding: '4px 0',
+                        }}
+                    >
+                        <div style={{ padding: '6px 16px 8px', fontSize: 12, color: GH.ink60, fontFamily: GH_MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {currentUser?.email}
+                        </div>
+                        {PERSONAL_ITEMS.map(({ path, label, icon: Icon }) => (
+                            <Link key={path} to={path} role="menuitem" style={menuLink} className="admin-menu-link">
+                                <Icon size={16} aria-hidden="true" />
+                                {label}
+                            </Link>
+                        ))}
+                        <div style={{ borderTop: hairline, margin: '4px 0' }} />
+                        <button type="button" role="menuitem" onClick={onLogout} style={{ ...menuLink, color: GH.danger }} className="admin-menu-link">
+                            <LogOut size={16} aria-hidden="true" />
+                            Выйти
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Разделы — четыре группы, прокручиваются отдельно от шапки и подвала. */}
+            <nav aria-label="Разделы админки" style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '4px 0 12px' }}>
+                {navGroups.map(g => {
+                    const headId = `admin-nav-${g.title}`;
+                    return (
+                        <div key={g.title} style={{ marginTop: 12 }}>
+                            <div id={headId} style={{ ...monoLabel, padding: '4px 24px 6px' }}>
+                                {g.title}
+                            </div>
+                            <ul aria-labelledby={headId} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                                {g.items.map(item => {
+                                    const active = isActive(item);
+                                    const Icon = item.icon;
+                                    return (
+                                        <li key={item.path}>
+                                            <Link
+                                                to={item.path}
+                                                aria-current={active ? 'page' : undefined}
+                                                className={active ? undefined : 'admin-nav-link'}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 12,
+                                                    minHeight: 40,
+                                                    padding: '0 24px',
+                                                    textDecoration: 'none',
+                                                    fontSize: 14,
+                                                    fontWeight: active ? 600 : 500,
+                                                    background: active ? GH.ink : undefined,
+                                                    color: active ? GH.paper : GH.ink,
+                                                }}
+                                            >
+                                                <Icon size={16} aria-hidden="true" />
+                                                {item.label}
+                                            </Link>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    );
+                })}
+            </nav>
+
+            {/* Подвал: на сайт и в свой кабинет специалиста */}
+            <div style={{ borderTop: hairline, padding: '8px 0' }}>
+                <button type="button" onClick={() => navigate('/crm')} style={{ ...menuLink, padding: '0 24px' }} className="admin-menu-link">
+                    <Briefcase size={16} aria-hidden="true" />
+                    Кабинет специалиста
+                </button>
+                <button type="button" onClick={() => navigate('/')} style={{ ...menuLink, padding: '0 24px', color: GH.ink60 }} className="admin-menu-link">
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    На сайт
+                </button>
+            </div>
+        </aside>
+    );
 
     return (
         <div
@@ -327,195 +398,31 @@ function GridHouseAdminShell({
                 WebkitFontSmoothing: 'antialiased',
                 display: 'flex',
                 position: 'relative',
-                overflowX: 'hidden',
+                overflowX: 'clip',
                 width: '100%',
                 maxWidth: '100vw',
             }}
         >
-            {/* ── SIDEBAR ──
-                Excel #34 — nav scrolled the WHOLE sidebar including the
-                footer, so "Права доступа" and anything below fell below the
-                viewport with no way to reach them. Fix: aside is a flex column
-                with overflow-y only on the nav middle section. Brand, user
-                info and footer actions stay pinned at top/bottom. */}
-            <aside
-                style={{
-                    width: narrow ? 280 : 260,
-                    minWidth: narrow ? 280 : 260,
-                    background: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
-                    backgroundColor: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
-                    borderRight: narrow ? `2px solid ${GH.ink}` : hairline,
-                    position: narrow ? 'fixed' : 'sticky',
-                    top: 0,
-                    left: 0,
-                    height: '100vh',
-                    transform: narrow && !mobileOpen ? 'translateX(-100%)' : 'translateX(0)',
-                    transition: 'transform 0.2s ease',
-                    zIndex: 60,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    boxShadow: narrow && mobileOpen ? '8px 0 40px rgba(15,15,16,0.35)' : 'none',
-                }}
-            >
-                {/* Brand */}
-                <div style={{ padding: '22px 24px 18px', borderBottom: hairline }}>
-                    <Link to="/" style={{ fontSize: 24, fontWeight: 700, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
-                        Unbox
-                    </Link>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
-                        Админ · Контроль
-                    </div>
-                </div>
+            {/* Наведение на пункт меню — тонкая подложка (раньше hover не было). */}
+            <style>{`
+                .admin-nav-link:hover, .admin-menu-link:hover { background: ${GH.ink5}; }
+                .admin-nav-link:focus-visible, .admin-menu-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+            `}</style>
 
-                {/* User */}
-                <div style={{ padding: '18px 24px', borderBottom: hairline }}>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
-                        Сессия · {roleLabel}
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
-                        {currentUser?.name ?? '—'}
-                    </div>
-                </div>
+            {sidebar}
 
-                {/* Personal toolbar — 3 шортката на личные функции
-                    (Абонемент / Бонусы / Профиль). Симметрично с CRM-шеллом:
-                    админу не нужно уходить в /dashboard ради счёта или
-                    профиля. */}
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 1,
-                    borderBottom: hairline,
-                    background: GH.ink10,
-                }}>
-                    {([
-                        { label: 'Абонемент', Icon: CreditCard, path: '/admin/subscription' },
-                        { label: 'Бонусы',    Icon: Gift,       path: '/admin/bonuses' },
-                        { label: 'Профиль',   Icon: UserCircle, path: '/admin/account' },
-                    ] as const).map(({ label, Icon, path }) => (
-                        <Link
-                            key={path}
-                            to={path}
-                            onClick={() => setMobileOpen(false)}
-                            title={label}
-                            style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: 4,
-                                padding: '10px 0',
-                                background: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
-                                color: GH.ink60,
-                                textDecoration: 'none',
-                                transition: 'color 0.12s, background 0.12s',
-                            }}
-                            onMouseEnter={e => {
-                                e.currentTarget.style.background = GH.paper;
-                                e.currentTarget.style.color = GH.ink;
-                            }}
-                            onMouseLeave={e => {
-                                e.currentTarget.style.background = narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG;
-                                e.currentTarget.style.color = GH.ink60;
-                            }}
-                        >
-                            <Icon size={16} />
-                            <span style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                            }}>
-                                {label}
-                            </span>
-                        </Link>
-                    ))}
-                </div>
-
-                {/* Nav — scrolls independently so Footer stays pinned. */}
-                <nav style={{ flex: 1, padding: 0, overflowY: 'auto', minHeight: 0 }}>
-                    {ghNav.map((item, i) => {
-                        const active = isActive(item);
-                        return (
-                            <Link
-                                key={item.path}
-                                to={item.path}
-                                onClick={() => setMobileOpen(false)}
-                                style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '44px 1fr',
-                                    alignItems: 'center',
-                                    padding: '14px 24px',
-                                    borderBottom: hairline,
-                                    background: active ? GH.ink : 'transparent',
-                                    color: active ? GH.paper : GH.ink,
-                                    textDecoration: 'none',
-                                    transition: 'background 0.1s ease',
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        letterSpacing: '0.06em',
-                                        fontVariantNumeric: 'tabular-nums',
-                                        opacity: active ? 0.5 : 0.45,
-                                    }}
-                                >
-                                    {String(i + 1).padStart(2, '0')}
-                                </div>
-                                <div style={{ fontSize: 14, fontWeight: active ? 600 : 500, letterSpacing: '-0.005em' }}>
-                                    {item.label}
-                                </div>
-                            </Link>
-                        );
-                    })}
-                </nav>
-
-                {/* Footer actions */}
-                <div style={{ borderTop: hairline }}>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/')}
-                        style={footerBtnStyle(GH.ink60, hairline)}
-                    >
-                        ← На сайт
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/crm')}
-                        style={footerBtnStyle(GH.accent, hairline)}
-                    >
-                        → CRM
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onLogout}
-                        style={footerBtnStyle(GH.danger, 'none')}
-                    >
-                        ↳ Выйти
-                    </button>
-                </div>
-            </aside>
-
-            {/* Mobile backdrop */}
+            {/* Фон под выдвинутым меню на узком окне */}
             {narrow && mobileOpen && (
                 <div
                     onClick={() => setMobileOpen(false)}
-                    style={{
-                        position: 'fixed',
-                        inset: 0,
-                        background: 'rgba(15,15,16,0.55)',
-                        backdropFilter: 'blur(2px)',
-                        WebkitBackdropFilter: 'blur(2px)',
-                        zIndex: 55,
-                    }}
+                    aria-hidden="true"
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,16,0.5)', zIndex: 55 }}
                 />
             )}
 
             {/* ── MAIN ── */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowX: 'hidden', width: narrow ? '100%' : undefined }}>
-                {/* Top bar */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', width: narrow ? '100%' : undefined }}>
+                {/* Шапка: где я (группа / раздел), поиск, календарь, уведомления. */}
                 <header
                     style={{
                         borderBottom: hairline,
@@ -523,76 +430,80 @@ function GridHouseAdminShell({
                         position: 'sticky',
                         top: 0,
                         zIndex: 30,
-                        padding: narrow ? '12px 16px' : '16px 28px',
+                        padding: narrow ? '8px 16px' : '10px 28px',
+                        minHeight: 56,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
+                        gap: 12,
                     }}
                 >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {narrow && (
-                            <button
-                                type="button"
-                                onClick={() => setMobileOpen(true)}
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    color: GH.paper,
-                                    background: GH.ink,
-                                    border: `1px solid ${GH.ink}`,
-                                    padding: '8px 12px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                <Menu size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Меню
-                            </button>
-                        )}
-                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
-                            {String((activeIndex < 0 ? 0 : activeIndex) + 1).padStart(2, '0')} · {activeItem?.label ?? 'Раздел'}
-                        </div>
+                    {narrow && (
+                        <button
+                            type="button"
+                            onClick={() => setMobileOpen(true)}
+                            aria-expanded={mobileOpen}
+                            style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                fontFamily: GH_SANS, fontSize: 14, fontWeight: 500,
+                                color: GH.paper, background: GH.ink, border: 'none',
+                                padding: '0 12px', minHeight: 40, cursor: 'pointer',
+                            }}
+                        >
+                            <Menu size={16} aria-hidden="true" />
+                            Меню
+                        </button>
+                    )}
+                    <div style={{ fontSize: 14, color: GH.ink60, display: 'flex', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
+                        {group && !narrow && <span>{group}</span>}
+                        {group && !narrow && <span aria-hidden="true">/</span>}
+                        <span style={{ color: GH.ink, fontWeight: 500 }}>{title}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {/* Excel #38 — one-click Google Calendar link.
-                            Uses the personal calendarId if the admin set one,
-                            otherwise opens the generic Calendar landing. */}
+
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                            type="button"
+                            onClick={openCmdK}
+                            aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
+                            style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 8,
+                                minHeight: 36, padding: '0 10px',
+                                minWidth: narrow ? undefined : 260,
+                                fontFamily: GH_SANS, fontSize: 14, color: GH.ink60,
+                                background: COLOR.card, border: `1px solid ${GH.ink20}`, borderRadius: 8,
+                                cursor: 'pointer', textAlign: 'left',
+                            }}
+                        >
+                            <Search size={16} aria-hidden="true" />
+                            <span style={{ flex: 1 }}>{narrow ? 'Найти' : 'Найти клиента или бронь'}</span>
+                            {!narrow && (
+                                <kbd style={{
+                                    fontFamily: GH_MONO, fontSize: 12, color: GH.ink60,
+                                    border: `1px solid ${GH.ink10}`, borderRadius: 4, padding: '1px 6px',
+                                }}>
+                                    {isMac ? '⌘K' : 'Ctrl K'}
+                                </kbd>
+                            )}
+                        </button>
+                        {/* Excel #38 — Google Календарь в один клик. */}
                         <a
                             href="https://calendar.google.com/calendar/u/0/r"
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="Открыть Google Calendar в новой вкладке"
+                            title="Открыть Google Календарь в новой вкладке"
+                            aria-label="Google Календарь (откроется в новой вкладке)"
+                            className="admin-menu-link"
                             style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                                color: GH.ink60,
-                                textDecoration: 'none',
-                                border: `1px solid ${GH.ink10}`,
-                                padding: '6px 10px',
-                                transition: 'border-color 0.12s, color 0.12s',
-                            }}
-                            onMouseEnter={(e) => {
-                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink;
-                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink;
-                            }}
-                            onMouseLeave={(e) => {
-                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink10;
-                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink60;
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                minHeight: 36, padding: '0 10px',
+                                fontSize: 14, color: GH.ink60, textDecoration: 'none',
+                                border: `1px solid ${GH.ink10}`, borderRadius: 8,
                             }}
                         >
-                            <CalendarDays size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                            Google Календарь
-                            <ExternalLink size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginLeft: 6 }} />
+                            <CalendarDays size={16} aria-hidden="true" />
+                            {!narrow && 'Календарь'}
+                            <ExternalLink size={12} aria-hidden="true" />
                         </a>
                         <NotificationBell variant="light" />
-                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
-                            Unbox · Панель управления
-                        </div>
                     </div>
                 </header>
 
@@ -603,21 +514,4 @@ function GridHouseAdminShell({
             </div>
         </div>
     );
-}
-
-function footerBtnStyle(color: string, border: string): React.CSSProperties {
-    return {
-        width: '100%',
-        padding: '14px 24px',
-        textAlign: 'left',
-        fontFamily: GH_MONO,
-        fontSize: 12,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color,
-        background: 'transparent',
-        border: 'none',
-        borderBottom: border !== 'none' ? border : undefined,
-        cursor: 'pointer',
-    };
 }
