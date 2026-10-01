@@ -99,7 +99,13 @@ api.interceptors.response.use(
             // React error #31).
             showErrorToastOnce(error, apiErrorMessage(error, 'Ошибка валидации данных'));
         } else if (status === 409 && detail) {
-            showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
+            // Закрытие кабинета поверх броней (волна 4): экран сам показывает шторку со
+            // списком броней (MaintenanceConflictSheet) — второй тост рядом не нужен.
+            const isMaintenanceConflict = String(error.config?.url ?? '').includes('maintenance')
+                && typeof detail === 'object' && Array.isArray((detail as { conflicts?: unknown }).conflicts);
+            if (!isMaintenanceConflict) {
+                showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
+            }
         } else if (isTimeoutError(error)) {
             // Timeout — пробрасываем юзеру только если это write. Для GET
             // тихо роняем, кэш на странице остаётся на месте.
