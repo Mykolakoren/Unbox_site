@@ -1929,7 +1929,12 @@ def _handle_hot_booking_callback(
                 if owner.subscription:
                     # Как /approve: часы — по живому пулу, доп. пул первым.
                     from app.api.v1.bookings.routes import _debit_approved_subscription_hours
-                    _debit_approved_subscription_hours(session, owner, booking)
+                    try:
+                        _debit_approved_subscription_hours(session, owner, booking)
+                    except HTTPException as _e:
+                        session.rollback()
+                        _answer_callback(callback_id, str(_e.detail)[:190], show_alert=True)
+                        return {"ok": True}
                 session.add(owner)
             else:
                 from app.services import wallet as _wallet

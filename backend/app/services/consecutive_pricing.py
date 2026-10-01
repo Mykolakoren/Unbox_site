@@ -136,6 +136,11 @@ def recompute_chain_and_settle(
             duration_minutes=int(b.duration or 0),
             format_type=b.format,
             consecutive_total_hours=total_hours,
+            # Цепочка — только ДЕНЕЖНЫЕ брони (payment_method='balance'). Живой
+            # пул абонемента (в т.ч. доп. — часы капсулы / «индивидуально»)
+            # не должен превращать их в SUBSCRIPTION/0 ₾ с возвратом денег и
+            # без списания часов (ревизия доп. пула 01.10).
+            ignore_subscription=True,
         )
 
         old_final = float(b.final_price or 0.0)

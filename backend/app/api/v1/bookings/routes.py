@@ -423,12 +423,23 @@ def _debit_approved_subscription_hours(session: Session, owner: User, booking: B
     """Подтверждение горячей брони (сайт /approve и кнопка в Telegram): снять
     часы абонемента. Раскладка доп./основной — по живому пулу (с момента
     создания брони часы капсулы могли уйти на другую бронь); доп. пул первым.
-    Как и раньше, покрытие здесь не перепроверяется (остаток не ниже 0)."""
+    Как и раньше, покрытие основным пулом здесь не перепроверяется (остаток не
+    ниже 0). Исключение — формат, которого в основном пуле нет вовсе (индивидуальная
+    бронь Группового мастера): если «4 ч индивидуально» уже разобрали другие
+    брони, основной (групповой) пул её не оплачивает — 409, бронь остаётся на
+    согласовании (ревизия доп. пула 01.10)."""
     hrs = float(booking.hours_deducted or 0)
     extra = subscription_pool.live_extra(
         owner.subscription, hrs, resource_type=_res_type(session, booking.resource_id),
         format_type=booking.format,
     )
+    included = subscription_pool.get(owner.subscription, "included_formats", ["individual"]) or ["individual"]
+    if hrs > 0 and extra < hrs - 0.01 and (booking.format or "individual") not in included:
+        raise HTTPException(
+            status_code=409,
+            detail="Часы абонемента не покрывают эту бронь (формат не входит в основной пул, "
+                   "а часов нужного пула уже нет). Отклоните её или попросите клиента оплатить деньгами.",
+        )
     owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs, extra=extra)
     if hrs > 0:
         subscription_pool.stamp_booking(booking, hrs, extra)
@@ -4237,6 +4248,25 @@ def trim_booking(
     leftQuote = _quote_for(bStart, left) if left > 0 else None
     rightQuote = _quote_for(cTo, right) if right > 0 else None
 
+    # Абонементная бронь: часы остатка — от ЧАСОВ ИСХОДНОЙ брони, а не от живого
+    # пула. Котировка идёт по пулу, из которого часы этой брони уже списаны, и
+    # при пустом пуле (а у Группового мастера индивидуальная бронь основной пул
+    # не покрывает НИКОГДА) вернула бы «не абонемент»: остаток превращался в
+    # бесплатный (часы 0, цена деньгами без списания), а все часы возвращались
+    # в пул — трюк повторяем (ревизия доп. пула 01.10). Пропорциональная доля и
+    # пропорциональная пиковая надбавка — как в сокращении (shorten_booking).
+    if (booking.payment_method or "").lower() == "subscription":
+        _orig_h = float(booking.hours_deducted if booking.hours_deducted is not None else (booking.duration / 60))
+        for _q, _dur in ((leftQuote, left), (rightQuote, right)):
+            if _q is not None and _dur > 0 and _q.applied_rule != "SUBSCRIPTION":
+                _ratio = _dur / booking.duration
+                _q.applied_rule = "SUBSCRIPTION"
+                _q.hours_deducted = round(_orig_h * _ratio, 4)
+                _q.extra_hours_deducted = 0.0
+                _q.final_price = round(float(booking.final_price or 0) * _ratio, 2)
+                _q.discount_amount = 0.0
+                _q.discount_percent = 0
+
     # ── Money ──
     pending = booking.payment_status == "pending"
     new_total_price = (
@@ -4916,6 +4946,19 @@ def change_booking_format(
     # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
     # клиент доплачивал весь слот, уже оплаченный бонус-часом.
     quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
+
+    # Абонементная бронь остаётся абонементной только если часы покрывают её и в
+    # новом формате. Иначе (формат не входит в тариф, нет часов нужного пула —
+    # у Группового мастера индивидуальная бронь платится ТОЛЬКО «4 ч
+    # индивидуально») котировка вернула бы деньги: часы вернулись бы в пул,
+    # бронь стала бесплатной, а при отмене вернулись бы деньги, которых никто
+    # не брал (ревизия доп. пула 01.10). Честно отказываем.
+    if (booking.payment_method or "").lower() == "subscription" and quote.applied_rule != "SUBSCRIPTION":
+        raise HTTPException(
+            status_code=400,
+            detail="Абонемент не покрывает эту бронь в новом формате (формат не входит в тариф "
+                   "или не хватает часов нужного пула). Отмените бронь и создайте новую.",
+        )
 
     old_price = float(booking.final_price or 0)
     old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0

@@ -586,6 +586,143 @@ def test_plan_split_rules():
     assert P.plan_split(gm, 1, resource_type="capsule", format_type="individual") is None
 
 
+# ── Находки ревизора денег 01.10 (закрыты) ───────────────────────────────
+
+@_scenario
+def test_trim_group_master_with_empty_extra_pool_is_not_free_and_not_repeatable():
+    """Групповой мастер, индивидуальная бронь 4 ч целиком из «4 ч индивидуально»
+    (пул пуст). Вырезка 1 ч из середины: остатки остаются оплаченными часами,
+    возвращается ровно вырезанный час и только в доп. пул; повторить нельзя."""
+    from app.api.v1.bookings import routes
+    from fastapi import BackgroundTasks
+    s = H._db()
+    admin = _admin_user(s)
+    u = H._user(s, sub=_sub_with("GROUP_MASTER"))
+    b = _book(s, admin, u, days=0, start="12:00", minutes=240, resource="room_1")
+    assert b.hours_pool == "extra" and b.extra_hours_deducted == 4.0
+    assert _snap(s, u)["xrem"] == 0.0
+    out = H._call(routes.trim_booking, booking_id=str(b.id),
+                  data=routes.TrimRequest(remove_from="13:00", remove_to="14:00"),
+                  background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    snap = _snap(s, u)
+    assert snap["xrem"] == 1.0 and snap["xused"] == 3.0 and snap["main"] == 20.0 and snap["balance"] == 500.0, snap
+    rows = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda x: x.start_time)
+    assert len(rows) == 2 and all(r.payment_method == "subscription" and r.applied_rule == "SUBSCRIPTION" for r in rows)
+    assert [r.hours_deducted for r in rows] == [1.0, 2.0] and [P.booking_extra(r) for r in rows] == [1.0, 2.0], \
+        [(r.hours_deducted, r.extra_hours_deducted, r.final_price) for r in rows]
+    assert all(r.final_price == 0.0 for r in rows), "остаток брони стал денежным"
+    _check_pool(s, u)
+    # отмена обеих частей возвращает ровно 3 ч, итого 4 — не больше
+    for r in rows:
+        _cancel(s, admin, s.get(Booking, r.id))
+    back = _snap(s, u)
+    assert back["xrem"] == 4.0 and back["xused"] == 0.0 and back["main"] == 20.0, back
+    _check_pool(s, u)
+
+
+@_scenario
+def test_format_change_that_subscription_does_not_cover_is_refused():
+    """Групповой мастер: индивидуальная бронь из доп. пула → group (основной пул
+    группы покрывает — можно, часы переезжают между пулами); обратно в
+    individual при пустом доп. пуле — 400, а не бесплатная бронь с фантомным
+    возвратом денег."""
+    from app.api.v1.bookings import routes
+    s = H._db()
+    admin = _admin_user(s)
+    u = H._user(s, sub=_sub_with("GROUP_MASTER"))
+    b = _book(s, admin, u, days=0, start="12:00", minutes=120, resource="room_1")
+    assert b.hours_pool == "extra"
+    out = H._call(routes.change_booking_format, booking_id=str(b.id),
+                  payload=routes.ChangeFormatRequest(new_format="group"), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    snap = _snap(s, u)
+    assert snap["xrem"] == 4.0 and snap["main"] == 18.0, snap   # 2 ч доп. вернулись, 2 ч ушли из группового
+    b = s.get(Booking, b.id)
+    assert b.hours_pool == "main" and (b.extra_hours_deducted or 0) == 0
+    _check_pool(s, u)
+    # доп. пул выбрали другие брони
+    _book(s, admin, u, days=0, start="14:00", minutes=240, resource="room_1")
+    assert _snap(s, u)["xrem"] == 0.0
+    before = _snap(s, u)
+    out = H._call(routes.change_booking_format, booking_id=str(b.id),
+                  payload=routes.ChangeFormatRequest(new_format="individual"), session=s, current_user=admin)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 400, "бронь стала индивидуальной за часы, которых нет"
+    assert _snap(s, u) == before
+    b = s.get(Booking, b.id)
+    assert b.format == "group" and b.hours_pool == "main"
+    _check_pool(s, u)
+
+
+@_scenario
+def test_consecutive_chain_recompute_ignores_live_subscription():
+    """Цепочка «часы подряд» пересчитывает ДЕНЕЖНЫЕ брони. Живые часы
+    (в т.ч. доп. пул) не должны превращать их в абонементные за 0 ₾."""
+    from app.services.consecutive_pricing import recompute_chain_and_settle
+    s = H._db()
+    u = H._user(s, sub=_sub_with("GROUP_MASTER"), balance=500.0)
+    bks = []
+    for st in ("12:00", "13:00"):
+        b = Booking(resource_id="room_1", location_id="unbox_uni", date=H._day(0), start_time=st, duration=60,
+                    final_price=20.0, payment_method="balance", payment_status="paid", status="confirmed",
+                    charge_amount=20.0, user_id=u.email, user_uuid=u.id, format="individual")
+        s.add(b); bks.append(b)
+    s.commit()
+    chain = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda x: x.start_time)
+    recompute_chain_and_settle(s, u, chain)
+    s.commit()
+    for b in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+        assert b.applied_rule != "SUBSCRIPTION" and b.final_price > 0, (b.applied_rule, b.final_price)
+    assert _snap(s, u)["xrem"] == 4.0 and _snap(s, u)["main"] == 20.0
+
+
+@_scenario
+def test_approve_group_master_individual_without_extra_hours_is_refused():
+    """Горячая индивидуальная бронь Группового мастера: к подтверждению «4 ч
+    индивидуально» уже разобрали — основной (групповой) пул её не оплачивает."""
+    from fastapi import HTTPException
+    from app.api.v1.bookings import routes
+    s = H._db()
+    admin = _admin_user(s)
+    u = H._user(s, sub=_sub_with("GROUP_MASTER"))
+    b = Booking(resource_id="room_1", location_id="unbox_uni", date=H._day(0), start_time="17:00", duration=60,
+                final_price=0.0, payment_method="subscription", payment_status="pending", status="pending_approval",
+                hours_deducted=1.0, extra_hours_deducted=1.0, hours_pool="extra", user_id=u.email,
+                user_uuid=u.id, format="individual")
+    s.add(b); s.commit()
+    # доп. пул уже пуст
+    s.get(User, u.id).subscription = P.update(s.get(User, u.id).subscription, extra_hours_remaining=0.0,
+                                              extra_hours_used=4.0)
+    s.commit()
+    try:
+        routes.approve_booking(booking_id=str(b.id), session=s, current_user=admin)
+        raise AssertionError("бронь подтверждена за часы группового пула")
+    except HTTPException as e:
+        s.rollback()
+        assert e.status_code == 409, e.status_code
+    snap = _snap(s, u)
+    assert snap["main"] == 20.0 and snap["used"] == 0.0, snap
+    assert s.get(Booking, b.id).status == "pending_approval"
+
+
+@_scenario
+def test_topup_extra_only_and_logged():
+    from app.api.v1.users import admin as users_admin
+    s = H._db()
+    admin = _admin_user(s)
+    u = H._user(s, sub=_sub_with("WARM_START"))
+    users_admin.topup_subscription(user_id=str(u.id), payload={"extra_hours": 2, "amount": 0},
+                                   session=s, current_user=admin)
+    snap = _snap(s, u)
+    assert snap["main"] == 10.0 and snap["xrem"] == 6.0 and snap["xtotal"] == 6.0, snap
+    hist = s.get(User, u.id).comment_history
+    assert hist and "доп. пула" in hist[-1]["text"], hist
+    _check_pool(s, u)
+
+
 # ── Статика ──────────────────────────────────────────────────────────────
 
 def test_plans_extra_values_and_frontend_mirror():

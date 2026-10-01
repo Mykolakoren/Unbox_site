@@ -527,8 +527,8 @@
   "A": {
    "balance": 47.5,
    "pool": {
-    "remaining_hours": 18.0,
-    "used_hours": 5.0,
+    "remaining_hours": 17.0,
+    "used_hours": 6.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },
@@ -577,9 +577,9 @@
      "confirmed",
      "subscription",
      "paid",
-     31.5,
-     31.5,
-     0.0
+     0.0,
+     0.0,
+     1.0
     ],
     [
      "10-06",
@@ -624,8 +624,8 @@
   "A": {
    "balance": 47.5,
    "pool": {
-    "remaining_hours": 18.6825,
-    "used_hours": 4.3175,
+    "remaining_hours": 17.0,
+    "used_hours": 6.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },
@@ -676,7 +676,7 @@
      "paid",
      10.0,
      10.0,
-     0.3175
+     1.0
     ],
     [
      "10-06",
