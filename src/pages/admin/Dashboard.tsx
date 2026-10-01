@@ -218,6 +218,11 @@ function GridHouseToday({
     const dueRows = rows.filter(r => r.due !== null && r.due > 0);
     const shown = filter === 'due' ? dueRows : rows;
     const toCollect = clients.filter(c => c.today > 0 || c.total > 0);
+    // «Взять сегодня» — только те, у кого есть что взять за сегодняшние брони.
+    // Остальные с общим долгом (today = 0: брони уже списаны с баланса) — отдельным
+    // блоком ниже, чтобы не выглядели как «брать сегодня». Суммы — те же, byClient.
+    const collectToday = toCollect.filter(c => c.today > 0);
+    const collectLater = toCollect.filter(c => !(c.today > 0));
     const settled = clients.length - toCollect.length;
     const loading = status !== 'ready' && rows.length === 0;
     const findUser = (key: string) => users.find(u => String(u.id) === key || u.email === key) ?? null;
@@ -392,7 +397,7 @@ function GridHouseToday({
                 {/* ── Справа: взять сегодня ── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
                     <section aria-labelledby="today-collect" style={{ border: hairline }}>
-                        <div style={{ padding: '12px 16px', borderBottom: hairline }}>
+                        <div style={{ padding: '12px 16px', borderBottom: loading || toCollect.length === 0 || collectToday.length > 0 ? hairline : 'none' }}>
                             <h2 id="today-collect" style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Взять сегодня</h2>
                             {!loading && (
                                 <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2 }}>
@@ -405,14 +410,30 @@ function GridHouseToday({
                             <div style={{ padding: 16 }}><SkeletonList count={2} label="Считаем долги" /></div>
                         ) : toCollect.length === 0 ? (
                             <EmptyState compact title="Все оплатили" hint="У сегодняшних клиентов нет долга." />
-                        ) : (
+                        ) : collectToday.length > 0 && (
                             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                                {toCollect.map(c => (
+                                {collectToday.map(c => (
                                     <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} />
                                 ))}
                             </ul>
                         )}
                     </section>
+
+                    {!loading && collectLater.length > 0 && (
+                        <section aria-labelledby="today-later" data-collect-later style={{ border: hairline }}>
+                            <div style={{ padding: '12px 16px' }}>
+                                <h2 id="today-later" style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Долг по другим броням: не сегодня</h2>
+                                <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2 }}>
+                                    Эти брони уже списаны с баланса, оплатить их можно, когда клиент придёт
+                                </div>
+                            </div>
+                            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                                {collectLater.map(c => (
+                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} />
+                                ))}
+                            </ul>
+                        </section>
+                    )}
 
                     {overLimit.length > 0 && (
                         <section aria-labelledby="today-over" style={{ border: hairline }}>
@@ -490,7 +511,9 @@ function CollectRow({ c, user, onPaid }: { c: TodayClient; user: AppUser | null;
     // В3: по умолчанию — весь долг клиента, подпись «из них за сегодня».
     const amount = c.total > 0 ? c.total : c.today;
     const hint = c.total > 0
-        ? `Весь долг ${formatGel(c.total)}, из них за сегодня ${formatGel(c.today)}`
+        ? (c.today > 0
+            ? `Весь долг ${formatGel(c.total)}, из них за сегодня ${formatGel(c.today)}`
+            : `Весь долг ${formatGel(c.total)} — по броням, уже списанным с баланса, не за сегодня`)
         : `За сегодня ${formatGel(c.today)}`;
     return (
         <li style={{ borderTop: hairline, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
