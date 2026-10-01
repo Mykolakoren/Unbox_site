@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
@@ -86,6 +86,20 @@ export function PublicHeader({ subnav, sticky = true }: PublicHeaderProps) {
     const isDesktop = useIsDesktop();
     const currentUser = useUserStore(s => s.currentUser);
     const [menuOpen, setMenuOpen] = useState(false);
+    // Высота шапки → CSS-переменная --public-header-h: липкие колонки под ней
+    // (страница кабинета и т.п.) встают ровно под шапкой, а не под зашитыми 88 px
+    // (с крошками шапка выше — колонка уходила под неё).
+    const headerRef = useRef<HTMLElement | null>(null);
+    useEffect(() => {
+        const el = headerRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return;
+        const root = document.documentElement;
+        const apply = () => root.style.setProperty('--public-header-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+        apply();
+        const ro = new ResizeObserver(apply);
+        ro.observe(el);
+        return () => { ro.disconnect(); root.style.removeProperty('--public-header-h'); };
+    });
 
     if (isMobileShellPath(location.pathname)) return null;
 
@@ -134,6 +148,7 @@ export function PublicHeader({ subnav, sticky = true }: PublicHeaderProps) {
 
     return (
         <header
+            ref={headerRef}
             style={{
                 background: COLOR.paper,
                 borderBottom: HAIRLINE,

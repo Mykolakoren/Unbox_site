@@ -60,9 +60,9 @@ export function lateRescheduleLeft(
   return Math.max(0, Math.floor(Number(sub.freeReschedules) || 0));
 }
 
-/** «Перенести (осталось 2 бесплатных переноса)». */
+/** «Перенести · ещё 2 бесплатно» — коротко: длинная подпись сжимала карточку брони. */
 export function lateRescheduleLabel(left: number): string {
-  return `Перенести (осталось ${ruCountWord(left, ['бесплатный перенос', 'бесплатных переноса', 'бесплатных переносов'])})`;
+  return `Перенести · ещё ${left} бесплатно`;
 }
 
 /** Часы до начала брони: дата — день по Тбилиси, время — по Тбилиси (UTC+4). */

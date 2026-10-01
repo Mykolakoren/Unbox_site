@@ -311,7 +311,7 @@ export function CabinetPage() {
                     .cabpg-photos { order: 0; }
                     .cabpg-spine {
                         position: sticky;
-                        top: 88px;
+                        top: calc(var(--public-header-h, 88px) + 16px);
                         padding-right: 32px;
                         border-right: 1px solid ${GH.ink};
                     }
