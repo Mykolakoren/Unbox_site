@@ -96,7 +96,7 @@ export function apiErrorMessage(err: any, fallback = 'Что-то пошло н�
 
 // ── Запись денег в кассу: «получилось или нет» ─────────────────────────
 
-/** Сервер не ответил (или ответил шлюз после таймаута): запись МОГЛА пройти. */
+/** Сервер не ответил или ответил сбоем 5xx (в т.ч. шлюз после таймаута): запись МОГЛА пройти. */
 export const PAYMENT_UNCERTAIN_TEXT = 'Не удалось подтвердить запись. Проверьте журнал кассы, прежде чем вносить заново';
 
 /** 409 duplicate_recent: такой же приход по клиенту уже записан минуту назад
@@ -112,12 +112,12 @@ export function isDuplicatePayment(err: any): boolean {
  * на ЛЮБОЙ сбой — в том числе когда платёж на самом деле записался (01.10
  * вторая оплата 45 ₾ после «красной ошибки»). Теперь:
  *   • сервер ответил отказом — его настоящие слова (или fallback);
- *   • ответа нет / шлюз 502-504 / сбой после ответа — честное «неизвестно,
+ *   • ответа нет / любой 5xx / сбой после ответа — честное «неизвестно,
  *     проверьте журнал», без догадок про права.
  */
 export function paymentErrorText(err: any, fallback = 'Не удалось записать оплату'): string {
     const status = err?.response?.status;
-    if (!err?.response || status === 502 || status === 503 || status === 504) return PAYMENT_UNCERTAIN_TEXT;
+    if (!err?.response || status >= 500) return PAYMENT_UNCERTAIN_TEXT;
     return apiErrorMessage(err, fallback);
 }
 

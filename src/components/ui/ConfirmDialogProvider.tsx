@@ -37,6 +37,9 @@ export interface ConfirmOptions {
     cancelLabel?: string;
     /** danger — необратимое: красная кнопка, фокус на «Отмена». */
     tone?: 'default' | 'danger';
+    /** 'cancel' — стартовый фокус на «Отмена» без красной кнопки: повторный
+     *  Enter не подтвердит (например, «Записать ещё одну» при дубле оплаты). */
+    initialFocus?: 'cancel';
     /** @deprecated старое имя body */
     message?: ReactNode;
     /** @deprecated старое имя tone: 'danger' */
@@ -120,7 +123,7 @@ function ConfirmSheet({ open, request, onAnswer }: { open: boolean; request?: Re
             role="alertdialog"
             width={420}
             // Необратимое — фокус на безопасной кнопке, Enter не удалит случайно.
-            initialFocus={danger ? cancelRef : confirmRef}
+            initialFocus={danger || opts?.initialFocus === 'cancel' ? cancelRef : confirmRef}
             footer={
                 <>
                     <Button

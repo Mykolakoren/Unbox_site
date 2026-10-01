@@ -310,10 +310,28 @@ def _lock_client_for_payment(session: Session, key: str) -> None:
     if session.get_bind().dialect.name != "postgresql":
         return
     from sqlalchemy import text
-    session.execute(
-        text("SELECT pg_advisory_xact_lock(7101, hashtext(:k))"),
-        {"k": key},
-    )
+    from sqlalchemy.exc import OperationalError
+    # Ждём очередь не дольше 5 с: иначе запрос, застрявший за «зависшим» держателем
+    # замка, висел бы бесконечно и занимал соединение пула. SET LOCAL живёт до конца
+    # транзакции, поэтому сразу после замка возвращаем умолчание — остальные запросы
+    # этой транзакции (запись баланса, commit) ведут себя как раньше.
+    session.execute(text("SET LOCAL lock_timeout = '5s'"))
+    try:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(7101, hashtext(:k))"),
+            {"k": key},
+        )
+    except OperationalError as e:
+        # 55P03 = lock_not_available (вышло время ожидания замка).
+        if getattr(getattr(e, "orig", None), "pgcode", None) != "55P03":
+            raise
+        session.rollback()
+        raise HTTPException(
+            409,
+            "По этому клиенту сейчас уже записывается операция, повторите через минуту. "
+            "Прежде чем вносить заново, проверьте журнал кассы.",
+        )
+    session.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
 
 
 def _find_recent_duplicate(
@@ -326,8 +344,14 @@ def _find_recent_duplicate(
     since = datetime.now() - DUPLICATE_WINDOW
     who = CashboxTransaction.client_id == payload.client_id
     if target_user is not None:
-        # Тот же человек мог прийти под email, а не под UUID.
-        who = who | (CashboxTransaction.credited_user_id == str(target_user.id))
+        # Тот же человек мог прийти под email, а не под UUID (и зачисление на
+        # баланс могло быть, а могло и нет) — сверяем все его обозначения.
+        who = (
+            who
+            | (CashboxTransaction.client_id == str(target_user.id))
+            | (CashboxTransaction.client_id == target_user.email)
+            | (CashboxTransaction.credited_user_id == str(target_user.id))
+        )
     stmt = (
         select(CashboxTransaction)
         .where(CashboxTransaction.type == "income")
@@ -400,8 +424,13 @@ def create_transaction(
     # the client_id as either a User UUID or an email and top up User.balance.
     credited_user_id: Optional[str] = None
     target_user: Optional[User] = None
+    # Пользователя для проверки дубля и ключа замка ищем и без флага зачисления:
+    # один человек под UUID и под email — один клиент. Не нашли — остаётся сырой client_id.
+    lookup_user: Optional[User] = None
+    if payload.type == "income" and payload.client_id:
+        lookup_user = _resolve_user_from_client_id(session, payload.client_id)
     if payload.credit_user_balance and payload.type == "income" and payload.client_id:
-        target_user = _resolve_user_from_client_id(session, payload.client_id)
+        target_user = lookup_user
         if not target_user:
             raise HTTPException(
                 400,
@@ -421,10 +450,10 @@ def create_transaction(
         and payload.payment_method != NON_MONEY_METHOD
     ):
         _lock_client_for_payment(
-            session, str(target_user.id) if target_user is not None else payload.client_id,
+            session, str(lookup_user.id) if lookup_user is not None else payload.client_id,
         )
         if not payload.confirm_duplicate:
-            prev = _find_recent_duplicate(session, payload, target_user)
+            prev = _find_recent_duplicate(session, payload, lookup_user)
             if prev is not None:
                 raise _duplicate_payment_error(prev, str(current_user.id))
 

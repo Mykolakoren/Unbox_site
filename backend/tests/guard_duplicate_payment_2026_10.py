@@ -259,6 +259,62 @@ def test_same_person_by_uuid_and_by_email_is_one_client():
     assert _pay(s, admin, c, 45, by="email")[0] == "409", "тот же человек под email обошёл защиту"
 
 
+def test_uuid_vs_email_without_credit_flag():
+    """NB-3: без зачисления на баланс тот же человек под email тоже один клиент."""
+    s, admin, c = _setup()
+    assert _pay(s, admin, c, 45, by="id", credit_user_balance=False)[0] == "ok"
+    assert _pay(s, admin, c, 45, by="email", credit_user_balance=False)[0] == "409", \
+        "без credit_user_balance email и UUID одного человека не склеились"
+    # клиент, которого нет среди пользователей (id клиента Psy-CRM): остаётся сырой client_id
+    assert _pay(s, admin, c, 45, client_id="crm-client-1", credit_user_balance=False)[0] == "ok"
+    assert _pay(s, admin, c, 45, client_id="crm-client-1", credit_user_balance=False)[0] == "409"
+    assert _pay(s, admin, c, 45, client_id="crm-client-2", credit_user_balance=False)[0] == "ok"
+
+
+def test_lock_wait_is_bounded_and_timeout_is_409():
+    """NB-1: ожидание замка ≤ 5 с (SET LOCAL), после замка таймаут возвращается в
+    умолчание; вышло время (55P03) → 409 с понятным текстом, без записи."""
+    from fastapi import HTTPException
+    from sqlalchemy.exc import OperationalError
+    from app.api.v1.cashbox import transactions as t
+
+    class _Orig(Exception):
+        def __init__(self, code):
+            self.pgcode = code
+
+    def run(fail_code=None):
+        log = []
+
+        class _S:
+            def get_bind(self):
+                return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+            def execute(self, stmt, params=None):
+                sql = str(stmt)
+                log.append(sql)
+                if "pg_advisory_xact_lock" in sql and fail_code:
+                    raise OperationalError(sql, params, _Orig(fail_code))
+
+            def rollback(self):
+                log.append("ROLLBACK")
+
+        try:
+            t._lock_client_for_payment(_S(), "k")
+            return log, None
+        except Exception as e:  # noqa: BLE001
+            return log, e
+
+    log, err = run()
+    assert err is None
+    assert "lock_timeout = '5s'" in log[0] and "pg_advisory_xact_lock" in log[1] and "lock_timeout TO DEFAULT" in log[2], log
+    log, err = run("55P03")
+    assert isinstance(err, HTTPException) and err.status_code == 409, err
+    assert "уже записывается операция" in err.detail and "повторите через минуту" in err.detail, err.detail
+    assert "ROLLBACK" in log and not any("DEFAULT" in x for x in log), log
+    log, err = run("40001")
+    assert isinstance(err, OperationalError), "чужие ошибки БД глотать нельзя"
+
+
 def test_plural_and_ago_text():
     from app.api.v1.cashbox.transactions import _ago_ru
     got = [_ago_ru(n) for n in (1, 23, 5, 11, 21, 0, 60, 125)]
@@ -285,7 +341,8 @@ def test_lock_taken_before_check_on_postgres_only():
     t._lock_client_for_payment(_Sess("sqlite"), "k1")
     assert calls == [], "в SQLite замок не нужен"
     t._lock_client_for_payment(_Sess("postgresql"), "k1")
-    assert len(calls) == 1 and "pg_advisory_xact_lock" in calls[0][0] and calls[0][1] == {"k": "k1"}, calls
+    lock = [c for c in calls if "pg_advisory_xact_lock" in c[0]]
+    assert len(lock) == 1 and lock[0][1] == {"k": "k1"}, calls
 
     src = (ROOT / "backend/app/api/v1/cashbox/transactions.py").read_text(encoding="utf-8")
     body = src[src.index("def create_transaction("):]
@@ -334,6 +391,15 @@ def test_all_client_incomes_go_through_the_guard_helper():
     mf = _code("src/pages/mobile/admin/MobileAdminFinance.tsx")
     assert "client_id" not in mf[mf.index("interface AddPayload"):mf.index("interface AddPayload") + 400], \
         "в мобильной кассе появился выбор клиента — подключите createIncomeWithDuplicateGuard"
+
+
+def test_confirm_dialog_focus_on_cancel_without_red_button():
+    """NB-2: стартовый фокус на «Отмена», кнопка «Записать ещё одну» не красная."""
+    h = _code("src/utils/cashboxDuplicate.ts")
+    assert "initialFocus: 'cancel'" in h and "tone: 'danger'" not in h, "фокус на «Отмена» не задан или кнопка красная"
+    p = _code("src/components/ui/ConfirmDialogProvider.tsx")
+    assert "opts?.initialFocus === 'cancel' ? cancelRef : confirmRef" in p, "провайдер не слушает initialFocus"
+    assert "variant={danger ? 'danger' : 'primary'}" in p
 
 
 def test_helper_asks_with_server_text_and_retries_with_flag():
@@ -405,6 +471,7 @@ console.log(JSON.stringify({
   noResponse: paymentErrorText(new Error('boom')) === PAYMENT_UNCERTAIN_TEXT,
   network: paymentErrorText({ isAxiosError: true, request: {}, message: 'Network Error' }) === PAYMENT_UNCERTAIN_TEXT,
   gateway: paymentErrorText(r(504, 'Gateway Time-out')) === PAYMENT_UNCERTAIN_TEXT,
+  server500: paymentErrorText(r(500, 'Внутренняя ошибка')) === PAYMENT_UNCERTAIN_TEXT,
   serverWords: paymentErrorText(r(403, 'Нет доступа к кассе')),
   english: paymentErrorText(r(400, 'Bad request'), 'Не удалось записать оплату'),
   dup: isDuplicatePayment(r(409, { code: 'duplicate_recent', message: 'x' })),
@@ -421,7 +488,7 @@ console.log(JSON.stringify({
         raise AssertionError(f"node упал: {r.stderr[:500]}")
     import json
     out = json.loads(r.stdout.strip().splitlines()[-1])
-    assert out["noResponse"] and out["network"] and out["gateway"], out
+    assert out["noResponse"] and out["network"] and out["gateway"] and out["server500"], out
     assert out["serverWords"] == "Нет доступа к кассе", out
     assert out["english"] == "Не удалось записать оплату", out
     assert out["dup"] is True and out["otherConflict"] is False and out["dup400"] is False, out

@@ -308,7 +308,8 @@ def test_confirm_dialog_names_actions():
     src = _read("src/components/ui/ConfirmDialogProvider.tsx")
     assert "tone?: 'default' | 'danger'" in src, "нет tone:'danger'"
     assert 'layer="dialog"' in src and "<Sheet" in src, "подтверждение не на общем Sheet/слое dialog"
-    assert "initialFocus={danger ? cancelRef : confirmRef}" in src, "у опасного фокус не на «Отмена»"
+    # 01.10 (guard_duplicate_payment_2026_10): + initialFocus: 'cancel' — фокус на «Отмена» без красной кнопки.
+    assert "initialFocus={danger || opts?.initialFocus === 'cancel' ? cancelRef : confirmRef}" in src, "у опасного фокус не на «Отмена»"
     assert "message?: ReactNode" in src and "destructive?: boolean" in src, "сломан старый API (message/destructive)"
     undo = _read("src/components/ui/undoToast.ts")
     assert "label: 'Вернуть'" in undo and "ms = 5000" in undo

@@ -46,6 +46,8 @@ export async function createIncomeWithDuplicateGuard(
             body: message,
             confirmLabel: 'Записать ещё одну',
             cancelLabel: 'Отмена',
+            // Фокус на «Отмена»: торопливый повторный Enter не запишет дубль.
+            initialFocus: 'cancel',
         });
         if (!again) throw new DuplicatePaymentDeclined();
         return cashboxApi.createTransaction({ ...payload, confirm_duplicate: true });
