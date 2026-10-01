@@ -13,10 +13,14 @@ interface AdminTaskState {
     error: string | null;
 
     fetchTasks: () => Promise<void>;
-    addTask: (data: CreateTaskPayload) => Promise<AdminTask | null>;
+    /** Ошибку сервера пробрасывает — экран сам говорит «не получилось»
+     *  и не пишет «Создано» (G8-admin-ops-M1). */
+    addTask: (data: CreateTaskPayload) => Promise<AdminTask>;
+    /** Пробрасывает ошибку: окно не закрывается, «Сохранено» не показываем. */
     updateTask: (id: string, updates: UpdateTaskPayload) => Promise<void>;
     /** true — задача удалена на сервере; false — не вышло (тост «Удалено» не показывать). */
     deleteTask: (id: string) => Promise<boolean>;
+    /** Сразу двигает карточку; при ошибке возвращает её назад и пробрасывает ошибку. */
     moveTask: (id: string, newStatus: TaskStatus) => Promise<void>;
     reorderTasks: (items: { id: string; sortOrder: number; status?: string }[]) => Promise<void>;
 }
@@ -37,27 +41,16 @@ export const useAdminTaskStore = create<AdminTaskState>()((set, get) => ({
     },
 
     addTask: async (data) => {
-        try {
-            const task = await adminTasksApi.create(data);
-            set((state) => ({ tasks: [...state.tasks, task] }));
-            return task;
-        } catch (e: any) {
-            console.error('Failed to create task:', e?.response?.data || e?.message || e);
-            const { toast } = await import('sonner');
-            toast.error(`Ошибка создания: ${e?.response?.data?.detail || e?.message || 'Неизвестная ошибка'}`);
-            return null;
-        }
+        const task = await adminTasksApi.create(data);
+        set((state) => ({ tasks: [...state.tasks, task] }));
+        return task;
     },
 
     updateTask: async (id, updates) => {
-        try {
-            const updated = await adminTasksApi.update(id, updates);
-            set((state) => ({
-                tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
-            }));
-        } catch (e: any) {
-            console.error('Failed to update task:', e);
-        }
+        const updated = await adminTasksApi.update(id, updates);
+        set((state) => ({
+            tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
+        }));
     },
 
     deleteTask: async (id) => {
@@ -72,24 +65,26 @@ export const useAdminTaskStore = create<AdminTaskState>()((set, get) => ({
     },
 
     moveTask: async (id, newStatus) => {
+        const before = get().tasks.find((t) => t.id === id)?.status;
         // Optimistic update
         set((state) => ({
             tasks: state.tasks.map((t) => (t.id === id ? { ...t, status: newStatus } : t)),
         }));
         try {
             await adminTasksApi.update(id, { status: newStatus });
-        } catch (e: any) {
-            console.error('Failed to move task:', e);
-            get().fetchTasks();
+        } catch (e) {
+            // Возвращаем карточку на место и говорим экрану, что не вышло.
+            if (before) {
+                set((state) => ({
+                    tasks: state.tasks.map((t) => (t.id === id ? { ...t, status: before } : t)),
+                }));
+            }
+            throw e;
         }
     },
 
     reorderTasks: async (items) => {
-        try {
-            await adminTasksApi.reorder(items);
-            get().fetchTasks();
-        } catch (e: any) {
-            console.error('Failed to reorder:', e);
-        }
+        await adminTasksApi.reorder(items);
+        await get().fetchTasks();
     },
 }));

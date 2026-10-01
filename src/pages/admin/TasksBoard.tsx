@@ -10,8 +10,12 @@ import {
 } from 'lucide-react';
 import { format, isPast, isToday, differenceInDays } from 'date-fns';
 import clsx from 'clsx';
-import { LegacyButton as Button } from '../../components/ui/LegacyButton';
+import { Button } from '../../components/ui/Button';
+import { Sheet } from '../../components/ui/Sheet';
+import { PageHeader } from '../../components/ui/PageHeader';
 import { toast } from 'sonner';
+import { toastApiError } from '../../utils/errors';
+import { ruCountWord } from '../../utils/plural';
 import {
     DndContext, PointerSensor, TouchSensor,
     KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -126,14 +130,43 @@ export function AdminTasksBoard() {
         // 1. Dropped over a column droppable zone?
         const targetCol = COLUMNS.find(c => `column-${c.id}` === overId);
         if (targetCol && activeTask.status !== targetCol.id) {
-            moveTask(taskId, targetCol.id);
+            void handleMove(taskId, targetCol.id, false);
             return;
         }
 
         // 2. Dropped over another task?
         const overTask = tasks.find(t => t.id === overId);
         if (overTask && activeTask.status !== overTask.status) {
-            moveTask(taskId, overTask.status as TaskStatus);
+            void handleMove(taskId, overTask.status as TaskStatus, false);
+        }
+    };
+
+    // Перемещение: стор сразу двигает карточку и возвращает её при ошибке.
+    // «Перенесли» — только после ответа сервера (G8-admin-ops-M1).
+    const handleMove = async (taskId: string, status: TaskStatus, announce = true) => {
+        try {
+            await moveTask(taskId, status);
+            if (announce) toast.success(`Перенесли в «${COLUMNS.find(c => c.id === status)?.title}»`);
+        } catch (e) {
+            toastApiError(e, 'Не получилось перенести задачу');
+        }
+    };
+
+    // Создание/правка из окна: true — сохранено (окно можно закрыть),
+    // false — ошибка показана, введённое остаётся в окне.
+    const saveTask = async (task: AdminTask, data: any): Promise<boolean> => {
+        try {
+            if (task.id) {
+                await updateTask(task.id, data);
+                toast.success('Задача сохранена');
+            } else {
+                await addTask(data);
+                toast.success('Задача создана');
+            }
+            return true;
+        } catch (e) {
+            toastApiError(e, task.id ? 'Не получилось сохранить задачу' : 'Не получилось создать задачу');
+            return false;
         }
     };
 
@@ -148,7 +181,13 @@ export function AdminTasksBoard() {
 
     const handleQuickAdd = async (status: TaskStatus) => {
         if (!quickAddTitle.trim()) return;
-        await addTask({ title: quickAddTitle.trim(), status });
+        try {
+            await addTask({ title: quickAddTitle.trim(), status });
+        } catch (e) {
+            // Название не стираем — можно нажать «Создать» ещё раз.
+            toastApiError(e, 'Не получилось создать задачу');
+            return;
+        }
         setQuickAddTitle('');
         setQuickAddCol(null);
         toast.success('Задача создана');
@@ -181,9 +220,8 @@ export function AdminTasksBoard() {
                 archivedCount={archivedCount}
                 hasFilters={hasFilters}
                 confirmDeleteTask={confirmDeleteTask}
-                moveTask={moveTask}
-                updateTask={updateTask}
-                addTask={addTask}
+                handleMove={handleMove}
+                saveTask={saveTask}
                 emptyNewTask={emptyNewTask}
             />
         );
@@ -227,10 +265,34 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
     const handleSave = async () => {
         if (!title.trim()) { toast.error('Введите название'); return; }
         setSaving(true);
-        await onSave({ title: title.trim(), description, status, priority, assigneeId: assigneeId || undefined, assigneeName: assigneeName || undefined,
-            participants, startDate: startDate ? new Date(startDate + 'T00:00:00').toISOString() : null,
-            deadline: deadline ? new Date(deadline + 'T23:59:59').toISOString() : null, labels, checklist, attachments });
-        setSaving(false);
+        try {
+            await onSave({ title: title.trim(), description, status, priority, assigneeId: assigneeId || undefined, assigneeName: assigneeName || undefined,
+                participants, startDate: startDate ? new Date(startDate + 'T00:00:00').toISOString() : null,
+                deadline: deadline ? new Date(deadline + 'T23:59:59').toISOString() : null, labels, checklist, attachments });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // Клик мимо окна / Esc с заполненной формой — сначала спросить (G8-17).
+    const { confirm: askClose } = useConfirmDialog();
+    const dirty = title !== task.title || description !== (task.description || '') || status !== task.status
+        || priority !== task.priority || assigneeId !== (task.assigneeId || '')
+        || JSON.stringify(participants) !== JSON.stringify(task.participants || [])
+        || JSON.stringify(labels) !== JSON.stringify(task.labels || [])
+        || JSON.stringify(checklist) !== JSON.stringify(task.checklist || [])
+        || JSON.stringify(attachments) !== JSON.stringify(task.attachments || [])
+        || newCheckItem.trim() !== '' || newComment.trim() !== '';
+    const requestClose = async () => {
+        if (saving) return;
+        if (!dirty) { onClose(); return; }
+        const ok = await askClose({
+            title: 'Закрыть без сохранения?',
+            body: 'Изменения в задаче пропадут.',
+            confirmLabel: 'Закрыть без сохранения',
+            cancelLabel: 'Вернуться к задаче',
+        });
+        if (ok) onClose();
     };
 
     const toggleLabel = (val: string) => setLabels(prev => prev.includes(val) ? prev.filter(l => l !== val) : [...prev, val]);
@@ -273,13 +335,24 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[5vh] bg-black/40 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
-                    <h2 className="text-lg font-bold text-unbox-dark">{isNew ? 'Новая задача' : 'Редактирование'}</h2>
-                    <button onClick={onClose} aria-label="Закрыть" className="text-ink-60 hover:text-ink p-1"><X size={20} aria-hidden="true" /></button>
+        <Sheet
+            open
+            onClose={requestClose}
+            title={isNew ? 'Новая задача' : 'Задача'}
+            width={680}
+            footer={
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+                    <Button onClick={handleSave} loading={saving}>{isNew ? 'Создать задачу' : 'Сохранить'}</Button>
+                    <Button variant="secondary" onClick={requestClose} disabled={saving}>Отмена</Button>
+                    {onDelete && (
+                        <Button variant="quiet" onClick={onDelete} disabled={saving} icon={<Trash2 size={16} aria-hidden="true" />} style={{ marginLeft: 'auto', color: 'var(--status-danger-fg)' }}>
+                            Удалить
+                        </Button>
+                    )}
                 </div>
-                <div className="p-6 space-y-5">
+            }
+        >
+                <div className="space-y-5">
                     <div>
                         <label className="block text-xs font-semibold text-ink-60 mb-1">Название *</label>
                         <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Что нужно сделать?"
@@ -444,15 +517,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                         </div>
                     )}
                 </div>
-                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-2xl">
-                    {onDelete ? <button onClick={onDelete} className="text-sm text-[color:var(--status-danger-fg)] hover:text-[color:var(--status-danger-fg)] flex items-center gap-1 py-2 -my-2"><Trash2 size={14} />Удалить</button> : <div />}
-                    <div className="flex gap-2">
-                        <Button variant="outline" onClick={onClose}>Отмена</Button>
-                        <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 size={14} className="animate-spin mr-1" />Сохранение...</> : isNew ? 'Создать' : 'Сохранить'}</Button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        </Sheet>
     );
 }
 
@@ -481,17 +546,12 @@ type GHTBProps = {
     archivedCount: number;
     hasFilters: boolean;
     confirmDeleteTask: (task: AdminTask) => Promise<boolean>;
-    moveTask: (id: string, status: TaskStatus) => void;
-    updateTask: (id: string, data: any) => Promise<any>;
-    addTask: (data: any) => Promise<any>;
+    handleMove: (id: string, status: TaskStatus) => Promise<void>;
+    saveTask: (task: AdminTask, data: any) => Promise<boolean>;
     emptyNewTask: AdminTask;
 };
 
-const GH_COLUMNS: { id: TaskStatus; num: string; title: string }[] = [
-    { id: 'TODO', num: '01', title: 'К выполнению' },
-    { id: 'IN_PROGRESS', num: '02', title: 'В процессе' },
-    { id: 'DONE', num: '03', title: 'Готово' },
-];
+const GH_COLUMNS = COLUMNS;
 
 function GridHouseAdminTasksBoard(p: GHTBProps) {
     const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
@@ -504,38 +564,18 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
     const [mobileTab, setMobileTab] = useState<TaskStatus>('TODO');
 
     return (
-        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ maxWidth: 1600, width: '100%', margin: '0 auto', padding: narrow ? '16px' : 'clamp(24px, 4vw, 48px)', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                {/* HEAD */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: narrow ? 12 : 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 32, marginBottom: narrow ? 16 : 32 }}>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ ...eyebrow, marginBottom: narrow ? 6 : 12 }}>Раздел · Задачи</div>
-                        <h1 style={{ fontFamily: GH_SANS, fontSize: narrow ? 28 : 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
-                            Рабочая доска.
-                        </h1>
-                        <div style={{ ...eyebrow, marginTop: narrow ? 8 : 12 }}>
-                            {p.tasks.length} задач · {p.tasks.filter(t => t.status === 'DONE').length} завершено
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => p.setEditingTask(p.emptyNewTask)}
-                        style={{
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            background: GH.ink,
-                            color: GH.paper,
-                            border: `1px solid ${GH.ink}`,
-                            padding: narrow ? '10px 14px' : '14px 22px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                        }}
-                    >
-                        <Plus size={narrow ? 11 : 12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                        {narrow ? 'Создать' : 'Новая задача'}
-                    </button>
-                </div>
+        <div style={{ color: GH.ink, fontFamily: GH_SANS, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {/* HEAD — H1 = пункт меню; кнопка — общий Button (плюс в строку, G8-15). */}
+                <PageHeader
+                    title="Задачи"
+                    description={p.loading ? undefined : `${ruCountWord(p.tasks.length, ['задача', 'задачи', 'задач'])} · готово ${p.tasks.filter(t => t.status === 'DONE').length}`}
+                    actions={
+                        <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => p.setEditingTask(p.emptyNewTask)}>
+                            Новая задача
+                        </Button>
+                    }
+                />
 
                 {/* FILTERS */}
                 <div style={{
@@ -658,14 +698,9 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                         <GHDroppableColumn key={col.id} colId={col.id} borderLeft={!narrow && colIdx > 0}>
                                             {/* Column head */}
                                             <div style={{ padding: '16px 16px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <div>
-                                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
-                                                        {col.num}
-                                                    </div>
-                                                    <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', marginTop: 2 }}>
-                                                        {col.title}
-                                                    </div>
-                                                </div>
+                                                <h2 style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 600, margin: 0 }}>
+                                                    {col.title}
+                                                </h2>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                     <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                                                         {colTasks.length}
@@ -673,7 +708,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                                     <button
                                                         onClick={() => { p.setQuickAddCol(col.id); p.setQuickAddTitle(''); }}
                                                         aria-label={`Добавить задачу в «${col.title}»`}
-                                                        style={{ width: 28, height: 28, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                        style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                                     >
                                                         <Plus size={14} aria-hidden="true" />
                                                     </button>
@@ -710,19 +745,18 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
 
                                             <SortableContext items={colTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
                                                 <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 200 }}>
-                                                    {colTasks.map((task, i) => (
+                                                    {colTasks.map(task => (
                                                         <GHSortableTaskCard
                                                             key={task.id}
                                                             task={task}
-                                                            index={i}
                                                             onEdit={() => p.setEditingTask(task)}
                                                             onDelete={() => { p.confirmDeleteTask(task); }}
-                                                            onMove={(status) => { p.moveTask(task.id, status); toast.success(`Перемещено в "${GH_COLUMNS.find(c => c.id === status)?.title}"`); }}
+                                                            onMove={(status) => { void p.handleMove(task.id, status); }}
                                                         />
                                                     ))}
                                                     {colTasks.length === 0 && (
                                                         <div style={{ padding: '40px 16px', border: `1px dashed ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, textAlign: 'center' }}>
-                                                            Пусто
+                                                            Задач нет
                                                         </div>
                                                     )}
                                                 </div>
@@ -742,26 +776,22 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                 })}
                             </div>
                         </div>
-                        <DragOverlay>{p.activeTask && <GHTaskCardView task={p.activeTask} index={0} isDragging />}</DragOverlay>
+                        <DragOverlay>{p.activeTask && <GHTaskCardView task={p.activeTask} isDragging />}</DragOverlay>
                     </DndContext>
                 )}
 
-                {/* Footer */}
-                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginTop: 24, display: 'flex', justifyContent: 'space-between', ...eyebrow }}>
-                    <span>Unbox · Задачи · {new Date().getFullYear()}</span>
-                    <span>{p.tasks.length} позиций</span>
-                </div>
             </div>
 
             {p.editingTask && (
                 <TaskEditModal
+                    key={p.editingTask.id || 'new'}
                     task={p.editingTask}
                     admins={p.admins}
                     onClose={() => p.setEditingTask(null)}
                     onSave={async (data) => {
-                        if (p.editingTask!.id) { await p.updateTask(p.editingTask!.id, data); toast.success('Обновлено'); }
-                        else { await p.addTask(data as any); toast.success('Создано'); }
-                        p.setEditingTask(null);
+                        // Окно закрываем только после успешного сохранения.
+                        const ok = await p.saveTask(p.editingTask!, data);
+                        if (ok) p.setEditingTask(null);
                     }}
                     onDelete={p.editingTask.id ? async () => { if (await p.confirmDeleteTask(p.editingTask!)) p.setEditingTask(null); } : undefined}
                 />
@@ -789,20 +819,20 @@ function GHDroppableColumn({ colId, children, borderLeft }: { colId: string; chi
     );
 }
 
-function GHSortableTaskCard({ task, index, onEdit, onDelete, onMove }: {
-    task: AdminTask; index: number; onEdit: () => void; onDelete: () => void; onMove: (status: TaskStatus) => void;
+function GHSortableTaskCard({ task, onEdit, onDelete, onMove }: {
+    task: AdminTask; onEdit: () => void; onDelete: () => void; onMove: (status: TaskStatus) => void;
 }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
     return (
         <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-            <GHTaskCardView task={task} index={index} onEdit={onEdit} onDelete={onDelete} onMove={onMove} dragListeners={listeners} />
+            <GHTaskCardView task={task} onEdit={onEdit} onDelete={onDelete} onMove={onMove} dragListeners={listeners} />
         </div>
     );
 }
 
-function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, isDragging }: {
-    task: AdminTask; index: number; onEdit?: () => void; onDelete?: () => void; onMove?: (status: TaskStatus) => void; dragListeners?: any; isDragging?: boolean;
+function GHTaskCardView({ task, onEdit, onDelete, onMove, dragListeners, isDragging }: {
+    task: AdminTask; onEdit?: () => void; onDelete?: () => void; onMove?: (status: TaskStatus) => void; dragListeners?: any; isDragging?: boolean;
 }) {
     const priColor = task.priority === 'HIGH' ? GH.danger : task.priority === 'LOW' ? GH.ink60 : GH.ink;
     const priLabel = task.priority === 'HIGH' ? 'Срочно' : task.priority === 'MEDIUM' ? 'Средний' : 'Низкий';
@@ -829,9 +859,6 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             {/* Top row: index + priority + move buttons */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
-                        №{String(index + 1).padStart(3, '0')}
-                    </span>
                     <span style={{
                         fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700,
                         color: priColor, border: `1px solid ${priColor}`, padding: '2px 6px',
@@ -855,11 +882,12 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                         <button
                             key={col.id}
                             onClick={e => { e.stopPropagation(); onMove(col.id); }}
-                            title={`→ ${col.title}`}
+                            title={`Перенести в «${col.title}»`}
+                            aria-label={`Перенести задачу в «${col.title}»`}
                             style={{
                                 fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', fontWeight: 700,
                                 color: GH.ink60, background: 'transparent', border: `1px solid ${GH.ink10}`,
-                                padding: '3px 6px', cursor: 'pointer',
+                                padding: '3px 6px', cursor: 'pointer', whiteSpace: 'nowrap',
                             }}
                         >
                             {col.id === 'TODO' ? 'Отложить' : col.id === 'IN_PROGRESS' ? 'В работу' : 'Готово'}
@@ -926,7 +954,7 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             {(task.attachments?.length > 0) && (
                 <div style={{ marginTop: 8, fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Paperclip size={11} />
-                    <span>{task.attachments.length} вложений</span>
+                    <span>{ruCountWord(task.attachments.length, ['вложение', 'вложения', 'вложений'])}</span>
                 </div>
             )}
 
@@ -953,7 +981,7 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                         else if (isToday(d)) color = GH.ink;
                     }
                     return (
-                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color, display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
                             <Clock size={10} />
                             {formatDayMonth(d)} · {formatTime(d)}
                         </span>
