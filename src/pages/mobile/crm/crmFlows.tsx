@@ -119,7 +119,7 @@ export function useQuickPay(
         setBusy(before.id, true);
         try {
             await crmApi.unmarkPaidSession(before.id);
-            onPatched({ ...before, isPaid: false });
+            onPatched({ ...before, isPaid: false, paidAmount: undefined, remaining: undefined });
             toast.success('Оплата снята');
         } catch (e) {
             toastApiError(e, 'Не удалось снять оплату. Попробуйте ещё раз');

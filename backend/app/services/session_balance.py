@@ -123,17 +123,15 @@ def remaining_in(ts, client, payments: Iterable, rates: Dict[str, float], curren
     return round(convert(m.remaining, m.currency, target, rates), 2)
 
 
-def load_payments_by_session(
-    db: Session, specialist_id: str, client_id: Optional[str] = None,
-) -> Dict[str, List[TherapistPayment]]:
+def load_payments_by_session(db: Session, specialist_id: str) -> Dict[str, List[TherapistPayment]]:
     """Платежи специалиста, привязанные к сессиям, сгруппированные по сессии.
-    Одним запросом на весь список — а не по запросу на сессию."""
+    Одним запросом на весь список — а не по запросу на сессию. По клиенту НЕ
+    фильтруем: сессию могли перепривязать к другому клиенту, а платёж остался на
+    прежнем — важна связь «платёж ↔ сессия», а не клиент платежа."""
     stmt = select(TherapistPayment).where(
         TherapistPayment.specialist_id == specialist_id,
         TherapistPayment.session_id.is_not(None),
     )
-    if client_id:
-        stmt = stmt.where(TherapistPayment.client_id == client_id)
     by_session: Dict[str, List[TherapistPayment]] = defaultdict(list)
     for p in db.exec(stmt).all():
         by_session[p.session_id].append(p)

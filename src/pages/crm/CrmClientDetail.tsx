@@ -302,7 +302,7 @@ export function CrmClientDetail() {
         if (!ok) return;
         try {
             await crmApi.unmarkPaidSession(sessionId);
-            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: false } : s));
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: false, paidAmount: undefined, remaining: undefined } : s));
             toast.success('Отметка об оплате снята');
             loadData();
         } catch (e: any) {

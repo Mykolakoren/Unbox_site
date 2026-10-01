@@ -281,7 +281,7 @@ def get_client_balance(
 
     from app.api.v1.settings import get_exchange_rates
     rates = get_exchange_rates(session)
-    pays_by_session = sb.load_payments_by_session(session, uid, client_id)
+    pays_by_session = sb.load_payments_by_session(session, uid)
 
     def _group_by_currency(sessions_list):
         # Долг по сессии = цена минус внесённое, в валюте самой сессии.

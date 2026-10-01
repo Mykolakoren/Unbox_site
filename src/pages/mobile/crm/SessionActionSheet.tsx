@@ -195,7 +195,9 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 );
             } else {
                 await crmApi.unmarkPaidSession(session.id);
-                onChange({ ...session, isPaid: false });
+                // Снятая оплата: «внесено/остаток» от прежней оплаты больше неверны — сбрасываем,
+                // долг снова считается по полной цене, пока сервер не пришлёт свежие.
+                onChange({ ...session, isPaid: false, paidAmount: undefined, remaining: undefined });
                 toast.success('Оплата снята');
             }
         } catch (e: unknown) {

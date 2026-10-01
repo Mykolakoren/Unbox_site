@@ -29,8 +29,12 @@ class TherapistPaymentCreate(SQLModel):
     amount: float
     currency: str = "GEL"
     account: str = "Cash"
-    date: datetime
+    # Без даты форма «Новый платёж» в Финансах получала 422: день оплаты — сегодня.
+    date: datetime = Field(default_factory=datetime.now)
     session_id: Optional[str] = None
+    # «Доплатить» по сессии: сервер не даст внести больше остатка (цена − внесённое),
+    # так что повторный клик/тап не задвоит доплату. Нет флага — как раньше.
+    cap_to_remaining: bool = False
 
 
 class TherapistPaymentRead(TherapistPaymentBase):

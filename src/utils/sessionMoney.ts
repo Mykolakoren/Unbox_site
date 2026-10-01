@@ -45,7 +45,13 @@ export function sessionDebt(
 ): { amount: number; currency: string } {
     const currency = sessionCurrencyOf(s, client);
     if (s.isPaid) return { amount: 0, currency };
-    const amount = s.remaining != null ? s.remaining : sessionPriceOf(s, client);
+    // Остатку верим, только если сервер прислал ОБА числа и они не противоречат
+    // «не оплачено»: после «Снять оплату» на экране может остаться remaining: 0
+    // от прежней оплаты — тогда долг, как раньше, вся цена.
+    const price = sessionPriceOf(s, client);
+    const trusted = s.remaining != null && s.paidAmount != null
+        && !(s.remaining <= EPS && s.paidAmount <= EPS && price > EPS);
+    const amount = trusted ? (s.remaining as number) : price;
     return { amount: Math.max(0, Math.round(amount * 100) / 100), currency };
 }
 

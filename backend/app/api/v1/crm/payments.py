@@ -64,6 +64,11 @@ def create_payment(
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
+    # Платёж и доплата — только в плюс (минус и ноль — это ошибка ввода; снять
+    # оплату можно кнопкой «Снять отметку» или правкой платежа).
+    if not (0 < float(data.amount or 0) < 1e9):
+        raise HTTPException(400, "Сумма платежа должна быть больше нуля")
+
     ts = None
     if data.session_id:
         # FOR UPDATE — тот же паттерн, что в quick-pay: одновременные
@@ -77,6 +82,12 @@ def create_payment(
         ).first()
         if ts and ts.specialist_id != str(current_user.id):
             ts = None
+        # Платёж на чужую или удалённую сессию раньше записывался с «висячей»
+        # ссылкой — теперь отказ, чтобы деньги не уезжали мимо сессии.
+        if ts is None:
+            raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
+        if ts.client_id != data.client_id:
+            raise HTTPException(400, "Эта сессия записана на другого клиента — обновите карточку")
 
     # На сессию разрешён РОВНО ОДИН платёж — это защита в самой базе
     # (uq_therapist_payment_session), поставленная после чистки 74 дублей.
@@ -93,17 +104,36 @@ def create_payment(
     from app.api.v1.settings import get_exchange_rates
     rates = get_exchange_rates(session)
 
+    # «Доплатить»: не больше остатка по сессии (цена − внесённое) + допуск на
+    # округление. Повторный клик по кнопке приходит с той же суммой, когда остатка
+    # уже нет, — и упирается сюда, а не задваивает платёж.
+    if ts is not None and data.cap_to_remaining:
+        _cur = sb.session_currency(ts, client)
+        _paid = sb.paid_in([existing], _cur, rates) if existing is not None else 0.0
+        _rest = max(sb.session_price(ts, client) - _paid, 0.0)
+        _in = sb.convert(data.amount, data.currency, _cur, rates)
+        _tol = sb.EPS + sb.slack([existing] if existing is not None else [], _cur, rates) \
+            + (0.005 * sb.convert(1, data.currency, _cur, rates) if sb.norm_currency(data.currency) != _cur else 0.0)
+        if _in > _rest + _tol:
+            raise HTTPException(
+                409,
+                f"Доплата больше остатка по сессии (осталось {round(_rest, 2)} {_cur}). "
+                "Возможно, оплату уже внесли — обновите карточку.",
+            )
+
     if existing is not None:
         # Доплата в другой валюте: прибавляем в валюте УЖЕ записанного платежа
         # (одна строка = одна валюта), а не складываем доллары с лари как числа.
         added = sb.convert(data.amount, data.currency, existing.currency, rates)
         existing.amount = round(float(existing.amount or 0) + added, 2)
-        if data.account:
+        # Счёт меняем, только если его явно прислали (по умолчанию «Cash» из модели —
+        # не выбор пользователя и не должен перетирать прежний счёт).
+        if "account" in data.model_fields_set and data.account:
             existing.account = data.account
         payment = existing
     else:
         payment = TherapistPayment(
-            **data.model_dump(),
+            **data.model_dump(exclude={"cap_to_remaining"}),
             specialist_id=str(current_user.id),
         )
     session.add(payment)

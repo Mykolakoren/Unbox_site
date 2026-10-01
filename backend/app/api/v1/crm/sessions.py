@@ -34,7 +34,7 @@ def _sessions_with_money(db: Session, uid: str, sessions, client_id: Optional[st
             select(TherapistClient).where(TherapistClient.specialist_id == uid)
         ).all()
     }
-    pays = sb.load_payments_by_session(db, uid, client_id)
+    pays = sb.load_payments_by_session(db, uid)
     out: List[TherapySessionRead] = []
     for ts in sessions:
         row = TherapySessionRead.model_validate(ts)
@@ -915,6 +915,11 @@ def quick_pay_session(
         # в этот платёж. Раньше тут был отказ 409, а теперь у частично оплаченной
         # сессии на кнопке стоит сумма остатка, и она должна работать.
         _cl = session.get(TherapistClient, ts.client_id)
+        # Сначала «замораживаем» цену и валюту сессии (как в create_payment): иначе
+        # цена клиента в одной валюте превратилась бы в сумму платежа в другой.
+        if ts.price is None and _cl is not None and _cl.base_price:
+            ts.price = _cl.base_price
+        ts.currency = ts.currency or (_cl.currency if _cl is not None else None)
         topped_up = _top_up_partial_payment(session, ts, _cl, existing_payment)
         logger.warning(
             "[quick-pay] reconcile: у сессии %s был живой платёж при is_paid=False "
@@ -940,6 +945,9 @@ def quick_pay_session(
             "account": existing_payment.account,
             "reconciled": True,
             "topped_up": topped_up,
+            # Сколько денег добавилось ЭТИМ нажатием (для тоста): при простой
+            # сверке — 0, при доплате остатка — сумма доплаты.
+            "added": topped_up,
         }
 
     client = session.get(TherapistClient, ts.client_id)
@@ -982,7 +990,8 @@ def quick_pay_session(
     if price and price > 0:
         session.refresh(payment)
         push_payment(payment, client.name)
-    return {"ok": True, "amount": price, "currency": client.currency, "account": account}
+    return {"ok": True, "amount": price, "currency": ts.currency or client.currency, "account": account,
+            "added": price if price and price > 0 else 0}
 
 
 @router.post("/sessions/{session_id}/unmark-paid")
@@ -1046,7 +1055,7 @@ def mark_all_sessions_paid(
             TherapySession.is_paid == False,
             TherapySession.date <= now,
             TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
-        )
+        ).with_for_update()
     ).all()
 
     count = 0
@@ -1054,7 +1063,7 @@ def mark_all_sessions_paid(
     # Платёж на сессию один (uq_therapist_payment_session). Если по сессии уже
     # внесена часть, второй платёж не создаём: дописываем остаток в тот же.
     # Раньше такая сессия роняла «Отметить все» ошибкой уникальности.
-    existing_by_session = sb.load_payments_by_session(session, uid, client_id)
+    existing_by_session = sb.load_payments_by_session(session, uid)
     for ts in unpaid:
         price = ts.price if ts.price is not None else client.base_price or 0
         # Fill session price from client base_price if NULL
