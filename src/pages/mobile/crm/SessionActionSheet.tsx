@@ -408,7 +408,7 @@ function Main({
                 <Row
                     icon={<CalendarPlus size={16} aria-hidden="true" />}
                     label={`Записать следующую · ${nextSessionLabel(session, client)}`}
-                    sub="Тот же день недели и время — можно поменять"
+                    sub="Тот же день недели и время"
                     onClick={onBookNext}
                 />
             )}
