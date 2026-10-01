@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus } from 'lucide-react';
+import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { bookingsApi } from '../../../api/bookings';
@@ -40,11 +40,14 @@ export function getAdminUserName(users: User[], email: string | null | undefined
 
 /** Контроллер шторок: действия по брони + отмена + смена цены.
  *  После любого действия перечитывает ПОЛНЫЙ админский список броней. */
-export function AdminBookingSheets({ booking, getUserName, onClose }: {
+export function AdminBookingSheets({ booking, getUserName, onClose, acceptPayment }: {
     /** Бронь, по которой открыта шторка действий (null — закрыта). */
     booking: BookingHistoryItem | null;
     getUserName: (email: string | null | undefined) => string;
     onClose: () => void;
+    /** Волна 4 (G9-24, В3): строка «Принять оплату» — открывает TopupSheet
+     *  у родителя. null — брать нечего, строку не показываем. */
+    acceptPayment?: (b: BookingHistoryItem) => { sub: string; onClick: () => void } | null;
 }) {
     const navigate = useNavigate();
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
@@ -187,6 +190,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose }: {
                     onEditPrice={() => doEditPrice(booking)}
                     onExtend={() => doExtend(booking)}
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(booking.userId)}`)}
+                    pay={acceptPayment ? acceptPayment(booking) : null}
                 />
             )}
 
@@ -247,7 +251,7 @@ function formatDurationStandalone(min: number): string {
 }
 
 function ActionSheet({
-    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser,
+    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser, pay,
 }: {
     booking: BookingHistoryItem;
     userName: string;
@@ -261,6 +265,7 @@ function ActionSheet({
     onEditPrice: () => void;
     onExtend: () => void;
     onOpenUser: () => void;
+    pay?: { sub: string; onClick: () => void } | null;
 }) {
     const canCancel = booking.status === 'confirmed' || booking.status === 'pending_approval';
     const canApprove = booking.status === 'pending_approval';
@@ -312,6 +317,15 @@ function ActionSheet({
                             icon={<Check size={18} />}
                             busy={busy}
                             onClick={onApprove}
+                        />
+                    )}
+                    {pay && (
+                        <ActionRow
+                            label="Принять оплату"
+                            sub={pay.sub}
+                            tone="danger"
+                            icon={<Wallet size={18} />}
+                            onClick={pay.onClick}
                         />
                     )}
                     {canReschedule && (

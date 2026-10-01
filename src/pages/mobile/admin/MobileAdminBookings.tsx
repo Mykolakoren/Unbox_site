@@ -6,6 +6,11 @@ import { useUserStore } from '../../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import type { BookingHistoryItem } from '../../../store/types';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
+import { useAdminDueMap, acceptPaymentFor, type AcceptPayment } from './adminPayment';
+import { TopupSheet } from './TopupSheet';
+import { DueBadge } from '../../../components/admin/DueBadge';
+import { useBookingStore } from '../../../store/bookingStore';
+import { formatGel } from '../../../utils/format';
 import { statusLabel } from '../../../design/statuses';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Chip } from '../../../components/ui/Chip';
@@ -50,6 +55,10 @@ export function MobileAdminBookings() {
     // Чекбокс «Показать прошедшие» добавляет отменённые / завершённые /
     // перенесённые / пересданные / no-show в список.
     const [showPast, setShowPast] = useState(false);
+    // Волна 4 (В2, G9-24): «к оплате / ✓» в строке и «Принять оплату» в шторке.
+    const dueMap = useAdminDueMap(bookings, users);
+    const [pay, setPay] = useState<AcceptPayment | null>(null);
+    const setBookingForUser = useBookingStore(s => s.setBookingForUser);
 
     useEffect(() => {
         fetchAllBookings();
@@ -291,6 +300,8 @@ export function MobileAdminBookings() {
                         || b.status === 'cancelled'
                         || b.status === 'rescheduled'
                         || b.status === 're-rented';
+                    const due = dueMap.get(b.id);
+                    const owes = !!due && due.due > 0;
                     return (
                         <button
                             key={b.id}
@@ -305,7 +316,9 @@ export function MobileAdminBookings() {
                                 alignItems: 'center', cursor: 'pointer', fontFamily: 'inherit',
                                 textAlign: 'left', color: 'var(--color-ink)',
                                 minHeight: 56,
-                                opacity: isBlocker ? 0.78 : isPast ? 0.65 : 1,
+                                // Неоплаченная прошедшая не притушивается — её надо заметить (В2).
+                                opacity: isBlocker ? 0.78 : isPast && !owes ? 0.65 : 1,
+                                ...(owes ? { borderColor: 'var(--status-danger-fg)', borderLeftWidth: 4 } : null),
                             }}
                         >
                             <div style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--color-ink)' }}>
@@ -344,7 +357,14 @@ export function MobileAdminBookings() {
                                     padding: '4px 9px', borderRadius: 999,
                                     whiteSpace: 'nowrap',
                                 }}>Блок</span>
-                                : <StatusBadge kind="booking" status={b.status} audience="staff" />
+                                : (
+                                    // G9-14: «Подтверждена» на каждой строке — шум; бейдж
+                                    // статуса только у нестандартных, плюс «к оплате / ✓» (В2).
+                                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                        {b.status !== 'confirmed' && <StatusBadge kind="booking" status={b.status} audience="staff" />}
+                                        <DueBadge due={due?.due} paid={!!due} />
+                                    </span>
+                                )
                             }
                         </button>
                     );
@@ -356,7 +376,28 @@ export function MobileAdminBookings() {
                 booking={sheet}
                 getUserName={getUserName}
                 onClose={() => setSheet(null)}
+                acceptPayment={b => {
+                    const p = acceptPaymentFor(b, bookings, users, dueMap);
+                    if (!p) return null;
+                    return {
+                        sub: p.today > 0
+                            ? `Весь долг ${formatGel(p.total)}, из них за сегодня ${formatGel(p.today)}`
+                            : `Весь долг ${formatGel(p.total)}`,
+                        onClick: () => { setSheet(null); setPay(p); },
+                    };
+                }}
             />
+
+            {pay && (
+                <TopupSheet
+                    user={pay.user}
+                    defaultAmount={pay.total}
+                    todayAmount={pay.today}
+                    defaultBranch={pay.branch}
+                    onClose={() => setPay(null)}
+                    onDone={async () => { setPay(null); await fetchUsers(); }}
+                />
+            )}
 
             {/* 2026-06-06 owner: FAB «+ Новая бронь» для админа.
                 Ведёт на /m/find — общий клиентский flow поиска слота, но
@@ -366,6 +407,7 @@ export function MobileAdminBookings() {
             <Link
                 to="/m/find"
                 aria-label="Новая бронь"
+                onClick={() => setBookingForUser(null)}
                 style={{
                     position: 'fixed',
                     right: 16,
