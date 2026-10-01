@@ -142,7 +142,9 @@ def test_card_money_handlers_untouched():
     save = _body(src, "const handleSaveProfile = async")
     assert "}, applyPriceTo !== 'none' ? applyPriceTo : undefined);" in save, "applyPriceTo уходит в updateClient как раньше"
     # Расчёт баланса — прежний.
-    assert "const debt = unpaid.reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);" in src
+    # 02.10: stats.debt (сумма по полной цене) убран — он нигде не использовался; долг на
+    # карточке считает sumByCurrency по остатку (sessionDebt), см. guard_crm_payments_a_2026_10.
+    assert "const debt = unpaid.reduce" not in src, "вернулся неиспользуемый stats.debt"
     assert "const totalPaid = balance?.totalPaid ?? 0;" in src
 
 

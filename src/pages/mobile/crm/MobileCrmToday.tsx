@@ -458,7 +458,9 @@ export function MobileCrmToday() {
                                                 onClick={() => quickPay.pay(s)}
                                                 aria-label={`Отметить оплату: ${nameOf(s)}, ${formatMoney(p.amount, { currency: p.currency })}`}
                                             >
-                                                {`${partialPayment(s, clientById.get(s.clientId)) ? 'Доплата' : 'Оплата'} · ${formatMoney(p.amount, { currency: p.currency })}`}
+                                                {partialPayment(s, clientById.get(s.clientId))
+                                                    ? `Доплата · ${formatMoney(p.amount, { currency: p.currency })}`
+                                                    : `Оплата · ${formatMoney(p.amount, { currency: p.currency })}`}
                                             </Button>
                                         ) : (
                                             <StatusBadge kind="session" status={s.status} />
