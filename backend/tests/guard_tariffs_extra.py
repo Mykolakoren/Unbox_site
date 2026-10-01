@@ -797,6 +797,36 @@ def test_plans_extra_values_and_frontend_mirror():
         assert f"extraHours: {h}," in item and f"extraKind: '{kind}'" in item, f"сайт не совпадает с сервером: {pid}"
 
 
+def test_extra_pool_script_catalog_equals_plans():
+    """Скрипт доп. пула «задним числом» держит свою копию каталога (чтобы dry-run
+    шёл на прод-коде до выкладки). Копия обязана совпасть с subscription_sale.PLANS
+    — иначе ретро-начисление выдаст не те часы (ревизия 01.10, N5)."""
+    import importlib.util
+    from app.services.subscription_sale import PLANS
+    path = os.path.join(_BACKEND, "scripts", "tariffs_extra_pool_2026_10.py")
+    spec = importlib.util.spec_from_file_location("tariffs_extra_pool_2026_10", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert set(mod.EXTRA_BY_PLAN) == set(PLANS) == set(mod.PLAN_INFO), \
+        (set(mod.EXTRA_BY_PLAN), set(PLANS), set(mod.PLAN_INFO))
+    for pid, p in PLANS.items():
+        assert mod.EXTRA_BY_PLAN[pid] == (p["extra_kind"], float(p["extra_hours"])), \
+            f"EXTRA_BY_PLAN[{pid}] = {mod.EXTRA_BY_PLAN[pid]} != PLANS ({p['extra_kind']}, {p['extra_hours']})"
+        want = dict(hours=p["hours"], bonus=p["bonus_hours"], price=p["price"], days=p["duration_days"], name=p["name"])
+        assert mod.PLAN_INFO[pid] == want, f"PLAN_INFO[{pid}] = {mod.PLAN_INFO[pid]} != {want}"
+
+
+def test_subscriptions_page_takes_extra_hours_from_catalog():
+    """Страница тарифов не зашивает часы капсулы в тексты — берёт extraHours /
+    extraKind из SUBSCRIPTION_PLANS (N5)."""
+    page = _read("src/pages/SubscriptionsPage.tsx")
+    assert "extraHours" in page and "extraKind" in page, "страница не читает extraHours/extraKind из каталога"
+    assert re.search(r"capsuleHours:\s*[1-9]", page) is None, "capsuleHours снова зашит числом"
+    assert re.search(r"'\d+ (час|часа|часов) в капсуле", page) is None, "часы капсулы снова зашиты в текст"
+    assert re.search(r"'\d+ (час|часа|часов) в любом индивидуальном", page) is None, \
+        "«N ч индивидуально» Группового мастера снова зашито в текст"
+
+
 def test_extra_fields_written_only_inside_subscription_pool():
     pat = re.compile(r"""\bextra_hours_(remaining|used|total)\s*=(?!=)|["']extra_hours_(remaining|used|total)["']\s*:""")
     bad = []

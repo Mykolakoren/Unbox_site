@@ -15,6 +15,7 @@ import { timeToMin } from '../utils/bookingHelpers';
 import type { BookingHistoryItem } from '../store/types';
 import { paymentLine } from './mobile/bookingView';
 import { activeBonusHours } from '../utils/paymentPriority';
+import { extraPoolLabel } from '../utils/subscriptionHours';
 
 /**
  * «Обзор» кабинета клиента на компьютере (/dashboard).
@@ -267,6 +268,9 @@ export function DashboardOverview() {
                             <div className="mt-1 text-body">
                                 {currentUser.subscription.name}: <span className="num font-semibold">{fmtHours(currentUser.subscription.remainingHours)}</span>
                             </div>
+                            {extraPoolLabel(currentUser.subscription) && (
+                                <div className="mt-0.5 text-small text-ink-60 num">{extraPoolLabel(currentUser.subscription)}</div>
+                            )}
                         </div>
                     )}
                     <nav aria-label="Ещё" className="flex flex-col px-2 py-2">

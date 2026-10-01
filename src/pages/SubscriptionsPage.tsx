@@ -55,8 +55,6 @@ const STANDARD_PRICES = [
 type PlanCopy = {
     dataId: string;
     tagline: string;
-    capsuleHours: number;
-    extraNote?: string;
     features: string[];
     bonuses: string[];
     badge: string | null;
@@ -67,10 +65,8 @@ const PLAN_COPY: PlanCopy[] = [
     {
         dataId: 'TRIAL',
         tagline: 'Попробуйте формат Unbox',
-        capsuleHours: 1,
         features: [
             'Любой индивидуальный кабинет',
-            '1 час в капсуле в любое время',
         ],
         bonuses: [],
         badge: null,
@@ -79,10 +75,8 @@ const PLAN_COPY: PlanCopy[] = [
     {
         dataId: 'WARM_START',
         tagline: 'Уверенный старт практики',
-        capsuleHours: 4,
         features: [
             'Любой индивидуальный кабинет',
-            '4 часа в капсуле в любое время',
             'Бесплатный перенос бронирований',
         ],
         bonuses: [],
@@ -92,10 +86,8 @@ const PLAN_COPY: PlanCopy[] = [
     {
         dataId: 'REGULAR_PRACTITIONER',
         tagline: 'Для стабильной практики',
-        capsuleHours: 6,
         features: [
             'Любой индивидуальный кабинет',
-            '6 часов в капсуле в любое время',
             'Бесплатный перенос бронирований',
             'Размещение в каталоге Unbox',
         ],
@@ -111,10 +103,8 @@ const PLAN_COPY: PlanCopy[] = [
     {
         dataId: 'PRO_PLUS',
         tagline: 'Максимум для профессионалов',
-        capsuleHours: 10,
         features: [
             'Любой индивидуальный кабинет',
-            '10 часов в капсуле в любое время',
             'Бесплатный перенос бронирований',
             'Перерывы 30 мин между сессиями бесплатно',
             'Размещение в каталоге Unbox',
@@ -132,11 +122,8 @@ const PLAN_COPY: PlanCopy[] = [
     {
         dataId: 'GROUP_MASTER',
         tagline: 'Для тренингов и воркшопов',
-        capsuleHours: 0,
-        extraNote: '+ 4 ч в индивидуальном кабинете',
         features: [
             'Групповые кабинеты (до 20 чел.)',
-            '4 часа в любом индивидуальном кабинете',
         ],
         bonuses: [
             'Съёмка рилз — 1 час в любом филиале',
@@ -149,6 +136,28 @@ const PLAN_COPY: PlanCopy[] = [
 ];
 
 type DataPlan = (typeof SUBSCRIPTION_PLANS)[number] & { bonusHours?: number };
+
+/** Доп. пул тарифа — из SUBSCRIPTION_PLANS[].extraHours / extraKind (data.ts,
+ *  зеркало сервера subscription_sale.PLANS), а не зашит в тексты: поменяли
+ *  часы в каталоге — карточка и плашка поменялись сами. */
+function planExtra(p: DataPlan): { capsuleHours: number; extraNote?: string; extraFeature?: string } {
+    const h = Number((p as any).extraHours) || 0;
+    const kind = (p as any).extraKind as 'capsule' | 'individual' | undefined;
+    if (h <= 0) return { capsuleHours: 0 };
+    if (kind === 'capsule') {
+        return { capsuleHours: h, extraFeature: `${h} ${hoursWord(h)} в капсуле в любое время` };
+    }
+    return {
+        capsuleHours: 0,
+        extraNote: `+ ${h} ч в индивидуальном кабинете`,
+        extraFeature: `${h} ${hoursWord(h)} в любом индивидуальном кабинете`,
+    };
+}
+
+function hoursWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    return m10 === 1 && m100 !== 11 ? 'час' : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'часа' : 'часов');
+}
 
 /** Часы абонемента для расчёта цены часа: основные + бонусные (у «Профи+»
  *  40 + 2 — сервер их правда начисляет, subscription_sale.py). Часы в
@@ -172,8 +181,16 @@ function planBaseRate(p: DataPlan): number {
 const PLANS = PLAN_COPY.flatMap(copy => {
     const p = SUBSCRIPTION_PLANS.find(x => x.id === copy.dataId) as DataPlan | undefined;
     if (!p) return [];
+    const ex = planExtra(p);
+    // Строка про доп. часы — второй пункт списка (после «кабинета»).
+    const features = ex.extraFeature
+        ? [copy.features[0], ex.extraFeature, ...copy.features.slice(1)]
+        : copy.features;
     return [{
         ...copy,
+        features,
+        capsuleHours: ex.capsuleHours,
+        extraNote: ex.extraNote,
         id: p.id,
         name: p.name,
         price: p.price,

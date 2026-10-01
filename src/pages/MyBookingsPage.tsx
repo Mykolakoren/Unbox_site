@@ -48,7 +48,8 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatTime } from '../utils/format';
 import { ruCountWord } from '../utils/plural';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
-import { extraPoolLabel } from '../utils/subscriptionHours';
+import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
+import { subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
@@ -3273,7 +3274,12 @@ function CrmQuickBookingModal({
      *  whatever pricing the public-facing /checkout shows. */
     const crmExtras = EXTRAS;
 
-    const hasSubscription = !!currentUser?.subscription?.planId && (currentUser?.subscription?.remainingHours ?? 0) > 0;
+    // Часы абонемента — основной пул + доп. (часы капсулы / «4 ч индивидуально»),
+    // как в мастере брони и на сервере: иначе кнопка «абонементом» гасла бы у
+    // клиента, у которого остались только капсульные часы.
+    const hasSubscription = !!currentUser?.subscription?.planId
+        && ((currentUser?.subscription?.remainingHours ?? 0) > 0
+            || (extraPool(currentUser?.subscription)?.remaining ?? 0) > 0);
 
     const startDate = useMemo(() => {
         const [h, m] = slot.time.split(':').map(Number);
@@ -3320,7 +3326,14 @@ function CrmQuickBookingModal({
     }, [isRecurring, recurringMode, recurringPattern, recurringOccurrences, recurringUntil, slot.date]);
 
     const hoursForSub = duration / 60;
-    const enoughHoursOnSub = hasSubscription && (currentUser?.subscription?.remainingHours ?? 0) >= hoursForSub;
+    const subHours = useMemo(() => subscriptionHours(currentUser?.subscription, {
+        format: chosenFormat,
+        bookingDate: slot.date,
+        bookings,
+        ownerEmail: currentUser?.email,
+        resourceKind: resourceKind(slot.resId),
+    }), [currentUser, chosenFormat, slot.date, slot.resId, bookings]);
+    const enoughHoursOnSub = hasSubscription && subHours.ok && subHours.remaining >= hoursForSub - 0.01;
 
     const handleBook = async (resourceIdOverride?: string) => {
         const bookResId = resourceIdOverride || slot.resId;

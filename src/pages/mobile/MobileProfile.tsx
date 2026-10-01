@@ -9,6 +9,7 @@ import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { getFavoriteCabinet, setFavoriteCabinet } from './favoriteCabinet';
 import { fmtHours, reservedSubscriptionHours } from '../../utils/paymentPriority';
+import { extraPoolLabel } from '../../utils/subscriptionHours';
 import { resetTour } from './OnboardingTour';
 import { canBookCabinets } from '../../utils/permissions';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
@@ -103,7 +104,8 @@ export function MobileProfile() {
                         ? <span className="num">{fmtHours(sub.remainingHours)} из {fmtHours(sub.totalHours)}</span>
                         : 'Нет'}
                     sub={sub
-                        ? (subReserved > 0.01 ? `${sub.name} · ${fmtHours(subReserved)} уже в бронях` : sub.name)
+                        ? [subReserved > 0.01 ? `${sub.name} · ${fmtHours(subReserved)} уже в бронях` : sub.name, extraPoolLabel(sub)]
+                            .filter(Boolean).join(' · ')
                         : 'Час по абонементу дешевле — выбрать тариф'}
                     onClick={() => navigate('/m/subscription')}
                 />
