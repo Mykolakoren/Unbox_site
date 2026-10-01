@@ -41,6 +41,21 @@ function hhmm(naive: string): string {
     return naive.slice(11, 16);
 }
 
+/** Ответ на near-конфликт: перенести существующую / создать отдельную / пропустить. */
+export type CalendarNearDecision = 'move' | 'force' | 'skip';
+
+/**
+ * Память ответа для СЕРИИ (ревизор 01.10): при 24 датах не задаём 24 вопроса.
+ * После первого ответа спрашиваем «Применить ко всем датам серии?»; «да» —
+ * дальше решение применяется молча (в т.ч. «Не создавать» — оставшиеся
+ * конфликтные даты пропускаются), «нет» — спрашиваем по каждой дате.
+ * Создайте один объект `{}` на весь цикл серии и передавайте в каждый вызов.
+ */
+export interface SeriesCalendarChoice {
+    decision?: CalendarNearDecision;
+    asked?: boolean;
+}
+
 /**
  * Создать сессию; при near-конфликте — спросить специалиста.
  * Возвращает созданную/перенесённую сессию или null, если он отказался.
@@ -50,6 +65,7 @@ export async function createSessionResolvingCalendar(
     create: (data: CrmSessionCreate) => Promise<CrmSession>,
     update: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>,
     data: CrmSessionCreate,
+    series?: SeriesCalendarChoice,
 ): Promise<CrmSession | null> {
     try {
         return await create(data);
@@ -60,28 +76,50 @@ export async function createSessionResolvingCalendar(
         // Перенос существующей: только если она не держит СВОЮ бронь кабинета,
         // когда мы привязываем новую (иначе сдвинулась бы чужая бронь).
         const canMove = !!near.existingSessionId && !(data.bookingId && near.existingHasBooking);
-        if (canMove) {
-            const move = await confirmAction({
+
+        let decision: CalendarNearDecision | undefined = series?.decision;
+        // Запомненное «перенести» на дату, где переносить нечего, — спросим заново.
+        if (decision === 'move' && !canMove) decision = undefined;
+
+        if (!decision) {
+            if (canMove && await confirmAction({
                 title: 'У клиента уже есть встреча рядом',
                 body: `${near.message} Перенести её на ${hhmm(data.date)}?`,
                 confirmLabel: 'Перенести существующую',
                 cancelLabel: 'Нет',
-            });
-            if (move) {
-                const patch: CrmSessionUpdate = { date: data.date };
-                if (data.durationMinutes) patch.durationMinutes = data.durationMinutes;
-                if (data.bookingId) { patch.bookingId = data.bookingId; patch.isBooked = true; }
-                if (data.price !== undefined) patch.price = data.price;
-                return await update(near.existingSessionId as string, patch);
+            })) {
+                decision = 'move';
+            } else {
+                decision = await confirmAction({
+                    title: 'Создать отдельную встречу?',
+                    body: `${near.message} Если это другая встреча — создадим ещё одну сессию и событие в календаре.`,
+                    confirmLabel: 'Всё равно создать',
+                    cancelLabel: 'Не создавать',
+                }) ? 'force' : 'skip';
+            }
+            if (series && !series.asked) {
+                series.asked = true;
+                const label = decision === 'move' ? '«Перенести существующую»'
+                    : decision === 'force' ? '«Всё равно создать»' : '«Не создавать»';
+                if (await confirmAction({
+                    title: 'Применить этот ответ ко всем датам серии?',
+                    body: `Если на других датах серии рядом тоже окажется встреча клиента — ответим ${label} без вопросов.`,
+                    confirmLabel: 'Да, ко всем датам',
+                    cancelLabel: 'Спрашивать по каждой',
+                })) {
+                    series.decision = decision;
+                }
             }
         }
-        const force = await confirmAction({
-            title: 'Создать отдельную встречу?',
-            body: `${near.message} Если это другая встреча — создадим ещё одну сессию и событие в календаре.`,
-            confirmLabel: 'Всё равно создать',
-            cancelLabel: 'Не создавать',
-        });
-        if (!force) return null;
-        return await create({ ...data, force: true });
+
+        if (decision === 'move') {
+            const patch: CrmSessionUpdate = { date: data.date };
+            if (data.durationMinutes) patch.durationMinutes = data.durationMinutes;
+            if (data.bookingId) { patch.bookingId = data.bookingId; patch.isBooked = true; }
+            if (data.price !== undefined) patch.price = data.price;
+            return await update(near.existingSessionId as string, patch);
+        }
+        if (decision === 'force') return await create({ ...data, force: true });
+        return null;
     }
 }

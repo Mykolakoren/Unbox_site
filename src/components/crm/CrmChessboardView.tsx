@@ -44,7 +44,7 @@ const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code ||
 // AdminChessboardView и CrmChessboardView. Теперь — общие.
 // parseUTC заменяет локальный parseBookingDate (тело идентичное).
 import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
-import { createSessionResolvingCalendar } from '../../utils/crmCalendarConflict';
+import { createSessionResolvingCalendar, type SeriesCalendarChoice } from '../../utils/crmCalendarConflict';
 
 const _minToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1251,6 +1251,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 // the delete UI later offer "this one vs this+future" the way
                 // Google Calendar does. Generated once per click, not per slot,
                 // so multi-client recurring (rare but possible) shares a group.
+                // Один ответ на near-конфликты календаря на всю серию (не 24 вопроса подряд).
+                const seriesCalendarChoice: SeriesCalendarChoice = {};
                 const recurringGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : `rg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1281,7 +1283,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 pushToCalendar: true,
                                 recurringGroupId,
                                 isBooked: false,
-                            });
+                            }, seriesCalendarChoice);
                             if (made) recurringCreated++;
                         } catch (e) {
                             // Don't swallow silently — earlier we did, and a
