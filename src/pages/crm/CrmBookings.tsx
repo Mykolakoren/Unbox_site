@@ -1168,7 +1168,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                                 : <span style={{ color: GH.ink60, fontStyle: 'italic' }}>без клиента</span>}
                         </div>
                         <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{patternLabel}</div>
-                        <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{g.futureCount}</div>
+                        <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{g.futureCount}</div>
                         <div style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>{g.totalCount}</div>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>
                             {g.nextDate ? formatDayMonth(g.nextDate) : '—'}

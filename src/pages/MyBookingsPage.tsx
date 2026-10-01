@@ -5,7 +5,7 @@ import { SubscriptionCard } from '../components/SubscriptionCard';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw, Bell,
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, ArrowLeft, AlertTriangle, RotateCcw, Bell,
     Ticket, Gift, Wallet,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -4014,7 +4014,23 @@ function GridHouseMyBookings({
             ) : viewMode === 'grid' ? (
                 <div className="pt-4">
                     {crmMode && (
-                        <div className="mb-3 flex items-center gap-2 border border-accent bg-accent-soft px-4 py-1 text-small">
+                        <div className="mb-3 flex flex-wrap items-center gap-2 border border-accent bg-accent-soft px-4 py-1 text-small">
+                            {/* X2-14 (волна 3): дорога обратно в CRM — назад по истории
+                                (фильтр «Сессий» сохранится), а если открыли по ссылке —
+                                на «Сессии». */}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+                                    if (idx > 0) navigate(-1);
+                                    else navigate('/crm/sessions', { replace: true });
+                                }}
+                                className="inline-flex h-11 items-center gap-1 pr-2 font-medium text-accent-ink hover:text-ink"
+                            >
+                                <ArrowLeft size={16} aria-hidden="true" />
+                                Вернуться в CRM
+                            </button>
+                            <span className="h-5 w-px bg-ink-20" aria-hidden="true" />
                             <CalendarIcon size={16} className="text-accent-ink" aria-hidden="true" />
                             <span>Выберите время для сессии с <b>{crmMode.clientName}</b></span>
                             <button

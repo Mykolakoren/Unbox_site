@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, API_URL } from '../../api/client';
 import { toast } from 'sonner';
 import { Loader2, Save, Plus, X, Upload } from 'lucide-react';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { apiErrorMessage } from '../../utils/errors';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { compressImage } from '../../utils/imageCompress';
 import { Skeleton } from '../../components/ui/Skeleton';
@@ -43,6 +47,15 @@ interface ProfileData {
     sessionDurationMin: number;
 }
 
+/** Снимок ровно тех полей, что уходят в PATCH /specialists/me — по нему
+ *  понимаем, есть ли несохранённые правки (G5-21). */
+function profileSnapshot(p: ProfileData): string {
+    return JSON.stringify([
+        p.firstName, p.lastName, p.photoUrl || null, p.tagline, p.bio,
+        p.specializations, p.formats, p.basePriceGel, p.sessionDurationMin,
+    ]);
+}
+
 export function CrmProfile() {
         const [profile, setProfile] = useState<ProfileData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -51,12 +64,16 @@ export function CrmProfile() {
     // Сбой загрузки ≠ «анкеты нет»: 404 — анкеты правда нет, остальное — ошибка
     // с «Повторить» (rule 8). Раньше любой сбой сети писал «Анкета не найдена».
     const [loadFailed, setLoadFailed] = useState(false);
+    // Последнее сохранённое состояние: есть правки → появляется полоса
+    // «Есть несохранённые изменения · Сохранить» и вопрос при уходе.
+    const [savedSnap, setSavedSnap] = useState<string | null>(null);
+    const dirty = !!profile && savedSnap !== null && profileSnapshot(profile) !== savedSnap;
 
     const loadProfile = () => {
         setLoading(true);
         setLoadFailed(false);
         api.get('/specialists/me')
-            .then(r => setProfile(r.data))
+            .then(r => { setProfile(r.data); setSavedSnap(profileSnapshot(r.data)); })
             .catch((e: any) => {
                 if (e?.response?.status !== 404) setLoadFailed(true);
                 toast.error('Не удалось загрузить анкету');
@@ -65,6 +82,18 @@ export function CrmProfile() {
     };
 
     useEffect(() => { loadProfile(); }, []);
+
+    // Закрыть вкладку / обновить страницу с несохранёнными правками —
+    // браузер переспросит (G5-21).
+    useEffect(() => {
+        if (!dirty) return;
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = '';
+        };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }, [dirty]);
 
     const handleSave = async () => {
         if (!profile) return;
@@ -82,9 +111,10 @@ export function CrmProfile() {
                 sessionDurationMin: profile.sessionDurationMin,
             });
             setProfile(r.data);
+            setSavedSnap(profileSnapshot(r.data));
             toast.success('Анкета сохранена');
-        } catch {
-            toast.error('Ошибка при сохранении');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось сохранить анкету — проверьте интернет и нажмите ещё раз'));
         } finally {
             setSaving(false);
         }
@@ -117,6 +147,7 @@ export function CrmProfile() {
                 loadFailed={loadFailed}
                 onRetry={loadProfile}
                 saving={saving}
+                dirty={dirty}
                 setProfile={setProfile}
                 newSpec={newSpec}
                 setNewSpec={setNewSpec}
@@ -134,14 +165,8 @@ export function CrmProfile() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const GHP_HAIRLINE = `1px solid ${GH.ink10}`;
-const GHP_MONO_LABEL: React.CSSProperties = {
-    fontFamily: GH_MONO,
-    fontSize: 12,
-    fontWeight: 500,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: GH.ink60,
-};
+/** Подпись поля: 14 px, ink-60, без капса (волна 3). */
+const GHP_LABEL: React.CSSProperties = { fontSize: 14, fontWeight: 500, color: GH.ink60 };
 
 function GridHouseCrmProfile({
     profile,
@@ -149,6 +174,7 @@ function GridHouseCrmProfile({
     loadFailed,
     onRetry,
     saving,
+    dirty,
     setProfile,
     newSpec,
     setNewSpec,
@@ -162,6 +188,7 @@ function GridHouseCrmProfile({
     loadFailed: boolean;
     onRetry: () => void;
     saving: boolean;
+    dirty: boolean;
     setProfile: React.Dispatch<React.SetStateAction<ProfileData | null>>;
     newSpec: string;
     setNewSpec: (v: string) => void;
@@ -191,51 +218,27 @@ function GridHouseCrmProfile({
 
     if (!profile) {
         return (
-            <div style={{ fontFamily: GH_SANS, color: GH.ink, padding: '120px 24px', textAlign: 'center', borderTop: `2px solid ${GH.ink}`, borderBottom: GHP_HAIRLINE }}>
-                <div style={{ ...GHP_MONO_LABEL, marginBottom: 14 }}>→ Ошибка</div>
-                <h2
-                    style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 800,
-                        fontSize: 'clamp(28px, 3.5vw, 44px)',
-                        lineHeight: 0.95,
-                        letterSpacing: '-0.02em',
-                        margin: 0,
-                        marginBottom: 10,
-                    }}
-                >
-                    Анкета не найдена.
-                </h2>
-                <div style={{ ...GHP_MONO_LABEL, color: GH.ink60 }}>
-                    Обратитесь к администратору для создания анкеты
+            <div style={{ fontFamily: GH_SANS, color: GH.ink, padding: '64px 24px', textAlign: 'center', border: GHP_HAIRLINE, maxWidth: 760 }}>
+                <h1 style={{ fontSize: 28, fontWeight: 600, margin: '0 0 12px' }}>Анкеты пока нет</h1>
+                <p style={{ fontSize: 16, color: GH.ink60, lineHeight: 1.5, maxWidth: 460, margin: '0 auto 24px' }}>
+                    Заполните анкету — по ней клиенты находят вас в каталоге. Если ваша карточка
+                    уже есть на сайте, напишите администратору: он привяжет её к аккаунту.
+                </p>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <Link to="/become-specialist" className="ui-btn ui-btn--primary">Заполнить анкету</Link>
+                    <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" className="ui-btn ui-btn--secondary">
+                        Написать администратору
+                    </a>
                 </div>
             </div>
         );
     }
-
-    const saveBtnStyle: React.CSSProperties = {
-        background: GH.ink,
-        color: GH.paper,
-        fontFamily: GH_MONO,
-        fontSize: 12,
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        padding: '14px 22px',
-        border: 'none',
-        cursor: saving ? 'default' : 'pointer',
-        opacity: saving ? 0.5 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 10,
-    };
 
     const inputStyle: React.CSSProperties = {
         width: '100%',
         padding: '10px 0',
         border: 'none',
         borderBottom: `2px solid ${GH.ink}`,
-        outline: 'none',
         background: 'transparent',
         fontFamily: GH_SANS,
         fontSize: 16,
@@ -243,35 +246,13 @@ function GridHouseCrmProfile({
     };
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, maxWidth: 760 }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: GHP_HAIRLINE, paddingBottom: 28, marginBottom: 36 }}>
-                <div style={{ ...GHP_MONO_LABEL, marginBottom: 14 }}>Раздел · Моя анкета</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
-                    <h1
-                        style={{
-                            fontFamily: GH_SANS,
-                            fontWeight: 800,
-                            fontSize: 'clamp(36px, 4.5vw, 56px)',
-                            lineHeight: 0.95,
-                            letterSpacing: '-0.02em',
-                            margin: 0,
-                        }}
-                    >
-                        {profile.firstName} {profile.lastName}.
-                    </h1>
-                    <button onClick={onSave} disabled={saving} style={saveBtnStyle}>
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                        {saving ? 'Сохраняем…' : 'Сохранить'}
-                    </button>
-                </div>
-                <div style={{ ...GHP_MONO_LABEL, marginTop: 10 }}>
-                    Публичный профиль в каталоге
-                </div>
-            </div>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 760 }}>
+            {/* Волна 3 (G5-21): одна кнопка сохранения — в липкой полосе внизу,
+                появляется только когда есть правки. */}
+            <PageHeader title="Анкета" description="Так вас видят клиенты в каталоге специалистов." />
 
             {/* ── Section 01 · Основное ── */}
-            <GHPSection num={1} title="Основное">
+            <GHPSection title="Основное">
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 24, marginBottom: 24 }}>
                     {/* Photo square */}
                     <div style={{ width: 120, height: 120, border: `2px solid ${GH.ink}`, background: GH.paper, position: 'relative', overflow: 'hidden' }}>
@@ -286,8 +267,8 @@ function GridHouseCrmProfile({
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     fontFamily: GH_SANS,
-                                    fontWeight: 800,
-                                    fontSize: 60,
+                                    fontWeight: 600,
+                                    fontSize: 56,
                                     lineHeight: 1,
                                     letterSpacing: '-0.04em',
                                     color: GH.ink,
@@ -299,30 +280,34 @@ function GridHouseCrmProfile({
                     </div>
 
                     <div>
-                        <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Фото профиля</div>
+                        <div style={{ ...GHP_LABEL, marginBottom: 6 }}>Фото профиля</div>
                         <PhotoUpload
                             onUploaded={(url) => setProfile((p) => (p ? { ...p, photoUrl: url } : p))}
                         />
-                        <div style={{ ...GHP_MONO_LABEL, color: GH.ink60, marginTop: 8 }}>
-                            jpg, png · до 2 МБ
+                        <div style={{ ...GHP_LABEL, marginTop: 8 }}>
+                            JPG или PNG, до 2 МБ
                         </div>
                     </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
                     <div>
-                        <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Имя</div>
+                        <label htmlFor="crm-profile-first" style={{ ...GHP_LABEL, display: 'block', marginBottom: 6 }}>Имя</label>
                         <input
+                            id="crm-profile-first"
                             type="text"
+                            autoComplete="given-name"
                             value={profile.firstName}
                             onChange={(e) => setProfile((p) => (p ? { ...p, firstName: e.target.value } : p))}
                             style={inputStyle}
                         />
                     </div>
                     <div>
-                        <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Фамилия</div>
+                        <label htmlFor="crm-profile-last" style={{ ...GHP_LABEL, display: 'block', marginBottom: 6 }}>Фамилия</label>
                         <input
+                            id="crm-profile-last"
                             type="text"
+                            autoComplete="family-name"
                             value={profile.lastName}
                             onChange={(e) => setProfile((p) => (p ? { ...p, lastName: e.target.value } : p))}
                             style={inputStyle}
@@ -331,8 +316,10 @@ function GridHouseCrmProfile({
                 </div>
 
                 <div>
-                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Короткое описание · tagline</div>
+                    <label htmlFor="crm-profile-tagline" style={{ ...GHP_LABEL, display: 'block', marginBottom: 6 }}>Короткое описание</label>
                     <input
+                        id="crm-profile-tagline"
+                        aria-describedby="crm-profile-tagline-count"
                         type="text"
                         value={profile.tagline}
                         onChange={(e) => setProfile((p) => (p ? { ...p, tagline: e.target.value } : p))}
@@ -340,25 +327,30 @@ function GridHouseCrmProfile({
                         placeholder="Психолог · КПТ · 5 лет практики"
                         style={inputStyle}
                     />
-                    <div style={{ ...GHP_MONO_LABEL, color: GH.ink60, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
-                        {String(profile.tagline.length).padStart(3, '0')} / 150
+                    <div id="crm-profile-tagline-count" style={{ ...GHP_LABEL, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
+                        {profile.tagline.length} из 150 знаков
                     </div>
                 </div>
             </GHPSection>
 
             {/* ── Section 02 · О себе ── */}
-            <GHPSection num={2} title="О себе">
+            <GHPSection title="О себе">
                 <textarea
+                    aria-label="О себе"
+                    aria-describedby="crm-profile-bio-hint"
                     value={profile.bio}
                     onChange={(e) => setProfile((p) => (p ? { ...p, bio: e.target.value } : p))}
                     rows={7}
                     placeholder="Ваш подход, образование, опыт работы…"
                     style={{ ...inputStyle, resize: 'vertical', fontFamily: GH_SANS, lineHeight: 1.55 }}
                 />
+                <div id="crm-profile-bio-hint" style={{ ...GHP_LABEL, marginTop: 8 }}>
+                    Можно оформить: ## — заголовок, **текст** — жирный.
+                </div>
             </GHPSection>
 
             {/* ── Section 03 · Специализации ── */}
-            <GHPSection num={3} title="Специализации">
+            <GHPSection title="Специализации">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20, minHeight: 32 }}>
                     {profile.specializations.map((spec) => (
                         <span
@@ -399,7 +391,8 @@ function GridHouseCrmProfile({
                                 onAddSpec(newSpec);
                             }
                         }}
-                        placeholder="Добавить…"
+                        placeholder="Своя специализация"
+                        aria-label="Добавить специализацию"
                         style={inputStyle}
                     />
                     <button
@@ -426,7 +419,7 @@ function GridHouseCrmProfile({
                 </div>
 
                 <div style={{ borderTop: GHP_HAIRLINE, paddingTop: 16 }}>
-                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 10 }}>→ Быстрый выбор</div>
+                    <div style={{ ...GHP_LABEL, marginBottom: 10 }}>Частые запросы</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                         {SPECIALIZATION_SUGGESTIONS.filter((s) => !profile.specializations.includes(s)).map((s) => (
                             <button
@@ -461,9 +454,9 @@ function GridHouseCrmProfile({
             </GHPSection>
 
             {/* ── Section 04 · Формат и стоимость ── */}
-            <GHPSection num={4} title="Формат и стоимость">
+            <GHPSection title="Формат и стоимость">
                 <div style={{ marginBottom: 28 }}>
-                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 12 }}>Формат работы</div>
+                    <div style={{ ...GHP_LABEL, marginBottom: 12 }}>Формат работы</div>
 
                     {/* Onlne checkbox */}
                     <FormatCheckbox
@@ -474,7 +467,7 @@ function GridHouseCrmProfile({
                     />
 
                     {/* Center checkboxes */}
-                    <div style={{ ...GHP_MONO_LABEL, marginTop: 24, marginBottom: 10 }}>Очно — в каких центрах</div>
+                    <div style={{ ...GHP_LABEL, marginTop: 24, marginBottom: 10 }}>Очно — в каких центрах</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {LOCATION_OPTIONS.map((loc) => (
                             <FormatCheckbox
@@ -492,9 +485,10 @@ function GridHouseCrmProfile({
                 </div>
 
                 <div>
-                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Базовая стоимость · ₾</div>
+                    <label htmlFor="crm-profile-price" style={{ ...GHP_LABEL, display: 'block', marginBottom: 6 }}>Стоимость сессии</label>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8, maxWidth: 240 }}>
                         <input
+                            id="crm-profile-price"
                             type="number"
                             value={profile.basePriceGel}
                             onChange={(e) => setProfile((p) => (p ? { ...p, basePriceGel: Number(e.target.value) } : p))}
@@ -504,9 +498,8 @@ function GridHouseCrmProfile({
                                 flex: 1,
                                 background: 'transparent',
                                 border: 'none',
-                                outline: 'none',
                                 fontFamily: GH_SANS,
-                                fontWeight: 700,
+                                fontWeight: 600,
                                 fontSize: 32,
                                 letterSpacing: '-0.02em',
                                 color: GH.ink,
@@ -520,10 +513,11 @@ function GridHouseCrmProfile({
                     </div>
                 </div>
 
-                <div>
-                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Длительность консультации · мин</div>
+                <div style={{ marginTop: 24 }}>
+                    <label htmlFor="crm-profile-duration" style={{ ...GHP_LABEL, display: 'block', marginBottom: 6 }}>Длительность сессии</label>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8, maxWidth: 240 }}>
                         <input
+                            id="crm-profile-duration"
                             type="number"
                             value={profile.sessionDurationMin ?? 50}
                             onChange={(e) => setProfile((p) => (p ? { ...p, sessionDurationMin: Number(e.target.value) } : p))}
@@ -534,9 +528,8 @@ function GridHouseCrmProfile({
                                 flex: 1,
                                 background: 'transparent',
                                 border: 'none',
-                                outline: 'none',
                                 fontFamily: GH_SANS,
-                                fontWeight: 700,
+                                fontWeight: 600,
                                 fontSize: 32,
                                 letterSpacing: '-0.02em',
                                 color: GH.ink,
@@ -544,48 +537,58 @@ function GridHouseCrmProfile({
                                 padding: 0,
                             }}
                         />
-                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.06em' }}>
-                            МИН
+                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60 }}>
+                            мин
                         </span>
                     </div>
-                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
+                    <div style={{ fontSize: 14, color: GH.ink60, marginTop: 6 }}>
                         Показывается в шапке вашего профиля на сайте.
                     </div>
                 </div>
             </GHPSection>
 
-            {/* ── Bottom save ── */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 24, paddingBottom: 40, borderTop: GHP_HAIRLINE, marginTop: 36 }}>
-                <button onClick={onSave} disabled={saving} style={saveBtnStyle}>
-                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    {saving ? 'Сохраняем…' : 'Сохранить изменения'}
-                </button>
-            </div>
+            {/* ── Липкая полоса сохранения: только когда есть правки ── */}
+            {(dirty || saving) && (
+                <div
+                    role="region"
+                    aria-label="Несохранённые изменения"
+                    style={{
+                        position: 'sticky',
+                        bottom: 0,
+                        zIndex: 'var(--z-sticky)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        flexWrap: 'wrap',
+                        padding: '12px 16px',
+                        margin: '24px 0 16px',
+                        background: GH.ink,
+                        color: GH.paper,
+                    }}
+                >
+                    <span style={{ fontSize: 16, fontWeight: 500 }}>Есть несохранённые изменения</span>
+                    <Button
+                        variant="primary"
+                        loading={saving}
+                        icon={<Save size={16} aria-hidden="true" />}
+                        onClick={onSave}
+                    >
+                        Сохранить анкету
+                    </Button>
+                </div>
+            )}
         </div>
     );
 }
 
-function GHPSection({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
+function GHPSection({ title, children }: { title: string; children: React.ReactNode }) {
     return (
-        <section style={{ marginBottom: 40, paddingBottom: 40, borderBottom: GHP_HAIRLINE }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 20, marginBottom: 24 }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', paddingTop: 6 }}>
-                    {String(num).padStart(2, '0')}
-                </div>
-                <h2
-                    style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 700,
-                        fontSize: 22,
-                        letterSpacing: '-0.01em',
-                        color: GH.ink,
-                        margin: 0,
-                    }}
-                >
-                    {title}
-                </h2>
-            </div>
-            <div style={{ paddingLeft: 80 }}>{children}</div>
+        <section style={{ marginBottom: 32, paddingBottom: 32, borderBottom: GHP_HAIRLINE }}>
+            <h2 style={{ fontFamily: GH_SANS, fontWeight: 600, fontSize: 20, color: GH.ink, margin: '0 0 16px' }}>
+                {title}
+            </h2>
+            {children}
         </section>
     );
 }
@@ -702,7 +705,7 @@ function FormatPreview({ formats }: { formats: string[] }) {
             lineHeight: 1.5,
             color: GH.ink,
         }}>
-            <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Так клиенты увидят формат</div>
+            <div style={{ ...GHP_LABEL, marginBottom: 6 }}>Так клиенты увидят формат</div>
             Ведёт приём{' '}{parts.flatMap((p, i) => i === 0 ? [p] : [' ', p])}.
         </div>
     );
@@ -739,7 +742,7 @@ function PhotoUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
             const baseUrl = (API_URL || '').replace('/api/v1', '');
             const fullUrl = `${baseUrl}${res.data.url}`;
             onUploaded(fullUrl);
-            toast.success('Фото загружено — не забудьте сохранить профиль');
+            toast.success('Фото загружено — сохраните анкету');
         } catch (err: unknown) {
             const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить фото');
@@ -770,7 +773,7 @@ function PhotoUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
                     border: 'none',
                     fontFamily: GH_SANS,
                     fontSize: 14,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     cursor: busy ? 'wait' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',

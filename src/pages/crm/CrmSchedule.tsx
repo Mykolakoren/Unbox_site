@@ -4,13 +4,16 @@ import { LOCATIONS } from '../../utils/data';
 import { useUserStore } from '../../store/userStore';
 import { ADMIN_ROLES } from '../../utils/permissions';
 import { Link } from 'react-router-dom';
-import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User, Plus, CalendarOff } from 'lucide-react';
+import { Save, Trash2, MapPin, Video, User, Plus, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { formatDayMonth, formatDateLabel, formatTime } from '../../utils/format';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { apiErrorMessage } from '../../utils/errors';
 
 const DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const LOCATION_OPTIONS = [
@@ -217,9 +220,9 @@ export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
                 isAvailable: o.is_available,
             }));
             await specialistsApi.updateSchedule(specialistId, [...weeklySlots, ...overrideSlots]);
-            toast.success('Расписание сохранено');
-        } catch {
-            toast.error('Ошибка при сохранении');
+            toast.success('Часы приёма сохранены');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось сохранить часы приёма — проверьте интернет и нажмите ещё раз'));
         } finally {
             setSaving(false);
         }
@@ -315,8 +318,8 @@ export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
                         await specialistsApi.cancelAppointment(specialistId, id);
                         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a));
                         toast.success('Запись отменена');
-                    } catch {
-                        toast.error('Не удалось отменить запись');
+                    } catch (e) {
+                        toast.error(apiErrorMessage(e, 'Не удалось отменить запись — попробуйте ещё раз'));
                     }
                 }}
             />
@@ -432,8 +435,8 @@ function GridHouseCrmSchedule({
                 <div style={{ ...GH_MONO_LABEL, marginBottom: 16 }}>{isError ? 'Нет связи' : 'Нет анкеты'}</div>
                 <div
                     style={{
-                        fontSize: 'clamp(28px, 3vw, 44px)',
-                        fontWeight: 800,
+                        fontSize: 'clamp(28px, 3vw, 40px)',
+                        fontWeight: 600,
                         lineHeight: 1.05,
                         letterSpacing: '-0.02em',
                         color: GH.ink,
@@ -473,62 +476,16 @@ function GridHouseCrmSchedule({
                 padding: narrow ? '20px 16px 24px' : undefined,
             }}
         >
-            {/* ── Header ── */}
-            <header
-                style={{
-                    borderBottom: GH_HAIRLINE_STRONG,
-                    paddingBottom: 20,
-                    marginBottom: 32,
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: 16,
-                }}
-            >
-                <div>
-                    <div style={{ ...GH_MONO_LABEL, marginBottom: 8 }}>Раздел · Расписание</div>
-                    <h1
-                        style={{
-                            fontSize: narrow ? 30 : 'clamp(36px, 4.5vw, 56px)',
-                            fontWeight: 800,
-                            lineHeight: 0.95,
-                            letterSpacing: '-0.025em',
-                            margin: 0,
-                        }}
-                    >
-                        Моё расписание.
-                    </h1>
-                    <div style={{ fontSize: 15, color: GH.ink60, marginTop: 8, maxWidth: 520 }}>
-                        Недельный шаблон: когда, где и в каком формате вы принимаете. Клиенты видят только то, что здесь отмечено.
-                    </div>
-                </div>
-
-                <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    style={{
-                        background: GH.ink,
-                        color: GH.paper,
-                        border: 'none',
-                        padding: '14px 24px',
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        cursor: saving ? 'not-allowed' : 'pointer',
-                        opacity: saving ? 0.5 : 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        transition: 'opacity 0.15s ease',
-                    }}
-                >
-                    <Save size={14} />
-                    {saving ? 'Сохранение…' : 'Сохранить'}
-                </button>
-            </header>
+            {/* ── Шапка (волна 3: PageHeader, «Часы приёма» по В4) ── */}
+            <PageHeader
+                title="Часы приёма"
+                description="Недельный шаблон: когда, где и в каком формате вы принимаете. Клиенты видят только то, что здесь отмечено."
+                actions={
+                    <Button variant="primary" loading={saving} icon={<Save size={16} aria-hidden="true" />} onClick={handleSave}>
+                        Сохранить
+                    </Button>
+                }
+            />
 
             {/* ── Weekly template section ── */}
             <section style={{ marginBottom: 56 }}>
@@ -542,7 +499,7 @@ function GridHouseCrmSchedule({
                 >
                     <h2 style={{ ...GH_MONO_LABEL, color: GH.ink }}>Недельный шаблон</h2>
                     <div style={{ ...GH_MONO_LABEL }}>
-                        Активных дней: {String(days.filter(d => d.enabled).length).padStart(2, '0')} / 07
+                        Рабочих дней: {days.filter(d => d.enabled).length} из 7
                     </div>
                 </div>
 
@@ -645,33 +602,16 @@ function GridHouseCrmSchedule({
             {/* На телефоне кнопка в шапке уезжает далеко вверх — дублируем
                 её после редактируемых блоков. */}
             {narrow && (
-                <button
+                <Button
+                    variant="primary"
+                    block
+                    loading={saving}
+                    icon={<Save size={16} aria-hidden="true" />}
                     onClick={handleSave}
-                    disabled={saving}
-                    style={{
-                        width: '100%',
-                        background: GH.ink,
-                        color: GH.paper,
-                        border: 'none',
-                        padding: '16px 24px',
-                        marginTop: -24,
-                        marginBottom: 48,
-                        fontFamily: GH_MONO,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        cursor: saving ? 'not-allowed' : 'pointer',
-                        opacity: saving ? 0.5 : 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 10,
-                    }}
+                    style={{ marginTop: -24, marginBottom: 48 }}
                 >
-                    <Save size={14} />
-                    {saving ? 'Сохранение…' : 'Сохранить расписание'}
-                </button>
+                    Сохранить часы приёма
+                </Button>
             )}
 
             {/* ── Upcoming appointments ── */}
@@ -686,7 +626,7 @@ function GridHouseCrmSchedule({
                 >
                     <h2 style={{ ...GH_MONO_LABEL, color: GH.ink }}>Предстоящие записи</h2>
                     <div style={GH_MONO_LABEL}>
-                        Всего: {String(upcomingAppointments.length).padStart(2, '0')}
+                        Всего: {upcomingAppointments.length}
                     </div>
                 </div>
 
@@ -745,7 +685,7 @@ function GridHouseCrmSchedule({
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
                                 >
-                                    {String(i + 1).padStart(2, '0')}
+                                    {i + 1}
                                 </div>
                                 <div
                                     style={{
@@ -884,7 +824,7 @@ function GridHouseDayRow({
                     paddingTop: 6,
                 }}
             >
-                {String(index + 1).padStart(2, '0')}
+                {index + 1}
             </div>
 
             {/* Toggle */}
@@ -901,7 +841,10 @@ function GridHouseDayRow({
                         padding: 0,
                         transition: 'background 0.15s ease',
                     }}
-                    aria-label={enabled ? 'Выключить день' : 'Включить день'}
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${GH_DOW_LABELS[index]} — рабочий день`}
                 >
                     <div
                         style={{
@@ -961,7 +904,6 @@ function GridHouseDayRow({
                                         background: 'transparent',
                                         padding: '4px 2px',
                                         color: GH.ink,
-                                        outline: 'none',
                                         flex: 1,
                                         minWidth: 120,
                                         // Узко: локация своей строкой под временем
@@ -1035,7 +977,6 @@ const GH_TIME_INPUT: React.CSSProperties = {
     background: 'transparent',
     padding: '4px 2px',
     color: GH.ink,
-    outline: 'none',
     width: 82,
     fontVariantNumeric: 'tabular-nums',
 };
@@ -1093,7 +1034,6 @@ function GridHouseOverrideRow({
                     background: 'transparent',
                     padding: '4px 2px',
                     color: GH.ink,
-                    outline: 'none',
                     width: '100%',
                     cursor: 'pointer',
                 }}
@@ -1155,7 +1095,6 @@ function GridHouseOverrideRow({
                                 background: 'transparent',
                                 padding: '4px 2px',
                                 color: GH.ink,
-                                outline: 'none',
                                 width: narrow ? 100 : 70,
                             }}
                         />
@@ -1172,7 +1111,6 @@ function GridHouseOverrideRow({
                                 background: 'transparent',
                                 padding: '4px 2px',
                                 color: GH.ink,
-                                outline: 'none',
                                 width: narrow ? 100 : 70,
                             }}
                         />
@@ -1198,7 +1136,6 @@ function GridHouseOverrideRow({
                             background: 'transparent',
                             padding: '4px 2px',
                             color: GH.ink,
-                            outline: 'none',
                             width: '100%',
                             cursor: 'pointer',
                         }}

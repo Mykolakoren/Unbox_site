@@ -1470,7 +1470,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         <span className="text-xs uppercase font-semibold">
                             {format(day, 'EEEEEE', { locale: ru })}
                         </span>
-                        <span className="font-bold text-base leading-none">{format(day, 'd')}</span>
+                        <span className="font-semibold text-base leading-none">{format(day, 'd')}</span>
                     </button>
                 );
             })}
@@ -1591,7 +1591,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         )}
                     >
                         <div className="min-w-0">
-                            <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
+                            <div className="text-xs font-semibold tabular-nums">{slot}–{endTime}</div>
                             <div className="text-xs truncate">
                                 {isMine
                                     ? (linkedSessions.length > 1
