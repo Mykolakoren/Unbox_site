@@ -23,6 +23,8 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
+import { AccountSelect } from '../../components/crm/AccountSelect';
+import { accountLabel as accountLabelOf, defaultPaymentAccount } from '../../utils/paymentAccounts';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { ruPlural } from '../../utils/plural';
 import { sessionDebt, sessionDebtIn } from '../../utils/sessionMoney';
@@ -268,7 +270,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
         { id: 'month', label: 'Месяц' },
     ];
     const accountLabel = (id?: string) =>
-        id ? (useCrmStore.getState().paymentAccounts.find(a => a.id === id)?.label || id) : '';
+        id ? accountLabelOf(id, useCrmStore.getState().paymentAccounts) : '';
     const kpiLoading = p.loading && !p.payments.length;
 
     return (
@@ -515,7 +517,10 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
 }) {
     const [clientId, setClientId] = useState('');
     const [amount, setAmount] = useState('');
-    const [account, setAccount] = useState('');
+    const paymentAccounts = useCrmStore(s => s.paymentAccounts);
+    // Счёт — из списка счетов (как везде в CRM), по умолчанию — счёт клиента, иначе наличные.
+    // Раньше тут было свободное поле: «Cash», «tbc», «TBC» набирались руками и плодили варианты.
+    const [account, setAccount] = useState(() => defaultPaymentAccount(useCrmStore.getState().paymentAccounts));
     const [saving, setSaving] = useState(false);
 
     const selectedClient = clients.find(c => c.id === clientId);
@@ -523,8 +528,9 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
     useEffect(() => {
         if (selectedClient) {
             setAmount(String(selectedClient.basePrice));
-            setAccount(selectedClient.defaultAccount || '');
+            setAccount(defaultPaymentAccount(paymentAccounts, selectedClient.defaultAccount));
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedClient]);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -593,14 +599,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                 </div>
                 <div>
                     <label htmlFor="fin-pay-account" style={labelStyle}>Счёт</label>
-                    <input
-                        id="fin-pay-account"
-                        type="text"
-                        value={account}
-                        onChange={e => setAccount(e.target.value)}
-                        placeholder="cash / bank / transfer"
-                        style={hairlineInput}
-                    />
+                    <AccountSelect value={account} onChange={setAccount} className="ui-input" />
                 </div>
             </div>
 

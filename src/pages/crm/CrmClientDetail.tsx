@@ -8,6 +8,7 @@ import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
 import { NewSessionSheet } from '../../components/crm/NewSessionSheet';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { SessionPaymentBlock } from '../../components/crm/SessionPaymentBlock';
+import { PaymentEditSheet } from '../../components/crm/PaymentEditSheet';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
     Phone, Mail, Plus, Trash2, Check, X, Pencil, Send, RefreshCw, StickyNote,
@@ -36,6 +37,7 @@ import { Field, Input, Select, TextArea } from '../../components/ui/Field';
 import { undoToast } from '../../components/ui/undoToast';
 import { statusLabel } from '../../design/statuses';
 import { paidLocally, partialPayment, sessionCurrencyOf, sessionDebt } from '../../utils/sessionMoney';
+import { accountLabel, accountSelectValue, defaultPaymentAccount, lastPaymentAccountOf } from '../../utils/paymentAccounts';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../mobile/admin/parseMoneyInput';
 
 /**
@@ -165,6 +167,8 @@ export function CrmClientDetail() {
     const [rescheduleFor, setRescheduleFor] = useState<CrmSession | null>(null);
     const [payingId, setPayingId] = useState<string | null>(null);
     const [showAllPayments, setShowAllPayments] = useState(false);
+    // Платёж, который правят карандашом в «Последних оплатах» (то же окно, что в блоке «Оплата»).
+    const [editingPayment, setEditingPayment] = useState<CrmPayment | null>(null);
     const [pausing, setPausing] = useState(false);
 
     // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
@@ -273,7 +277,7 @@ export function CrmClientDetail() {
         try {
             const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? paidLocally(s) : s));
-            const accLabel = result.account ? (paymentAccounts.find(a => a.id === result.account)?.label || result.account) : '';
+            const accLabel = result.account ? accountLabel(result.account, paymentAccounts) : '';
             // Сколько добавилось ЭТИМ нажатием (при доплате остатка — только он), а не весь платёж.
             const addedNow = result.added ?? result.amount;
             toast.success(`Оплата отмечена: ${formatMoney(addedNow, { currency: result.currency })}${accLabel ? ` · ${accLabel}` : ''}`);
@@ -575,6 +579,8 @@ export function CrmClientDetail() {
         (a, b) => parseUTC(b.date || b.createdAt).getTime() - parseUTC(a.date || a.createdAt).getTime(),
     );
     const visiblePayments = showAllPayments ? sortedPayments : sortedPayments.slice(0, PAYMENTS_PREVIEW);
+    // Счёт «по умолчанию» для новой оплаты: счёт клиента → счёт его последнего платежа → наличные.
+    const defaultAccount = defaultPaymentAccount(paymentAccounts, client.defaultAccount, lastPaymentAccountOf(payments));
 
     const goBookRoom = (s: CrmSession) => navigate('/dashboard/bookings', {
         state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
@@ -720,6 +726,7 @@ export function CrmClientDetail() {
                     editSessionCurrency={editSessionCurrency}
                     setEditSessionCurrency={setEditSessionCurrency}
                     paymentBySession={paymentBySession}
+                    defaultAccount={defaultAccount}
                     onPaymentChanged={reloadQuietly}
                     handleUpdateSession={handleUpdateSession}
                     setPendingDelete={setPendingDelete}
@@ -751,9 +758,22 @@ export function CrmClientDetail() {
                                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '2px 0' }}>
                                         <span style={{ flex: 1, minWidth: 0 }}>
                                             {formatDayMonth(p.date || p.createdAt, { withYear: 'auto' })}
-                                            {' · '}{paymentAccounts.find(a => a.id === p.account)?.label || p.account}
+                                            {' · '}{accountLabel(p.account, paymentAccounts)}
                                         </span>
                                         <span className="num" style={{ whiteSpace: 'nowrap' }}>{formatMoney(p.amount, { currency: p.currency })}</span>
+                                        {!viewingOther && (
+                                            <button
+                                                onClick={() => setEditingPayment(p)}
+                                                title="Изменить оплату"
+                                                aria-label={`Изменить оплату ${formatMoney(p.amount, { currency: p.currency })}`}
+                                                style={{
+                                                    width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    background: 'none', border: 'none', cursor: 'pointer', color: GH.ink60, flexShrink: 0,
+                                                }}
+                                            >
+                                                <Pencil size={13} aria-hidden="true" />
+                                            </button>
+                                        )}
                                         {!viewingOther && (
                                             <button
                                                 onClick={() => handleDeletePayment(p.id)}
@@ -810,6 +830,16 @@ export function CrmClientDetail() {
             sessions={sessions}
             onChanged={reloadQuietly}
         />
+
+        {/* Изменить оплату — то же окно, что в блоке «Оплата» панели сессии. */}
+        {editingPayment && (
+            <PaymentEditSheet
+                payment={editingPayment}
+                clientCurrency={client.currency}
+                onClose={() => setEditingPayment(null)}
+                onSaved={async () => { setEditingPayment(null); await reloadQuietly(); }}
+            />
+        )}
 
         <RescheduleSheet
             session={rescheduleFor}
@@ -939,6 +969,8 @@ interface HistoryProps {
     setEditSessionCurrency: (v: string) => void;
     /** Платёж каждой сессии — для блока «Оплата» в панели правки. */
     paymentBySession: Map<string, CrmPayment>;
+    /** Счёт по умолчанию для новой оплаты (клиента → последнего платежа → наличные). */
+    defaultAccount: string;
     onPaymentChanged: () => void | Promise<void>;
     handleUpdateSession: (sessionId: string, data: Partial<CrmSession>) => Promise<void>;
     setPendingDelete: (s: CrmSession | null) => void;
@@ -960,9 +992,11 @@ function HistorySection(props: HistoryProps) {
         payingId, onPay, handleUnmarkPaid, handleDeleteNote,
         editingSession, setEditingSession, editSessionPrice, setEditSessionPrice,
         editSessionAccount, setEditSessionAccount, editSessionCurrency, setEditSessionCurrency,
-        paymentBySession, onPaymentChanged, handleUpdateSession, setPendingDelete,
+        paymentBySession, defaultAccount, onPaymentChanged, handleUpdateSession, setPendingDelete,
         sessionNoteId, setSessionNoteId, sessionNoteText, setSessionNoteText, savingSessionNote, handleAddSessionNote,
     } = props;
+
+    const paymentAccounts = useCrmStore(s => s.paymentAccounts);
 
     // Шапка и строки — одна сетка с одинаковыми колонками и зазором, чтобы
     // статус не наезжал на сумму (M4). Если колонка уже минимума сетки
@@ -1128,7 +1162,7 @@ function HistorySection(props: HistoryProps) {
                                                     } else {
                                                         setEditingSession(session.id);
                                                         setEditSessionPrice(String(session.price ?? client.basePrice));
-                                                        setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
+                                                        setEditSessionAccount(accountSelectValue(session.account ?? defaultAccount, paymentAccounts));
                                                         setEditSessionCurrency(sessionCurrencyOf(session, client));
                                                     }
                                                 }}
@@ -1191,8 +1225,26 @@ function HistorySection(props: HistoryProps) {
                                 ))}
 
                                 {/* Правка цены, валюты, счёта и статуса */}
-                                {isEditing && (
+                                {isEditing && (() => {
+                                    // Платёж по сессии уже есть: «Счёт для оплаты» тут менял бы счёт СЕССИИ,
+                                    // а в «Последних оплатах» стоит счёт ПЛАТЕЖА (01.10 владелец менял поле
+                                    // и не понимал, почему платёж остался на Cash). Поэтому при платеже
+                                    // поля нет — счёт правится в блоке «Оплата» сверху.
+                                    const payment = paymentBySession.get(session.id);
+                                    const sessionAccountStart = accountSelectValue(session.account ?? defaultAccount, paymentAccounts);
+                                    return (
                                     <div style={{ marginTop: 8, padding: 12, background: GH.sunken, border: hairline }}>
+                                        {payment && (
+                                            <div style={{ marginBottom: 10 }}>
+                                                <SessionPaymentBlock
+                                                    session={session}
+                                                    client={client}
+                                                    payment={payment}
+                                                    readOnly={viewingOther}
+                                                    onChanged={onPaymentChanged}
+                                                />
+                                            </div>
+                                        )}
                                         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                                             <Field label="Цена" className="flex-1" error={editPriceError}>
                                                 <Input kind="money" value={editSessionPrice} onChange={e => setEditSessionPrice(e.target.value)} />
@@ -1202,10 +1254,12 @@ function HistorySection(props: HistoryProps) {
                                                     {currencyChoices.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
                                                 </Select>
                                             </Field>
-                                            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontWeight: 500, minWidth: 160 }}>
-                                                Счёт для оплаты
-                                                <AccountSelect className="ui-input" value={editSessionAccount} onChange={setEditSessionAccount} />
-                                            </label>
+                                            {!payment && (
+                                                <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontWeight: 500, minWidth: 160 }}>
+                                                    Счёт для оплаты
+                                                    <AccountSelect className="ui-input" value={editSessionAccount} onChange={setEditSessionAccount} />
+                                                </label>
+                                            )}
                                             <Button
                                                 size="compact"
                                                 disabled={parsedEditPrice === null}
@@ -1214,23 +1268,16 @@ function HistorySection(props: HistoryProps) {
                                                     // Валюту и счёт шлём, только если их поменяли: иначе правка
                                                     // одной цены «замораживала» бы счёт клиента по умолчанию
                                                     // (и счёт, выбранный позже при «Отметить оплату», игнорировался).
+                                                    // Счёт шлём лишь пока платежа нет: после оплаты он правится
+                                                    // в блоке «Оплата», а здесь молча менять счёт сессии нельзя.
                                                     const patch: Partial<CrmSession> = { price: parsedEditPrice };
                                                     if (editSessionCurrency !== sessionCurrencyOf(session, client)) patch.currency = editSessionCurrency;
-                                                    if (editSessionAccount !== (session.account ?? (client.defaultAccount || 'cash'))) patch.account = editSessionAccount;
+                                                    if (!payment && accountSelectValue(editSessionAccount, paymentAccounts) !== sessionAccountStart) patch.account = editSessionAccount;
                                                     handleUpdateSession(session.id, patch);
                                                 }}
                                             >
                                                 Сохранить
                                             </Button>
-                                        </div>
-                                        <div style={{ marginTop: 10 }}>
-                                            <SessionPaymentBlock
-                                                session={session}
-                                                client={client}
-                                                payment={paymentBySession.get(session.id)}
-                                                readOnly={viewingOther}
-                                                onChanged={onPaymentChanged}
-                                            />
                                         </div>
                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, paddingTop: 10, borderTop: hairline }}>
                                             {Object.entries(STATUS_LABELS).map(([key, label]) => (
@@ -1261,7 +1308,8 @@ function HistorySection(props: HistoryProps) {
                                             </button>
                                         </div>
                                     </div>
-                                )}
+                                    );
+                                })()}
                             </div>
                         );
                     })}

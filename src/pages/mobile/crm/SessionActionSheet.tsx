@@ -23,6 +23,7 @@ import { useCrmStore } from '../../../store/crmStore';
 import { nextSessionLabel } from './crmFlows';
 import { SessionPaymentBlock } from '../../../components/crm/SessionPaymentBlock';
 import { paidLocally, partialPayment } from '../../../utils/sessionMoney';
+import { accountSelectValue, defaultPaymentAccount } from '../../../utils/paymentAccounts';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -86,6 +87,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const [currencyRaw, setCurrencyRaw] = useState('GEL');
     const [accountRaw, setAccountRaw] = useState('');
     const [noteText, setNoteText] = useState('');
+    const paymentAccounts = useCrmStore(s => s.paymentAccounts);
     const { confirm } = useConfirmDialog();
 
     // Заметки к сессии — это те же записи (TherapistNote), что во вкладке
@@ -279,7 +281,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         if (m === 'price') {
             setPriceRaw((session.price ?? client?.basePrice ?? 0).toString());
             setCurrencyRaw(sessionCurrency(session, client).toUpperCase());
-            setAccountRaw(session.account ?? client?.defaultAccount ?? 'cash');
+            setAccountRaw(accountSelectValue(session.account ?? defaultPaymentAccount(paymentAccounts, client?.defaultAccount), paymentAccounts));
         }
         if (m === 'notes') setNoteText('');
         setMode(m);
@@ -302,7 +304,12 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             // «замораживался» бы на сессии при правке одной цены).
             const patch: Parameters<typeof crmApi.updateSession>[1] = { price: parsedPrice };
             if (currencyRaw !== sessionCurrency(session, client).toUpperCase()) patch.currency = currencyRaw;
-            if (accountRaw !== (session.account ?? client?.defaultAccount ?? 'cash')) patch.account = accountRaw;
+            // Платёж уже есть — счёт оплаты правится в блоке «Оплата», а не тут (поле скрыто):
+            // иначе менялся бы счёт сессии, а в оплатах стоял прежний (01.10).
+            if (!payment && accountSelectValue(accountRaw, paymentAccounts)
+                !== accountSelectValue(session.account ?? defaultPaymentAccount(paymentAccounts, client?.defaultAccount), paymentAccounts)) {
+                patch.account = accountRaw;
+            }
             await update(patch, 'Цена обновлена');
             setMode('main');
         } catch { /* toast already shown */ }
@@ -376,6 +383,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     error={priceError}
                     currency={currencyRaw}
                     account={accountRaw}
+                    hasPayment={!!payment}
                     onChange={setPriceRaw}
                     onCurrency={setCurrencyRaw}
                     onAccount={setAccountRaw}
@@ -586,9 +594,11 @@ function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
     );
 }
 
-function PriceForm({ value, error, currency, account, onChange, onCurrency, onAccount, onBack }: {
+function PriceForm({ value, error, currency, account, hasPayment, onChange, onCurrency, onAccount, onBack }: {
     value: string; error?: string;
     currency: string; account: string;
+    /** Платёж по сессии уже есть: счёт оплаты правится в блоке «Оплата», поля «Счёт» нет. */
+    hasPayment: boolean;
     onChange: (v: string) => void;
     onCurrency: (v: string) => void;
     onAccount: (v: string) => void;
@@ -598,8 +608,9 @@ function PriceForm({ value, error, currency, account, onChange, onCurrency, onAc
     const symbol = currencySymbol(currency);
     // Старое значение, которого нет в списках, остаётся выбираемым — форма не подменит его молча.
     const currencies = CURRENCIES.some(c => c.code === currency) ? CURRENCIES : [...CURRENCIES, { code: currency, symbol: currency, label: currency }];
-    const accounts = paymentAccounts.some(a => a.id === account) || !account
-        ? paymentAccounts : [...paymentAccounts, { id: account, label: account }];
+    const accountValue = accountSelectValue(account, paymentAccounts);
+    const accounts = paymentAccounts.some(a => a.id === accountValue) || !accountValue
+        ? paymentAccounts : [...paymentAccounts, { id: accountValue, label: accountValue }];
     // Кнопка «Сохранить цену» — в подвале шторки, неактивна при пустом поле.
     return (
         <FormShell title="Цена сессии" onBack={onBack}>
@@ -616,11 +627,17 @@ function PriceForm({ value, error, currency, account, onChange, onCurrency, onAc
                     {currencies.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
                 </Select>
             </Field>
-            <Field label="Счёт для оплаты">
-                <Select value={account} onChange={e => onAccount(e.target.value)}>
-                    {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-                </Select>
-            </Field>
+            {hasPayment ? (
+                <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--color-ink-60)' }}>
+                    Оплата уже внесена: счёт, сумма и день платежа правятся в блоке «Оплата» на экране сессии.
+                </p>
+            ) : (
+                <Field label="Счёт для оплаты">
+                    <Select value={accountValue} onChange={e => onAccount(e.target.value)}>
+                        {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                    </Select>
+                </Field>
+            )}
         </FormShell>
     );
 }
