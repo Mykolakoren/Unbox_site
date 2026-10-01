@@ -47,7 +47,10 @@ export function MobileAdminSpecialists() {
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [q, setQ] = useState('');
-    const [filter, setFilter] = useState<'all' | 'pending' | 'verified'>('all');
+    // ?filter=pending — из «Заявок» («Специалисты на проверке»).
+    const [filter, setFilter] = useState<'all' | 'pending' | 'verified'>(
+        () => (new URLSearchParams(window.location.search).get('filter') === 'pending' ? 'pending' : 'all'),
+    );
     const [failed, setFailed] = useState(false);
     const { confirm } = useConfirmDialog();
 

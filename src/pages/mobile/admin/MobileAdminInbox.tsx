@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Check, Clock, MapPin, X, Inbox } from 'lucide-react';
+import { Check, Clock, MapPin, X, Inbox, UserCheck, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 import { bookingsApi } from '../../../api/bookings';
+import { specialistsApi, type SpecialistProfile } from '../../../api/specialists';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES } from '../../../utils/data';
 import { formatBookingDuration } from '../../../utils/bookingHelpers';
@@ -41,6 +43,15 @@ export function MobileAdminInbox() {
     const [busy, setBusy] = useState<string | null>(null);
     const [rejecting, setRejecting] = useState<BookingHistoryItem | null>(null);
     const [rejectReason, setRejectReason] = useState('');
+
+    // Волна 4 (G9-admin-mobile-M2): анкеты специалистов на проверке — здесь
+    // же, а не только внутри «Специалистов».
+    const [specPending, setSpecPending] = useState<SpecialistProfile[]>([]);
+    useEffect(() => {
+        specialistsApi.adminList()
+            .then(list => setSpecPending(list.filter(s => s.applicationStatus === 'pending')))
+            .catch(() => setSpecPending([]));
+    }, []);
 
     const reload = () => {
         setLoading(true);
@@ -97,9 +108,34 @@ export function MobileAdminInbox() {
                         Заявки
                     </h1>
                     <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        Срочные брони, которые ждут вашего решения.
+                        Срочные брони и анкеты специалистов, которые ждут вашего решения.
                     </p>
                 </div>
+
+                {specPending.length > 0 && (
+                    <div style={{ padding: '0 16px' }}>
+                        <Link
+                            to="/m/admin/specialists?filter=pending"
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 12, minHeight: 48,
+                                background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
+                                borderRadius: 14, padding: '10px 14px', textDecoration: 'none',
+                            }}
+                        >
+                            <UserCheck size={20} aria-hidden="true" />
+                            <span style={{ flex: 1 }}>
+                                <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>
+                                    Специалисты на проверке: {specPending.length}
+                                </span>
+                                <span style={{ display: 'block', fontSize: 12 }}>
+                                    {specPending.slice(0, 3).map(s => `${s.firstName} ${s.lastName}`.trim()).join(', ')}
+                                    {specPending.length > 3 ? ' и другие' : ''}
+                                </span>
+                            </span>
+                            <ChevronRight size={18} aria-hidden="true" />
+                        </Link>
+                    </div>
+                )}
 
                 {failed && !loading && (
                     <div style={{ padding: '0 16px' }}>
@@ -118,7 +154,7 @@ export function MobileAdminInbox() {
                         <EmptyState
                             compact
                             icon={<Inbox size={28} />}
-                            title="Все заявки разобраны"
+                            title={specPending.length > 0 ? "Срочных броней нет" : "Все заявки разобраны"}
                             hint="Новые срочные брони появятся здесь."
                         />
                     </div>
