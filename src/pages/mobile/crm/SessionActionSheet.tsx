@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     Check, X, MapPin, Calendar, Trash2,
     Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock,
 } from 'lucide-react';
-import { crmApi, type CrmSession, type CrmClient, type CrmNote } from '../../../api/crm';
+import { crmApi, type CrmSession, type CrmClient, type CrmNote, type CrmPayment } from '../../../api/crm';
 import { formatBatumi, parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { CURRENCIES } from '../../../utils/currency';
@@ -21,6 +21,8 @@ import type { BookingHistoryItem } from '../../../store/types';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/parseMoneyInput';
 import { useCrmStore } from '../../../store/crmStore';
 import { nextSessionLabel } from './crmFlows';
+import { SessionPaymentBlock } from '../../../components/crm/SessionPaymentBlock';
+import { partialPayment } from '../../../utils/sessionMoney';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -80,6 +82,9 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const [resTime, setResTime] = useState('');
     const [resDur, setResDur] = useState(60);
     const [priceRaw, setPriceRaw] = useState('');
+    // Валюта и счёт сессии правятся вместе с ценой (раньше шла одна цена).
+    const [currencyRaw, setCurrencyRaw] = useState('GEL');
+    const [accountRaw, setAccountRaw] = useState('');
     const [noteText, setNoteText] = useState('');
     const { confirm } = useConfirmDialog();
 
@@ -101,6 +106,27 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         return () => { cancelled = true; };
     }, [session.id, session.clientId]);
     useEffect(() => loadNotes(), [loadNotes]);
+
+    // Платёж этой сессии — для блока «Оплата» (правка, доплата, расхождение с ценой).
+    // Перечитываем, когда сессия поменялась (оплатили, правили цену или платёж).
+    const [payment, setPayment] = useState<CrmPayment | null>(null);
+    useEffect(() => {
+        if (!session.isPaid && !(session.paidAmount && session.paidAmount > 0)) { setPayment(null); return; }
+        let cancelled = false;
+        crmApi.getPayments({ clientId: session.clientId })
+            .then(list => { if (!cancelled) setPayment(list.find(p => p.sessionId === session.id) ?? null); })
+            .catch(() => { if (!cancelled) setPayment(null); });
+        return () => { cancelled = true; };
+    }, [session.id, session.clientId, session.isPaid, session.price, session.currency, session.paidAmount]);
+    // Платёж поправили или доплатили: берём свежую сессию (внесено/остаток считает сервер).
+    const refreshSession = useCallback(async () => {
+        try {
+            const list = await crmApi.getSessions({ clientId: session.clientId });
+            const fresh = list.find(x => x.id === session.id);
+            if (fresh) onChange(fresh);
+        } catch { /* тихо: данные обновятся при следующем открытии */ }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.id, session.clientId]);
 
     // Старый текст из session.notes (писался шторкой до 29.09). Показываем,
     // пока его копии нет среди заметок сессии.
@@ -250,7 +276,11 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             setResTime(formatBatumi(session.date, 'HH:mm'));
             setResDur(session.durationMinutes ?? 60);
         }
-        if (m === 'price') setPriceRaw((session.price ?? 0).toString());
+        if (m === 'price') {
+            setPriceRaw((session.price ?? client?.basePrice ?? 0).toString());
+            setCurrencyRaw(sessionCurrency(session, client).toUpperCase());
+            setAccountRaw(session.account ?? client?.defaultAccount ?? 'cash');
+        }
         if (m === 'notes') setNoteText('');
         setMode(m);
     };
@@ -267,7 +297,10 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     };
     const submitPrice = async () => {
         if (parsedPrice === null) return;
-        try { await update({ price: parsedPrice }, 'Цена обновлена'); setMode('main'); } catch { /* toast already shown */ }
+        try {
+            await update({ price: parsedPrice, currency: currencyRaw, account: accountRaw }, 'Цена обновлена');
+            setMode('main');
+        } catch { /* toast already shown */ }
     };
     const submitNote = async () => {
         if (await handleAddNote(noteText)) setMode('main');
@@ -310,6 +343,15 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     onDelete={() => openMode('delete')}
                     onCabinet={() => openMode('cabinet')}
                     onBookNext={onBookNext && !viewingOther ? () => onBookNext(session) : undefined}
+                    paymentBlock={client && payment ? (
+                        <SessionPaymentBlock
+                            session={session}
+                            client={client}
+                            payment={payment}
+                            readOnly={viewingOther}
+                            onChanged={refreshSession}
+                        />
+                    ) : undefined}
                 />
             )}
             {mode === 'reschedule' && (
@@ -325,11 +367,13 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             )}
             {mode === 'price' && (
                 <PriceForm
-                    session={session}
-                    client={client}
                     value={priceRaw}
                     error={priceError}
+                    currency={currencyRaw}
+                    account={accountRaw}
                     onChange={setPriceRaw}
+                    onCurrency={setCurrencyRaw}
+                    onAccount={setAccountRaw}
                     onBack={() => setMode('main')}
                 />
             )}
@@ -370,7 +414,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
 
 function Main({
     session, client, busy, notes, legacyNote, onStatus, onPaid, onPrice, onNotes, onReschedule,
-    onDelete, onCabinet, onBookNext,
+    onDelete, onCabinet, onBookNext, paymentBlock,
 }: {
     session: CrmSession;
     client?: CrmClient;
@@ -385,6 +429,8 @@ function Main({
     onDelete: () => void;
     onCabinet: () => void;
     onBookNext?: () => void;
+    /** Блок «Оплата» (правка платежа, доплата, расхождение с ценой). */
+    paymentBlock?: ReactNode;
 }) {
     const navigate = useNavigate();
     // G6-M4: у будущей сессии нет «Прошла» — случайный тап делал завтрашнюю
@@ -398,6 +444,8 @@ function Main({
         <span aria-hidden="true" style={{ fontWeight: 600, fontSize: 16, lineHeight: 1 }}>{symbol}</span>
     );
     const priceText = session.price ? formatMoney(session.price, { currency }) : null;
+    // Частично оплачена: внесено, но не всё — на кнопке остаток, а не «Отметить оплату».
+    const partial = partialPayment(session, client);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -454,13 +502,16 @@ function Main({
                 промахнуться), а снятие оплаты удаляло платёж без вопроса. */}
             <Row
                 icon={currencyIcon}
-                label={session.isPaid ? 'Оплачено' : 'Отметить оплату'}
-                sub={priceText ?? 'цена не указана'}
+                label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
+                sub={partial
+                    ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
+                    : (priceText ?? 'цена не указана')}
                 pressed={!!session.isPaid}
                 disabled={busy}
                 right={<CheckMark on={!!session.isPaid} />}
                 onClick={() => onPaid(!session.isPaid)}
             />
+            {paymentBlock}
             <Row
                 icon={currencyIcon}
                 label="Цена"
@@ -530,12 +581,20 @@ function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
     );
 }
 
-function PriceForm({ session, client, value, error, onChange, onBack }: {
-    session: CrmSession; client?: CrmClient;
+function PriceForm({ value, error, currency, account, onChange, onCurrency, onAccount, onBack }: {
     value: string; error?: string;
-    onChange: (v: string) => void; onBack: () => void;
+    currency: string; account: string;
+    onChange: (v: string) => void;
+    onCurrency: (v: string) => void;
+    onAccount: (v: string) => void;
+    onBack: () => void;
 }) {
-    const symbol = currencySymbol(sessionCurrency(session, client));
+    const paymentAccounts = useCrmStore(s => s.paymentAccounts);
+    const symbol = currencySymbol(currency);
+    // Старое значение, которого нет в списках, остаётся выбираемым — форма не подменит его молча.
+    const currencies = CURRENCIES.some(c => c.code === currency) ? CURRENCIES : [...CURRENCIES, { code: currency, symbol: currency, label: currency }];
+    const accounts = paymentAccounts.some(a => a.id === account) || !account
+        ? paymentAccounts : [...paymentAccounts, { id: account, label: account }];
     // Кнопка «Сохранить цену» — в подвале шторки, неактивна при пустом поле.
     return (
         <FormShell title="Цена сессии" onBack={onBack}>
@@ -546,6 +605,16 @@ function PriceForm({ session, client, value, error, onChange, onBack }: {
                     value={value}
                     onChange={e => onChange(e.target.value)}
                 />
+            </Field>
+            <Field label="Валюта">
+                <Select value={currency} onChange={e => onCurrency(e.target.value)}>
+                    {currencies.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
+                </Select>
+            </Field>
+            <Field label="Счёт для оплаты">
+                <Select value={account} onChange={e => onAccount(e.target.value)}>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                </Select>
             </Field>
         </FormShell>
     );

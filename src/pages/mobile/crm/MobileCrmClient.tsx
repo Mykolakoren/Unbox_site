@@ -25,6 +25,7 @@ import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime, formatTimeRange } from '../../../utils/format';
 import { SessionActionSheet } from './SessionActionSheet';
 import { linkCabinetPath, nextSessionLabel, useBookNext } from './crmFlows';
+import { sessionDebt } from '../../../utils/sessionMoney';
 
 /** Дата/время из базы (UTC) — по Батуми. */
 const TZ = { timeZone: BATUMI_TZ };
@@ -211,10 +212,8 @@ export function MobileCrmClient() {
     const telHref = phoneHref(client.phone);
     const tgHref = telegramHref(client.telegram);
     const cur = client.currency || 'GEL';
-    const debtItems = unpaid.map(s => ({
-        amount: Number(s.price ?? client.basePrice ?? 0) || 0,
-        currency: (s.currency || cur).toUpperCase(),
-    }));
+    // Долг по сессии — остаток (цена минус внесённое), а не вся цена.
+    const debtItems = unpaid.map(s => sessionDebt(s, client));
     const debtTotal = totalsLabel(debtItems);
 
     const cabinetOf = (s: CrmSession): string | null => {

@@ -43,6 +43,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
+import { sessionDebt, sessionCurrencyOf } from '../../utils/sessionMoney';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -321,13 +322,12 @@ export function CrmSessions() {
         });
         const unpaidCount = unpaidSessions.length;
 
-        // Debt by currency — sum prices of unpaid completed sessions
+        // Debt by currency — остаток по неоплаченным завершённым сессиям (цена минус
+        // внесённое), а не вся цена: частично оплаченная сессия не висит в долге целиком.
         const debtByCur: Record<string, number> = {};
         unpaidSessions.forEach(s => {
-            const client = clientMap.get(s.clientId);
-            const cur = client?.currency || 'GEL';
-            const price = s.price ?? client?.basePrice ?? 0;
-            if (price > 0) debtByCur[cur] = (debtByCur[cur] || 0) + price;
+            const d = sessionDebt(s, clientMap.get(s.clientId));
+            if (d.amount > 0) debtByCur[d.currency] = (debtByCur[d.currency] || 0) + d.amount;
         });
         const debtEntries = Object.entries(debtByCur).filter(([, v]) => v > 0);
         const debtLabel = debtEntries.length > 0
@@ -571,6 +571,10 @@ function SessionEditPanel({
     const [duration, setDuration] = useState(String(session.durationMinutes));
     const [status, setStatus] = useState(getEffectiveStatus(session));
     const [price, setPrice] = useState(String(session.price ?? ''));
+    // Валюта сессии (замороженная, иначе клиента): раньше здесь правилась одна цена,
+    // а валюта терялась. Шлём её, только если её поменяли.
+    const startCurrency = sessionCurrencyOf(session, { currency: clientCurrency });
+    const [currency, setCurrency] = useState(startCurrency);
     const [clientId, setClientId] = useState(session.clientId);
     const [isPaid, setIsPaid] = useState(session.isPaid);
     const [account, setAccount] = useState(clientDefaultAccount || 'cash');
@@ -587,6 +591,7 @@ function SessionEditPanel({
                 status,
                 price: price ? Number(price) : undefined,
             };
+            if (currency !== startCurrency) updateData.currency = currency;
             if (clientId !== session.clientId) {
                 updateData.clientId = clientId;
             }
@@ -732,7 +737,7 @@ function SessionEditPanel({
                 </div>
                 <div>
                     <label className="text-xs font-medium text-unbox-dark mb-1 block">
-                        Цена, {currencySign(clientCurrency)}
+                        Цена, {currencySign(currency)}
                     </label>
                     <input
                         type="number"
@@ -740,6 +745,17 @@ function SessionEditPanel({
                         onChange={(e) => setPrice(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     />
+                </div>
+                <div>
+                    <label className="text-xs font-medium text-unbox-dark mb-1 block">Валюта</label>
+                    <select
+                        value={currency}
+                        onChange={(e) => setCurrency(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
+                    >
+                        {(CURRENCIES.some(c => c.code === currency) ? CURRENCIES : [...CURRENCIES, { code: currency, symbol: currency, label: currency }])
+                            .map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
+                    </select>
                 </div>
             </div>
 

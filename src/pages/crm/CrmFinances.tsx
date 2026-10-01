@@ -25,6 +25,7 @@ import { Button } from '../../components/ui/Button';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { ruPlural } from '../../utils/plural';
+import { sessionDebt, sessionDebtIn } from '../../utils/sessionMoney';
 import { telegramHref } from '../../utils/contactLinks';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
@@ -119,12 +120,12 @@ export function CrmFinances() {
 
         // Total debt grouped by currency — uses ALL unpaid sessions (not filtered by period)
         const debtByCur: Record<string, number> = {};
+        // Долг — остаток по сессии (цена минус внесённое), а не вся цена.
         allUnpaidSessions.forEach(s => {
             const client = clientMap.get(s.clientId);
             if (!client || !client.isActive) return;
-            const cur = client.currency || 'GEL';
-            const price = (s.price != null && s.price > 0) ? s.price : (client.basePrice || 0);
-            debtByCur[cur] = (debtByCur[cur] || 0) + price;
+            const d = sessionDebt(s, client);
+            debtByCur[d.currency] = (debtByCur[d.currency] || 0) + d.amount;
         });
 
         const held = sessions.filter(
@@ -161,10 +162,11 @@ export function CrmFinances() {
             .forEach(s => {
                 const client = clientMap.get(s.clientId);
                 if (!client || !client.isActive) return;
-                const price = (s.price != null && s.price > 0) ? s.price : (client.basePrice || 0);
+                // В валюте клиента: у клиента одна строка «Долг N», сессии могут быть в разных валютах.
+                const owed = sessionDebtIn(s, client, client.currency || 'GEL');
                 const ex = map.get(s.clientId) || { client, count: 0, total: 0 };
                 ex.count++;
-                ex.total += price;
+                ex.total += owed;
                 map.set(s.clientId, ex);
             });
         return Array.from(map.values()).filter(v => v.total > 0).sort((a, b) => b.total - a.total);

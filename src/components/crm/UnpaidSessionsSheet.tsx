@@ -11,6 +11,7 @@ import { useCrmStore } from '../../store/crmStore';
 import { toastApiError } from '../../utils/errors';
 import { formatDateLabel, formatMoney } from '../../utils/format';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
+import { partialPayment, sessionDebt } from '../../utils/sessionMoney';
 
 /**
  * UnpaidSessionsSheet — «Долг клиента» (волна 3, шаг 0). Телефон и компьютер.
@@ -44,12 +45,9 @@ function utcMs(date: string): number {
     return new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(date) ? date : `${date}Z`).getTime();
 }
 
-/** Цена и валюта так же, как их возьмёт сервер при оплате. */
+/** Сколько осталось по сессии: цена минус уже внесённое (remaining с сервера), в её валюте. */
 function amountOf(s: CrmSession, client: CrmClient): { amount: number; currency: string } {
-    return {
-        amount: Number(s.price ?? client.basePrice ?? 0) || 0,
-        currency: (s.currency || client.currency || 'GEL').toUpperCase(),
-    };
+    return sessionDebt(s, client);
 }
 
 /** «280 ₾ + 50 $» — по валютам, без пересчёта. */
@@ -183,6 +181,7 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
                         const w = utcNaiveToTbilisi(s.date);
                         const { amount, currency } = amountOf(s, client);
                         const money = formatMoney(amount, { currency });
+                        const partial = partialPayment(s, client);
                         return (
                             <li
                                 key={s.id}
@@ -198,6 +197,11 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
                                     <div className="num" style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)' }}>
                                         {w?.time ?? ''}{s.durationMinutes ? ` · ${s.durationMinutes} мин` : ''}
                                     </div>
+                                    {partial && (
+                                        <div className="num" style={{ fontSize: 'var(--text-small)', color: 'var(--color-ink-60)' }}>
+                                            {`Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`}
+                                        </div>
+                                    )}
                                 </div>
                                 <Button
                                     variant="secondary"
@@ -205,7 +209,7 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
                                     disabled={markingAll || viewingOther}
                                     onClick={() => payOne(s)}
                                 >
-                                    {amount > 0 ? `Отметить оплату · ${money}` : 'Отметить оплату'}
+                                    {partial ? `Доплатить · ${money}` : amount > 0 ? `Отметить оплату · ${money}` : 'Отметить оплату'}
                                 </Button>
                             </li>
                         );

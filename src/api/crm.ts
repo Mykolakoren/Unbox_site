@@ -71,6 +71,10 @@ export interface CrmSession {
     currency?: string;   // Frozen at payment time; null → use client.currency
     account?: string;    // Frozen at payment time; null → use client.defaultAccount
     isPaid: boolean;
+    /** Внесено по сессии, в валюте сессии (считает сервер; нет — не считали). */
+    paidAmount?: number | null;
+    /** Долг по сессии = цена − внесённое, в валюте сессии; у оплаченной 0. Нет — берите цену. */
+    remaining?: number | null;
     isBooked: boolean;
     notes?: string;
     googleEventId?: string;
@@ -106,6 +110,9 @@ export interface CrmSessionUpdate {
     durationMinutes?: number;
     status?: string;
     price?: number;
+    /** Валюта и счёт сессии (замораживаются на момент оплаты). */
+    currency?: string;
+    account?: string;
     isPaid?: boolean;
     isBooked?: boolean;
     bookingId?: string;
@@ -152,6 +159,14 @@ export interface CrmPaymentCreate {
     account?: string;
     date?: string;
     sessionId?: string;
+}
+
+/** Правка платежа: что не передано — не меняется. Клиента и сессию менять нельзя. */
+export interface CrmPaymentUpdate {
+    amount?: number;
+    currency?: string;
+    account?: string;
+    date?: string;
 }
 
 export interface CrmNote {
@@ -436,6 +451,12 @@ export const crmApi = {
 
     createPayment: async (data: CrmPaymentCreate): Promise<CrmPayment> => {
         const response = await api.post('/crm/payments', data);
+        return response.data;
+    },
+
+    /** Поправить платёж (сумма, валюта, счёт, дата). У сессии «оплачено» пересчитывается на сервере. */
+    updatePayment: async (paymentId: string, data: CrmPaymentUpdate): Promise<CrmPayment> => {
+        const response = await api.patch(`/crm/payments/${paymentId}`, data);
         return response.data;
     },
 
