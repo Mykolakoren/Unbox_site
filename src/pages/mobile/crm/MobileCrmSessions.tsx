@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CheckCircle2, XCircle, Clock, X } from 'lucide-react';
-import { format as fmtDate, addDays } from 'date-fns';
 import { crmApi, type CrmSession } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -13,6 +12,9 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { getStatusDef, statusLabel } from '../../../design/statuses';
 import { COLOR } from '../../../design/tokens';
 import { formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
+import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
+import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
+import { useBookNext } from './crmFlows';
 
 type Window = '7d' | '30d' | 'past7d' | 'past30d' | 'all';
 
@@ -43,10 +45,15 @@ const TONE_BG: Record<string, { bg: string; fg: string }> = {
  *
  * Tap a row → SessionActionSheet (full controls + bottom sheet).
  *
- * Wave 1: заголовок экрана, фильтры полными словами («Заплан./Завер./
- * Отмен.» → «Запланированные / Прошедшие / Отменённые»), статус строки —
+ * Wave 1: заголовок экрана, фильтры полными словами, статус строки —
  * из общего словаря, суммы — formatMoney («140 ₾», не «140 GEL»),
  * загрузка/ошибка/пусто — Skeleton/ErrorBar/EmptyState.
+ *
+ * Волна 3: «Сессии» — вкладка. После действия в шторке шторка показывает
+ * ТОТ ЖЕ обновлённый объект, а список обновляется в фоне без спиннера
+ * (G6-09: раньше шторка оставалась «Не оплачено», и повторный тап давал
+ * «Сессия уже отмечена оплаченной»). Прошедшие — от новых к старым (G6-17).
+ * Период — по дням Батуми. «Записать следующую» — как на «Сегодня».
  */
 export function MobileCrmSessions() {
     const [sessions, setSessions] = useState<CrmSession[]>([]);
@@ -57,40 +64,49 @@ export function MobileCrmSessions() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [q, setQ] = useState('');
     const { clients, fetchClients } = useCrmStore();
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     // Прошедшие сессии закрылись автоматически → статусы поменялись.
     const dataVersion = useCrmDataVersion();
+    useDocumentTitle('Сессии · Psy-CRM');
 
     useEffect(() => {
-        if (clients.length === 0) fetchClients(true).catch(() => {});
+        if (clients.length === 0) fetchClients(false, true).catch(() => {});
     }, [clients.length, fetchClients]);
 
+    // Границы — календарные дни по Батуми. Сервер сравнивает с UTC, поэтому
+    // начало берём на день раньше: сессия в 00:30 по Батуми не теряется.
     const range = useMemo(() => {
-        const today = new Date();
+        const today = tbilisiToday();
         switch (period) {
-            case '7d':       return { from: today, to: addDays(today, 7) };
-            case '30d':      return { from: today, to: addDays(today, 30) };
-            case 'past7d':   return { from: addDays(today, -7), to: today };
-            case 'past30d':  return { from: addDays(today, -30), to: today };
-            case 'all':      return { from: addDays(today, -365), to: addDays(today, 365) };
+            case '7d':       return { from: today, to: addDaysYmd(today, 7) };
+            case '30d':      return { from: today, to: addDaysYmd(today, 30) };
+            case 'past7d':   return { from: addDaysYmd(today, -7), to: today };
+            case 'past30d':  return { from: addDaysYmd(today, -30), to: today };
+            case 'all':      return { from: addDaysYmd(today, -365), to: addDaysYmd(today, 365) };
         }
     }, [period]);
 
-    const reload = async () => {
-        setLoading(true);
+    // Номер запроса: ответ за прошлый период не перезапишет новый.
+    const reqSeq = useRef(0);
+    /** quiet — обновить в фоне, не приглушая список (после действия в шторке). */
+    const reload = async (quiet = false) => {
+        const seq = ++reqSeq.current;
+        if (!quiet) setLoading(true);
         try {
-            const list = await crmApi.getSessions({
-                dateFrom: fmtDate(range.from, 'yyyy-MM-dd'),
-                dateTo: fmtDate(range.to, 'yyyy-MM-dd'),
-            });
+            const list = await crmApi.getSessions({ dateFrom: addDaysYmd(range.from, -1), dateTo: range.to });
+            if (seq !== reqSeq.current) return;
             setSessions(list);
             setFailed(false);
         } catch {
             // Сбой — не «нет сессий»: прежний список не затираем.
-            setFailed(true);
+            if (seq === reqSeq.current) setFailed(true);
         } finally {
-            setLoading(false);
+            if (seq === reqSeq.current) setLoading(false);
         }
     };
+
+    const bookNext = useBookNext(() => { reload(true); fetchClients(false, true).catch(() => {}); }, clients);
+    const isPast = period === 'past7d' || period === 'past30d';
 
     useEffect(() => { reload(); }, [period, dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -98,6 +114,9 @@ export function MobileCrmSessions() {
         const needle = q.trim().toLowerCase();
         return sessions
             .filter(s => {
+                // Запрос взят с запасом в день — оставляем свои дни по Батуми.
+                const day = utcNaiveToTbilisi(s.date)?.date;
+                if (day && (day < range.from || day > range.to)) return false;
                 if (statusFilter === 'planned' && s.status !== 'PLANNED') return false;
                 if (statusFilter === 'completed' && s.status !== 'COMPLETED') return false;
                 if (statusFilter === 'cancelled' && !s.status?.startsWith('CANCELLED')) return false;
@@ -109,11 +128,12 @@ export function MobileCrmSessions() {
                 return true;
             })
             .sort((a, b) => {
-                const ad = parseUTC(a.date as any).getTime();
-                const bd = parseUTC(b.date as any).getTime();
-                return ad - bd;
+                const ad = parseUTC(a.date).getTime();
+                const bd = parseUTC(b.date).getTime();
+                // Прошедшие — сначала свежие (G6-17), будущие — по порядку.
+                return isPast ? bd - ad : ad - bd;
             });
-    }, [sessions, statusFilter, q, clients]);
+    }, [sessions, statusFilter, q, clients, isPast, range]);
 
     const initialLoading = loading && sessions.length === 0 && !failed;
 
@@ -191,7 +211,7 @@ export function MobileCrmSessions() {
             </div>
 
             {failed && !loading && (
-                <ErrorBar message="Не удалось загрузить сессии" onRetry={reload} className="mb-3" />
+                <ErrorBar message="Не удалось загрузить сессии" onRetry={() => reload()} className="mb-3" />
             )}
 
             {initialLoading ? (
@@ -202,7 +222,7 @@ export function MobileCrmSessions() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: loading ? 0.6 : 1 }}>
                     {filtered.map(s => {
                         const client = clients.find(c => c.id === s.clientId);
-                        const dt = parseUTC(s.date as any);
+                        const dt = parseUTC(s.date);
                         const isCancelled = (s.status || '').startsWith('CANCELLED');
                         const isCompleted = s.status === 'COMPLETED';
                         const tone = TONE_BG[getStatusDef('session', s.status).tone];
@@ -268,10 +288,25 @@ export function MobileCrmSessions() {
                     session={activeSheet}
                     client={clients.find(c => c.id === activeSheet.clientId)}
                     onClose={() => setActiveSheet(null)}
-                    onChange={() => { reload(); }}
-                    onDeleted={() => { reload(); setActiveSheet(null); }}
+                    onChange={(updated) => {
+                        // G6-09: шторка показывает тот же обновлённый объект,
+                        // список подменяем сразу и тихо перечитываем.
+                        setSessions(prev => prev.map(x => x.id === updated.id ? updated : x));
+                        setActiveSheet(updated);
+                        reload(true);
+                    }}
+                    onDeleted={(id) => {
+                        setSessions(prev => prev.filter(x => x.id !== id));
+                        setActiveSheet(null);
+                        reload(true);
+                    }}
+                    onBookNext={viewingOther ? undefined : (s) => {
+                        setActiveSheet(null);
+                        bookNext.open(clients.find(c => c.id === s.clientId) ?? null, s);
+                    }}
                 />
             )}
+            {bookNext.sheet}
         </div>
     );
 }
