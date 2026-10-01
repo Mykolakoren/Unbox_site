@@ -48,6 +48,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatTime } from '../utils/format';
 import { ruCountWord } from '../utils/plural';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
+import { extraPoolLabel } from '../utils/subscriptionHours';
 import { ADMIN_ROLES } from '../utils/permissions';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
@@ -3767,6 +3768,7 @@ function SubscriptionStrip({ sub, onOpen }: { sub: any; onOpen: () => void }) {
             <Ticket size={16} className="text-ink-60" aria-hidden="true" />
             <span className="text-ink">
                 Абонемент «{sub.name}»: <span className="num font-semibold">{fmtHoursShort(sub.remainingHours)}</span> из <span className="num">{fmtHoursShort(total)}</span>
+                {extraPoolLabel(sub) && <> · {extraPoolLabel(sub)}</>}
                 {until && <> · до {until}</>}
                 {sub.isFrozen && <> · на паузе</>}
             </span>

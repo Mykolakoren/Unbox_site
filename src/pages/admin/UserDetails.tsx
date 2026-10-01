@@ -45,6 +45,7 @@ import { Field, Input, type InputKind } from '../../components/ui/Field';
 import { statusLabel } from '../../design/statuses';
 import { COLOR, SHADOW, STATUS, Z } from '../../design/tokens';
 import { formatGel, formatDayMonth, formatTime } from '../../utils/format';
+import { extraPoolLabel } from '../../utils/subscriptionHours';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 
@@ -675,7 +676,8 @@ export function AdminUserDetails() {
                                     const total = Number(sub.totalHours || 0) + Number(sub.bonusHours || 0);
                                     const until = sub.expiryDate ? formatDayMonth(sub.expiryDate, { withYear: 'auto' }) : null;
                                     if (life === 'completed') return `закончился${until ? ` ${until}` : ''}`;
-                                    const base = `осталось ${sub.remainingHours} из ${total} ч${until && !sub.flexible ? ` до ${until}` : ''}`;
+                                    const xl = extraPoolLabel(sub);
+                                    const base = `осталось ${sub.remainingHours} из ${total} ч${xl ? ` · ${xl.toLowerCase()}` : ''}${until && !sub.flexible ? ` до ${until}` : ''}`;
                                     return life === 'frozen' ? `${base} · на паузе` : base;
                                 })()}
                             </div>
@@ -1139,6 +1141,9 @@ export function AdminUserDetails() {
                                                             {subscriptionLifecycle(user.subscription as any) === 'completed'
                                                                 ? <>Использовано: <b>{(user.subscription.totalHours + (user.subscription.bonusHours || 0)) - user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>
                                                                 : <>Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>}
+                                                            {extraPoolLabel(user.subscription) && (
+                                                                <div>{extraPoolLabel(user.subscription)}</div>
+                                                            )}
                                                         </div>
                                                         <button
                                                             onClick={() => setIsTopupOpen(o => !o)}

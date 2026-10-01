@@ -7,6 +7,7 @@ import { parseISO } from 'date-fns';
 import { formatDayMonth } from '../utils/format';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
 import { fmtFreezeDays, freezeBudget } from '../utils/subscription';
+import { extraKindLabel, extraPool, extraPoolLabel } from '../utils/subscriptionHours';
 
 const ADMIN_TG = 'https://t.me/UnboxCenter';
 
@@ -97,6 +98,17 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     />
                 </div>
             </div>
+
+            {/* Доп. пул (владелец 01.10): часы капсулы / «4 ч индивидуально» —
+                тратятся первыми, только на свой вид брони. */}
+            {extraPoolLabel(sub) && (
+                <div className="mb-4 flex justify-between gap-3 text-small border-t border-ink-10 pt-3">
+                    <span className="text-ink-60">{extraKindLabel(extraPool(sub)!.kind)}</span>
+                    <span className="num font-semibold">
+                        осталось {fmtHours(extraPool(sub)!.remaining)} из {fmtHours(extraPool(sub)!.total)}
+                    </span>
+                </div>
+            )}
 
             {/* Что входит */}
             {plan?.perks && plan.perks.length > 0 && (

@@ -22,6 +22,7 @@ import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import { TopupSheet } from './TopupSheet';
 import { userCanAccessFinance } from '../../../utils/permissions';
+import { extraPoolLabel } from '../../../utils/subscriptionHours';
 import { DesktopLink } from './DesktopLink';
 
 /**
@@ -170,6 +171,7 @@ export function MobileAdminUserCard() {
                 <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
                     {sub
                         ? <>Абонемент «{sub.name}»: осталось <span className="num">{sub.remainingHours}</span> из <span className="num">{sub.totalHours}</span> ч
+                            {extraPoolLabel(sub) ? <> · {extraPoolLabel(sub)!.toLowerCase()}</> : null}
                             {sub.expiryDate && !sub.flexible ? <> до {formatDayMonth(sub.expiryDate)}</> : null}
                             {sub.isFrozen ? ' · заморожен' : ''}</>
                         : 'Абонемента нет'}

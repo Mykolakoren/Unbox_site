@@ -672,6 +672,31 @@ def test_resolve_payment_method_still_routes_extra_covered_quote_to_subscription
         assert q2.applied_rule != "SUBSCRIPTION", "кабинет покрыт, хотя основной пул пуст"
 
 
+def test_frontend_shows_extra_pool_and_mirrors_server_rules():
+    util = _read("src/utils/subscriptionHours.ts")
+    assert "export function extraPoolLabel(" in util and "export function extraApplies(" in util
+    # зеркало subscription_pool.extra_applies: капсульные часы — только капсула,
+    # «индивидуально» — только кабинет + индивидуальный формат
+    assert "p.kind === 'capsule'" in util and "return resource === 'capsule'" in util
+    assert "resource === 'cabinet' && format === 'individual'" in util
+    assert "'Капсула'" in util and "'Индивидуально'" in util and "осталось" in util
+    pp = _read("src/utils/paymentPriority.ts")
+    assert "extraAvailable(sub, opts.resourceKind, opts.format)" in pp, "оформление не знает про доп. пул"
+    assert "resourceKind: cartResourceKind(" in _read("src/components/Wizard/ConfirmationStep.tsx")
+    assert "resourceKind: cartResourceKind(" in _read("src/pages/mobile/MobileCheckout.tsx")
+    for rel in ("src/components/SubscriptionCard.tsx", "src/pages/mobile/MobileSubscription.tsx",
+                "src/pages/admin/UserDetails.tsx", "src/pages/mobile/admin/MobileAdminUserCard.tsx",
+                "src/pages/MyBookingsPage.tsx"):
+        assert "subscriptionHours'" in _read(rel), f"{rel}: карточка не показывает доп. пул"
+    types = _read("src/store/types.ts")
+    for f in ("extraKind", "extraHoursTotal", "extraHoursRemaining"):
+        assert f in types, f"нет {f} в Subscription"
+    # алиасы пула: оба диалекта
+    for snake, camel in (("extra_hours_total", "extraHoursTotal"), ("extra_hours_remaining", "extraHoursRemaining"),
+                         ("extra_hours_used", "extraHoursUsed"), ("extra_kind", "extraKind")):
+        assert P._ALIASES.get(snake) == camel, snake
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):
