@@ -97,6 +97,10 @@ export function MobileCrmClient() {
     useDocumentTitle('Клиент · Psy-CRM');
 
     useEffect(() => { fetchBookings?.(); }, [fetchBookings]);
+    // Счета специалиста (свои названия, не только «Наличные / TBC / BOG») —
+    // для подписи платежа в истории, как на компьютере (CrmLayout грузит их там).
+    const fetchPaymentAccounts = useCrmStore(s => s.fetchPaymentAccounts);
+    useEffect(() => { fetchPaymentAccounts(); }, [fetchPaymentAccounts]);
 
     /** Перечитать карточку (после записи, оплаты, заметки, правок в шторке). */
     const refresh = useCallback(() => setAttempt(a => a + 1), []);
@@ -561,6 +565,8 @@ function itemId(item: TimelineItem): string {
 
 /** Строка ленты клиента. Сессия — кнопка: открывает шторку сессии. */
 function TimelineRow({ item, onOpenSession }: { item: TimelineItem; onOpenSession: (s: CrmSession) => void }) {
+    // Счёт платежа — человеческим названием («Наличные»), а не id («cash»).
+    const paymentAccounts = useCrmStore(s => s.paymentAccounts);
     if (item.kind === 'session') {
         const s = item.session;
         const isCancelled = s.status?.startsWith('CANCELLED');
@@ -619,7 +625,7 @@ function TimelineRow({ item, onOpenSession }: { item: TimelineItem; onOpenSessio
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                         {formatDayMonth(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
-                        {p.account ? ` · ${p.account}` : ''}
+                        {p.account ? ` · ${paymentAccounts.find(a => a.id === p.account)?.label || p.account}` : ''}
                     </div>
                 </div>
             </div>
