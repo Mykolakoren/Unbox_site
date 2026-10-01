@@ -21,6 +21,7 @@ import { getStatusDef, statusLabel } from '../../../design/statuses';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { toastApiError } from '../../../utils/errors';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
+import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime, formatTimeRange } from '../../../utils/format';
 import { SessionActionSheet } from './SessionActionSheet';
 import { linkCabinetPath, nextSessionLabel, useBookNext } from './crmFlows';
@@ -56,7 +57,7 @@ type Balance = { totalPaid: number; totalExpected: number; debt: number; prepaym
  *    шторка сессии); если её нет — «Следующей нет · была 23 сент.» и
  *    [Записать · вт, 7 окт., 19:00] → NewSessionSheet со значениями
  *    прошлой сессии (G6-06).
- *  - Долг (G6-02): «Долг 280 ₾ · 2 сессии» [Отметить оплату · 280 ₾] →
+ *  - Долг (G6-02): «Долг 280 ₾ · 2 сессии» [Долг 280 ₾ · Оплатить] →
  *    UnpaidSessionsSheet (оплата по строке — quickPaySession, «все» — с
  *    вопросом). После оплаты карточка перечитывается.
  *  - История: строки сессий — кнопки, открывают ту же шторку сессии;
@@ -92,7 +93,8 @@ export function MobileCrmClient() {
     const [activeSheet, setActiveSheet] = useState<CrmSession | null>(null);
     const [unpaidOpen, setUnpaidOpen] = useState(false);
     const [noteOpen, setNoteOpen] = useState(false);
-    useDocumentTitle(client ? `${client.name} · Psy-CRM` : null);
+    // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
+    useDocumentTitle('Клиент · Psy-CRM');
 
     useEffect(() => { fetchBookings?.(); }, [fetchBookings]);
 
@@ -202,7 +204,8 @@ export function MobileCrmClient() {
         );
     }
 
-    const phoneClean = client.phone?.replace(/\s/g, '');
+    const telHref = phoneHref(client.phone);
+    const tgHref = telegramHref(client.telegram);
     const cur = client.currency || 'GEL';
     const debtItems = unpaid.map(s => ({
         amount: Number(s.price ?? client.basePrice ?? 0) || 0,
@@ -248,17 +251,17 @@ export function MobileCrmClient() {
             </div>
 
             {/* Contacts row */}
-            {(phoneClean || client.telegram || client.email) && (
+            {(telHref || tgHref || client.email) && (
                 <div style={{ padding: '0 16px', display: 'flex', gap: 8 }}>
-                    {phoneClean && (
-                        <a href={`tel:${phoneClean}`} style={contactBtn}>
+                    {telHref && (
+                        <a href={telHref} style={contactBtn}>
                             <Phone size={16} aria-hidden="true" />
                             <span style={{ fontSize: 12 }}>Звонок</span>
                         </a>
                     )}
-                    {client.telegram && (
+                    {tgHref && (
                         <a
-                            href={`https://t.me/${client.telegram.replace('@', '')}`}
+                            href={tgHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             // Нейтральная, как «Звонок» (аудит G6-18, X4-15).
@@ -352,8 +355,10 @@ export function MobileCrmClient() {
                             </div>
                         </div>
                         {!viewingOther && (
+                            // Кнопка только открывает список неоплаченных — подпись не
+                            // обещает мгновенную оплату (оплата — по строке в шторке).
                             <Button size="touch" onClick={() => setUnpaidOpen(true)}>
-                                {`Отметить оплату · ${debtTotal}`}
+                                {`Долг ${debtTotal} · Оплатить`}
                             </Button>
                         )}
                     </div>

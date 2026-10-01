@@ -19,6 +19,10 @@
   * После записи/оплаты экран не перечитывает данные (шторки стор не обновляют).
   * «Все сессии»: шторка снова показывает старый объект после действия (G6-09).
   * У будущей сессии снова главная кнопка «Прошла» (G6-M4).
+  * Ревью волны 3: имя клиента в заголовке вкладки карточки; ссылки t.me /
+    tel: снова собираются без проверки, мимо src/utils/contactLinks.ts;
+    кнопка долга «Отметить оплату · 280 ₾» обещает мгновенную оплату, хотя
+    только открывает список неоплаченных.
 
     python3 backend/tests/guard_wave3_mcrm.py
 """
@@ -150,6 +154,36 @@ def test_client_card_next_debt_note():
         assert text in code, f"карточка клиента: нет {text}"
     assert "navigate('/m/find')" not in code, "вернулась «Забронировать кабинет» без клиента"
     assert "useBookNext(() => refresh()" in code, "после записи карточка не перечитывается"
+
+
+def test_client_card_tab_title_has_no_name():
+    code = _code("MobileCrmClient.tsx")
+    titles = re.findall(r"useDocumentTitle\(([^;]*)\);", code)
+    assert titles == ["'Клиент · Psy-CRM'"], \
+        f"заголовок вкладки карточки клиента с именем (психотерапия, видно при показе экрана): {titles}"
+
+
+def test_contact_links_from_shared_util():
+    for name in ("MobileCrmClient.tsx", "MobileCrmClients.tsx"):
+        src = (MCRM / name).read_text(encoding="utf-8")
+        code = _strip_comments(src)
+        assert "import { phoneHref, telegramHref } from '../../../utils/contactLinks';" in src, \
+            f"{name}: ссылки «Позвонить / Telegram» — из общей contactLinks.ts"
+        assert "https://t.me/" not in code and "`tel:" not in code, \
+            f"{name}: ссылка t.me / tel: снова собирается без проверки ника и номера"
+    card = _code("MobileCrmClient.tsx")
+    assert "href={tgHref}" in card and "href={telHref}" in card
+    lst = _code("MobileCrmClients.tsx")
+    assert "href={telegramHref(c.telegram)!}" in lst and "href={phoneHref(c.phone)!}" in lst
+
+
+def test_client_card_debt_button_does_not_promise_instant_pay():
+    code = _code("MobileCrmClient.tsx")
+    i = code.index("onClick={() => setUnpaidOpen(true)}")
+    label = code[i:code.index("</Button>", i)]
+    assert "Долг ${debtTotal} · Оплатить" in label, "кнопка долга: «Долг 280 ₾ · Оплатить»"
+    assert "Отметить оплату" not in label, \
+        "кнопка долга только открывает список — «Отметить оплату · 280 ₾» обещает мгновенную оплату"
 
 
 def test_screens_reload_after_sheets():

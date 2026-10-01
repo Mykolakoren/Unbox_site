@@ -25,19 +25,11 @@ import { Button } from '../../components/ui/Button';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { ruPlural } from '../../utils/plural';
+import { telegramHref } from '../../utils/contactLinks';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
 function sessionsWord(n: number): string {
     return ruPlural(n, ['сессия', 'сессии', 'сессий']);
-}
-
-/** Ссылка «Написать» в Telegram, если он у клиента есть (G5-20). */
-function telegramHref(client: CrmClient): string | null {
-    const tg = (client.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '');
-    if (!tg) return null;
-    if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(tg)) return `https://t.me/${tg}`;
-    const digits = tg.replace(/[^\d]/g, '');
-    return digits.length >= 7 ? `https://t.me/+${digits}` : null;
 }
 
 type Period = 'day' | 'week' | 'month';
@@ -395,7 +387,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     </div>
                     <div>
                         {p.debtByClient.map(({ client, count, total }) => {
-                            const tg = telegramHref(client);
+                            const tg = telegramHref(client.telegram);
                             return (
                                 // flex с переносом: имя гибкое, сумма и кнопки
                                 // справа на компьютере или строкой ниже на узком.

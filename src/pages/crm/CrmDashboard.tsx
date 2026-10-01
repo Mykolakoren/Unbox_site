@@ -476,7 +476,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             {s.isPaid
                                                 ? <StatusBadge kind="payment" status="paid" audience="staff" />
                                                 : <StatusBadge kind="session" status={shownStatus} audience="staff" />}
-                                            {!cancelled && !s.isPaid && started && (
+                                            {/* В «просмотре как специалист» оплату не отмечаем — как везде. */}
+                                            {!cancelled && !s.isPaid && started && !viewingOther && (
                                                 <Button
                                                     loading={payingId === s.id}
                                                     disabled={!!payingId && payingId !== s.id}

@@ -142,7 +142,9 @@ function CrmQuickBookModal({
                 Number(price) || 0
             );
             toast.success('Бронирование создано' + (selectedClientId ? ' и сессия привязана' : ''));
-            onClose();
+            // onClose здесь НЕ зовём: onClose = «Отмена» и сбрасывает очередь
+            // периодов. После успеха окно ведёт родитель (handleBooked): открывает
+            // следующий период из очереди или закрывает окно, если очередь пуста.
         } catch (e: any) {
             const detail = e?.response?.data?.detail;
             if (typeof detail === 'object' && detail?.conflicts) {

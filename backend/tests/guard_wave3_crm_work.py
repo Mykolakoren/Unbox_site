@@ -14,6 +14,8 @@
           «Вернуть» не тем путём (unmarkPaidSession), оплата через
           updateSession({isPaid}).
   В1    — деньги за месяц на дашборде снова «Доход за месяц».
+  Ревью — в «просмотре как специалист» в «Сегодня» снова видна кнопка
+          «Отметить оплату» (везде в режиме просмотра она скрыта).
   G5-08 — в строке сессии снова 3–4 кнопки вместо одной главной и «⋯ Ещё».
   G5-13 / G5-M1 — «Новая сессия» снова своя форма (SessionForm), ?new=1 не
           открывает шторку, после записи нет «Все» / перечитки / прокрутки.
@@ -133,6 +135,16 @@ def test_dashboard_one_click_pay_with_undo():
     assert "crmApi.unmarkPaidSession(s.id)" in src, "«Вернуть» должно снимать оплату тем же путём, что шторка"
     assert "Отметить оплату · " in src, "кнопка оплаты должна называть сумму: «Отметить оплату · 140 ₾»"
     assert not re.search(r"updateSession\([^)]*isPaid", src), "оплата через updateSession({isPaid}) запрещена"
+
+
+def test_dashboard_today_pay_hidden_when_viewing_other():
+    """Ревью волны 3: в «просмотре как специалист» «Отметить оплату» в «Сегодня»
+    не показывается — как кнопки «Кабинет», «Записать» и «Новый клиент»."""
+    src = _code(DASH)
+    i = src.index("onClick={() => handlePay(s)}")
+    cond = src[src.rindex("{!cancelled", 0, i):i]
+    assert "&& !viewingOther && (" in cond, \
+        "«Сегодня»: «Отметить оплату» видна в режиме просмотра чужой CRM"
 
 
 def test_dashboard_shelves_use_wave3_sheets():

@@ -22,6 +22,7 @@ import { toastApiError } from '../../utils/errors';
 import { suggestNextSession, toTbilisiNaive, utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { contactHref } from '../../utils/contactLinks';
 import { STATUS } from '../../design/tokens';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -89,19 +90,6 @@ const STATUS_LABELS: Record<string, string> = Object.fromEntries(
 /** «вт, 7 окт.» — коротко для кнопки «Записать на …» (как в NewSessionSheet). */
 function shortDayLabel(ymd: string): string {
     return `${formatWeekdayShort(ymd, { capitalize: false })}, ${formatDayMonthShort(ymd)}`;
-}
-
-/** Ссылка «Написать»: Telegram, если он есть, иначе телефон. */
-function contactHref(client: CrmClient): { href: string; label: string } | null {
-    const tg = (client.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '');
-    if (tg) {
-        const digits = tg.replace(/[^\d+]/g, '');
-        if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(tg)) return { href: `https://t.me/${tg}`, label: 'Написать в Telegram' };
-        if (/^\+?\d{7,}$/.test(digits)) return { href: `https://t.me/+${digits.replace(/^\+/, '')}`, label: 'Написать в Telegram' };
-    }
-    const phone = (client.phone || '').replace(/[^\d+]/g, '');
-    if (phone.length >= 7) return { href: `tel:${phone}`, label: 'Позвонить' };
-    return null;
 }
 
 /** «280 ₾» или «280 ₾ + 50 $» — по валютам, без пересчёта. */
@@ -175,7 +163,8 @@ export function CrmClientDetail() {
     const [showAllPayments, setShowAllPayments] = useState(false);
     const [pausing, setPausing] = useState(false);
 
-    useDocumentTitle(client ? `${client.name} · Клиенты` : null);
+    // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
+    useDocumentTitle('Клиент · Psy-CRM');
 
     const loadData = useCallback(async () => {
         if (!clientId) return;

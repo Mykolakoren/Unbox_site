@@ -10,6 +10,9 @@
     сессию на бронь, защита от двойного клика (savingRef) пропала, поля цены
     перестали быть type="number" (иначе «50,5» → NaN → 0), пересдача
     (claimable → окно брони) или «следить» (WaitlistSubscribeModal) пропали.
+  * Ревью волны 3 — очередь периодов: выделили два периода, забронировали
+    первый — окно второго должно открыться само. Ломалось, когда окно после
+    успешной брони звало onClose (= «Отмена», сбрасывает очередь).
   * G5-16 — свои брони не тёмные, чужие залиты серым, колокольчик виден
     всегда, легенда не объясняет все виды клеток, «без клиента» красным,
     вернулась «+ Бронь», которая ничего не делала.
@@ -87,6 +90,29 @@ def test_handle_booked_links_session_to_booking():
     assert "if (clientId && bookingId)" in body, "handleBooked: сессия без брони/клиента"
     assert "bookingId," in body and "isBooked: true," in body, "handleBooked: сессия не привязана к брони"
     assert "pendingChunks.length > 0" in body, "очередь нескольких периодов сломана"
+
+
+def test_quick_book_queue_survives_success():
+    """Два периода: после успешной брони первого окно второго открывается само.
+    onClose = «Отмена» и сбрасывает очередь, поэтому после onBooked окно его
+    не зовёт — дальше ведёт handleBooked (следующий период или закрыть)."""
+    chess = _read(CHESS)
+    handle = _strip_comments(_fn(chess, "const handleBook = async", "// Волна 3 (X4-04)"))
+    i = handle.index("await onBooked(")
+    after_success = handle[i:handle.index("} catch", i)]
+    assert "onClose()" not in after_success, \
+        "после успешной брони окно зовёт onClose — очередь периодов сбрасывается, второй период теряется"
+    booked = _fn(chess, "const handleBooked = async", "// Handle saving multi-slot")
+    assert "setPendingChunks(rest);" in booked and "setBookSlot({ resId: next.resId" in booked, \
+        "handleBooked не открывает следующий период"
+    assert "setBookSlot(null);" in booked, "handleBooked не закрывает окно, когда очередь пуста"
+    main = chess[chess.index("// ─── Main Component"):]
+    modals = re.findall(r"<CrmQuickBookModal(.*?)onBooked=\{handleBooked\}", main, re.S)
+    assert len(modals) == 2, f"ожидали два места с CrmQuickBookModal, нашли {len(modals)}"
+    for m in modals:
+        assert "key={`${bookSlot.resId}|${bookSlot.time}|${bookSlot.duration}`}" in m, \
+            "у окна брони пропал key — 2-й период откроется с длительностью 1-го"
+        assert "setPendingChunks([])" in m, "«Отмена» посреди очереди больше не сбрасывает оставшиеся периоды"
 
 
 def test_link_modal_double_click_guard_and_series():

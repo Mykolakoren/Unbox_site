@@ -11,7 +11,12 @@
     updateSession({isPaid…}) вместо quickPaySession.
   * with_stats: будущая сессия попала в lastPastSessionDate, чужие сессии
     (другой специалист) или отменённые считаются в nextSessionDate.
-  * index.css: html, body снова overflow-x: hidden (ломает sticky, X1-M3).
+  * index.css: у html, body последним стоит не overflow-x: clip (hidden ломает
+    sticky, X1-M3) или пропал запасной hidden перед clip для iOS ≤ 15.
+  * src/utils/contactLinks.ts (ревью волны 3): ссылка t.me строится из мусора
+    («Анна в телеге»), без Telegram кнопка ведёт не на tel: с подписью
+    «Позвонить»; функции исполняются через node.
+  * Мёртвый src/components/SidebarLayout.tsx вернулся или его снова импортируют.
 
 Без сети и боевой базы (SQLite в памяти + чтение исходников):
     python3 backend/tests/guard_wave3_foundation.py
@@ -225,8 +230,66 @@ def test_index_css_overflow_clip():
     css = _strip_comments(_read("src/index.css"))
     m = re.search(r"html\s*,\s*body\s*\{([^}]*)\}", css)
     assert m, "нет правила html, body в index.css"
-    assert re.search(r"overflow-x:\s*clip", m.group(1)), "html, body: нужен overflow-x: clip (X1-M3)"
-    assert not re.search(r"overflow-x:\s*hidden", m.group(1)), "html, body: hidden ломает sticky"
+    vals = re.findall(r"overflow-x:\s*([a-z-]+)", m.group(1))
+    assert vals and vals[-1] == "clip", \
+        f"html, body: последним должен стоять overflow-x: clip (hidden ломает sticky, X1-M3), сейчас {vals}"
+    # hidden разрешён только как запасной вариант ПЕРЕД clip: iOS ≤ 15 clip
+    # не знает и без него остаётся с горизонтальной прокруткой.
+    assert vals[:-1] == ["hidden"], \
+        f"html, body: перед clip нужен ровно один запасной overflow-x: hidden для iOS ≤ 15, сейчас {vals}"
+
+
+# ── contactLinks.ts (ревью волны 3) ───────────────────────────────────────
+
+CONTACT = "src/utils/contactLinks.ts"
+
+
+def test_contact_links_util_has_no_imports():
+    code = _strip_comments(_read(CONTACT))
+    assert not re.search(r"^\s*import\s", code, flags=re.M), \
+        "contactLinks.ts должен быть без импортов — его гоняет node"
+    for fn in ("telegramHref", "phoneHref", "contactHref"):
+        assert f"export function {fn}(" in code, f"contactLinks.ts: нет {fn}"
+
+
+def test_contact_links_validate_nick_and_number():
+    cases = {
+        "nick": "m.telegramHref('@anna_k')",
+        "url": "m.telegramHref('https://t.me/anna_k')",
+        "bare_url": "m.telegramHref('t.me/anna_k')",
+        "number": "m.telegramHref('+995 599 32-46-68')",
+        "junk": "m.telegramHref('Анна в телеге')",
+        "short": "m.telegramHref('@ab')",
+        "empty": "m.telegramHref('')",
+        "phone": "m.phoneHref('+995 599 324 668')",
+        "phone_short": "m.phoneHref('12-34')",
+        "c_tg": "m.contactHref({ telegram: '@anna_k', phone: '+995599324668' })",
+        "c_tel": "m.contactHref({ telegram: 'Анна в телеге', phone: '+995 599 324 668' })",
+        "c_none": "m.contactHref({ telegram: '', phone: '' })",
+    }
+    expr = "{" + ", ".join(f"{k}: {v}" for k, v in cases.items()) + "}"
+    r = _node_eval(CONTACT, expr)
+    if r is None:
+        print("    (node ≥ 22.6 нет — проверка contactLinks по исполнению пропущена)")
+        return
+    assert r["nick"] == "https://t.me/anna_k", r
+    assert r["url"] == "https://t.me/anna_k" and r["bare_url"] == "https://t.me/anna_k", r
+    assert r["number"] == "https://t.me/+995599324668", r
+    assert r["junk"] is None and r["short"] is None and r["empty"] is None, \
+        f"из мусора в поле Telegram строится битая ссылка t.me: {r}"
+    assert r["phone"] == "tel:+995599324668" and r["phone_short"] is None, r
+    assert r["c_tg"] == {"href": "https://t.me/anna_k", "label": "Написать в Telegram"}, r
+    # Без (корректного) Telegram — звонок, и подпись «Позвонить», не «Написать».
+    assert r["c_tel"] == {"href": "tel:+995599324668", "label": "Позвонить"}, r
+    assert r["c_none"] is None, r
+
+
+def test_dead_sidebar_layout_stays_deleted():
+    assert not (ROOT / "src/components/SidebarLayout.tsx").exists(), \
+        "вернулся мёртвый SidebarLayout.tsx (не рендерится с апреля)"
+    for p in (ROOT / "src").rglob("*.ts*"):
+        code = _strip_comments(p.read_text(encoding="utf-8"))
+        assert "SidebarLayout" not in code, f"{p.relative_to(ROOT)}: импорт удалённого SidebarLayout"
 
 
 if __name__ == "__main__":

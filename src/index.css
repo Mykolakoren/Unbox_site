@@ -149,8 +149,11 @@
 /* ── Prevent horizontal scroll on mobile ──
  * clip, а не hidden (X1-M3, волна 3): hidden делает html/body контейнером
  * прокрутки, и position: sticky у шапок и подвалов внутри перестаёт липнуть.
- * clip режет вылезающее так же, но прокрутку не создаёт. */
+ * clip режет вылезающее так же, но прокрутку не создаёт.
+ * hidden строкой выше — запасной вариант для iOS ≤ 15 (clip не знает):
+ * там браузер возьмёт hidden, новые перекроют его clip. */
 html, body {
+  overflow-x: hidden;
   overflow-x: clip;
   max-width: 100vw;
 }

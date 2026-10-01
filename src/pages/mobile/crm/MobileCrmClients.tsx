@@ -14,6 +14,7 @@ import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { formatDayMonth, formatMoney } from '../../../utils/format';
 import { utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
+import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { useCrmDataVersion } from './crmDataVersion';
 import { shortDay } from './crmFlows';
 import { usePullToRefresh } from '../usePullToRefresh';
@@ -233,18 +234,18 @@ export function MobileCrmClients() {
                                 <ClientSecondLine c={c} />
                             </div>
                         </Link>
-                        {c.phone && (
+                        {phoneHref(c.phone) && (
                             <a
-                                href={`tel:${c.phone.replace(/\s/g, '')}`}
+                                href={phoneHref(c.phone)!}
                                 aria-label={`Позвонить: ${c.name}`}
                                 style={iconBtn}
                             >
                                 <Phone size={16} aria-hidden="true" />
                             </a>
                         )}
-                        {c.telegram && (
+                        {telegramHref(c.telegram) && (
                             <a
-                                href={`https://t.me/${c.telegram.replace('@', '')}`}
+                                href={telegramHref(c.telegram)!}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 aria-label={`Написать в Telegram: ${c.name}`}

@@ -16,6 +16,13 @@
   В1     — деньги за период в Финансах — «Касса · с долгами».
   G5-20  — у долга «Отметить оплату» (UnpaidSessionsSheet) и «Написать» (t.me).
   G5-24  — заметки ~72 знака, имя-ссылка, без номеров, «Скрывать текст».
+  Ревью волны 3:
+    • заголовок вкладки карточки без имени клиента («Клиент · Psy-CRM»);
+    • ссылки «Написать / Позвонить» — из общей src/utils/contactLinks.ts, без
+      своих копий t.me в карточке и Финансах;
+    • без Telegram кнопка карточки — «Позвонить» с иконкой телефона на tel:,
+      а не «Написать»;
+    • «Скрывать текст»: поиск не ищет по тексту скрытых заметок.
   ЗАПРЕТЫ — денежные обработчики карточки и их вопросы, applyPriceTo, режим
            просмотра в Финансах, notesText, оплата только quickPaySession.
 
@@ -206,7 +213,9 @@ def test_finances_journal_links_and_debt_actions():
     code = _strip_comments(src)
     assert code.count("to={`/crm/clients/${client.id}`}") >= 2, "строки долга и журнала ведут в карточку клиента"
     assert "<UnpaidSessionsSheet" in src and "p.onMarkPaid(client)" in src, "у долга нет «Отметить оплату»"
-    assert "https://t.me/" in src and "Написать" in src, "у долга нет «Написать»"
+    assert "telegramHref(client.telegram)" in code and "Написать" in src, "у долга нет «Написать»"
+    assert "from '../../utils/contactLinks'" in src, "ссылка t.me у долга — из общей contactLinks.ts"
+    assert "https://t.me/" not in code, "в Финансах снова своя сборка ссылки t.me без проверки"
     assert "padStart" not in code, "номера строк 001… вернулись"
 
 
@@ -230,6 +239,53 @@ def test_notes_reading_width_link_and_hide():
     assert "hideText={readHide()}" in src, "окно удаления не должно цитировать скрытую заметку"
     prev = _read("preview")
     assert "hideText" in prev
+
+
+def test_notes_search_skips_hidden_text():
+    """Ревью волны 3: при «Скрывать текст» поиск по content скрытой заметки
+    выдаёт её содержимое («депрессия» → осталась одна заметка Анны)."""
+    code = _strip_comments(_read("notes"))
+    m = re.search(r"const filtered = useMemo\(\(\) => \{(.*?)\}, \[([^\]]*)\]\);", code, re.S)
+    assert m, "в CrmNotes нет фильтра поиска const filtered = useMemo(…)"
+    body, deps = m.group(1), m.group(2)
+    assert "const textSearchable = !hideText || revealed.has(n.id);" in body, \
+        "поиск должен знать, скрыт ли текст заметки (hideText / revealed)"
+    assert body.count("n.content") == 1 and "textSearchable && n.content.toLowerCase().includes(q)" in body, \
+        "по тексту скрытой заметки снова ищут — по выдаче угадывается содержимое"
+    assert "n.tags" in body and "clientMap.get(n.clientId)?.name" in body, "поиск по тегам и имени клиента пропал"
+    assert "hideText" in deps and "revealed" in deps, "фильтр не пересчитывается при «Скрывать/Показывать»"
+
+
+# ── Ревью волны 3: приватность и контакты в карточке ────────────────────────
+
+def test_card_tab_title_has_no_client_name():
+    """Психотерапия: имя клиента во вкладке видно при показе экрана и остаётся
+    в истории браузера."""
+    code = _strip_comments(_read("detail"))
+    titles = re.findall(r"useDocumentTitle\(([^;]*)\);", code)
+    assert titles == ["'Клиент · Psy-CRM'"], f"заголовок вкладки карточки: {titles}"
+
+
+def test_card_contact_from_shared_util():
+    src = _read("detail")
+    code = _strip_comments(src)
+    assert "import { contactHref } from '../../utils/contactLinks';" in src, \
+        "карточка: contactHref — из общей src/utils/contactLinks.ts"
+    assert "function contactHref" not in code and "https://t.me/" not in code, \
+        "в карточке снова своя копия проверки ника/номера"
+
+
+def test_card_without_telegram_offers_call():
+    """Фикс 04cea69: без Telegram кнопка ведёт на tel: и подписана
+    «Позвонить» (contact.label), а не «Написать»."""
+    code = _strip_comments(_read("detail"))
+    m = re.search(r"contact\.href\.startsWith\('tel:'\) \?\s*\((.*?)\)\s*:\s*\((.*?)\)\s*\)", code, re.S)
+    assert m, "у кнопки связи нет ветки для tel: — без Telegram снова «Написать» на звонок"
+    tel, tg = m.group(1), m.group(2)
+    assert "href={contact.href}" in tel and "<Phone" in tel and "{contact.label}" in tel, \
+        "ветка tel: должна быть «Позвонить» (contact.label) с иконкой телефона"
+    assert "Написать" not in tel and 'target="_blank"' not in tel, "ветка tel: снова «Написать» / новая вкладка"
+    assert "Написать" in tg and "<Send" in tg, "ветка Telegram потеряла «Написать»"
 
 
 # ── Общее для пакета ─────────────────────────────────────────────────────────

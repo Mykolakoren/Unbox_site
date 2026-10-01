@@ -65,22 +65,10 @@ export function CrmNotes() {
         return map;
     }, [clients]);
 
-    const filtered = useMemo(() => {
-        if (!search) return notes;
-        const q = search.toLowerCase();
-        return notes.filter(
-            (n) =>
-                n.content.toLowerCase().includes(q) ||
-                n.tags?.toLowerCase().includes(q) ||
-                clientMap.get(n.clientId)?.name.toLowerCase().includes(q)
-        );
-    }, [notes, search, clientMap]);
-
     return (
 
             <GridHouseCrmNotes
                 notes={notes}
-                filtered={filtered}
                 clients={clients}
                 clientMap={clientMap}
                 loading={loading || !loaded}
@@ -132,7 +120,6 @@ const META: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, color: GH
 
 function GridHouseCrmNotes({
     notes,
-    filtered,
     clients,
     clientMap,
     loading,
@@ -149,7 +136,6 @@ function GridHouseCrmNotes({
     onDelete,
 }: {
     notes: CrmNote[];
-    filtered: CrmNote[];
     clients: CrmClient[];
     clientMap: Map<string, CrmClient>;
     loading: boolean;
@@ -175,6 +161,20 @@ function GridHouseCrmNotes({
         setRevealed(new Set());
         try { localStorage.setItem(HIDE_KEY, next ? '1' : '0'); } catch { /* приватное окно — не страшно */ }
     };
+
+    // Поиск живёт здесь, рядом с «Скрывать текст»: пока текст скрыт и заметка
+    // не раскрыта, по её content не ищем — иначе по выдаче можно угадать,
+    // что написано («депрессия» → осталась одна заметка Анны). Ищем по имени и тегам.
+    const filtered = useMemo(() => {
+        if (!search) return notes;
+        const q = search.toLowerCase();
+        return notes.filter((n) => {
+            const textSearchable = !hideText || revealed.has(n.id);
+            return (textSearchable && n.content.toLowerCase().includes(q)) ||
+                n.tags?.toLowerCase().includes(q) ||
+                clientMap.get(n.clientId)?.name.toLowerCase().includes(q);
+        });
+    }, [notes, search, clientMap, hideText, revealed]);
 
     const filteredBy = search || filterClient;
 
@@ -210,7 +210,7 @@ function GridHouseCrmNotes({
                         type="search"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Текст, тег или имя клиента"
+                        placeholder={hideText ? 'Тег или имя клиента' : 'Текст, тег или имя клиента'}
                         aria-label="Поиск по заметкам"
                         style={{ flex: 1, background: 'transparent', border: 'none', fontFamily: GH_SANS, fontSize: 15, color: GH.ink, minHeight: 36 }}
                     />
