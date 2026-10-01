@@ -5,7 +5,7 @@ import { analyticsApi, type OwnerAnalytics, type MonthlyMetric } from '../../api
 import { useUserStore } from '../../store/userStore';
 import { toast } from 'sonner';
 import { STATUS } from '../../design/tokens';
-import { formatGel } from '../../utils/format';
+import { formatGel, formatMonthLabel } from '../../utils/format';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 
@@ -58,24 +58,38 @@ export function OwnerAnalytics() {
 
     const maxHistRev = useMemo(() => Math.max(1, ...history.map(h => h.revenue)), [history]);
 
+    // G7-22: выбранный пресет видно (раньше «Этот месяц / Прошлый месяц» не подсвечивались).
+    const activePreset = (() => {
+        const now = new Date();
+        if (from === iso(firstOfMonth(now)) && to === iso(now)) return 'this';
+        const p = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const end = new Date(now.getFullYear(), now.getMonth(), 0);
+        if (from === iso(p) && to === iso(end)) return 'prev';
+        return null;
+    })();
+    const presetStyle = (kind: 'this' | 'prev'): React.CSSProperties => activePreset === kind
+        ? { ...chip, background: GH.ink, color: GH.paper, borderColor: GH.ink }
+        : chip;
+
     // Строго персональный доступ — даже по прямой ссылке (бэкенд тоже вернёт 403).
     if (currentUser && (currentUser.email || '').toLowerCase() !== 'koren.nikolas@gmail.com') {
         return <Navigate to="/admin" replace />;
     }
 
     return (
-        <div style={{ padding: '20px clamp(12px,3vw,28px) 80px', maxWidth: 1200, margin: '0 auto', fontFamily: GH_SANS, color: GH.ink }}>
+        // G7-14: без своего maxWidth/padding — отступы даёт AdminLayout, край как у других страниц.
+        <div style={{ paddingBottom: 80, fontFamily: GH_SANS, color: GH.ink }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
                 <div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60 }}>АНАЛИТИКА · ВЛАДЕЛЕЦ</div>
                     <h1 style={{ fontSize: 'clamp(24px,3vw,34px)', fontWeight: 800, margin: '4px 0 0' }}>Обзор бизнеса</h1>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <button onClick={() => preset('this')} style={chip}>Этот месяц</button>
-                    <button onClick={() => preset('prev')} style={chip}>Прошлый месяц</button>
-                    <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={dateInput} />
+                    <button type="button" aria-pressed={activePreset === 'this'} onClick={() => preset('this')} style={presetStyle('this')}>Этот месяц</button>
+                    <button type="button" aria-pressed={activePreset === 'prev'} onClick={() => preset('prev')} style={presetStyle('prev')}>Прошлый месяц</button>
+                    <input type="date" aria-label="Начало периода" value={from} onChange={e => setFrom(e.target.value)} style={dateInput} />
                     <span style={{ color: GH.ink60 }}>—</span>
-                    <input type="date" value={to} onChange={e => setTo(e.target.value)} style={dateInput} />
+                    <input type="date" aria-label="Конец периода" value={to} onChange={e => setTo(e.target.value)} style={dateInput} />
                 </div>
             </div>
 
@@ -95,13 +109,14 @@ export function OwnerAnalytics() {
                         <Tile label="Выручка" value={formatGel(data.summary.revenue)} accent />
                         <Tile label="Броней" value={fmt(data.summary.bookings)} />
                         <Tile label="Часов аренды" value={fmt(data.summary.hours)} />
-                        <Tile label="Загрузка" value={`${data.summary.occupancyPct}%`} />
+                        <Tile label="Загрузка" value={`${fmt(data.summary.occupancyPct)}%`} />
                         <Tile label="Средний чек" value={formatGel(data.summary.avgCheck)} />
                     </div>
 
                     {/* Деньги, которых не видно в «выручке» — контроль владельца */}
                     <Section title="Куда уходят деньги">
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
+                        {/* G7-22: сетка 3×2 — шестая карточка больше не висит одна во втором ряду. */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
                             <div style={card}>
                                 <div style={{ fontSize: 12, color: GH.ink60 }}>Бесплатные часы</div>
                                 <div style={{ fontSize: 22, fontWeight: 800 }}>{fmt(data.summary.freeHours)} ч</div>
@@ -157,7 +172,7 @@ export function OwnerAnalytics() {
                                     <Row k="Средний чек" v={formatGel(c.avgCheck)} />
                                     <div style={{ marginTop: 10 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: GH.ink60, marginBottom: 4 }}>
-                                            <span>Загрузка</span><span style={{ fontWeight: 700, color: GH.ink }}>{c.occupancyPct}%</span>
+                                            <span>Загрузка</span><span style={{ fontWeight: 700, color: GH.ink }}>{fmt(c.occupancyPct)}%</span>
                                         </div>
                                         <Bar pct={c.occupancyPct} />
                                     </div>
@@ -170,10 +185,10 @@ export function OwnerAnalytics() {
                     <Section title="Загрузка по кабинетам">
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {data.byRoom.map(r => (
-                                <div key={r.resourceId} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 90px', gap: 12, alignItems: 'center' }}>
+                                <div key={r.resourceId} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 130px', gap: 12, alignItems: 'center' }}>
                                     <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
                                     <Bar pct={r.occupancyPct} />
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, textAlign: 'right' }}>{r.occupancyPct}% · {fmt(r.hours)}ч</div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(r.occupancyPct)}% · {fmt(r.hours)} ч</div>
                                 </div>
                             ))}
                         </div>
@@ -233,7 +248,7 @@ export function OwnerAnalytics() {
                                                 {x.freeHours > 0 ? fmt(x.freeHours) : '—'}
                                             </td>
                                             <td style={{ padding: '8px 10px', textAlign: 'right' }}>{formatGel(x.paid)}</td>
-                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{x.ratePerHour}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{fmt(Number(x.ratePerHour) || 0)}</td>
                                             <td style={{ padding: '8px 10px', textAlign: 'right', color: x.balance < 0 ? STATUS.danger.fg : GH.ink60 }}>
                                                 {formatGel(x.balance)}
                                             </td>
@@ -277,17 +292,32 @@ export function OwnerAnalytics() {
                         {history.length === 0 ? (
                             <div style={{ color: GH.ink60, fontSize: 13 }}>Пока нет сохранённых месяцев. Снимки создаются автоматически 1-го числа (или кнопкой выше).</div>
                         ) : (
-                            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', overflowX: 'auto', paddingBottom: 8 }}>
-                                {[...history].reverse().map(h => (
-                                    <div key={h.month} style={{ textAlign: 'center', minWidth: 56 }}>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, marginBottom: 4 }}>{fmt(h.revenue)}</div>
-                                        <div style={{ height: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-                                            <div style={{ width: 30, height: `${Math.max(4, (h.revenue / maxHistRev) * 100)}%`, background: GH.accent }} />
-                                        </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, marginTop: 4 }}>{h.month.slice(5)}·{h.month.slice(2, 4)}</div>
-                                        <div style={{ fontSize: 12, color: GH.ink60 }}>{h.occupancyPct}%</div>
-                                    </div>
-                                ))}
+                            // G7-22: таблица на всю ширину вместо трёх тонких столбиков у левого края.
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
+                                    <thead>
+                                        <tr style={{ textAlign: 'left', color: GH.ink60, fontSize: 12 }}>
+                                            <th style={{ padding: '8px 10px' }}>Месяц</th>
+                                            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Выручка</th>
+                                            <th style={{ padding: '8px 10px', width: '40%' }}></th>
+                                            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Загрузка</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {history.map(h => (
+                                            <tr key={h.month} style={{ borderTop: `1px solid ${GH.ink10}` }}>
+                                                <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{formatMonthLabel(`${h.month.slice(0, 7)}-15`, { capitalize: true })}</td>
+                                                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: GH_MONO, whiteSpace: 'nowrap' }}>{formatGel(h.revenue, { fraction: 0 })}</td>
+                                                <td style={{ padding: '8px 10px' }}>
+                                                    <div style={{ height: 8, background: GH.ink10 }}>
+                                                        <div style={{ height: '100%', width: `${Math.max(2, (h.revenue / maxHistRev) * 100)}%`, background: GH.accent }} />
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: GH_MONO }}>{fmt(h.occupancyPct)}%</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </Section>
