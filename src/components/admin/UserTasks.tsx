@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { formatDayMonth } from '../../utils/format';
 import clsx from 'clsx';
 import { LegacyButton as Button } from '../ui/LegacyButton';
+import { undoToast } from '../ui/undoToast';
 
 interface UserTasksProps {
     email: string;
@@ -12,7 +13,17 @@ interface UserTasksProps {
 }
 
 export function UserTasks({ email, tasks }: UserTasksProps) {
-    const { addUserTask, toggleUserTask, removeUserTask } = useUserStore();
+    const { addUserTask, toggleUserTask, removeUserTask, updateUserById } = useUserStore();
+
+    // Волна 4: удаление без вопроса, но с «Вернуть» на 5 секунд.
+    const handleRemoveTask = (task: Task) => {
+        removeUserTask(email, task.id);
+        undoToast('Задача удалена', () => {
+            const fresh = useUserStore.getState().users.find(u => u.email === email)?.adminTasks || [];
+            if (fresh.some(t => t.id === task.id)) return;
+            return updateUserById(email, { adminTasks: [...fresh, task] } as any);
+        });
+    };
     const [newTaskText, setNewTaskText] = useState('');
     const [dueDate, setDueDate] = useState('');
 
@@ -119,7 +130,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                             </div>
 
                             <button
-                                onClick={() => removeUserTask(email, task.id)}
+                                onClick={() => handleRemoveTask(task)}
                                 aria-label="Удалить задачу"
                                 className="text-ink-60 hover:text-[var(--status-danger-fg)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
                             >

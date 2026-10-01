@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, X, Globe, Phone, Mail, MessageCircle, Send, Instagram } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { LegacyButton as Button } from '../ui/LegacyButton';
+import { undoToast } from '../ui/undoToast';
 
 interface UserContactsProps {
     email: string;
@@ -34,9 +35,20 @@ export function UserContacts({ email, contacts }: UserContactsProps) {
         setIsAdding(false);
     };
 
+    // Волна 4: удаление сразу, но с «Вернуть» на 5 секунд (раньше контакт
+    // пропадал молча — промах мышью стирал Telegram клиента без следа).
     const handleRemove = (index: number) => {
+        const removed = contacts[index];
+        if (!removed) return;
         const updatedContacts = contacts.filter((_, i) => i !== index);
         updateUserById(email, { additionalContacts: updatedContacts });
+        undoToast(`Контакт «${removed.value}» удалён`, () => {
+            // Возвращаем на прежнее место в СВЕЖЕМ списке (вдруг за 5 с добавили другой).
+            const fresh = useUserStore.getState().users.find(u => u.email === email)?.additionalContacts || [];
+            const restored = [...fresh];
+            restored.splice(Math.min(index, restored.length), 0, removed);
+            return updateUserById(email, { additionalContacts: restored });
+        });
     };
 
     const getIcon = (typeId: string) => {

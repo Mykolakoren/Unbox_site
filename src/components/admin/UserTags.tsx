@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Tag, Plus, X } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import { undoToast } from '../ui/undoToast';
 
 interface UserTagsProps {
     email: string;
@@ -21,6 +22,12 @@ export function UserTags({ email, tags }: UserTagsProps) {
     const { addUserTag, removeUserTag } = useUserStore();
     const [isAdding, setIsAdding] = useState(false);
     const [newTag, setNewTag] = useState('');
+
+    // Волна 4: тег снимается сразу, «Вернуть» — 5 секунд.
+    const handleRemove = (tag: string) => {
+        removeUserTag(email, tag);
+        undoToast(`Тег «${tag}» снят`, () => addUserTag(email, tag));
+    };
 
     const handleAdd = (tag: string) => {
         if (!tag.trim()) return;
@@ -48,7 +55,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                         <div key={tag} className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${colorClass}`}>
                             {tag}
                             <button
-                                onClick={() => removeUserTag(email, tag)}
+                                onClick={() => handleRemove(tag)}
                                 aria-label={`Убрать тег «${tag}»`}
                                 className="hover:opacity-60"
                             >
