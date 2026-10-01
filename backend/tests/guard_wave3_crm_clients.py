@@ -184,6 +184,15 @@ def test_clients_sheets_and_existing_apis():
         "удаление навсегда — только после вопроса"
 
 
+def test_clients_new_param_opens_sheet_and_is_removed():
+    """Дашборд и быстрые действия ведут на /crm/clients?new=1 (пакет B)."""
+    src = _read("clients")
+    assert "searchParams.get('new') !== '1'" in src, "?new=1 не открывает NewClientSheet"
+    assert "setNewClientOpen(true)" in src
+    assert "next.delete('new')" in src and "{ replace: true }" in src, \
+        "?new=1 нужно убрать из адреса через replace"
+
+
 # ── Финансы ──────────────────────────────────────────────────────────────────
 
 def test_finances_cash_word_v1():

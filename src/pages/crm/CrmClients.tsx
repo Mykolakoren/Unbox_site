@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, type CSSProperties, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { useUserStore } from '../../store/userStore';
 import { Plus, Search, Phone, Mail, X, Send, Merge, Trash2 } from 'lucide-react';
@@ -77,6 +77,18 @@ export function CrmClients() {
     useEffect(() => {
         fetchClients(false, true).finally(() => setFetchedOnce(true));
     }, [fetchClients]);
+
+    // ?new=1 — «Добавить клиента» с дашборда и кнопки быстрых действий:
+    // сразу открываем NewClientSheet и убираем параметр из адреса (replace),
+    // чтобы «Назад» и обновление страницы не открывали шторку снова.
+    const [searchParams, setSearchParams] = useSearchParams();
+    useEffect(() => {
+        if (searchParams.get('new') !== '1') return;
+        if (!viewingOther) setNewClientOpen(true);
+        const next = new URLSearchParams(searchParams);
+        next.delete('new');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams, viewingOther]);
 
     const toggleSort = (field: SortField) => {
         if (sortField === field) {
