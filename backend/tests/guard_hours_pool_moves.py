@@ -337,22 +337,73 @@ _DIRECT_WRITE = re.compile(
 )
 
 
+# Чистое чтение пула для ответа API: весь элемент словаря — один вызов
+# subscription_pool.get/get_float и больше ничего (`"remaining_hours":
+# subscription_pool.get_float(sub, "remaining_hours"),`). Любая арифметика после
+# вызова или присваивание `remaining_hours=...` — запись, даже если в строке
+# есть subscription_pool.get (`remaining_hours=subscription_pool.get_float(...)+h`).
+_PURE_READ = re.compile(
+    r"""^\s*["'](remaining_hours|remainingHours|used_hours|usedHours)["']\s*:\s*"""
+    r"""subscription_pool\.get(?:_float)?\([^()]*\)\s*[,})]*\s*$"""
+)
+
+# Разовые скрипты июля 2026 — ДО появления subscription_pool, уже выполнены и
+# больше не запускаются. Новые скрипты сюда не добавлять: двигать часы через
+# subscription_pool.debit_hours / credit_hours / grant_hours.
+_LEGACY_ONE_OFF_SCRIPTS = frozenset({
+    "fix_marina_nadia_2026_07_29.py",
+    "reconcile_hours_2026_07.py",
+    "assign_subs_2026_07.py",
+    "migrate_defer_existing.py",
+})
+
+
+def _is_direct_pool_write(line: str) -> bool:
+    code = line.split("#", 1)[0]
+    if not _DIRECT_WRITE.search(code):
+        return False
+    return not _PURE_READ.match(code)
+
+
+def test_direct_write_detector_catches_writes_and_spares_reads():
+    """Сам детектор: запись с subscription_pool.get внутри ловится, чистое чтение — нет."""
+    writes = [
+        'remaining_hours=subscription_pool.get_float(sub, "remaining_hours") + h,',
+        "used_hours=subscription_pool.get_float(sub, 'used_hours') - h)",
+        'sub["remaining_hours"] = subscription_pool.get_float(sub, "remaining_hours") + h',
+        '"remaining_hours": subscription_pool.get_float(sub, "remaining_hours") + h,',
+        'remaining_hours=max(0.0, rem - h),',
+    ]
+    reads = [
+        '"remaining_hours": subscription_pool.get_float(user.subscription, "remaining_hours"),',
+        '            "used_hours": subscription_pool.get_float(sub, "used_hours")',
+        'rem = subscription_pool.get_float(sub, "remaining_hours")',
+        'x = 1  # remaining_hours = 5',
+    ]
+    for l in writes:
+        assert _is_direct_pool_write(l), f"запись не поймана: {l}"
+    for l in reads:
+        assert not _is_direct_pool_write(l), f"чтение принято за запись: {l}"
+
+
 def test_no_direct_pool_writes_outside_subscription_pool():
-    app_dir = os.path.join(_BACKEND, "app")
+    """Смотрим backend/app И backend/scripts (скрипты правят живые деньги не
+    реже кода). Исключения — сам subscription_pool и разовые скрипты июля."""
     bad = []
-    for root, _, files in os.walk(app_dir):
-        for fn in files:
-            if not fn.endswith(".py"):
-                continue
-            path = os.path.join(root, fn)
-            rel = os.path.relpath(path, _BACKEND)
-            if rel == os.path.join("app", "services", "subscription_pool.py"):
-                continue
-            for i, line in enumerate(open(path, encoding="utf-8"), 1):
-                code = line.split("#", 1)[0]
-                # Чтение пула для ответа API (`"remaining_hours": get_float(...)`) — не запись.
-                if _DIRECT_WRITE.search(code) and "subscription_pool.get" not in code:
-                    bad.append(f"{rel}:{i}: {line.strip()[:100]}")
+    for sub_dir in ("app", "scripts"):
+        for root, _, files in os.walk(os.path.join(_BACKEND, sub_dir)):
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(root, fn)
+                rel = os.path.relpath(path, _BACKEND)
+                if rel == os.path.join("app", "services", "subscription_pool.py"):
+                    continue
+                if sub_dir == "scripts" and fn in _LEGACY_ONE_OFF_SCRIPTS:
+                    continue
+                for i, line in enumerate(open(path, encoding="utf-8"), 1):
+                    if _is_direct_pool_write(line):
+                        bad.append(f"{rel}:{i}: {line.strip()[:100]}")
     assert not bad, "часы абонемента пишутся мимо subscription_pool:\n  " + "\n  ".join(bad)
 
 
