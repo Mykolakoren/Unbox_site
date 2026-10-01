@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LOCATIONS, CABINET_SERVICES } from '../../utils/data';
+import { CABINET_SERVICES } from '../../utils/data';
 import { useBookingStore } from '../../store/bookingStore';
 import { MapPin, Users, Ruler, Settings, ImageOff, Power, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
@@ -14,6 +14,8 @@ import { undoToast } from '../../components/ui/undoToast';
 import { ruCountWord } from '../../utils/plural';
 import { STATUS } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 /* ── Grid House module-scope constants (prefix: ghc) ── */
 const ghcHairline = `1px solid ${GH.ink10}`;
@@ -24,14 +26,6 @@ const ghcMono: React.CSSProperties = {
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
-};
-const ghcH1: React.CSSProperties = {
-    fontFamily: GH_SANS,
-    fontWeight: 800,
-    fontSize: 'clamp(28px, 3.5vw, 42px)',
-    lineHeight: 0.95,
-    letterSpacing: '-0.02em',
-    margin: 0,
 };
 
 export function AdminCabinets() {
@@ -140,7 +134,7 @@ export function AdminCabinets() {
             editingResource={editingResource}
             isModalOpen={isModalOpen}
             setIsModalOpen={setIsModalOpen}
-            locations={locations.length > 0 ? locations : LOCATIONS}
+            locations={locations}
             onToggleResource={handleToggleResource}
             onToggleLocation={handleToggleLocation}
             toggleBusyId={toggleBusyId}
@@ -183,7 +177,10 @@ function GridHouseCabinets({
     toggleBusyId,
     resources,
 }: GridHouseCabinetsProps) {
-    const total = String(filteredResources.length).padStart(3, '0');
+    const hiddenCount = filteredResources.filter(r => r.isActive === false).length;
+    // Вкладки — из живого списка локаций (G8-16): раньше статичный LOCATIONS
+    // давал пустую вкладку «Neo School», которой нет среди локаций выше.
+    const tabs = [{ id: 'all', name: 'Все филиалы' }, ...locations.map(l => ({ id: l.id, name: l.name }))];
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
     useEffect(() => {
         const h = () => setNarrow(window.innerWidth < 768);
@@ -193,19 +190,11 @@ function GridHouseCabinets({
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
-                <div style={{ ...ghcMono, marginBottom: narrow ? 8 : 14 }}>Раздел · Кабинеты</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
-                    <h1 style={{ ...ghcH1, fontSize: narrow ? 24 : ghcH1.fontSize }}>Каталог пространств.</h1>
-                    <div style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                        {total}
-                    </div>
-                </div>
-                <div style={{ ...ghcMono, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
-                    Показано кабинетов
-                </div>
-            </div>
+            {/* ── Header: H1 = пункт меню, без «009» (G8-11) ── */}
+            <PageHeader
+                title="Кабинеты"
+                description={`${ruCountWord(filteredResources.length, ['кабинет', 'кабинета', 'кабинетов'])}${hiddenCount > 0 ? ` · скрыто от клиентов: ${hiddenCount}` : ''}`}
+            />
 
             {/* ── Locations management strip ──
                 Owner 2026-05-27: above the cabinet grid, list every location
@@ -214,7 +203,7 @@ function GridHouseCabinets({
                 cabinet.isActive). Re-enabling a location does NOT auto-
                 re-enable cabinets — admins flip the ones they want back. */}
             <div style={{ marginBottom: narrow ? 20 : 32, paddingBottom: narrow ? 16 : 24, borderBottom: ghcHairline }}>
-                <div style={{ ...ghcMono, marginBottom: 12 }}>Раздел · Локации</div>
+                <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>Локации</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
                     {locations.map(loc => {
                         const childCount = resources.filter(r => r.locationId === loc.id).length;
@@ -234,7 +223,7 @@ function GridHouseCabinets({
                                 }}
                             >
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontFamily: GH_SANS, fontWeight: 700, fontSize: 15, color: GH.ink }}>
+                                    <div style={{ fontFamily: GH_SANS, fontWeight: 600, fontSize: 16, color: GH.ink }}>
                                         {loc.name}
                                         {!isActive && (
                                             <span style={{
@@ -253,7 +242,7 @@ function GridHouseCabinets({
                                         )}
                                     </div>
                                     <div style={{ ...ghcMono, marginTop: 4 }}>
-                                        {childActive} / {childCount} активных кабинетов
+                                        видно клиентам {childActive} из {childCount}
                                     </div>
                                 </div>
                                 <button
@@ -289,7 +278,7 @@ function GridHouseCabinets({
             </div>
 
             {/* ── Location filter tabs ── */}
-            <div style={{
+            <div role="group" aria-label="Филиал" style={{
                 borderTop: `2px solid ${GH.ink}`,
                 borderBottom: ghcHairline,
                 display: 'flex',
@@ -299,11 +288,13 @@ function GridHouseCabinets({
                 flexWrap: narrow ? 'nowrap' : 'wrap',
                 WebkitOverflowScrolling: 'touch',
             }}>
-                {[{ id: 'all', name: narrow ? 'Все' : 'Все филиалы' }, ...LOCATIONS].map((loc) => {
+                {tabs.map((loc) => {
                     const active = filterLocation === loc.id;
                     return (
                         <button
                             key={loc.id}
+                            type="button"
+                            aria-pressed={active}
                             onClick={() => setFilterLocation(loc.id)}
                             style={{
                                 fontFamily: GH_MONO,
@@ -311,7 +302,7 @@ function GridHouseCabinets({
                                 fontWeight: 600,
                                 letterSpacing: '0.06em',
                                 textTransform: 'uppercase' as const,
-                                padding: narrow ? '12px 14px' : '18px 24px',
+                                padding: narrow ? '12px 14px' : '14px 24px',
                                 background: active ? GH.ink : 'transparent',
                                 color: active ? GH.paper : GH.ink,
                                 border: 'none',
@@ -321,7 +312,7 @@ function GridHouseCabinets({
                                 flexShrink: 0,
                             }}
                         >
-                            {loc.name}
+                            {loc.id === 'all' && narrow ? 'Все' : loc.name}
                         </button>
                     );
                 })}
@@ -329,9 +320,8 @@ function GridHouseCabinets({
 
             {/* ── Grid / Empty state ── */}
             {filteredResources.length === 0 ? (
-                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghcHairline, padding: '80px 24px', textAlign: 'center' }}>
-                    <div style={{ ...ghcMono, marginBottom: 14 }}>→ Пусто</div>
-                    <h2 style={{ ...ghcH1, fontSize: 'clamp(28px, 3.5vw, 44px)' }}>Нет кабинетов.</h2>
+                <div style={{ border: ghcHairline, background: GH.card }}>
+                    <EmptyState compact title="В этом филиале кабинетов нет" hint="Выберите другой филиал или «Все филиалы»." />
                 </div>
             ) : (
                 <div
@@ -343,9 +333,9 @@ function GridHouseCabinets({
                         borderLeft: narrow ? undefined : `1px solid ${GH.ink10}`,
                     }}
                 >
-                    {filteredResources.map((resource, idx) => {
+                    {filteredResources.map((resource) => {
                         const coverPhoto = resource.photos?.[0];
-                        const locationName = LOCATIONS.find((l) => l.id === resource.locationId)?.name;
+                        const locationName = locations.find((l) => l.id === resource.locationId)?.name;
                         const resourceServices = (resource.services || [])
                             .map((id) => CABINET_SERVICES.find((s) => s.id === id))
                             .filter(Boolean)
@@ -367,30 +357,18 @@ function GridHouseCabinets({
                                     {coverPhoto ? (
                                         <img src={coverPhoto} alt={resource.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                     ) : (
-                                        <>
-                                            <div
-                                                style={{
-                                                    position: 'absolute',
-                                                    inset: 0,
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    fontFamily: GH_SANS,
-                                                    fontWeight: 800,
-                                                    fontSize: 'clamp(80px, 14vw, 140px)',
-                                                    lineHeight: 0.8,
-                                                    letterSpacing: '-0.04em',
-                                                    color: GH.ink,
-                                                    fontVariantNumeric: 'tabular-nums',
-                                                    userSelect: 'none',
-                                                }}
-                                            >
-                                                {String(idx + 1).padStart(2, '0')}
-                                            </div>
-                                            <div style={{ position: 'absolute', top: 10, left: 12, ...ghcMono, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                <ImageOff size={10} /> Без фото
-                                            </div>
-                                        </>
+                                        // Нейтральная заглушка: без порядкового номера — у «Кабинета 9»
+                                        // раньше крупно стояло «07» (G8-16).
+                                        <div
+                                            style={{
+                                                position: 'absolute', inset: 0, background: GH.sunken,
+                                                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                                color: GH.ink60, fontSize: 14,
+                                            }}
+                                        >
+                                            <ImageOff size={24} aria-hidden="true" />
+                                            Фото пока нет
+                                        </div>
                                     )}
 
                                     {/* Top badges */}
@@ -435,13 +413,10 @@ function GridHouseCabinets({
                                 {/* Body */}
                                 <div style={{ padding: 20, flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
                                     <div>
-                                        <div style={{ ...ghcMono, fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>
-                                            {String(idx + 1).padStart(3, '0')}
-                                        </div>
                                         <div
                                             style={{
                                                 fontFamily: GH_SANS,
-                                                fontWeight: 700,
+                                                fontWeight: 600,
                                                 fontSize: 20,
                                                 letterSpacing: '-0.015em',
                                                 lineHeight: 1.15,
@@ -461,7 +436,7 @@ function GridHouseCabinets({
                                         <div
                                             style={{
                                                 fontFamily: GH_SANS,
-                                                fontSize: 13,
+                                                fontSize: 14,
                                                 lineHeight: 1.5,
                                                 color: GH.ink60,
                                                 display: '-webkit-box',
@@ -587,15 +562,7 @@ function GridHouseCabinets({
                 </div>
             )}
 
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ ...ghcMono, color: GH.ink60 }}>Unbox · админка · 2026</div>
-                <div style={{ ...ghcMono, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
-                    {total} кабинетов
-                </div>
-            </div>
-
-            <ResourceModal resource={editingResource} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+            <ResourceModal resource={editingResource} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} locations={locations} />
         </div>
     );
 }
