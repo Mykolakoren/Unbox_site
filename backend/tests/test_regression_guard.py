@@ -612,6 +612,22 @@ def test_balance_correction_requires_permission():
         "гейт права на баланс пропал из correct_user_balance или update_user")
 
 
+def test_permissions_only_owner_or_senior():
+    """Ревизия безопасности 01.10: PATCH /users/{id}/permissions стоит под
+    require_admin, а ограничение было только для senior_admin — обычный admin
+    мог выдать себе кассу, цены и assign_roles. Теперь 403 всем, кроме owner
+    и senior_admin; senior не трогает права владельца."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/users/admin.py"), encoding="utf-8").read()
+    i = src.find("def update_permissions(")
+    assert i != -1, "update_permissions пропал"
+    body = src[i:i + 2500]
+    gate = body.find('if current_user.role not in ("owner", "senior_admin"):')
+    assert gate != -1, "гейт owner/senior_admin в update_permissions пропал"
+    assert gate < body.find("user.permissions ="), "гейт должен стоять до записи прав"
+    assert 'user.role == "owner"' in body, "senior снова может менять права владельца"
+
+
 def test_psycrm_roster_fully_isolated():
     """Решение владельца 27.08: список клиентов Psy-CRM видит ТОЛЬКО сам
     специалист — admin-proxy через ?specialist_id= закрыт для всех ролей."""

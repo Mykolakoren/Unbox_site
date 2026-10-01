@@ -597,8 +597,14 @@ def update_permissions(
     Update granular permissions for a user.
     Owner: can grant/revoke any permission.
     Senior Admin: can only grant/revoke permissions within SENIOR_ADMIN_GRANTABLE set.
+    Admin: 403 — раньше ветка else пускала обычного admin выдать себе любые
+    права (ревизия безопасности 01.10).
     """
+    if current_user.role not in ("owner", "senior_admin"):
+        raise HTTPException(403, "Менять права может только владелец или старший администратор")
     user = _resolve_user(session, user_id)
+    if current_user.role == "senior_admin" and user.role == "owner":
+        raise HTTPException(403, "Старший администратор не может менять права владельца")
 
     invalid = [p for p in permissions if p not in deps.ALL_GRANTABLE]
     if invalid:
@@ -613,7 +619,7 @@ def update_permissions(
         ]
         senior_perms = [p for p in permissions if p in deps.SENIOR_ADMIN_GRANTABLE]
         final_permissions = existing_owner_perms + senior_perms
-    else:
+    else:  # owner
         final_permissions = permissions
 
     user.permissions = final_permissions
