@@ -119,7 +119,8 @@ def crm_dashboard(
             # «Оплачено» — для неё флаг оплаты и цена (fallback на ставку).
             "is_paid": s.is_paid,
             "price": s.price if s.price is not None else (client.base_price if client else None),
-            "currency": client.currency if client else None,
+            # Цена лежит в валюте сессии (нет — валюта клиента).
+            "currency": (s.currency or (client.currency if client else None)),
         })
 
     # --- Extended stats ---
@@ -164,11 +165,12 @@ def crm_dashboard(
         expected_by_cur: dict[str, float] = {}
         for ms in m_sessions:
             client = session.get(TherapistClient, ms.client_id)
-            price = ms.price if ms.price is not None else (client.base_price if client else 0)
-            cur = (client.currency if client else "GEL") or "GEL"
-            cur = cur.upper()
+            # Цена и валюта — САМОЙ сессии (ms.currency, нет — валюта клиента): сессия
+            # в лари у клиента с USDT — это лари, а не USDT (иначе ≈ ×2,7 завышение).
+            price = sb.session_price(ms, client)
+            cur = sb.session_currency(ms, client)
             expected_by_cur[cur] = expected_by_cur.get(cur, 0) + price
-            expected_gel += price * GEL_RATES.get(cur, 1)
+            expected_gel += sb.price_in(ms, client, GEL_RATES, "GEL")
 
         monthly_stats.append({
             "month": m_start.strftime("%Y-%m"),

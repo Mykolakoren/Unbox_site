@@ -44,7 +44,7 @@ import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
 import { defaultPaymentAccount } from '../../utils/paymentAccounts';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
-import { sessionDebt, sessionCurrencyOf, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
+import { sessionDebt, sessionCurrencyOf, earnedByCurrency, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -344,15 +344,14 @@ export function CrmSessions() {
         // «Заработано» — из ЗАВЕРШЁННЫХ ОПЛАЧЕННЫХ сессий этого месяца (по дате сессии).
         // Это то, что владелец интуитивно ждёт рядом с «N завершено». В отличие от
         // «кассы» ниже (все платежи месяца), сюда НЕ попадает оплата прошлых долгов и
-        // пополнения без сессии. Цена/валюта — как в строке списка (session.price ?? client.basePrice).
-        const earnedByCur: Record<string, number> = {};
-        monthSessions.forEach(s => {
-            if (getEffectiveStatus(s) !== 'COMPLETED' || !s.isPaid) return;
-            const client = clientMap.get(s.clientId);
-            const cur = client?.currency || 'GEL';
-            const price = s.price ?? client?.basePrice ?? 0;
-            if (price > 0) earnedByCur[cur] = (earnedByCur[cur] || 0) + price;
-        });
+        // пополнения без сессии. Цена — session.price ?? client.basePrice, валюта — СЕССИИ
+        // (session.currency, нет — валюта клиента), как у долга. 01.10: раньше брали валюту
+        // клиента, и сессия в лари у клиента с USDT считалась как USDT (≈ ×2,7 к заработку).
+        const earnedByCur = earnedByCurrency(
+            monthSessions,
+            (id) => clientMap.get(id),
+            (s) => getEffectiveStatus(s) === 'COMPLETED' && !!s.isPaid,
+        );
         const earnedEntries = Object.entries(earnedByCur).filter(([, v]) => v > 0);
         const earnedLabel = earnedEntries.length > 0
             ? earnedEntries.map(([cur, val]) => formatMoney(val, { currency: cur, fraction: 0 })).join(' · ')

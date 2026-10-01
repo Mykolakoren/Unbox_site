@@ -38,6 +38,32 @@ export function convertMoney(amount: number, from: string, to: string): number {
     return (amount * rate(from)) / rate(to);
 }
 
+/**
+ * «Заработано»: цена сессий по валютам САМИХ СЕССИЙ (а не валюты клиента).
+ * Цена — `session.price ?? client.basePrice`, валюта — `session.currency ?? client.currency`
+ * (как у долга и остатка). Раньше брали валюту клиента: сессия в лари у клиента с USDT
+ * считалась как USDT и в пересчёте на лари завышалась ≈ ×2,7. `isEarned` решает, какие
+ * сессии идут в зачёт (завершённые и оплаченные) — это знает вызывающий экран.
+ * Пересчёт в лари — на вызывающем (`toGel` по общим курсам), здесь только суммы по валютам.
+ */
+export function earnedByCurrency(
+    sessions: CrmSession[],
+    clientOf: (clientId: string) => ClientMoney | null | undefined,
+    isEarned: (s: CrmSession) => boolean,
+): Record<string, number> {
+    const byCur: Record<string, number> = {};
+    sessions.forEach(s => {
+        if (!isEarned(s)) return;
+        const client = clientOf(s.clientId);
+        const price = sessionPriceOf(s, client);
+        if (price > 0) {
+            const cur = sessionCurrencyOf(s, client);
+            byCur[cur] = (byCur[cur] || 0) + price;
+        }
+    });
+    return byCur;
+}
+
 /** Долг по одной сессии в её валюте: остаток, а не вся цена. У оплаченной — 0. */
 export function sessionDebt(
     s: CrmSession,
