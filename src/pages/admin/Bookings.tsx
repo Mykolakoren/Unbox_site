@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
-import { format } from 'date-fns';
-import { Search, LayoutGrid, List, Check, X, Loader2 } from 'lucide-react';
+import { Search, LayoutGrid, List, Check, X, Loader2, MousePointerClick } from 'lucide-react';
 import clsx from 'clsx';
 import { AdminChessboardView } from '../../components/admin/AdminChessboardView';
 import { bookingsApi } from '../../api/bookings';
@@ -18,11 +17,14 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { SkeletonList } from '../../components/ui/Skeleton';
-import { STATUS } from '../../design/tokens';
-import { formatGel } from '../../utils/format';
+import { STATUS, COLOR } from '../../design/tokens';
+import { formatGel, formatDateLabel } from '../../utils/format';
+import { parseUTC } from '../../utils/dateUtils';
+import { DueBadge } from '../../components/admin/DueBadge';
+import { computeDueByBooking, type DueInfo } from '../../utils/dueAmounts';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
 import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
-import { ruCountWord } from '../../utils/plural';
+import { ruCountWord, ruPlural } from '../../utils/plural';
 import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
 import { subscriptionLifecycle } from '../../utils/subscription';
 import { statusLabel } from '../../design/statuses';
@@ -342,9 +344,29 @@ export function AdminBookings() {
     // Excel #59 — "Перенести" navigates to the grid view with this booking
     // highlighted and scrolled into view. The admin then drags it to the new
     // slot using the existing drag-to-move handler in AdminChessboardView.
+    // Волна 4: вид переключаем явно — иначе на той же странице URL менялся,
+    // а список оставался списком.
     const handleMove = (bookingId: string) => {
+        setViewMode('grid');
         navigate(`/admin/bookings?view=grid&highlight=${bookingId}`);
     };
+    // Клик по строке списка — та же панель брони, что в шахматке.
+    const openInGrid = (bookingId: string) => {
+        setViewMode('grid');
+        navigate(`/admin/bookings?view=grid&highlight=${bookingId}`);
+    };
+
+    // «К оплате / оплачено» в списке — та же карта, что в шахматке и «Сегодня»
+    // (только computeDueByBooking, своих формул нет).
+    const dueMap = useMemo(() => {
+        const bal = new Map<string, number>();
+        for (const u of users) {
+            const v = Number((u as any).balance ?? 0);
+            if (u.email) bal.set(u.email, v);
+            if (u.id) bal.set(String(u.id), v);
+        }
+        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
+    }, [bookings, users]);
 
     const [approvingId, setApprovingId] = useState<string | null>(null);
     const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -448,6 +470,8 @@ export function AdminBookings() {
                 extendingId={extendingId}
                 allListStatus={allListStatus}
                 onRetryAll={() => { void loadAllBookings(); }}
+                dueMap={dueMap}
+                onOpenInGrid={openInGrid}
             />
         </>
     );
@@ -479,6 +503,10 @@ type GHAdminBookingsProps = {
     /** Полный админский список: 'ready' — только тогда можно сказать «броней нет». */
     allListStatus: 'loading' | 'ready' | 'error';
     onRetryAll: () => void;
+    /** «Сколько взять» по брони — computeDueByBooking. */
+    dueMap: Map<string, DueInfo>;
+    /** Открыть бронь в шахматке (та же панель брони). */
+    onOpenInGrid: (bookingId: string) => void;
 };
 
 function GridHouseAdminBookings(props: GHAdminBookingsProps) {
@@ -489,7 +517,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
         convertingId, handleMove, handleApprove, handleReject,
         approvingId, rejectingId, extendingId,
-        allListStatus, onRetryAll,
+        allListStatus, onRetryAll, dueMap, onOpenInGrid,
     } = props;
 
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -499,13 +527,23 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         return () => window.removeEventListener('resize', h);
     }, []);
 
+    // «Показать ещё 50» вместо тысячи строк разом (G7-06). Смена фильтра —
+    // снова первые 50.
+    const PAGE = 50;
+    const [limit, setLimit] = useState(PAGE);
+    useEffect(() => { setLimit(PAGE); }, [filterStatus, timeFilter, search]);
+    const visible = filteredBookings.slice(0, limit);
+    const rest = filteredBookings.length - visible.length;
+
+    // «+ Бронь» — бронь за клиента делается в шахматке: выделить время → «Продолжить».
+    const [pickHint, setPickHint] = useState(false);
+
     const MONO_LABEL: React.CSSProperties = {
         ...ghabMono,
         fontWeight: 500,
         color: GH.ink60,
     };
 
-    const totalFmt = String(bookings.length).padStart(3, '0');
     const activeCount = bookings.filter((b) => b.status === 'confirmed').length;
     const pendingCount = bookings.filter((b) => b.status === 'pending_approval').length;
 
@@ -517,54 +555,181 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
 
     // Статусы в строках — общий StatusBadge (слова из src/design/statuses.ts).
 
+    // Кнопки действий строки — одни и те же для таблицы и карточек телефона.
+    // Обработчики — прежние (отмена, перенос, продление, допы, пересдача, цена).
+    const rowActions = (booking: BookingHistoryItem, touch: boolean) => {
+        const linkBtn = (color: string) => (touch ? { ...ghActionBtn(color, GH.ink10), minHeight: 44 } : ghTableLinkBtn(color));
+        return (
+            <>
+                {booking.status === 'pending_approval' && (
+                    <>
+                        <button
+                            onClick={() => handleApprove(booking.id)}
+                            disabled={approvingId === booking.id}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                padding: touch ? '6px 12px' : '5px 8px', minHeight: touch ? 44 : undefined,
+                                background: GH.ink, color: GH.paper,
+                                border: 'none', cursor: 'pointer',
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                            }}
+                        >
+                            {approvingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                            Принять
+                        </button>
+                        <button
+                            onClick={() => handleReject(booking.id)}
+                            disabled={rejectingId === booking.id}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                padding: touch ? '6px 12px' : '5px 8px', minHeight: touch ? 44 : undefined,
+                                background: 'transparent', color: GH.danger,
+                                border: `1px solid ${GH.danger}`, cursor: 'pointer',
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                            }}
+                        >
+                            {rejectingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                            Отклонить
+                        </button>
+                    </>
+                )}
+                {booking.status === 'confirmed' && (
+                    <>
+                        <button
+                            onClick={() => handleMove(booking.id)}
+                            style={linkBtn(GH.ink60)}
+                            title="Перенести — откроется шахматка"
+                        >
+                            Перенести
+                        </button>
+                        <button
+                            onClick={() => handleExtend(booking.id)}
+                            disabled={extendingId === booking.id}
+                            style={linkBtn(GH.ink60)}
+                            title="Продлить бронь — выбрать время"
+                        >
+                            {extendingId === booking.id ? '...' : 'Продлить'}
+                        </button>
+                        {bookingBucket(bookingStartMs(booking)) === 'today' && (
+                            <button
+                                onClick={() => handleAddExtras(booking.id)}
+                                style={linkBtn(GH.ink60)}
+                                title="Дозаказ — добавить кофе и т.п."
+                            >
+                                + Доп
+                            </button>
+                        )}
+                        {canToSubscription(booking) && (
+                            <button
+                                onClick={() => handleToSubscription(booking.id)}
+                                disabled={convertingId === booking.id}
+                                style={linkBtn(GH.ink60)}
+                                title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                            >
+                                {convertingId === booking.id ? '...' : 'На абонемент'}
+                            </button>
+                        )}
+                        <button
+                            onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
+                            style={linkBtn(GH.ink60)}
+                        >
+                            Цена
+                        </button>
+                        <button
+                            onClick={() => handleReRent(booking.id)}
+                            style={linkBtn(GH.ink60)}
+                            title={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: отдать время другим, клиенту вернём 50%'}
+                        >
+                            {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
+                        </button>
+                        <button
+                            onClick={() => handleCancel(booking.id)}
+                            style={linkBtn(GH.danger)}
+                        >
+                            Отменить
+                        </button>
+                    </>
+                )}
+                {/* Завершившаяся СЕГОДНЯШНЯЯ бронь: админ всё ещё может добить
+                    время по факту, дозаказать допы и поправить цену. В базе
+                    статус ещё 'confirmed' (completed — только в ответе API),
+                    поэтому бэкенд эти правки принимает. */}
+                {booking.status === 'completed' && bookingBucket(bookingStartMs(booking)) === 'today' && (
+                    <>
+                        <button
+                            onClick={() => handleExtend(booking.id)}
+                            disabled={extendingId === booking.id}
+                            style={linkBtn(GH.ink60)}
+                            title="Добить время по факту — клиент занимался дольше"
+                        >
+                            {extendingId === booking.id ? '...' : 'Продлить'}
+                        </button>
+                        <button
+                            onClick={() => handleAddExtras(booking.id)}
+                            style={linkBtn(GH.ink60)}
+                            title="Дозаказ — добавить кофе и т.п."
+                        >
+                            + Доп
+                        </button>
+                        {canToSubscription(booking) && (
+                            <button
+                                onClick={() => handleToSubscription(booking.id)}
+                                disabled={convertingId === booking.id}
+                                style={linkBtn(GH.ink60)}
+                                title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                            >
+                                {convertingId === booking.id ? '...' : 'На абонемент'}
+                            </button>
+                        )}
+                        <button
+                            onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
+                            style={linkBtn(GH.ink60)}
+                        >
+                            Цена
+                        </button>
+                    </>
+                )}
+            </>
+        );
+    };
+
+    const dateLabel = (b: BookingHistoryItem) => formatDateLabel(parseUTC(b.date), { timeZone: 'UTC', withYear: 'auto' });
+
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Compact header — title + inline KPIs on one row, then
-                action cluster on the right (+ Бронь · Список / Шахматка). */}
+            {/* ── Шапка: заголовок, счётчики без нулей, «+ Бронь» и вид. */}
             <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 12 : 16, marginBottom: narrow ? 14 : 20 }}>
-                <p style={{ ...ghabMono, color: GH.ink60, marginBottom: narrow ? 6 : 8 }}>Админка · брони</p>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
-                    {/* LEFT: title + inline KPIs */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 16 : 28, flexWrap: 'wrap' }}>
                         <h1
                             style={{
-                                fontSize: narrow ? 22 : 'clamp(26px, 3vw, 36px)',
-                                fontWeight: 800,
+                                fontSize: narrow ? 22 : 28,
+                                fontWeight: 600,
                                 letterSpacing: '-0.02em',
-                                lineHeight: 1.1,
+                                lineHeight: 1.2,
                                 margin: 0,
                             }}
                         >
-                            Поток броней.
+                            Бронирования
                         </h1>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 12 : 20 }}>
-                            <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 22 : 28, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
-                                    {totalFmt}
-                                </span>
-                                <span style={{ ...ghabMono, color: GH.ink60 }}>ВСЕГО</span>
-                            </div>
-                            <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: GH.accent }}>
-                                    {String(activeCount).padStart(3, '0')}
-                                </span>
-                                <span style={{ ...ghabMono, color: GH.ink60 }}>АКТИВ</span>
-                            </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 12 : 20, fontSize: 14, color: GH.ink60, flexWrap: 'wrap' }}>
+                            <span><span className="num" style={{ color: GH.ink, fontWeight: 600 }}>{bookings.length}</span> всего</span>
+                            <span><span className="num" style={{ color: GH.ink, fontWeight: 600 }}>{activeCount}</span> {ruPlural(activeCount, ['активная', 'активные', 'активных'])}</span>
                             {pendingCount > 0 && (
-                                <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: STATUS.pending.fg }}>
-                                        {String(pendingCount).padStart(3, '0')}
-                                    </span>
-                                    <span style={{ ...ghabMono, color: GH.ink60 }}>ЖДУТ ПОДТВЕРЖДЕНИЯ</span>
-                                </div>
+                                <span style={{ color: STATUS.pending.fg }}>
+                                    <span className="num" style={{ fontWeight: 600 }}>{pendingCount}</span> {pendingCount % 10 === 1 && pendingCount % 100 !== 11 ? 'ждёт' : 'ждут'} подтверждения
+                                </span>
                             )}
                         </div>
                     </div>
 
-                    {/* RIGHT: + Бронь right next to view toggle */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: narrow ? 6 : 8 }}>
-                        {/* Excel #70 — was /checkout (dead). Admin chessboard is the right entry. */}
-                        <button onClick={() => navigate('/dashboard/bookings')}
+                        {/* G7-18 / X2-14: «+ Бронь» больше не уводит в личный кабинет —
+                            бронь за клиента ставится в шахматке: выделить время → «Продолжить». */}
+                        <button onClick={() => { setViewMode('grid'); setPickHint(true); }}
+                            data-new-booking
                             style={{
                                 padding: narrow ? '5px 10px' : '6px 16px',
                                 border: ghabHairline,
@@ -577,11 +742,12 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 color: GH.paper,
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                             }}>
-                            + БРОНЬ
+                            + Бронь
                         </button>
                         <div style={{ display: 'flex' }}>
                             {(['list', 'grid'] as const).map((m, i) => (
                                 <button key={m} onClick={() => setViewMode(m)}
+                                    aria-pressed={viewMode === m}
                                     style={{
                                         padding: narrow ? '5px 10px' : '6px 16px',
                                         border: 'none',
@@ -597,7 +763,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         borderRight: i === 1 ? ghabHairline : 'none',
                                         display: 'inline-flex', alignItems: 'center', gap: 6,
                                     }}>
-                                    {m === 'list' ? <><List size={10} /> {narrow ? 'СПИСОК' : 'СПИСОК'}</> : <><LayoutGrid size={10} /> {narrow ? 'ШАХ.' : 'ШАХМАТКА'}</>}
+                                    {m === 'list' ? <><List size={12} /> Список</> : <><LayoutGrid size={12} /> Шахматка</>}
                                 </button>
                             ))}
                         </div>
@@ -605,15 +771,33 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                 </div>
             </div>
 
-            {/* ── Grid view = chessboard ──
-                Wrapper padding cut 20 → 10 and the "ШАХМАТКА · LEGACY VIEW"
-                tag stripped — admin doesn't need to be told what they're
-                looking at, the grid is self-evident. Closes the dead-space
-                gap the user flagged. */}
+            {/* ── Grid view = chessboard ── */}
             {viewMode === 'grid' && (
-                <div style={{ border: ghabHairline, padding: 10, background: GH.paper }}>
-                    <AdminChessboardView />
-                </div>
+                <>
+                    {pickHint && (
+                        <div
+                            role="status"
+                            data-pick-hint
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10,
+                                padding: '10px 14px', border: ghabHairline, background: COLOR.accentSoft,
+                                fontSize: 14, color: GH.ink,
+                            }}
+                        >
+                            <MousePointerClick size={16} aria-hidden="true" />
+                            <span style={{ flex: 1 }}>
+                                <b style={{ fontWeight: 600 }}>Выделите время в сетке</b> — нажмите на свободную клетку кабинета и протяните, затем «Продолжить» и выберите клиента.
+                            </span>
+                            <button type="button" onClick={() => setPickHint(false)} aria-label="Скрыть подсказку"
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, minWidth: 32, minHeight: 32 }}>
+                                <X size={16} />
+                            </button>
+                        </div>
+                    )}
+                    <div style={{ border: ghabHairline, padding: 10, background: GH.paper }}>
+                        <AdminChessboardView />
+                    </div>
+                </>
             )}
 
             {/* ── List view ── */}
@@ -622,7 +806,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     {/* Filters */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: narrow ? 12 : 18, marginBottom: narrow ? 16 : 28 }}>
                         <div>
-                            <div style={{ ...MONO_LABEL, marginBottom: 8 }}>ПОИСК</div>
+                            <div style={{ ...MONO_LABEL, marginBottom: 8 }}>Поиск</div>
                             <div style={{ position: 'relative', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
                                 <Search style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-80%)', width: 14, height: 14, color: GH.ink60 }} />
                                 <input
@@ -645,6 +829,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 {search && (
                                     <button
                                         onClick={() => setSearch('')}
+                                        aria-label="Очистить поиск"
                                         style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-80%)', background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}
                                     >
                                         <X size={12} />
@@ -659,6 +844,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                     <button
                                         key={o.value}
                                         onClick={() => setFilterStatus(o.value)}
+                                        aria-pressed={active}
                                         style={{
                                             fontFamily: GH_MONO,
                                             fontSize: 12,
@@ -693,6 +879,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                     <button
                                         key={o.value}
                                         onClick={() => setTimeFilter(o.value)}
+                                        aria-pressed={active}
                                         style={{
                                             fontFamily: GH_MONO,
                                             fontSize: 12,
@@ -741,430 +928,167 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     ) : narrow ? (
                         /* ── Mobile card list ── */
                         <div style={{ borderTop: `2px solid ${GH.ink}` }}>
-                            {filteredBookings.map((booking, idx) => {
+                            {visible.map((booking) => {
                                 const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
+                                const info = dueMap.get(booking.id);
+                                const owes = !!info && info.due > 0;
                                 return (
                                     <div
                                         key={booking.id}
                                         style={{
-                                            padding: '14px 0',
+                                            padding: '14px 0 14px 10px',
                                             borderBottom: ghabHairline,
                                             display: 'flex',
                                             flexDirection: 'column',
                                             gap: 8,
+                                            boxShadow: owes ? `inset 3px 0 0 ${STATUS.danger.fg}` : undefined,
                                         }}
                                     >
-                                        {/* Top row: index, date, status, price */}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
-                                                    {String(idx + 1).padStart(3, '0')}
-                                                </span>
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
-                                                    {format(booking.date, 'dd.MM')} · {booking.startTime}
-                                                </span>
-                                            </div>
+                                            <span className="num" style={{ fontSize: 12, color: GH.ink }}>
+                                                {dateLabel(booking)} · {booking.startTime}
+                                            </span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                                                 <StatusBadge kind="booking" status={booking.status} audience="staff" />
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
                                                     {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
                                                 </span>
                                             </div>
                                         </div>
-                                        {/* Client */}
                                         <div
                                             onClick={() => navigate(`/admin/users/${encodeURIComponent(booking.userId)}`)}
                                             style={{ cursor: 'pointer' }}
                                         >
-                                            <div style={{ fontSize: 14, fontWeight: 700, color: GH.ink, letterSpacing: '-0.005em' }}>
+                                            <div style={{ fontSize: 14, fontWeight: 600, color: GH.ink }}>
                                                 {getUserName(booking.userId)}
                                             </div>
-                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2 }}>
+                                            <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
                                                 {resourceName} · {booking.locationId === 'unbox_one' ? 'One' : 'Uni'} · {(booking.duration ?? 0) / 60}ч
                                             </div>
                                         </div>
-                                        {/* Actions */}
+                                        <div><DueBadge due={info?.due} paid={!!info} /></div>
                                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                            {booking.status === 'pending_approval' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleApprove(booking.id)}
-                                                        disabled={approvingId === booking.id}
-                                                        style={{
-                                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
-                                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
-                                                            padding: '6px 12px', minHeight: 44, background: GH.ink, color: GH.paper,
-                                                            border: 'none', cursor: 'pointer',
-                                                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                                                        }}
-                                                    >
-                                                        {approvingId === booking.id ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
-                                                        Принять
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleReject(booking.id)}
-                                                        disabled={rejectingId === booking.id}
-                                                        style={{
-                                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
-                                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
-                                                            padding: '6px 12px', minHeight: 44, background: 'transparent', color: GH.danger,
-                                                            border: `1px solid ${GH.danger}`, cursor: 'pointer',
-                                                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                                                        }}
-                                                    >
-                                                        <X size={10} /> Отклонить
-                                                    </button>
-                                                </>
-                                            )}
-                                            {booking.status === 'confirmed' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleMove(booking.id)}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                        title="Перенести бронь — откроется шахматка"
-                                                    >
-                                                        Перенести
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleExtend(booking.id)}
-                                                        disabled={extendingId === booking.id}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                        title="Продлить бронь — выбрать время"
-                                                    >
-                                                        {extendingId === booking.id ? '...' : 'Продлить'}
-                                                    </button>
-                                                    {bookingBucket(bookingStartMs(booking)) === 'today' && (
-                                                        <button
-                                                            onClick={() => handleAddExtras(booking.id)}
-                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                            title="Дозаказ — добавить кофе и т.п."
-                                                        >
-                                                            + Доп
-                                                        </button>
-                                                    )}
-                                                    {canToSubscription(booking) && (
-                                                        <button
-                                                            onClick={() => handleToSubscription(booking.id)}
-                                                            disabled={convertingId === booking.id}
-                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
-                                                        >
-                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                    >
-                                                        Цена
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleReRent(booking.id)}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                        title={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: отдать время другим, клиенту вернём 50%'}
-                                                    >
-                                                        {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCancel(booking.id)}
-                                                        style={{ ...ghActionBtn(GH.danger, `${GH.danger}30`), minHeight: 44 }}
-                                                    >
-                                                        Отменить
-                                                    </button>
-                                                </>
-                                            )}
-                                            {/* Завершившаяся СЕГОДНЯШНЯЯ бронь: админ всё ещё
-                                                может добить время по факту, дозаказать допы и
-                                                поправить цену. В базе статус ещё 'confirmed'
-                                                (completed — только в ответе API), поэтому
-                                                бэкенд эти правки принимает. */}
-                                            {booking.status === 'completed' && bookingBucket(bookingStartMs(booking)) === 'today' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleExtend(booking.id)}
-                                                        disabled={extendingId === booking.id}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                        title="Добить время по факту — клиент занимался дольше"
-                                                    >
-                                                        {extendingId === booking.id ? '...' : 'Продлить'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleAddExtras(booking.id)}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                        title="Дозаказ — добавить кофе и т.п."
-                                                    >
-                                                        + Доп
-                                                    </button>
-                                                    {canToSubscription(booking) && (
-                                                        <button
-                                                            onClick={() => handleToSubscription(booking.id)}
-                                                            disabled={convertingId === booking.id}
-                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
-                                                        >
-                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
-                                                    >
-                                                        Цена
-                                                    </button>
-                                                </>
-                                            )}
+                                            {rowActions(booking, true)}
                                         </div>
                                     </div>
                                 );
                             })}
                         </div>
                     ) : (
+                        /* ── Одна таблица с общими колонками (G7-06): строки больше не «прыгают». */
                         <div style={{ borderTop: `2px solid ${GH.ink}`, overflowX: 'auto' }}>
-                            {/* ── Table head ── */}
-                            <div
-                                style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '56px 110px 1fr 1fr 120px 100px 110px 180px',
-                                    gap: 14,
-                                    padding: '8px 0',
-                                    borderBottom: ghabHairline,
-                                    minWidth: 1100,
-                                }}
-                            >
-                                {['#', 'СОЗДАНО', 'КЛИЕНТ', 'РЕСУРС', 'ДАТА · ВРЕМЯ', 'СТАТУС', 'ЦЕНА', 'ДЕЙСТВИЯ'].map((h, i) => (
-                                    <span
-                                        key={i}
-                                        style={{
-                                            ...ghabMono,
-                                            color: GH.ink60,
-                                            textAlign: i === 5 ? 'center' : i >= 6 ? 'right' : undefined,
-                                        }}
-                                    >
-                                        {h}
-                                    </span>
-                                ))}
-                            </div>
+                            <table data-bookings-table style={{ width: '100%', minWidth: 1000, borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 14 }}>
+                                <colgroup>
+                                    <col style={{ width: 170 }} />
+                                    <col />
+                                    <col style={{ width: 150 }} />
+                                    <col style={{ width: 150 }} />
+                                    <col style={{ width: 150 }} />
+                                    <col style={{ width: 100 }} />
+                                    <col style={{ width: 240 }} />
+                                </colgroup>
+                                <thead>
+                                    <tr style={{ borderBottom: ghabHairline }}>
+                                        {['Дата · время', 'Клиент', 'Кабинет', 'Статус', 'Оплата', 'Цена', 'Действия'].map((h, i) => (
+                                            <th
+                                                key={h}
+                                                scope="col"
+                                                style={{
+                                                    ...ghabMono,
+                                                    color: GH.ink60,
+                                                    fontWeight: 500,
+                                                    padding: '8px 10px',
+                                                    textAlign: i >= 5 ? 'right' : 'left',
+                                                }}
+                                            >
+                                                {h}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visible.map((booking) => {
+                                        const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
+                                        const info = dueMap.get(booking.id);
+                                        const owes = !!info && info.due > 0;
+                                        // Клик по строке — та же панель брони, что в шахматке
+                                        // (шахматка открывается на дне брони с выделением).
+                                        const open = () => onOpenInGrid(booking.id);
+                                        return (
+                                            <tr
+                                                key={booking.id}
+                                                data-due={owes ? 'danger' : info ? 'ok' : 'none'}
+                                                onClick={open}
+                                                title="Открыть в шахматке"
+                                                style={{
+                                                    borderBottom: ghabHairline,
+                                                    cursor: 'pointer',
+                                                    verticalAlign: 'middle',
+                                                    background: owes ? STATUS.danger.bg : undefined,
+                                                    boxShadow: owes ? `inset 3px 0 0 ${STATUS.danger.fg}` : undefined,
+                                                }}
+                                            >
+                                                <td style={{ padding: '12px 10px' }}>
+                                                    <div className="num" style={{ color: GH.ink }}>{dateLabel(booking)}</div>
+                                                    <div className="num" style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
+                                                        {booking.startTime} · {(booking.duration ?? 0) / 60} ч
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px 10px', overflow: 'hidden' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); navigate(`/admin/users/${encodeURIComponent(booking.userId)}`); }}
+                                                        style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', maxWidth: '100%' }}
+                                                    >
+                                                        <div style={{ fontWeight: 600, color: GH.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {getUserName(booking.userId)}
+                                                        </div>
+                                                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booking.userId}</div>
+                                                    </button>
+                                                </td>
+                                                <td style={{ padding: '12px 10px' }}>
+                                                    <div style={{ color: GH.ink }}>{resourceName}</div>
+                                                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
+                                                        {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '12px 10px' }}>
+                                                    <StatusBadge kind="booking" status={booking.status} audience="staff" />
+                                                    {booking.isReRentListed && booking.status === 'confirmed' && (
+                                                        <div style={{ fontSize: 12, color: STATUS.pending.fg, marginTop: 4 }}>На пересдаче</div>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '12px 10px' }}>
+                                                    <DueBadge due={info?.due} paid={!!info} />
+                                                </td>
+                                                <td className="num" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 600, color: GH.ink }}>
+                                                    {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
+                                                </td>
+                                                <td style={{ padding: '12px 10px' }} onClick={(e) => e.stopPropagation()}>
+                                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, flexWrap: 'wrap' }}>
+                                                        {rowActions(booking, false)}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
 
-                            {/* ── Table rows ── */}
-                            {filteredBookings.map((booking, idx) => {
-                                const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
-
-                                return (
-                                    <div
-                                        key={booking.id}
-                                        style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '56px 110px 1fr 1fr 120px 100px 110px 180px',
-                                            gap: 14,
-                                            padding: '16px 0',
-                                            borderBottom: ghabHairline,
-                                            alignItems: 'center',
-                                            minWidth: 1100,
-                                        }}
-                                    >
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.06em' }}>
-                                            {String(idx + 1).padStart(3, '0')}
-                                        </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
-                                            {format(new Date(booking.createdAt), 'dd.MM · HH:mm')}
-                                        </div>
-                                        <div
-                                            onClick={() => navigate(`/admin/users/${encodeURIComponent(booking.userId)}`)}
-                                            style={{ cursor: 'pointer' }}
-                                        >
-                                            <div style={{ fontSize: 14, fontWeight: 700, color: GH.ink, letterSpacing: '-0.005em' }}>
-                                                {getUserName(booking.userId)}
-                                            </div>
-                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2 }}>{booking.userId}</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ fontSize: 13, color: GH.ink, letterSpacing: '-0.005em' }}>{resourceName}</div>
-                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2 }}>
-                                                {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
-                                                {format(booking.date, 'dd.MM.yyyy')}
-                                            </div>
-                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                                                {booking.startTime} · {(booking.duration ?? 0) / 60}ч
-                                            </div>
-                                        </div>
-                                        <div style={{ textAlign: 'center' }}>
-                                            <StatusBadge kind="booking" status={booking.status} audience="staff" />
-                                            {booking.isReRentListed && booking.status === 'confirmed' && (
-                                                <div style={{ ...ghabMono, color: STATUS.pending.fg, marginTop: 4 }}>На пересдаче</div>
-                                            )}
-                                        </div>
-                                        <div
-                                            style={{
-                                                fontFamily: GH_MONO,
-                                                fontSize: 14,
-                                                fontWeight: 600,
-                                                textAlign: 'right',
-                                                color: GH.ink,
-                                                fontVariantNumeric: 'tabular-nums',
-                                            }}
-                                        >
-                                            {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, flexWrap: 'wrap' }}>
-                                            {booking.status === 'pending_approval' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleApprove(booking.id)}
-                                                        disabled={approvingId === booking.id}
-                                                        style={{
-                                                            fontFamily: GH_MONO,
-                                                            fontSize: 12,
-                                                            fontWeight: 600,
-                                                            letterSpacing: '0.06em',
-                                                            textTransform: 'uppercase',
-                                                            padding: '5px 8px',
-                                                            background: GH.ink,
-                                                            color: GH.paper,
-                                                            border: 'none',
-                                                            cursor: 'pointer',
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: 4,
-                                                        }}
-                                                    >
-                                                        {approvingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                                        Принять
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleReject(booking.id)}
-                                                        disabled={rejectingId === booking.id}
-                                                        style={{
-                                                            fontFamily: GH_MONO,
-                                                            fontSize: 12,
-                                                            fontWeight: 600,
-                                                            letterSpacing: '0.06em',
-                                                            textTransform: 'uppercase',
-                                                            padding: '5px 8px',
-                                                            background: 'transparent',
-                                                            color: GH.danger,
-                                                            border: `1px solid ${GH.danger}`,
-                                                            cursor: 'pointer',
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: 4,
-                                                        }}
-                                                    >
-                                                        {rejectingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                                                        Отклонить
-                                                    </button>
-                                                </>
-                                            )}
-                                            {booking.status === 'confirmed' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleMove(booking.id)}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Перенести — откроется шахматка"
-                                                    >
-                                                        Перенести
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleExtend(booking.id)}
-                                                        disabled={extendingId === booking.id}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Продлить бронь — выбрать время"
-                                                    >
-                                                        {extendingId === booking.id ? '...' : 'Продлить'}
-                                                    </button>
-                                                    {bookingBucket(bookingStartMs(booking)) === 'today' && (
-                                                        <button
-                                                            onClick={() => handleAddExtras(booking.id)}
-                                                            style={ghTableLinkBtn(GH.ink60)}
-                                                            title="Дозаказ — добавить кофе и т.п."
-                                                        >
-                                                            + Доп
-                                                        </button>
-                                                    )}
-                                                    {canToSubscription(booking) && (
-                                                        <button
-                                                            onClick={() => handleToSubscription(booking.id)}
-                                                            disabled={convertingId === booking.id}
-                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
-                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
-                                                        >
-                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                    >
-                                                        Цена
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleReRent(booking.id)}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                        title={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: отдать время другим, клиенту вернём 50%'}
-                                                    >
-                                                        {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCancel(booking.id)}
-                                                        style={ghTableLinkBtn(GH.danger)}
-                                                    >
-                                                        Отменить
-                                                    </button>
-                                                </>
-                                            )}
-                                            {/* Завершившаяся сегодняшняя бронь — правки по факту
-                                                (в базе статус ещё confirmed, бэкенд принимает). */}
-                                            {booking.status === 'completed' && bookingBucket(bookingStartMs(booking)) === 'today' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleExtend(booking.id)}
-                                                        disabled={extendingId === booking.id}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Добить время по факту"
-                                                    >
-                                                        {extendingId === booking.id ? '...' : 'Продлить'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleAddExtras(booking.id)}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Дозаказ — добавить кофе и т.п."
-                                                    >
-                                                        + Доп
-                                                    </button>
-                                                    {canToSubscription(booking) && (
-                                                        <button
-                                                            onClick={() => handleToSubscription(booking.id)}
-                                                            disabled={convertingId === booking.id}
-                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
-                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
-                                                        >
-                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={ghTableLinkBtn(GH.ink60)}
-                                                    >
-                                                        Цена
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                    {rest > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '16px 0' }}>
+                            <Button variant="secondary" onClick={() => setLimit(l => l + PAGE)} data-show-more>
+                                Показать ещё {Math.min(PAGE, rest)}
+                            </Button>
+                            <span style={{ fontSize: 14, color: GH.ink60 }}>
+                                показано {visible.length} из {filteredBookings.length}
+                            </span>
                         </div>
                     )}
                 </>
             )}
-
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 16 }}>
-                <p style={{ ...ghabMono, color: GH.ink60 }}>Unbox · админка · 2026</p>
-            </div>
         </div>
     );
 }
