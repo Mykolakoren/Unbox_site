@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, CreditCard, Banknote, Landmark } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -13,6 +13,11 @@ interface AddFundsModalProps {
     defaultAmount?: number;
     /** Пояснение под заголовком — откуда взялась подставленная сумма. */
     hint?: string;
+    /** Филиал по брони («Unbox Uni» / «Unbox One») — подставить при открытии. */
+    defaultBranch?: string;
+    /** Без филиала не записывать: приход без филиала не попадает в остаток
+     *  ни Uni, ни One. «Принять оплату» ставит true. */
+    requireBranch?: boolean;
 }
 
 const PAYMENT_METHODS = [
@@ -26,10 +31,13 @@ const PAYMENT_METHODS = [
 // локацией для броней, но денег там не считают: операций по нему ноль.
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
-export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmount, hint }: AddFundsModalProps) {
+export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmount, hint, defaultBranch, requireBranch = false }: AddFundsModalProps) {
     const [amount, setAmount] = useState('');
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog'>('cash');
     const [branch, setBranch] = useState('');
+    // Подсветка «выберите филиал» — после попытки записать без него.
+    const [branchMissing, setBranchMissing] = useState(false);
+    const branchRef = useRef<HTMLSelectElement>(null);
 
     // Сумма обнуляется при каждом открытии. Окно не пересоздаётся (ниже просто
     // return null), поэтому после «Отмены» введённая сумма оставалась в поле —
@@ -40,6 +48,14 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
         if (isOpen) setAmount(defaultAmount && defaultAmount > 0 ? String(Math.round(defaultAmount * 100) / 100) : '');
     }, [isOpen, defaultAmount]);
 
+    // Филиал брони известен — подставляем его (как TopupSheet на телефоне).
+    // Неизвестен — оставляем прошлый выбор за смену.
+    useEffect(() => {
+        if (!isOpen) return;
+        setBranchMissing(false);
+        if (defaultBranch && BRANCHES.includes(defaultBranch)) setBranch(defaultBranch);
+    }, [isOpen, defaultBranch]);
+
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -47,6 +63,11 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
         const value = parseFloat(amount);
         if (isNaN(value) || value <= 0) {
             toast.error('Введите корректную сумму');
+            return;
+        }
+        if (requireBranch && !branch) {
+            setBranchMissing(true);
+            branchRef.current?.focus();
             return;
         }
         onConfirm(value, method, branch || undefined);
@@ -123,17 +144,28 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        <label htmlFor="add-funds-branch" className="block text-sm font-medium text-gray-700 mb-1.5">
                             Филиал
                         </label>
                         <select
+                            id="add-funds-branch"
+                            ref={branchRef}
                             value={branch}
-                            onChange={e => setBranch(e.target.value)}
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                            onChange={e => { setBranch(e.target.value); setBranchMissing(false); }}
+                            aria-invalid={branchMissing || undefined}
+                            aria-describedby={branchMissing ? 'add-funds-branch-error' : undefined}
+                            className={`w-full px-4 py-2.5 rounded-xl border focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm ${branchMissing
+                                ? 'border-[var(--status-danger-fg)] bg-[var(--status-danger-bg)]'
+                                : 'border-gray-200'}`}
                         >
-                            <option value="">Не указан</option>
+                            <option value="">{requireBranch ? 'Выберите филиал' : 'Не указан'}</option>
                             {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
                         </select>
+                        {branchMissing && (
+                            <p id="add-funds-branch-error" role="alert" className="mt-1.5 text-xs font-medium text-[var(--status-danger-fg)]">
+                                Выберите филиал — иначе деньги не попадут в остаток кассы
+                            </p>
+                        )}
                     </div>
 
                     <div className="flex gap-3 pt-2">

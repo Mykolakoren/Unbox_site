@@ -2,7 +2,10 @@ import { useMemo } from 'react';
 import type { BookingHistoryItem, User } from '../../../store/types';
 import { computeDueByBooking, type DueInfo } from '../../../utils/dueAmounts';
 import { todayRows, byClient, bookingDayKey, batumiDayKey } from '../../../utils/adminToday';
-import { LOCATIONS, RESOURCES } from '../../../utils/data';
+import { branchOfBooking } from '../../../utils/cashBranch';
+
+// Филиал по кабинету — общий с компьютером (src/utils/cashBranch.ts).
+export { branchOfBooking };
 
 /**
  * «К оплате» в мобильной админке (волна 4, пакет A) — только чтение.
@@ -32,12 +35,6 @@ export interface AcceptPayment {
     today: number;
     /** Филиал брони — подставляем в шторку. */
     branch?: string;
-}
-
-/** Филиал брони по кабинету: «Unbox One» / «Unbox Uni». */
-export function branchOfBooking(b: Pick<BookingHistoryItem, 'resourceId'>): string | undefined {
-    const locId = RESOURCES.find(r => r.id === b.resourceId)?.locationId;
-    return LOCATIONS.find(l => l.id === locId)?.name;
 }
 
 /** Что взять с клиента этой брони. null — клиента нет в списке или брать нечего. */

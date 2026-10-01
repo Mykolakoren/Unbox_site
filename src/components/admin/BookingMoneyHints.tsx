@@ -10,6 +10,7 @@ import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AddFundsModal } from './modals/AddFundsModal';
 import { formatDayMonth, formatGel } from '../../utils/format';
 import { Button } from '../ui/Button';
+import { cashBranchOfBooking } from '../../utils/cashBranch';
 
 type Estimate = Awaited<ReturnType<typeof bookingsApi.getWeeklyEstimate>>;
 
@@ -98,7 +99,7 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                     <span className="text-ink-60 shrink-0">Баланс</span>
                     <span className="flex items-center gap-2">
                         <span className={`font-medium ${balance < 0 ? 'text-[var(--status-danger-fg)]' : 'text-unbox-dark'}`}>{formatGel(balance)}</span>
-                        <AcceptPaymentButton client={client} defaultAmount={suggested} hint={suggestedHint} />
+                        <AcceptPaymentButton client={client} defaultAmount={suggested} hint={suggestedHint} branch={cashBranchOfBooking(booking)} />
                     </span>
                 </div>
             )}
@@ -113,13 +114,23 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
  * 'cat-topup', credit_user_balance: true), тот же fetchUsers и тосты. Сумму по
  * умолчанию передаёт экран: в попапе брони — долг или цена брони, в «Сегодня» —
  * весь долг клиента (решение владельца В3).
+ *
+ * Филиал (доработка 01.10): экран передаёт филиал по кабинету брони
+ * (cashBranchOfBooking), окно подставляет его. Не определился — окно не
+ * запишет без выбора (requireBranch): приход без филиала не попадает в
+ * остаток ни Uni, ни One. onPaid — экрану перечитать свои цифры (строка
+ * кассы в «Сегодня»); handleConfirm при этом не меняется.
  */
 export function AcceptPaymentButton({
-    client, defaultAmount, hint, label = 'Принять оплату', appearance = 'chip', className,
+    client, defaultAmount, hint, branch, onPaid, label = 'Принять оплату', appearance = 'chip', className,
 }: {
     client: User | null | undefined;
     defaultAmount?: number;
     hint?: string;
+    /** Филиал кассы по брони; undefined — админ выберет сам. */
+    branch?: string;
+    /** После попытки оплаты — перечитать то, что экран показывает сам. */
+    onPaid?: () => void;
     label?: ReactNode;
     /** chip — маленькая кнопка в попапе брони; primary/secondary — общая Button. */
     appearance?: 'chip' | 'primary' | 'secondary';
@@ -178,10 +189,12 @@ export function AcceptPaymentButton({
                     <AddFundsModal
                         isOpen={payOpen}
                         onClose={() => setPayOpen(false)}
-                        onConfirm={handleConfirm}
+                        onConfirm={async (amount, method, b) => { await handleConfirm(amount, method, b); onPaid?.(); }}
                         userName={client?.name}
                         defaultAmount={defaultAmount}
                         hint={hint}
+                        defaultBranch={branch}
+                        requireBranch
                     />
                 </div>,
                 document.body,
