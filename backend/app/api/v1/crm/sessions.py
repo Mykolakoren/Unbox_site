@@ -448,9 +448,12 @@ def update_session(
         or (ts.duration_minutes or 60) != _old_duration
         or ts.client_id != _old_client_id
     )
+    # Ревизор регрессий 01.10: только будущие PLANNED — прошедшие и
+    # проведённые сессии задним числом в календарь не ставим.
     if (
         not ts.google_event_id and _cal_id and _changed
-        and ts.status not in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST")
+        and ts.status == "PLANNED"
+        and ts.date > datetime.utcnow()
     ):
         try:
             from app.services.crm_calendar import move_or_attach_event
