@@ -44,7 +44,15 @@ def _try_move_linked_booking(
     from app.services.booking import check_availability
 
     log = logging.getLogger(__name__)
-    booking = session.get(Booking, ts.booking_id)
+    # TherapySession.booking_id — str, Booking.id — UUID (см. такой же разбор
+    # в _cancel_booking_behind_session): отдаём session.get() настоящий UUID.
+    from uuid import UUID as _UUID
+    try:
+        _bid = ts.booking_id if not isinstance(ts.booking_id, str) else _UUID(ts.booking_id)
+    except (ValueError, TypeError):
+        log.warning("[crm-sync] booking_id %r is not a UUID", ts.booking_id)
+        return
+    booking = session.get(Booking, _bid)
     if not booking or booking.status != "confirmed":
         log.info("[crm-sync] session %s moved but booking %s not confirmed; skipping",
                  ts.id, ts.booking_id)
@@ -215,6 +223,187 @@ def _delete_session_safely(session: Session, ts: TherapySession) -> None:
         n.session_id = None
         session.add(n)
     session.delete(ts)
+
+_CANCELLED_STATUSES = ("CANCELLED_CLIENT", "CANCELLED_THERAPIST")
+# Служебный текст, который ставит заявка с сайта (specialist_schedule.py) —
+# это не заметка терапевта, ценности в ней нет.
+_PUBLIC_REQUEST_NOTE = "Заявка через публичный сайт. Кабинет и оплата — отдельно."
+
+
+def _tbs_day(dt: datetime):
+    """Календарный день по Тбилиси (UTC+4) для UTC-naive времени сессии."""
+    from datetime import timedelta as _td
+    return (dt + _td(hours=4)).date()
+
+
+def _session_has_value(session: Session, ts: TherapySession) -> bool:
+    """Есть ли в сессии то, что нельзя молча стереть: оплата, платежи,
+    заметки (TherapistNote или встроенная ts.notes) или бронь кабинета."""
+    if ts.is_paid or ts.booking_id:
+        return True
+    inline = (ts.notes or "").strip()
+    if inline and inline != _PUBLIC_REQUEST_NOTE:
+        return True
+    if session.exec(
+        select(TherapistPayment.id).where(TherapistPayment.session_id == ts.id)
+    ).first() is not None:
+        return True
+    if session.exec(
+        select(TherapistNote.id).where(TherapistNote.session_id == ts.id)
+    ).first() is not None:
+        return True
+    return False
+
+
+def _keep_valuable_session(
+    session: Session, ts: TherapySession, kept: list,
+) -> bool:
+    """Событие сессии удалено/исчезло в Google (режим «календарь главный»).
+
+    01.10: раньше сессию стирали жёстко ВСЕГДА — вместе с ней пропадала
+    встроенная зашифрованная заметка, платежи отвязывались, а бронь кабинета
+    отменялась с возвратом денег. Теперь:
+      • сессия с оплатой / платежами / заметками / бронью → статус
+        CANCELLED_THERAPIST, всё остальное (деньги, бронь) НЕ трогаем,
+        специалист получит уведомление и решит сам;
+      • пустая сессия (ничего из перечисленного) → вызывающий удаляет её,
+        как раньше.
+    Возвращает True, если сессию надо СОХРАНИТЬ (удалять нельзя).
+    """
+    if not _session_has_value(session, ts):
+        return False
+    if ts.status not in _CANCELLED_STATUSES:
+        ts.status = "CANCELLED_THERAPIST"
+        ts.updated_at = datetime.now()
+        session.add(ts)
+        kept.append(ts)
+    return True
+
+
+def _relink_moved_events(
+    session: Session,
+    uid: str,
+    matched: list,
+    alive_ids: set,
+    window_min: datetime,
+    window_max: datetime,
+) -> tuple:
+    """Перенос в календаре ≠ новая встреча (01.10).
+
+    Событие клиента, которое не нашлось по google_event_id, сначала ищет
+    «свою» сессию, а уже потом рождает новую. Раньше искалась только сессия
+    со СТРОГО тем же временем: перенос хотя бы на минуту давал дубль, а
+    сессия без id никогда не удалялась.
+
+    Кандидат — сессия того же клиента, того же дня по Тбилиси, не отменённая,
+    у которой нет google_event_id ИЛИ её событие больше не живо (не пришло в
+    выдаче/отменено). Разница ≤3 ч — любой такой кандидат; больше 3 ч, но тот
+    же день — только «сирота» с мёртвым id (её иначе удалила бы уборка).
+    Пары разбираются от ближайшей по времени: два события одного клиента в
+    один день → сессия достаётся ближайшему.
+
+    Возвращает (сколько перепривязано, множество обработанных gid).
+    """
+    from datetime import timedelta as _td
+
+    live = [e for e in matched if not e.get("is_cancelled") and e.get("client_id")]
+    if not live:
+        return 0, set()
+    gids = [e["google_event_id"] for e in live]
+    already = set(session.exec(
+        select(TherapySession.google_event_id).where(
+            TherapySession.google_event_id.in_(gids)  # type: ignore[union-attr]
+        )
+    ).all())
+    pending = [e for e in live if e["google_event_id"] not in already]
+    if not pending:
+        return 0, set()
+
+    client_ids = {str(e["client_id"]) for e in pending}
+    lo = min(e["date"] for e in pending) - _td(days=1)
+    hi = max(e["date"] for e in pending) + _td(days=1)
+    cands = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id.in_(client_ids),  # type: ignore[attr-defined]
+            TherapySession.date >= lo,
+            TherapySession.date <= hi,
+            TherapySession.status.not_in(_CANCELLED_STATUSES),  # type: ignore[attr-defined]
+        )
+    ).all()
+
+    # Мёртвый id доверяем только внутри окна выборки: событие у края окна
+    # могло просто не попасть в запрос — это не «исчезло».
+    edge = _td(hours=12)
+
+    def _relinkable(ts: TherapySession) -> bool:
+        if not ts.google_event_id:
+            return True
+        if ts.google_event_id in alive_ids:
+            return False
+        return window_min + edge <= ts.date <= window_max - edge
+
+    cands = [c for c in cands if _relinkable(c)]
+    if not cands:
+        return 0, set()
+
+    pairs = []
+    for e in pending:
+        e_day = _tbs_day(e["date"])
+        for ts in cands:
+            if str(ts.client_id) != str(e["client_id"]) or _tbs_day(ts.date) != e_day:
+                continue
+            gap = abs((ts.date - e["date"]).total_seconds())
+            if gap > 3 * 3600 and not ts.google_event_id:
+                continue  # дальше 3 ч берём только сирот с мёртвым id
+            pairs.append((gap, e, ts))
+    pairs.sort(key=lambda p: p[0])
+
+    log = logging.getLogger(__name__)
+    used_events: set = set()
+    used_sessions: set = set()
+    handled: set = set()
+    relinked = 0
+    for gap, e, ts in pairs:
+        gid = e["google_event_id"]
+        if gid in used_events or ts.id in used_sessions:
+            continue
+        # google_event_id уникален по всей таблице — проверяем перед привязкой.
+        clash = session.exec(
+            select(TherapySession.id).where(TherapySession.google_event_id == gid)
+        ).first()
+        used_events.add(gid)
+        if clash is not None:
+            continue
+        used_sessions.add(ts.id)
+        old_date = ts.date
+        old_gid = ts.google_event_id
+        ts.google_event_id = gid
+        moved = gap > 60
+        if moved:
+            ts.date = e["date"]
+            ts.duration_minutes = e["duration_minutes"]
+            # Будущая сессия не может быть «Проведена» (см. ветку переноса ниже).
+            if ts.status == "COMPLETED" and e["date"] > datetime.utcnow():
+                ts.status = "PLANNED"
+        ts.updated_at = datetime.now()
+        session.add(ts)
+        session.flush()
+        if moved and ts.booking_id:
+            _try_move_linked_booking(
+                session, ts, old_date,
+                new_date=e["date"],
+                new_duration=e["duration_minutes"],
+                specialist_id=uid,
+            )
+        relinked += 1
+        handled.add(gid)
+        log.info(
+            "[crm-sync] перепривязал сессию %s к событию %s (было %s, %s → %s)",
+            ts.id, gid, old_gid or "без id", old_date, ts.date,
+        )
+    return relinked, handled
+
 
 router = APIRouter()
 
@@ -600,6 +789,26 @@ def sync_from_calendar(
     # режимах — они обратимы.
     gcal_master = bool((current_user.crm_data or {}).get("gcal_source_of_truth", False))
     deletions_held: list[str] = []
+    # Сессии с оплатой/заметками/бронью, которые при удалении события НЕ
+    # стёрты, а отменены (01.10) — по ним одно уведомление специалисту.
+    kept_cancelled: list = []
+
+    # ── Перенос в календаре ≠ новая встреча (01.10) ───────────────────────
+    # «Живые» события — все неотменённые из выдачи (вкл. unmatched/ambiguous:
+    # они существуют, просто не сопоставлены с клиентом).
+    alive_gcal_ids: set[str] = {
+        e["google_event_id"]
+        for bucket in ("matched", "unmatched", "ambiguous")
+        for e in result.get(bucket, [])
+        if e.get("google_event_id") and not e.get("is_cancelled")
+    }
+    # Окно выборки — то же, что в services.crm_calendar.sync_from_calendar.
+    _win_min = _now - _td_cancel_guard(days=max(2, past_days))
+    _win_max = _now + _td_cancel_guard(days=months_forward * 30)
+    relinked, relinked_gids = _relink_moved_events(
+        session, uid, result["matched"], alive_gcal_ids, _win_min, _win_max,
+    )
+
     for entry in result["matched"]:
         if entry.get("is_cancelled"):
             existing = session.exec(
@@ -628,16 +837,17 @@ def sync_from_calendar(
                 if not gcal_master:
                     deletions_held.append(existing.date.strftime("%d.%m %H:%M"))
                     continue
-                # 2026-05-14: spec says cancellation in GCal = removal from
-                # CRM (no CANCELLED_* status). Detach any linked cabinet
-                # booking first so the slot frees up automatically — same
-                # behaviour as the admin pressing "Отменить" in the sheet.
-                _cancel_booking_behind_session(
-                    session, existing, "Сессия отменена в Google Calendar"
-                )
+                # 01.10: сессию с оплатой/заметками/бронью только отменяем —
+                # деньги не двигаем, бронь кабинета НЕ снимаем (специалист
+                # получит уведомление). Удаляем только пустую.
+                if _keep_valuable_session(session, existing, kept_cancelled):
+                    continue
                 _delete_session_safely(session, existing)
                 deleted_on_cancel += 1
             continue
+
+        if entry["google_event_id"] in relinked_gids:
+            continue  # уже привязано к существующей сессии выше
 
         existing = session.exec(
             select(TherapySession).where(
@@ -781,10 +991,10 @@ def sync_from_calendar(
         if not gcal_master:
             deletions_held.append(ts.date.strftime("%d.%m %H:%M"))
             continue
-        # Same "GCal-cancel = delete" rule applies to orphan rows whose
-        # GCal event vanished from the sync window. Refunds the client and
-        # clears the cabinet's own GCal event — see _cancel_booking_behind_session.
-        _cancel_booking_behind_session(session, ts, "Сессия удалена из Google Calendar")
+        # 01.10: та же защита, что для отменённых событий — ценную сессию
+        # (оплата/заметки/бронь) отменяем без движения денег, пустую удаляем.
+        if _keep_valuable_session(session, ts, kept_cancelled):
+            continue
         _delete_session_safely(session, ts)
         orphans_cancelled += 1
 
@@ -818,6 +1028,31 @@ def sync_from_calendar(
                 icon="calendar-x",
                 link="/crm/sessions",
             ))
+
+    if kept_cancelled and not dry_run:
+        from app.models.notification import Notification as _KeptNotif
+        _names = {
+            c.id: c.name for c in clients
+        }
+        _items = [
+            f"{_names.get(t.client_id, 'клиент')} {(t.date + _td(hours=4)).strftime('%d.%m %H:%M')}"
+            for t in kept_cancelled
+        ]
+        session.add(_KeptNotif(
+            recipient_id=uid,
+            type="calendar_session_cancelled",
+            title="Встреча удалена в календаре — сессия отменена",
+            description=(
+                "Встреча удалена в Google Календаре — сессия отменена, "
+                "оплата/бронь сохранены, проверьте: "
+                + ", ".join(_items[:8])
+                + (f" и ещё {len(_items) - 8}" if len(_items) > 8 else "")
+                + ". Если бронь кабинета больше не нужна — отмените её сами; "
+                "если встреча всё же будет — верните статус сессии."
+            ),
+            icon="calendar-x",
+            link="/crm/sessions",
+        ))
 
     if orphans_cancelled > 0 or deleted_on_cancel > 0:
         logging.getLogger(__name__).info(
@@ -877,8 +1112,13 @@ def sync_from_calendar(
         # date moves on existing rows, AND the orphan-cancel sweep below.
         # Frontend just shows "Обновлено: N" and we want orphans to be in there
         # so admins notice when a ghost session is purged.
-        "updated": updated + orphans_cancelled,
+        "updated": updated + orphans_cancelled + relinked,
         "orphans_cancelled": orphans_cancelled,
+        # 01.10: удалено в Google, но сессия ценная → отменена, не стёрта.
+        "sessions_cancelled_kept": len(kept_cancelled),
+        "deleted_on_cancel": deleted_on_cancel,
+        # 01.10: события, привязанные к уже существующим сессиям (перенос).
+        "relinked": relinked,
         # Защитный режим: сколько удалений из Google задержано (сессии целы).
         "deletions_held": len(set(deletions_held)),
         "auto_created_clients": auto_created_clients,
@@ -1108,7 +1348,10 @@ def auto_sync_all_calendars(
                 "specialist": u.email,
                 "created": r.get("created"),
                 "updated": r.get("updated"),
-                "deleted": r.get("deleted"),
+                # Раньше здесь читался несуществующий ключ "deleted" (всегда null).
+                "deleted": (r.get("deleted_on_cancel") or 0) + (r.get("orphans_cancelled") or 0),
+                "relinked": r.get("relinked"),
+                "kept_cancelled": r.get("sessions_cancelled_kept"),
                 "duplicates": len(r.get("calendar_duplicates") or []),
             })
         except Exception as e:  # noqa: BLE001 — один упал, остальные синкаются
