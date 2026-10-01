@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Shield, Check, Loader2, Info } from 'lucide-react';
+import { Shield, Check, Info, Lock } from 'lucide-react';
+import { Button } from '../ui/Button';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import type { User } from '../../store/types';
@@ -204,25 +205,37 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
         return false;
     };
 
+    // Волна 4 (G8-13): права роли — замок и «входит в роль „…“», а не
+    // активная галочка, которая не нажимается. Список и сохранение не менялись.
+    const roleName = ROLE_NAMES[user.role ?? ''] ?? 'Пользователь';
+
     return (
-        <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-1">
-                <Shield size={16} className="text-unbox-green" />
-                <span className="text-sm font-semibold text-unbox-dark">Гранулярные права доступа</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 16px', fontSize: 14, color: 'var(--color-ink-60)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <Lock size={14} aria-hidden="true" /> входит в роль «{roleName}» — выдаётся само
+                </span>
+                {canEdit && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <Check size={14} aria-hidden="true" /> отмечено — выдано сверх роли
+                    </span>
+                )}
                 {!isOwner && isSeniorAdmin && (
-                    <span className={`${canEdit ? '' : 'ml-auto'} flex items-center gap-1 text-xs text-ink-60`}>
-                        <Info size={11} />
-                        Серые пункты — только для владельца
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <Info size={14} aria-hidden="true" /> «Только владелец» — может выдать только владелец
                     </span>
                 )}
             </div>
 
             {PERMISSION_GROUPS.map(group => (
-                <div key={group.group} className="space-y-1">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-ink-60 px-1">
+                <fieldset key={group.group} style={{ border: 'none', margin: 0, padding: 0 }}>
+                    <legend style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, letterSpacing: '0.06em',
+                        textTransform: 'uppercase', color: 'var(--color-ink-60)', padding: '0 0 6px',
+                    }}>
                         {group.group}
-                    </div>
-                    <div className="bg-white rounded-xl border border-unbox-light overflow-hidden">
+                    </legend>
+                    <div style={{ border: '1px solid var(--color-ink-10)', background: 'var(--color-card)' }}>
                         {group.permissions.map((perm, idx) => {
                             const isInherited = inheritedPerms.has(perm.id);
                             const active = selected.has(perm.id) || isInherited;
@@ -233,38 +246,50 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                                 <button
                                     key={perm.id}
                                     type="button"
+                                    role={isInherited ? undefined : 'checkbox'}
+                                    aria-checked={isInherited ? undefined : active}
                                     onClick={() => !isInherited && toggle(perm.id, perm.seniorAdmin)}
                                     disabled={locked}
-                                    className={[
-                                        'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors',
-                                        idx > 0 && 'border-t border-unbox-light',
-                                        editable && active && 'bg-unbox-green/5',
-                                        editable && !active && 'hover:bg-unbox-light/50',
-                                        isInherited && 'bg-sunken',
-                                        locked && !isInherited && 'opacity-40 cursor-not-allowed',
-                                    ].filter(Boolean).join(' ')}
+                                    className="perm-row"
+                                    data-editable={editable || undefined}
+                                    style={{
+                                        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                                        minHeight: 44, padding: '8px 16px', textAlign: 'left',
+                                        border: 'none', borderTop: idx > 0 ? '1px solid var(--color-ink-10)' : 'none',
+                                        background: isInherited ? 'var(--color-sunken)'
+                                            : editable && active ? 'var(--color-accent-soft)' : 'transparent',
+                                        cursor: editable ? 'pointer' : 'default',
+                                        font: 'inherit', color: 'var(--color-ink)',
+                                    }}
                                 >
-                                    {/* Checkbox */}
-                                    <div className={[
-                                        'w-4.5 h-4.5 rounded flex-shrink-0 border flex items-center justify-center transition-all',
-                                        active && isInherited ? 'bg-ink-60 border-ink-60' :
-                                        active ? 'bg-unbox-green border-unbox-green' :
-                                        'border-unbox-light bg-white',
-                                    ].join(' ')}>
-                                        {active && <Check size={10} strokeWidth={3} className="text-white" />}
-                                    </div>
+                                    {isInherited ? (
+                                        <Lock size={16} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-ink-60)' }} />
+                                    ) : (
+                                        <span
+                                            aria-hidden="true"
+                                            style={{
+                                                width: 18, height: 18, flexShrink: 0, borderRadius: 4,
+                                                display: 'grid', placeItems: 'center',
+                                                border: `1.5px solid ${active ? 'var(--color-accent)' : 'var(--color-ink-40)'}`,
+                                                background: active ? 'var(--color-accent)' : 'var(--color-card)',
+                                                color: 'var(--color-card)',
+                                            }}
+                                        >
+                                            {active && <Check size={12} strokeWidth={3} />}
+                                        </span>
+                                    )}
 
-                                    <span className={`text-sm ${active ? 'text-unbox-dark font-medium' : 'text-ink-60'}`}>
+                                    <span style={{ fontSize: 14, fontWeight: active ? 500 : 400, color: active ? 'var(--color-ink)' : 'var(--color-ink-60)' }}>
                                         {perm.label}
                                     </span>
 
                                     {isInherited && (
-                                        <span className="ml-auto text-xs text-ink-60 bg-ink-05 px-1.5 py-0.5 rounded flex-shrink-0">
-                                            от роли
+                                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--color-ink-60)', flexShrink: 0 }}>
+                                            входит в роль «{roleName}»
                                         </span>
                                     )}
-                                    {locked && !isInherited && (
-                                        <span className="ml-auto text-xs text-ink-60 flex-shrink-0">
+                                    {locked && !isInherited && canEdit && (
+                                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--color-ink-60)', flexShrink: 0 }}>
                                             Только владелец
                                         </span>
                                     )}
@@ -272,19 +297,24 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                             );
                         })}
                     </div>
-                </div>
+                </fieldset>
             ))}
 
             {canEdit && hasChanges() && (
-                <button
-                    onClick={save}
-                    disabled={saving}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60"
-                >
-                    {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-                    Сохранить права
-                </button>
+                <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, background: 'var(--color-card)' }}>
+                    <Button block loading={saving} onClick={save} icon={<Shield size={16} aria-hidden="true" />}>
+                        Сохранить права
+                    </Button>
+                </div>
             )}
+            <style>{`.perm-row[data-editable]:hover { background: var(--color-ink-05) !important; }`}</style>
         </div>
     );
 }
+
+const ROLE_NAMES: Record<string, string> = {
+    owner: 'Владелец',
+    senior_admin: 'Старший админ',
+    admin: 'Администратор',
+    specialist: 'Специалист',
+};

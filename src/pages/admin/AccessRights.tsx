@@ -1,49 +1,57 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Shield, Search, ChevronDown, User as UserIcon } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { PermissionsEditor } from '../../components/admin/PermissionsEditor';
 import type { User } from '../../store/types';
-import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Sheet } from '../../components/ui/Sheet';
+import { Field, Input } from '../../components/ui/Field';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ruCountWord } from '../../utils/plural';
+
+/**
+ * Права доступа — волна 4, пакет D (G8-13).
+ *
+ * Раньше: пустой экран «Выберите пользователя.» и самодельный выпадающий
+ * список по ВСЕЙ базе клиентов. Теперь по умолчанию — таблица сотрудников
+ * (владелец, старшие админы, админы и все, кому выданы права сверх роли):
+ * имя, роль, сколько прав выдано отдельно. Клик по строке — окно
+ * «Что может делать». Поиск фильтрует таблицу; ниже — «другие
+ * пользователи» из всей базы, если нужного нет среди сотрудников.
+ *
+ * Кто может открыть страницу и что сохраняется — не менялось:
+ * PermissionsEditor (список прав и сохранение) тот же.
+ */
+
+const STAFF_ROLES = ['owner', 'senior_admin', 'admin'];
+const ROLE_ORDER: Record<string, number> = { owner: 0, senior_admin: 1, admin: 2, specialist: 3 };
 
 function roleLabel(role?: string) {
     switch (role) {
         case 'owner':        return 'Владелец';
-        case 'senior_admin': return 'Ст. Админ';
+        case 'senior_admin': return 'Старший админ';
         case 'admin':        return 'Администратор';
         case 'specialist':   return 'Специалист';
-        default:             return 'Пользователь';
+        default:             return 'Клиент';
     }
 }
 
-function roleBadgeClass(role?: string) {
-    switch (role) {
-        case 'owner':        return 'bg-sunken text-ink-80';
-        case 'senior_admin': return 'bg-sunken text-ink-80';
-        case 'admin':        return 'bg-sunken text-ink-80';
-        case 'specialist':   return 'bg-sunken text-ink-80';
-        default:             return 'bg-gray-100 text-ink-80';
-    }
-}
+const RIGHTS: [string, string, string] = ['право', 'права', 'прав'];
 
 export function AdminAccessRights() {
-        const users = useUserStore(s => s.users);
+    const users = useUserStore(s => s.users);
     const fetchUsers = useUserStore(s => s.fetchUsers);
     const currentUser = useUserStore(s => s.currentUser);
 
     const [search, setSearch] = useState('');
-    const [dropdownOpen, setDropdownOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const [loaded, setLoaded] = useState(users.length > 0);
 
-    useEffect(() => { fetchUsers(); }, [fetchUsers]);
-
-    const filtered = useMemo(() =>
-        users.filter(u =>
-            u.name.toLowerCase().includes(search.toLowerCase()) ||
-            u.email.toLowerCase().includes(search.toLowerCase())
-        ),
-        [users, search]
-    );
+    useEffect(() => {
+        Promise.resolve(fetchUsers()).finally(() => setLoaded(true));
+    }, [fetchUsers]);
 
     // Sync selectedUser when users list refreshes (after save)
     useEffect(() => {
@@ -54,214 +62,78 @@ export function AdminAccessRights() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [users]);
 
-    const handleSelect = (user: User) => {
-        setSelectedUser(user);
-        setDropdownOpen(false);
-        setSearch('');
-    };
+    const q = search.trim().toLowerCase();
+    const matches = (u: User) => !q
+        || (u.name || '').toLowerCase().includes(q)
+        || (u.email || '').toLowerCase().includes(q);
+
+    const isStaff = (u: User) => STAFF_ROLES.includes(u.role ?? '') || (u.permissions?.length ?? 0) > 0;
+
+    const staff = useMemo(() =>
+        users.filter(isStaff).sort((a, b) =>
+            (ROLE_ORDER[a.role ?? ''] ?? 9) - (ROLE_ORDER[b.role ?? ''] ?? 9)
+            || (a.name || '').localeCompare(b.name || '', 'ru')),
+        [users],
+    );
+    const staffShown = staff.filter(matches);
+    const others = q.length >= 2 ? users.filter(u => !isStaff(u) && matches(u)).slice(0, 10) : [];
 
     const currentUserRole = currentUser?.role ?? '';
 
     return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            <PageHeader
+                title="Права доступа"
+                description="Кто из команды что может делать в админке. Права роли выдаются сами, здесь — то, что добавлено сверх роли."
+            />
 
-        <GridHouseAccessRights
-            users={users}
-            filtered={filtered}
-            search={search}
-            setSearch={setSearch}
-            dropdownOpen={dropdownOpen}
-            setDropdownOpen={setDropdownOpen}
-            selectedUser={selectedUser}
-            setSelectedUser={setSelectedUser}
-            handleSelect={handleSelect}
-            currentUserRole={currentUserRole}
-            fetchUsers={fetchUsers}
-        />
-    );
-}
-
-
-// ═════════════════════════════════════════════════════════════════════════
-// GRID HOUSE VARIANT
-// Rollback: delete everything below + the early-return block above.
-// ═════════════════════════════════════════════════════════════════════════
-
-const gharHairline = `1px solid ${GH.ink10}`;
-const gharMono: React.CSSProperties = {
-    fontFamily: GH_MONO,
-    fontSize: 12,
-    fontWeight: 500,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: GH.ink60,
-};
-
-interface GHAccessRightsProps {
-    users: User[];
-    filtered: User[];
-    search: string;
-    setSearch: (v: string) => void;
-    dropdownOpen: boolean;
-    setDropdownOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
-    selectedUser: User | null;
-    setSelectedUser: (u: User | null) => void;
-    handleSelect: (u: User) => void;
-    currentUserRole: string;
-    fetchUsers: () => void;
-}
-
-function GridHouseAccessRights({
-    filtered,
-    search,
-    setSearch,
-    dropdownOpen,
-    setDropdownOpen,
-    selectedUser,
-    setSelectedUser,
-    handleSelect,
-    currentUserRole,
-    fetchUsers,
-}: GHAccessRightsProps) {
-    return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 32 }}>
-                <div style={{ ...gharMono, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Shield size={12} /> Раздел · Права доступа
-                </div>
-                <h1
-                    style={{
-                        fontFamily: GH_SANS,
-                        fontWeight: 800,
-                        fontSize: 'clamp(28px, 3.5vw, 42px)',
-                        lineHeight: 0.95,
-                        letterSpacing: '-0.02em',
-                        margin: 0,
-                    }}
-                >
-                    Ролевой контроль.
-                </h1>
-                <div style={{ ...gharMono, marginTop: 10 }}>Разрешения · Владелец · Администраторы</div>
+            <div style={{ maxWidth: 420, marginBottom: 16 }}>
+                <Field label="Найти сотрудника или пользователя">
+                    <Input
+                        kind="search"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Имя или почта"
+                    />
+                </Field>
             </div>
 
-            {/* ── User selector ── */}
-            <div style={{ marginBottom: 32 }}>
-                <div style={{ ...gharMono, marginBottom: 10 }}>→ Выберите пользователя</div>
-                <div style={{ position: 'relative' }}>
-                    <button
-                        onClick={() => setDropdownOpen((v: boolean) => !v)}
-                        style={{
-                            width: '100%',
-                            display: 'grid',
-                            gridTemplateColumns: '1fr auto auto',
-                            gap: 16,
-                            alignItems: 'center',
-                            padding: '18px 20px',
-                            background: 'transparent',
-                            border: `2px solid ${GH.ink}`,
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                        }}
-                    >
-                        {selectedUser ? (
-                            <>
-                                <div>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink }}>
-                                        {selectedUser.name}
-                                    </div>
-                                    <div style={{ ...gharMono, color: GH.ink60, marginTop: 3 }}>
-                                        {selectedUser.email}
-                                    </div>
-                                </div>
-                                <span
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 12,
-                                        fontWeight: 600,
-                                        letterSpacing: '0.06em',
-                                        textTransform: 'uppercase',
-                                        padding: '5px 9px',
-                                        color: GH.paper,
-                                        background: GH.ink,
-                                    }}
-                                >
-                                    {roleLabel(selectedUser.role)}
-                                </span>
-                            </>
-                        ) : (
-                            <>
-                                <div style={{ ...gharMono, color: GH.ink60 }}>
-                                    → Не выбран
-                                </div>
-                                <div />
-                            </>
-                        )}
-                        <ChevronDown size={16} style={{ color: GH.ink60, transition: 'transform 150ms', transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
-                    </button>
-
-                    {dropdownOpen && (
-                        <>
-                            <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setDropdownOpen(false)} />
-                            <div
-                                style={{
-                                    position: 'absolute',
-                                    top: 'calc(100% + 4px)',
-                                    left: 0,
-                                    right: 0,
-                                    zIndex: 20,
-                                    background: GH.paper,
-                                    border: `2px solid ${GH.ink}`,
-                                    overflow: 'hidden',
-                                }}
-                            >
-                                <div style={{ padding: 16, borderBottom: gharHairline, position: 'relative' }}>
-                                    <Search style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: GH.ink60 }} />
-                                    <input
-                                        autoFocus
-                                        type="text"
-                                        placeholder="Имя или email..."
-                                        value={search}
-                                        onChange={(e) => setSearch(e.target.value)}
-                                        style={{
-                                            width: '100%',
-                                            paddingLeft: 24,
-                                            paddingRight: 0,
-                                            border: 'none',
-                                            outline: 'none',
-                                            background: 'transparent',
-                                            fontFamily: GH_SANS,
-                                            fontSize: 14,
-                                            color: GH.ink,
-                                        }}
-                                    />
-                                </div>
-                                <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-                                    {filtered.length === 0 && (
-                                        <div style={{ padding: '24px 16px', textAlign: 'center', ...gharMono }}>
-                                            Ничего не найдено
-                                        </div>
-                                    )}
-                                    {filtered.map((user, i) => (
-                                        <GHARUserRow
-                                            key={user.id}
-                                            user={user}
-                                            index={i}
-                                            isSelected={selectedUser?.id === user.id}
-                                            isLast={i === filtered.length - 1}
-                                            onSelect={handleSelect}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </>
+            {!loaded && users.length === 0 ? (
+                <SkeletonList count={4} label="Загружаем сотрудников" cardHeight={48} />
+            ) : (
+                <>
+                    <UserTable
+                        caption="Команда"
+                        rows={staffShown}
+                        onOpen={setSelectedUser}
+                        empty={q ? 'Среди сотрудников никого с таким именем' : 'Сотрудников пока нет'}
+                    />
+                    {q.length >= 2 && (
+                        <div style={{ marginTop: 24 }}>
+                            <UserTable
+                                caption="Другие пользователи"
+                                rows={others}
+                                onOpen={setSelectedUser}
+                                empty="Никого не нашли"
+                            />
+                        </div>
                     )}
-                </div>
-            </div>
+                    {q.length > 0 && q.length < 2 && (
+                        <p style={{ marginTop: 12, fontSize: 14, color: GH.ink60 }}>
+                            Чтобы найти среди всех пользователей, введите хотя бы две буквы.
+                        </p>
+                    )}
+                </>
+            )}
 
-            {/* ── Permissions panel ── */}
-            {selectedUser ? (
-                <div style={{ border: gharHairline, padding: 28, background: GH.paper }}>
-                    <div style={{ ...gharMono, marginBottom: 20 }}>→ Разрешения · {selectedUser.name}</div>
+            <Sheet
+                open={!!selectedUser}
+                onClose={() => setSelectedUser(null)}
+                title={selectedUser ? `Что может делать: ${selectedUser.name}` : 'Что может делать'}
+                description={selectedUser ? `${roleLabel(selectedUser.role)} · ${selectedUser.email}` : undefined}
+                width={720}
+            >
+                {selectedUser && (
                     <PermissionsEditor
                         user={selectedUser}
                         currentUserRole={currentUserRole}
@@ -270,91 +142,80 @@ function GridHouseAccessRights({
                             fetchUsers();
                         }}
                     />
-                </div>
-            ) : (
-                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: gharHairline, padding: '80px 24px', textAlign: 'center' }}>
-                    <div style={{ ...gharMono, marginBottom: 14 }}>→ Ожидание выбора</div>
-                    <h2
-                        style={{
-                            fontFamily: GH_SANS,
-                            fontWeight: 800,
-                            fontSize: 'clamp(28px, 3.5vw, 42px)',
-                            lineHeight: 0.95,
-                            letterSpacing: '-0.02em',
-                            margin: 0,
-                        }}
-                    >
-                        Выберите пользователя.
-                    </h2>
-                    <div style={{ ...gharMono, marginTop: 12, color: GH.ink60 }}>
-                        Управление разрешениями откроется после выбора
-                    </div>
-                </div>
-            )}
-
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 16 }}>
-                <p style={{ ...gharMono, color: GH.ink60, margin: 0 }}>Unbox · админка · 2026</p>
-            </div>
+                )}
+            </Sheet>
         </div>
     );
 }
 
-function GHARUserRow({
-    user,
-    index,
-    isSelected,
-    isLast,
-    onSelect,
-}: {
-    user: User;
-    index: number;
-    isSelected: boolean;
-    isLast: boolean;
-    onSelect: (u: User) => void;
+function UserTable({ caption, rows, onOpen, empty }: {
+    caption: string;
+    rows: User[];
+    onOpen: (u: User) => void;
+    empty: string;
 }) {
+    const th: React.CSSProperties = {
+        textAlign: 'left', padding: '10px 16px', borderBottom: `1px solid ${GH.ink10}`,
+        fontFamily: GH_MONO, fontSize: 12, fontWeight: 500, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: GH.ink60,
+    };
     return (
-        <button
-            onClick={() => onSelect(user)}
-            style={{
-                width: '100%',
-                display: 'grid',
-                gridTemplateColumns: '48px 1fr auto',
-                gap: 12,
-                alignItems: 'center',
-                padding: '14px 16px',
-                background: isSelected ? GH.ink5 : 'transparent',
-                border: 'none',
-                borderBottom: isLast ? 'none' : gharHairline,
-                cursor: 'pointer',
-                textAlign: 'left',
-            }}
-        >
-            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.06em' }}>
-                {String(index + 1).padStart(3, '0')}
-            </div>
-            <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: GH.ink, letterSpacing: '-0.005em' }}>
-                    {user.name}
-                </div>
-                <div style={{ ...gharMono, color: GH.ink60, marginTop: 2 }}>
-                    {user.email}
-                </div>
-            </div>
-            <span
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    padding: '4px 7px',
-                    color: GH.ink,
-                    border: `1px solid ${GH.ink}`,
-                }}
-            >
-                {roleLabel(user.role)}
-            </span>
-        </button>
+        <div style={{ border: `1px solid ${GH.ink10}`, background: GH.card, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 560 }}>
+                <caption style={{ textAlign: 'left', padding: '12px 16px', fontWeight: 600, fontSize: 16, borderBottom: `1px solid ${GH.ink10}` }}>
+                    {caption}
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col" style={th}>Имя</th>
+                        <th scope="col" style={th}>Роль</th>
+                        <th scope="col" style={th}>Сверх роли</th>
+                        <th scope="col" style={{ ...th, width: 48 }}><span className="sr-only">Открыть</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.length === 0 ? (
+                        <tr>
+                            <td colSpan={4}>
+                                <EmptyState compact title={empty} />
+                            </td>
+                        </tr>
+                    ) : rows.map(u => {
+                        const extra = u.permissions?.length ?? 0;
+                        return (
+                            <tr
+                                key={u.id}
+                                className="access-row"
+                                onClick={() => onOpen(u)}
+                                style={{ borderBottom: `1px solid ${GH.ink10}`, cursor: 'pointer' }}
+                            >
+                                <td style={{ padding: '10px 16px' }}>
+                                    {/* Кнопка — чтобы строку можно было открыть с клавиатуры. */}
+                                    <button
+                                        type="button"
+                                        onClick={e => { e.stopPropagation(); onOpen(u); }}
+                                        style={{
+                                            background: 'none', border: 'none', padding: 0, font: 'inherit',
+                                            color: GH.ink, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
+                                        }}
+                                    >
+                                        {u.name || u.email}
+                                    </button>
+                                    <div style={{ fontSize: 12, color: GH.ink60, overflowWrap: 'anywhere' }}>{u.email}</div>
+                                </td>
+                                <td style={{ padding: '10px 16px' }}>{roleLabel(u.role)}</td>
+                                <td style={{ padding: '10px 16px', color: extra > 0 ? GH.ink : GH.ink60 }}>
+                                    {extra > 0 ? ruCountWord(extra, RIGHTS) : 'только роль'}
+                                </td>
+                                <td style={{ padding: '10px 16px', color: GH.ink60 }} aria-hidden="true">
+                                    <ChevronRight size={16} />
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+            <style>{`.access-row:hover { background: ${GH.ink5}; }`}</style>
+        </div>
     );
 }
