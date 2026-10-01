@@ -679,6 +679,63 @@ def test_consecutive_chain_recompute_ignores_live_subscription():
     assert _snap(s, u)["xrem"] == 4.0 and _snap(s, u)["main"] == 20.0
 
 
+# Эталон B1 снят на main (до доп. пула) тем же сценарием — «Основной пул пуст
+# (remaining_hours=0), баланс 500, две денежные брони по 1 ч подряд в один день,
+# 14:00 и 15:00 в room_1»: (цена каждой, правило, % скидки, итоговый баланс).
+# Тёплый −10%, Регулярный −15%, Профи+ −20%, Групповой мастер: индивидуальная
+# бронь не покрывается тарифом — скидки нет, только «часы подряд» −10%; групповая
+# — скидка −25% (35 ₾ → 26.25). Ревизия 01.10: `ignore_subscription=True` в цепочке
+# съедал скидку — Регулярный платил 18/18 вместо 17/17 (main).
+_CHAIN_ON_MAIN = {
+    ("REGULAR_PRACTITIONER", "individual"): (17.0, "SUBSCRIPTION_DISCOUNT", 15, 466.0),
+    ("WARM_START", "individual"): (18.0, "SUBSCRIPTION_DISCOUNT", 10, 464.0),
+    ("PRO_PLUS", "individual"): (16.0, "SUBSCRIPTION_DISCOUNT", 20, 468.0),
+    ("GROUP_MASTER", "individual"): (18.0, "CONSECUTIVE_HOURS", 10, 464.0),
+    ("GROUP_MASTER", "group"): (26.25, "SUBSCRIPTION_DISCOUNT", 25, 447.5),
+    ("PRO_PLUS", "group"): (28.0, "SUBSCRIPTION_DISCOUNT", 20, 444.0),
+}
+
+
+@_scenario
+def test_consecutive_chain_keeps_subscription_discount_as_on_main():
+    """B1 (ревизия 01.10): цепочка «часы подряд» выключает ТОЛЬКО покрытие часами,
+    скидка абонемента остаётся. Два денежных часа подряд у клиента без часов
+    стоят ровно как на main: те же цены, то же правило, тот же баланс."""
+    for (plan, fmt), (price, rule, pct, balance) in _CHAIN_ON_MAIN.items():
+        s = H._db()
+        admin = _admin_user(s)
+        over = {"remaining_hours": 0.0}
+        if plan == "GROUP_MASTER" and fmt == "individual":
+            # «4 ч индивидуально» уже выбраны — иначе их покроет доп. пул (это
+            # новое поведение, а не main), и цепочки не будет вовсе.
+            over.update(extra_hours_remaining=0.0, extra_hours_used=4.0)
+        u = H._user(s, sub=_sub_with(plan, **over), balance=500.0, name="C")
+        for st in ("14:00", "15:00"):
+            H._create(s, admin, u, days=0, start=st, minutes=60, resource="room_1", fmt=fmt, method="balance")
+            s.commit()
+        s.expire_all()
+        rows = s.exec(select(Booking).where(Booking.user_uuid == u.id).order_by(Booking.start_time)).all()
+        assert len(rows) == 2, (plan, fmt, len(rows))
+        for b in rows:
+            got = (round(float(b.final_price), 2), b.applied_rule, int(b.discount_percent or 0))
+            assert b.payment_method == "balance" and got == (price, rule, pct), \
+                f"{plan}/{fmt} {b.start_time}: {got}, на main {(price, rule, pct)}"
+        assert round(float(s.get(User, u.id).balance), 2) == balance, \
+            f"{plan}/{fmt}: баланс {s.get(User, u.id).balance}, на main {balance}"
+
+
+def test_chain_pricing_uses_hours_cover_flag_not_ignore_subscription():
+    """Цепочка не имеет права звать `ignore_subscription=True` (выключает и скидку);
+    только `subscription_hours_cover=False`, а ветка SUBSCRIPTION_DISCOUNT — цела."""
+    src = _read("backend/app/services/consecutive_pricing.py")
+    code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "ignore_subscription" not in code, "цепочка снова выключает абонемент целиком — пропадёт скидка тарифа"
+    assert "subscription_hours_cover=False" in code, "цепочка не выключает покрытие часами"
+    pr = _read("backend/app/services/pricing.py")
+    assert "hours_cover=subscription_hours_cover" in pr and "if hours_cover:" in pr
+    assert 'breakdown.applied_rule = "SUBSCRIPTION_DISCOUNT"' in pr
+
+
 @_scenario
 def test_approve_group_master_individual_without_extra_hours_is_refused():
     """Горячая индивидуальная бронь Группового мастера: к подтверждению «4 ч
