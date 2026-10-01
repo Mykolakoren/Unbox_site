@@ -5675,6 +5675,7 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         )
 
     hours = round(float(quote.hours_deducted or (booking.duration / 60.0)), 4)
+    extra_hours = float(quote.extra_hours_deducted or 0)
 
     # 1. Возврат денег на баланс. Возвращаем ровно то, что было списано, за
     #    вычетом остатка, который абонемент не покрыл (пиковая надбавка).
@@ -5701,13 +5702,14 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
     #    списание (Валерия Костенецкая 29.09: 6 ч).
     is_pending = booking.payment_status == "pending"
     if not is_pending:
-        owner.subscription = subscription_pool.debit_hours(owner.subscription, hours)
+        owner.subscription = subscription_pool.debit_hours(owner.subscription, hours, extra=extra_hours)
         session.add(owner)
 
     # 3. Перекраска брони.
     booking.payment_method = "subscription"
     booking.applied_rule = "SUBSCRIPTION"
     booking.hours_deducted = hours
+    subscription_pool.stamp_booking(booking, hours, extra_hours)
     booking.final_price = peak_left
     # Для pending снимок «сколько списано» ставит крон; до него — пусто, как
     # у обычной отложенной абонементной брони.
@@ -5860,6 +5862,10 @@ def shorten_booking(
     old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
     new_hours = round(old_hours * (new_duration / old_duration), 4) if old_duration > 0 else old_hours
     refund_hours = round(old_hours - new_hours, 4)
+    # Доп. пул — той же долей (пропорциональное сокращение), возврат в свой пул.
+    old_extra = subscription_pool.booking_extra(booking) if old_hours > 0 else 0.0
+    new_extra = round(old_extra * (new_hours / old_hours), 4) if old_hours > 0 else 0.0
+    refund_extra = round(old_extra - new_extra, 4)
 
     # Применяем возврат только если деньги уже списаны. Для pending —
     # cron возьмёт правильную сумму при T-24h.
@@ -5872,7 +5878,8 @@ def shorten_booking(
             if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
                 if subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
                     target_user.subscription = subscription_pool.credit_hours(
-                        target_user.subscription, refund_hours)
+                        target_user.subscription, refund_hours, extra=refund_extra,
+                        kind=_pool_kind(session, booking))
             else:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
                               description="Возврат за сокращённое время брони",
@@ -5884,6 +5891,7 @@ def shorten_booking(
     booking.final_price = new_price
     if (booking.payment_method or "").lower() == "subscription":
         booking.hours_deducted = new_hours
+        subscription_pool.stamp_booking(booking, new_hours, new_extra)
     if settled_now:
         booking.charge_amount = new_price
     booking.updated_at = datetime.now()
@@ -6044,6 +6052,21 @@ def split_booking(
     charges = _split_amount(charged_total) if charged_total is not None else None
     hours_total = float(booking.hours_deducted or 0)
     hours = _split_amount(hours_total) if hours_total > 0 else None
+    # Доп. пул делим теми же долями; каждая часть берёт не больше своих часов,
+    # а сумма частей остаётся равной исходной (остаток — в первую часть).
+    extra_total = subscription_pool.booking_extra(booking) if hours is not None else 0.0
+    extras_split = None
+    if hours is not None and extra_total > 0:
+        extras_split = _split_amount(extra_total)
+        extras_split = [min(max(0.0, e), h) for e, h in zip(extras_split, hours)]
+        _rest = round(extra_total - sum(extras_split), 2)
+        for _i in range(len(extras_split)):
+            if _rest <= 0:
+                break
+            _room = round(hours[_i] - extras_split[_i], 2)
+            _add = min(_room, _rest)
+            extras_split[_i] = round(extras_split[_i] + _add, 2)
+            _rest = round(_rest - _add, 2)
 
     old_event_id = booking.gcal_event_id
     created: list = []
@@ -6061,6 +6084,9 @@ def split_booking(
                 booking.charge_amount = charges[0]
             if hours is not None:
                 booking.hours_deducted = hours[0]
+                if (booking.payment_method or "").lower() == "subscription":
+                    subscription_pool.stamp_booking(
+                        booking, hours[0], extras_split[0] if extras_split else 0.0)
             if q is not None:
                 booking.base_price = float(q.base_price)
                 booking.applied_rule = q.applied_rule
@@ -6098,6 +6124,8 @@ def split_booking(
                 created_by_id=str(current_user.id),
                 created_by_name=current_user.name or "",
             )
+            if hours is not None and (nb.payment_method or "").lower() == "subscription":
+                subscription_pool.stamp_booking(nb, hours[idx], extras_split[idx] if extras_split else 0.0)
             session.add(nb)
             created.append(nb)
         offset += p

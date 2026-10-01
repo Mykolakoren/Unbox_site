@@ -290,6 +290,18 @@ def grant_hours(sub: Optional[dict], hours: float) -> dict:
     return update(sub, remaining_hours=round(rem + h, 2), total_hours=round(total + h, 2))
 
 
+def grant_extra_hours(sub: Optional[dict], hours: float, kind: Optional[str] = None) -> dict:
+    """Пополнение доп. пула админом: остаток и «всего» +hours. Если у абонемента
+    доп. пула нет, заводим его вида ``kind`` (по умолчанию — капсула)."""
+    h = float(hours or 0)
+    cur = extra_kind(sub)
+    if cur is None:
+        return update(sub, **extra_fields(kind or EXTRA_CAPSULE, h))
+    er = get_float(sub, "extra_hours_remaining")
+    et = get_float(sub, "extra_hours_total")
+    return update(sub, extra_hours_remaining=round(er + h, 4), extra_hours_total=round(et + h, 4))
+
+
 def pool_fields(total: float, bonus: float = 0.0, used: float = 0.0) -> dict:
     """Поля нового пула (snake_case; запишет update): всего, бонус, остаток, израсходовано."""
     total, bonus, used = float(total), float(bonus), float(used)

@@ -672,6 +672,13 @@ def topup_subscription(
     # (snake-only) saw remaining_hours=0, fell back to cash and charged the
     # client's balance for hours they had just paid for. See subscription_pool.
     user.subscription = subscription_pool.grant_hours(user.subscription, hours)
+    # Доп. пул (часы капсулы / «индивидуально») пополняется отдельным полем —
+    # `hours` всегда про основной пул, как и раньше.
+    extra_hours = float(payload.get("extra_hours", 0) or 0)
+    if extra_hours < 0:
+        raise HTTPException(400, "extra_hours must not be negative")
+    if extra_hours > 0:
+        user.subscription = subscription_pool.grant_extra_hours(user.subscription, extra_hours)
 
     comment_history = list(user.comment_history or [])
     log_text = (
