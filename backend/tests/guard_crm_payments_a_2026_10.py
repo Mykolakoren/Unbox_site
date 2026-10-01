@@ -543,10 +543,10 @@ def test_front_session_panel_sends_price_currency_account():
     src = _code(DETAIL)
     i = src.index("Счёт для оплаты")
     panel = src[src.rfind("<Field", 0, i - 800):src.index("Удалить сессию", i)]
-    call = re.search(r"handleUpdateSession\(session\.id, \{[^}]*\}\)", panel, re.S)
-    assert call, "панель правки не сохраняет сессию"
-    for key in ("price:", "currency:", "account:"):
-        assert key in call.group(0), f"панель правки сессии снова не шлёт {key[:-1]}: нужны price, currency и account"
+    assert "handleUpdateSession(session.id, patch)" in panel, "панель правки не сохраняет сессию"
+    assert "price: parsedEditPrice" in panel, "панель правки сессии не шлёт price"
+    assert "patch.currency = editSessionCurrency" in panel and "patch.account = editSessionAccount" in panel, \
+        "панель правки сессии не шлёт currency/account (только изменённые)"
     assert "editSessionCurrency" in panel and "CURRENCIES" in src, "в панели нет выбора валюты"
     assert "AccountSelect" in panel and "SessionPaymentBlock" in panel, "в панели нет счёта или блока «Оплата»"
     api = _code("src/api/crm.ts")
@@ -580,7 +580,7 @@ def test_front_payment_block_edit_and_topup():
 
 def test_front_debt_uses_remaining_not_full_price():
     helper = _code("src/utils/sessionMoney.ts")
-    assert "s.remaining != null ? s.remaining" in helper, "общий расчёт долга не читает remaining"
+    assert "s.remaining" in helper and "s.paidAmount" in helper, "общий расчёт долга не читает remaining"
     for rel in (DETAIL, "src/components/crm/UnpaidSessionsSheet.tsx", "src/pages/crm/CrmSessions.tsx",
                 "src/pages/crm/CrmFinances.tsx", "src/pages/mobile/crm/MobileCrmClient.tsx"):
         assert "sessionDebt" in _code(rel), f"{rel}: долг считается без остатка по сессии (sessionDebt)"
@@ -590,8 +590,242 @@ def test_front_mobile_has_currency_and_payment_edit():
     src = _code("src/pages/mobile/crm/SessionActionSheet.tsx")
     form = src[src.index("function PriceForm"):src.index("function NotesForm") if "function NotesForm" in src else None]
     assert "Валюта" in form and "Счёт" in form, "мобильная форма цены без валюты/счёта"
-    assert "currency: currencyRaw, account: accountRaw" in src, "мобильная форма не шлёт валюту и счёт"
+    assert "patch.currency = currencyRaw" in src and "patch.account = accountRaw" in src, "мобильная форма не шлёт валюту и счёт"
     assert "SessionPaymentBlock" in src, "мобильная шторка сессии не показывает блок «Оплата»"
+
+
+# ─── Ревью этапа А (02.10): исправления ──────────────────────────────────
+
+def _create_payment(eng, uid=ME, **fields):
+    from sqlmodel import Session
+    from app.api.v1.crm.payments import create_payment
+    from app.models.therapist_payment import TherapistPaymentCreate
+    with Session(eng) as s:
+        return create_payment(data=TherapistPaymentCreate(**fields), session=s, current_user=_user(uid))
+
+
+def test_create_payment_date_defaults_and_amount_must_be_positive():
+    """N1: «Новый платёж» без даты давал 422; сумма ≤ 0 — 400 и для нового, и для доплаты."""
+    from sqlmodel import Session
+    from app.models.therapist_payment import TherapistPaymentCreate
+    p = TherapistPaymentCreate(client_id="c1", amount=10)
+    assert isinstance(p.date, datetime), "дата платежа по умолчанию не подставляется"
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=185, paid=100)
+    br = _Bridge()
+    try:
+        out = _create_payment(eng, client_id="c1", amount=20)          # без сессии и без даты
+        assert out.amount == 20 and out.date is not None
+        for bad in (0, -5):
+            assert _http_code(lambda: _create_payment(eng, client_id="c1", amount=bad)) == 400, f"сумма {bad} принята"
+            assert _http_code(lambda: _create_payment(eng, client_id="c1", session_id="s1", amount=bad)) == 400, \
+                f"доплата {bad} принята"
+    finally:
+        br.undo()
+
+
+def test_cap_to_remaining_blocks_double_topup():
+    """N2: «Доплатить» с capToRemaining не принимает сумму больше остатка — повторный клик не задваивает."""
+    from sqlmodel import Session
+    from app.models.therapist_payment import TherapistPayment
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=200, paid=185)           # оплачена по цене 185, цену подняли до 200
+    br = _Bridge()
+    try:
+        assert _http_code(lambda: _create_payment(eng, client_id="c1", session_id="s1", amount=50,
+                                                  cap_to_remaining=True)) == 409, "доплата больше остатка принята"
+        _create_payment(eng, client_id="c1", session_id="s1", amount=15, cap_to_remaining=True)
+        assert _http_code(lambda: _create_payment(eng, client_id="c1", session_id="s1", amount=15,
+                                                  cap_to_remaining=True)) == 409, "повторная доплата задвоила платёж"
+    finally:
+        br.undo()
+    with Session(eng) as s:
+        assert s.get(TherapistPayment, "p-s1").amount == 200, "после доплаты и отказа должно быть ровно 200"
+
+
+def test_create_payment_account_client_and_session_checks():
+    """N8: счёт «по умолчанию» не перетирает прежний; сессия должна быть клиента и своей."""
+    from sqlmodel import Session
+    from app.models.therapist_client import TherapistClient
+    from app.models.therapist_payment import TherapistPayment
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=185, paid=100, account="tbc")
+        s.add(TherapistClient(id="c2", specialist_id=ME, name="Борис", base_price=10))
+        s.commit()
+    br = _Bridge()
+    try:
+        _create_payment(eng, client_id="c1", session_id="s1", amount=10)          # счёт не прислали
+        with Session(eng) as s:
+            assert s.get(TherapistPayment, "p-s1").account == "tbc", "счёт по умолчанию перетёр прежний"
+        _create_payment(eng, client_id="c1", session_id="s1", amount=10, account="bog")
+        with Session(eng) as s:
+            assert s.get(TherapistPayment, "p-s1").account == "bog", "явно выбранный счёт не записался"
+        assert _http_code(lambda: _create_payment(eng, client_id="c2", session_id="s1", amount=5)) == 400, \
+            "платёж чужого клиента на сессию принят"
+        assert _http_code(lambda: _create_payment(eng, client_id="c1", session_id="нет-такой", amount=5)) == 404, \
+            "платёж на несуществующую сессию принят"
+    finally:
+        br.undo()
+
+
+def test_quick_pay_reconcile_freezes_price_and_currency_first():
+    """N4: цена клиента (₾) не превращается в сумму платежа в другой валюте: сначала заморозка."""
+    from sqlmodel import Session
+    from app.api.v1.crm.sessions import quick_pay_session
+    from app.api.v1.settings import DEFAULT_EXCHANGE_RATES
+    from app.models.therapist_payment import TherapistPayment
+    from app.models.therapy_session import TherapySession
+    usd = DEFAULT_EXCHANGE_RATES["USD"]
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=270, currency=None, paid=50, pay_currency="USD")
+        ts = s.get(TherapySession, "s1")
+        ts.price = None          # цена и валюта сессии не заморожены — идут от клиента (270 ₾)
+        ts.is_paid = False
+        s.add(ts)
+        s.commit()
+    br = _Bridge()
+    try:
+        with Session(eng) as s:
+            res = quick_pay_session(session_id="s1", payload={}, session=s, current_user=_user())
+    finally:
+        br.undo()
+    ts = _session_row(eng)
+    assert ts.price == 270 and ts.currency == "GEL", (ts.price, ts.currency)
+    with Session(eng) as s:
+        p = s.get(TherapistPayment, "p-s1")
+        assert p.currency == "USD" and abs(p.amount - 270 / usd) < 0.02, (p.amount, p.currency)
+    assert ts.is_paid is True and abs(res["added"] - (270 / usd - 50)) < 0.02, res
+
+
+def test_quick_pay_reports_added_amount():
+    from sqlmodel import Session
+    from app.api.v1.crm.sessions import quick_pay_session
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=185, sid="s1")
+        _seed(s, price=185, paid=100, sid="s2")
+    br = _Bridge()
+    try:
+        with Session(eng) as s:
+            assert quick_pay_session(session_id="s1", payload={}, session=s, current_user=_user())["added"] == 185
+        with Session(eng) as s:
+            assert quick_pay_session(session_id="s2", payload={}, session=s, current_user=_user())["added"] == 85, \
+                "тост должен показывать добавленную сумму, а не весь платёж"
+    finally:
+        br.undo()
+
+
+def test_debt_survives_session_moved_to_other_client():
+    """п.4: платёж не фильтруется по клиенту: сессию перепривязали — остаток по-прежнему цена − внесённое."""
+    from sqlmodel import Session
+    from app.api.v1.crm.sessions import list_sessions
+    from app.models.therapist_client import TherapistClient
+    from app.models.therapy_session import TherapySession
+    eng = _engine()
+    with Session(eng) as s:
+        _seed(s, price=185, paid=100)
+        s.add(TherapistClient(id="c2", specialist_id=ME, name="Борис", base_price=185))
+        ts = s.get(TherapySession, "s1")
+        ts.client_id = "c2"
+        s.add(ts)
+        s.commit()
+        row = list_sessions(session=s, current_user=_user(), client_id=None, date_from=None, date_to=None, status=None)[0]
+        assert row.paid_amount == 100 and row.remaining == 85, (row.paid_amount, row.remaining)
+    src = (BACKEND / "app/services/session_balance.py").read_text()
+    sig = src[src.index("def load_payments_by_session"):src.index("def load_payments_by_session") + 120]
+    assert "client_id" not in sig, "загрузка платежей снова принимает фильтр по клиенту"
+    stmt = src[src.index("stmt = select(TherapistPayment)"):]
+    assert "TherapistPayment.client_id" not in stmt, "загрузка платежей снова фильтрует по клиенту"
+
+
+def test_mark_all_locks_sessions():
+    """N3: «Отметить все» выбирает сессии под замком (двойной клик не задвоит платежи)."""
+    src = (BACKEND / "app/api/v1/crm/sessions.py").read_text()
+    body = src[src.index("def mark_all_sessions_paid"):]
+    assert ".with_for_update()" in body[:body.index("count = 0")], "mark-all без FOR UPDATE по выборке unpaid"
+
+
+def test_front_unmark_resets_money_and_debt_is_robust():
+    """B1: после «Снять оплату» остаток/внесённое сбрасываются; sessionDebt не верит remaining: 0 у неоплаченной."""
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    for rel in ("src/pages/mobile/crm/SessionActionSheet.tsx", DETAIL, "src/pages/mobile/crm/crmFlows.tsx"):
+        code = _code(rel)
+        assert "isPaid: false, paidAmount: undefined, remaining: undefined" in code, \
+            f"{rel}: после снятия оплаты остаётся старый remaining (долг 0 до перезагрузки)"
+    node = shutil.which("node")
+    if not node:
+        return
+    src = _src("src/utils/sessionMoney.ts")
+    src = re.sub(r"^import [^\n]*\n", "", src, flags=re.M)
+    prog = ("const EXCHANGE_RATES: Record<string, number> = { GEL: 1, USD: 2.69, UAH: 0.065 };\n"
+            "type CrmSession = any;\n" + src + """
+const c = { basePrice: 0, currency: 'GEL' };
+console.log(JSON.stringify({
+  afterUnmark: sessionDebt({ isPaid: false, price: 185, remaining: 0, paidAmount: undefined } as any, c).amount,
+  afterUnmarkStalePaid: sessionDebt({ isPaid: false, price: 185, remaining: 0, paidAmount: 0 } as any, c).amount,
+  noMoney: sessionDebt({ isPaid: false, price: 185 } as any, c).amount,
+  partial: sessionDebt({ isPaid: false, price: 185, remaining: 85, paidAmount: 100 } as any, c).amount,
+  covered: sessionDebt({ isPaid: false, price: 185, remaining: 0, paidAmount: 185 } as any, c).amount,
+  paid: sessionDebt({ isPaid: true, price: 185, remaining: 0, paidAmount: 185 } as any, c).amount,
+  free: sessionDebt({ isPaid: false, price: 0, remaining: 0, paidAmount: 0 } as any, c).amount,
+  mismatchNoCur: !!paymentMismatch({ isPaid: true, price: 15, paidAmount: 15.0102 } as any, c),
+  mismatchUsd: !!paymentMismatch({ isPaid: true, price: 15, paidAmount: 15.0102 } as any, c, 'USD'),
+  mismatchReal: !!paymentMismatch({ isPaid: true, price: 200, paidAmount: 185 } as any, c, 'USD'),
+}));
+""")
+    with tempfile.TemporaryDirectory() as d:
+        f = pathlib.Path(d) / "m.mts"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([node, "--experimental-strip-types", "--no-warnings", str(f)],
+                           capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        if "strip-types" in r.stderr or "bad option" in r.stderr:
+            return   # старый node — поведение проверяют статические проверки выше
+        raise AssertionError(f"node упал: {r.stderr[:500]}")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["afterUnmark"] == 185 and out["afterUnmarkStalePaid"] == 185, out
+    assert out["noMoney"] == 185 and out["partial"] == 85 and out["covered"] == 0 and out["paid"] == 0 and out["free"] == 0, out
+    assert out["mismatchNoCur"] is True and out["mismatchUsd"] is False and out["mismatchReal"] is True, \
+        f"допуск «цена и оплата не совпадают» не такой, как у сервера: {out}"
+
+
+def test_front_review_fixes_hold():
+    detail = _code(DETAIL)
+    # п.1: валюту и счёт шлём только изменёнными
+    assert "patch.currency = editSessionCurrency" in detail and "patch.account = editSessionAccount" in detail, \
+        "десктопная правка цены снова шлёт валюту и счёт всегда"
+    mob = _code("src/pages/mobile/crm/SessionActionSheet.tsx")
+    assert "patch.currency = currencyRaw" in mob and "patch.account = accountRaw" in mob, \
+        "мобильная правка цены снова шлёт валюту и счёт всегда"
+    # N5: после «Оплатить» цену и валюту сессии из платежа не подставляем
+    assert "price: res.amount" not in mob and "currency: res.currency ?? session.currency" not in mob
+    i = mob.index("const res = await crmApi.quickPaySession")
+    assert "refreshSession()" in mob[i:i + 700], "после «Оплатить» сессия не перечитывается"
+    assert "price: res.amount" not in _code("src/pages/mobile/crm/crmFlows.tsx"), "crmFlows подставляет цену из платежа"
+    # п.2: «Сегодня», строки сессий и тосты — остаток / добавленная сумма
+    for rel in ("src/pages/crm/CrmDashboard.tsx", "src/pages/mobile/crm/MobileCrmToday.tsx", "src/pages/crm/CrmSessions.tsx"):
+        assert "sessionDebt(" in _code(rel), f"{rel}: кнопки оплаты показывают полную цену, а не остаток"
+    for rel in (DETAIL, "src/pages/crm/CrmDashboard.tsx", "src/pages/crm/CrmSessions.tsx",
+                "src/components/crm/UnpaidSessionsSheet.tsx", "src/pages/mobile/crm/crmFlows.tsx"):
+        code = _code(rel)
+        assert "res.added ?? res.amount" in code or "result.added ?? result.amount" in code, \
+            f"{rel}: тост после оплаты показывает весь платёж, а не добавленную сумму"
+    # N2: «Доплатить» идемпотентно
+    blk = _code(BLOCK)
+    assert "crmApi.quickPaySession(session.id)" in blk and "capToRemaining: true" in blk, \
+        "«Доплатить» не использует quick-pay / capToRemaining"
+    # п.5: русские ошибки стора
+    store = _code("src/store/crmStore.ts")
+    assert "toastApiError(error, 'Не удалось обновить сессию')" in store, "стор не показывает ответ сервера при правке сессии"
+    # п.6: мёртвый stats.debt убран
+    assert "const debt = unpaid.reduce" not in detail, "вернулся неиспользуемый stats.debt"
 
 
 if __name__ == "__main__":
