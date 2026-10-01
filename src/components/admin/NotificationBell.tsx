@@ -172,7 +172,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                 <button
                                     onClick={handleMarkAll}
                                     disabled={markingAll}
-                                    className="flex items-center gap-1 text-xs text-unbox-green hover:text-unbox-dark font-medium transition-colors disabled:opacity-50"
+                                    className="flex items-center gap-1 text-xs text-accent-ink hover:text-ink font-medium transition-colors disabled:opacity-50"
                                 >
                                     {markingAll ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
                                     Прочитать все
@@ -201,7 +201,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                             onClick={() => handleClick(n)}
                                             className={clsx(
                                                 "w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0",
-                                                !n.isRead && "border-l-2 border-l-unbox-green bg-unbox-green/[0.03]"
+                                                !n.isRead && "border-l-2 border-l-accent bg-accent-soft"
                                             )}
                                         >
                                             <div className={clsx(

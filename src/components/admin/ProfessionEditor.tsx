@@ -45,7 +45,7 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
 
     if (isEditing) {
         return (
-            <div className="bg-gray-50 p-2 rounded-lg border border-gray-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-gray-50 p-2 rounded-lg border border-ink-10 animate-in fade-in zoom-in-95 duration-200">
                 <select
                     value={selectedType}
                     onChange={(e) => {
@@ -54,7 +54,7 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
                             setCustomValue('');
                         }
                     }}
-                    className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                    className="w-full text-sm p-1.5 rounded border border-ink-10 mb-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     autoFocus
                 >
                     <option value="">Выберите...</option>
@@ -70,21 +70,21 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
                         value={customValue}
                         onChange={(e) => setCustomValue(e.target.value)}
                         placeholder="Название профессии..."
-                        className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                        className="w-full text-sm p-1.5 rounded border border-ink-10 mb-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                 )}
 
                 <div className="flex gap-2">
                     <button
                         onClick={handleSave}
-                        className="flex-1 bg-unbox-green text-white text-xs py-1 rounded hover:bg-unbox-dark transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-ink text-paper text-xs py-1 rounded hover:bg-ink-80 transition-colors flex items-center justify-center gap-1"
                     >
                         <Check size={12} />
                         Сохранить
                     </button>
                     <button
                         onClick={() => setIsEditing(false)}
-                        className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs py-1 rounded hover:bg-gray-50 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-card border border-ink-10 text-ink-80 text-xs py-1 rounded hover:bg-sunken transition-colors flex items-center justify-center gap-1"
                     >
                         <X size={12} />
                         Отмена
@@ -97,7 +97,7 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
     return (
         <div
             onClick={() => setIsEditing(true)}
-            className="group cursor-pointer flex items-center gap-2 py-1 hover:bg-gray-50 rounded-md transition-colors -ml-1 pl-1"
+            className="group cursor-pointer flex items-center gap-2 py-1 hover:bg-sunken rounded-md transition-colors -ml-1 pl-1"
         >
             <Briefcase size={16} className="text-gray-500" />
             <div className="flex-1 font-medium text-gray-700 text-sm">

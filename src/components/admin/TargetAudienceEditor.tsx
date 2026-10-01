@@ -38,15 +38,15 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
 
     if (isEditing) {
         return (
-            <div className="bg-gray-50 p-2 rounded-lg border border-gray-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-gray-50 p-2 rounded-lg border border-ink-10 animate-in fade-in zoom-in-95 duration-200">
                 <div className="space-y-1 mb-2 max-h-48 overflow-y-auto">
                     {AUDIENCE_OPTIONS.map(option => (
-                        <label key={option} className="flex items-center gap-2 p-1.5 hover:bg-white rounded cursor-pointer text-sm">
+                        <label key={option} className="flex items-center gap-2 p-1.5 hover:bg-card rounded cursor-pointer text-sm">
                             <input
                                 type="checkbox"
                                 checked={selected.includes(option)}
                                 onChange={() => toggleOption(option)}
-                                className="rounded border-gray-300 text-unbox-green focus:ring-unbox-green"
+                                className="rounded border-ink-40 text-accent focus:ring-accent"
                             />
                             <span>{option}</span>
                         </label>
@@ -56,14 +56,14 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                 <div className="flex gap-2">
                     <button
                         onClick={handleSave}
-                        className="flex-1 bg-unbox-green text-white text-xs py-1 rounded hover:bg-unbox-dark transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-ink text-paper text-xs py-1 rounded hover:bg-ink-80 transition-colors flex items-center justify-center gap-1"
                     >
                         <Check size={12} />
                         Сохранить
                     </button>
                     <button
                         onClick={handleCancel}
-                        className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs py-1 rounded hover:bg-gray-50 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-card border border-ink-10 text-ink-80 text-xs py-1 rounded hover:bg-sunken transition-colors flex items-center justify-center gap-1"
                     >
                         <X size={12} />
                         Отмена
@@ -79,7 +79,7 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                 setSelected(value || []);
                 setIsEditing(true);
             }}
-            className="group cursor-pointer flex items-start gap-2 py-1 hover:bg-gray-50 rounded-md transition-colors -ml-1 pl-1"
+            className="group cursor-pointer flex items-start gap-2 py-1 hover:bg-sunken rounded-md transition-colors -ml-1 pl-1"
         >
             <Users size={16} className="text-gray-500 mt-0.5" />
             <div className="flex-1 text-sm">
