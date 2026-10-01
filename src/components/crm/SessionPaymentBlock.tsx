@@ -51,7 +51,7 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
     const cur = sessionCurrencyOf(session, client);
     const price = sessionPriceOf(session, client);
     const partial = partialPayment(session, client);
-    const mismatch = paymentMismatch(session, client);
+    const mismatch = paymentMismatch(session, client, payment.currency);
     const accountLabel = paymentAccounts.find(a => a.id === payment.account)?.label || payment.account;
     const topUpAmount = partial ? partial.remaining : (mismatch?.shortfall ?? 0);
 
@@ -59,17 +59,25 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
         if (topping || topUpAmount <= 0) return;
         setTopping(true);
         try {
-            // Валюта — сессии: сервер переведёт её в валюту платежа сам.
-            await crmApi.createPayment({
-                clientId: session.clientId,
-                sessionId: session.id,
-                amount: topUpAmount,
-                currency: cur,
-                account: payment.account,
-                // Дата нужна серверу, но у доплаты она не меняет платёж: он один на сессию.
-                date: new Date().toISOString().slice(0, 19),
-            });
-            toast.success(`Доплата записана: ${formatMoney(topUpAmount, { currency: cur })}`);
+            if (partial) {
+                // Частичная оплата: «Доплатить» = закрыть остаток. Это идемпотентный
+                // quick-pay: повторный тап получит «уже оплачена», а не вторую доплату.
+                const res = await crmApi.quickPaySession(session.id);
+                toast.success(`Доплата записана: ${formatMoney(res.added ?? topUpAmount, { currency: cur })}`);
+            } else {
+                // Цену подняли после оплаты: доплата по POST /payments, но с capToRemaining —
+                // сервер не примет сумму больше остатка (двойной клик не задвоит платёж).
+                await crmApi.createPayment({
+                    clientId: session.clientId,
+                    sessionId: session.id,
+                    amount: topUpAmount,
+                    currency: cur,
+                    capToRemaining: true,
+                    // Дата нужна серверу, но у доплаты она не меняет платёж: он один на сессию.
+                    date: new Date().toISOString().slice(0, 19),
+                });
+                toast.success(`Доплата записана: ${formatMoney(topUpAmount, { currency: cur })}`);
+            }
             await onChanged();
         } catch (e) {
             toastApiError(e, 'Не удалось записать доплату. Попробуйте ещё раз');

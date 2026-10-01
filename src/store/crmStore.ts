@@ -2,12 +2,13 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { crmApi } from '../api/crm';
 import { calendarNearConflict } from '../utils/crmCalendarConflict';
+import { toastApiError } from '../utils/errors';
 
 // Dedup concurrent quick-pay calls per session id — a double-tap on the "Оплатить"
 // button (the flag flips isPaid only AFTER the await) would otherwise fire two
 // payment API calls. Returning the same in-flight promise = one call, both
 // callers get the real result.
-const _quickPayInFlight = new Map<string, Promise<{ amount: number; currency: string }>>();
+const _quickPayInFlight = new Map<string, Promise<{ amount: number; currency: string; added?: number }>>();
 import type {
     CrmClient, CrmClientCreate, CrmClientUpdate,
     CrmSession, CrmSessionCreate, CrmSessionUpdate,
@@ -51,7 +52,7 @@ interface CrmStore {
     createSession: (data: CrmSessionCreate) => Promise<CrmSession>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
 
     // Payments
     fetchPayments: (params?: { clientId?: string; dateFrom?: string; dateTo?: string }) => Promise<void>;
@@ -188,7 +189,9 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
             }));
             return updated;
         } catch (error) {
-            toast.error('Не удалось обновить сессию');
+            // Русский ответ сервера («Валюта «ZZZ» не заведена…») показываем как есть,
+            // а не общее «не удалось»; без ответа — понятная причина (связь, таймаут).
+            toastApiError(error, 'Не удалось обновить сессию');
             throw error;
         }
     },
@@ -229,10 +232,10 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
                 const result = await crmApi.quickPaySession(id, account);
                 set((s) => ({
                     sessions: s.sessions.map((sess) =>
-                        sess.id === id ? { ...sess, isPaid: true } : sess
+                        sess.id === id ? { ...sess, isPaid: true, remaining: 0 } : sess
                     ),
                 }));
-                return { amount: result.amount, currency: result.currency };
+                return { amount: result.amount, currency: result.currency, added: result.added };
             } catch (error) {
                 toast.error('Не удалось отметить оплату');
                 throw error;

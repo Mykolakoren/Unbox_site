@@ -111,8 +111,9 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
         try {
             const res = await quickPaySession(s.id);
             setPaidIds(prev => new Set(prev).add(s.id));
-            toast.success(res.amount
-                ? `Оплата отмечена: ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}`
+            const addedNow = res.added ?? res.amount;
+            toast.success(addedNow
+                ? `Оплата отмечена: ${formatMoney(addedNow, { currency: res.currency || 'GEL' })}`
                 : 'Оплата отмечена');
             onChanged?.();
         } catch {

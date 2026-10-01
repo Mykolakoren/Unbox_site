@@ -43,7 +43,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
-import { sessionDebt, sessionCurrencyOf } from '../../utils/sessionMoney';
+import { sessionDebt, sessionCurrencyOf, partialPayment } from '../../utils/sessionMoney';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -97,10 +97,10 @@ function getEffectiveStatus(session: CrmSession): string {
  *  снимает отметку и удаляет платёж. */
 async function payWithUndo(
     sessionId: string,
-    quickPay: (id: string, account?: string) => Promise<{ amount: number; currency: string }>,
+    quickPay: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>,
     onChanged: () => void,
 ): Promise<void> {
-    let res: { amount: number; currency: string };
+    let res: { amount: number; currency: string; added?: number };
     try {
         res = await quickPay(sessionId);
     } catch {
@@ -108,7 +108,8 @@ async function payWithUndo(
         return;
     }
     onChanged();
-    const sum = res.amount ? ` · ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}` : '';
+    const added = res.added ?? res.amount;
+    const sum = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
     undoToast(`Отмечено${sum}`, async () => {
         try {
             await crmApi.unmarkPaidSession(sessionId);
@@ -924,7 +925,7 @@ interface GHSessionsProps {
     onReload: () => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
     handleBookCab: (session: CrmSession, clientName: string) => void;
     navigate: ReturnType<typeof useNavigate>;
 }
@@ -1445,7 +1446,7 @@ interface GHSessionRowProps {
     highlightId: string | null;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
     /** Перечитать сессии и платежи месяца. */
     onReload: () => void;
@@ -1481,7 +1482,11 @@ function GHSessionRow({
         ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" className={badgeClass} />
         : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" className={badgeClass} />;
     const amount = session.price ?? client?.basePrice;
-    const price = formatMoney(amount, { currency: client?.currency });
+    const price = formatMoney(amount, { currency: sessionCurrencyOf(session, client) });
+    // На кнопке оплаты — остаток (цена минус внесённое), а не вся цена.
+    const owed = sessionDebt(session, client);
+    const owedText = formatMoney(owed.amount, { currency: owed.currency });
+    const payVerb = partialPayment(session, client) ? 'Доплатить' : 'Отметить оплату';
 
     const canPay = !session.isPaid && !isCancelled;
     const canBook = !session.isBooked && !isCancelled;
@@ -1544,7 +1549,7 @@ function GHSessionRow({
                 <button type="button" onClick={handleQuickPay} disabled={paying} aria-busy={paying || undefined}
                     style={{ ...mainBtnStyle, background: GH.ink, color: GH.paper, opacity: paying ? 0.6 : 1 }}>
                     {narrow && <Banknote size={14} aria-hidden="true" />}
-                    {paying ? 'Отмечаем…' : (amount ? `Отметить оплату · ${price}` : 'Отметить оплату')}
+                    {paying ? 'Отмечаем…' : (owed.amount ? `${payVerb} · ${owedText}` : 'Отметить оплату')}
                 </button>
             )}
             {primary === 'cab' && (
@@ -1562,7 +1567,7 @@ function GHSessionRow({
                         </MenuItem>
                         {canPay && primary !== 'pay' && (
                             <MenuItem onSelect={() => { close(); handleQuickPay(); }}>
-                                <Banknote size={14} aria-hidden="true" /> Отметить оплату{amount ? ` · ${price}` : ''}
+                                <Banknote size={14} aria-hidden="true" /> {payVerb}{owed.amount ? ` · ${owedText}` : ''}
                             </MenuItem>
                         )}
                         {canBook && primary !== 'cab' && (

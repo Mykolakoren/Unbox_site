@@ -222,11 +222,10 @@ export function CrmClientDetail() {
     const stats = useMemo(() => {
         const completed = sessions.filter(s => s.status === 'COMPLETED').length;
         const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
-        const debt = unpaid.reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);
         const totalPaid = balance?.totalPaid ?? 0;
         const paidByCurrency: Record<string, number> = balance?.paidByCurrency ?? {};
         const debtByCurrency: Record<string, number> = balance?.debtByCurrency ?? {};
-        return { completed, unpaidCount: unpaid.length, debt, totalPaid, paidByCurrency, debtByCurrency };
+        return { completed, unpaidCount: unpaid.length, totalPaid, paidByCurrency, debtByCurrency };
     }, [sessions, client, balance]);
 
     // Заметки к сессии — все, а не только последняя: «История» показывает
@@ -275,7 +274,9 @@ export function CrmClientDetail() {
             const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
             const accLabel = result.account ? (paymentAccounts.find(a => a.id === result.account)?.label || result.account) : '';
-            toast.success(`Оплата отмечена: ${formatMoney(result.amount, { currency: result.currency })}${accLabel ? ` · ${accLabel}` : ''}`);
+            // Сколько добавилось ЭТИМ нажатием (при доплате остатка — только он), а не весь платёж.
+            const addedNow = result.added ?? result.amount;
+            toast.success(`Оплата отмечена: ${formatMoney(addedNow, { currency: result.currency })}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка');
@@ -1210,11 +1211,13 @@ function HistorySection(props: HistoryProps) {
                                                 disabled={parsedEditPrice === null}
                                                 onClick={() => {
                                                     if (parsedEditPrice === null) return;
-                                                    handleUpdateSession(session.id, {
-                                                        price: parsedEditPrice,
-                                                        currency: editSessionCurrency,
-                                                        account: editSessionAccount,
-                                                    });
+                                                    // Валюту и счёт шлём, только если их поменяли: иначе правка
+                                                    // одной цены «замораживала» бы счёт клиента по умолчанию
+                                                    // (и счёт, выбранный позже при «Отметить оплату», игнорировался).
+                                                    const patch: Partial<CrmSession> = { price: parsedEditPrice };
+                                                    if (editSessionCurrency !== sessionCurrencyOf(session, client)) patch.currency = editSessionCurrency;
+                                                    if (editSessionAccount !== (session.account ?? (client.defaultAccount || 'cash'))) patch.account = editSessionAccount;
+                                                    handleUpdateSession(session.id, patch);
                                                 }}
                                             >
                                                 Сохранить

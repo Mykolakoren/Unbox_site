@@ -134,13 +134,10 @@ export function useQuickPay(
         setBusy(session.id, true);
         try {
             const res = await quickPaySession(session.id);
-            onPatched({
-                ...session,
-                isPaid: true,
-                price: res.amount ?? session.price,
-                currency: res.currency ?? session.currency,
-            });
-            const money = res.amount ? ` · ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}` : '';
+            // Цену и валюту сессии из платежа не подставляем — onSettled перечитает данные.
+            onPatched({ ...session, isPaid: true, remaining: 0 });
+            const added = res.added ?? res.amount;
+            const money = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
             undoToast(`Отмечено${money}`, () => undo(session));
         } catch {
             // Тост об ошибке уже показал стор (quickPaySession).

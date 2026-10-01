@@ -77,12 +77,20 @@ export function partialPayment(
 export function paymentMismatch(
     s: CrmSession,
     client?: ClientMoney | null,
+    /** Валюта платежа: если она не валюта сессии, допуск шире — как на сервере. */
+    paymentCurrency?: string | null,
 ): { paid: number; price: number; currency: string; shortfall: number } | null {
     if (!s.isPaid) return null;
     const paid = Number(s.paidAmount ?? 0) || 0;
     if (paid <= EPS) return null; // платежа нет — оплату отметили руками, сравнивать не с чем
     const price = sessionPriceOf(s, client);
-    if (Math.abs(price - paid) <= EPS) return null;
+    // Допуск как у сервера (session_balance.slack): копейка плюс половина минимальной единицы
+    // валюты платежа в валюте сессии — сумму в долларах пишут с точностью до цента, и
+    // «Доплатить 0,02 ₾» по такой оплате быть не должно.
+    const cur = sessionCurrencyOf(s, client);
+    const slack = paymentCurrency && paymentCurrency.toUpperCase() !== cur
+        ? 0.005 * convertMoney(1, paymentCurrency, cur) : 0;
+    if (Math.abs(price - paid) <= EPS + slack) return null;
     return {
         paid, price, currency: sessionCurrencyOf(s, client),
         shortfall: Math.max(0, Math.round((price - paid) * 100) / 100),

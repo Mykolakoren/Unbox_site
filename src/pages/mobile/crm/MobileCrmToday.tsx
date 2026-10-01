@@ -22,6 +22,7 @@ import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmN
 import { linkCabinetPath, nextSessionLabel, useBookNext, useQuickPay } from './crmFlows';
 import { usePullToRefresh } from '../usePullToRefresh';
 import { PullIndicator } from '../PullIndicator';
+import { partialPayment, sessionDebt } from '../../../utils/sessionMoney';
 
 const NO_SESSIONS: CrmSession[] = [];
 const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
@@ -245,8 +246,10 @@ export function MobileCrmToday() {
     };
     const priceOf = (s: CrmSession): { amount: number; currency: string } | null => {
         const c = clientById.get(s.clientId);
-        const amount = Number(s.price ?? c?.basePrice ?? 0) || 0;
-        return amount > 0 ? { amount, currency: s.currency || c?.currency || 'GEL' } : null;
+        // Неоплаченная — остаток (цена минус внесённое); оплаченная/будущая — цена как есть.
+        const d = sessionDebt(s, c);
+        const amount = s.isPaid ? (Number(s.price ?? c?.basePrice ?? 0) || 0) : d.amount;
+        return amount > 0 ? { amount, currency: d.currency } : null;
     };
     const timeRange = (s: CrmSession) => {
         const start = parseUTC(s.date);
@@ -455,7 +458,7 @@ export function MobileCrmToday() {
                                                 onClick={() => quickPay.pay(s)}
                                                 aria-label={`Отметить оплату: ${nameOf(s)}, ${formatMoney(p.amount, { currency: p.currency })}`}
                                             >
-                                                {`Оплата · ${formatMoney(p.amount, { currency: p.currency })}`}
+                                                {`${partialPayment(s, clientById.get(s.clientId)) ? 'Доплата' : 'Оплата'} · ${formatMoney(p.amount, { currency: p.currency })}`}
                                             </Button>
                                         ) : (
                                             <StatusBadge kind="session" status={s.status} />

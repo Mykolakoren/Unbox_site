@@ -181,16 +181,14 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         try {
             if (isPaid) {
                 const res = await crmApi.quickPaySession(session.id);
-                onChange({
-                    ...session,
-                    isPaid: true,
-                    price: res.amount ?? session.price,
-                    currency: res.currency ?? session.currency,
-                    account: res.account ?? session.account,
-                });
+                // Цену и валюту сессии из платежа НЕ подставляем (платёж мог быть в другой
+                // валюте и цена превратилась бы в сумму платежа) — перечитываем сессию.
+                onChange({ ...session, isPaid: true, remaining: 0 });
+                refreshSession();
+                const added = res.added ?? res.amount;
                 toast.success(
-                    res.amount
-                        ? `Оплачено: ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}`
+                    added
+                        ? `Оплачено: ${formatMoney(added, { currency: res.currency || 'GEL' })}`
                         : 'Сессия отмечена оплаченной',
                 );
             } else {
@@ -300,7 +298,12 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const submitPrice = async () => {
         if (parsedPrice === null) return;
         try {
-            await update({ price: parsedPrice, currency: currencyRaw, account: accountRaw }, 'Цена обновлена');
+            // Валюту и счёт шлём, только если их поменяли (иначе счёт клиента по умолчанию
+            // «замораживался» бы на сессии при правке одной цены).
+            const patch: Parameters<typeof crmApi.updateSession>[1] = { price: parsedPrice };
+            if (currencyRaw !== sessionCurrency(session, client).toUpperCase()) patch.currency = currencyRaw;
+            if (accountRaw !== (session.account ?? client?.defaultAccount ?? 'cash')) patch.account = accountRaw;
+            await update(patch, 'Цена обновлена');
             setMode('main');
         } catch { /* toast already shown */ }
     };

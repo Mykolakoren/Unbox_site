@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { STATUS } from '../../design/tokens';
+import { partialPayment, sessionDebt } from '../../utils/sessionMoney';
 import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Sheet } from '../../components/ui/Sheet';
@@ -234,7 +235,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     const handlePay = async (s: CrmSession) => {
         if (payingId) return;
         setPayingId(s.id);
-        let res: { amount: number; currency: string };
+        let res: { amount: number; currency: string; added?: number };
         try {
             // ТОЛЬКО quickPaySession: платёж на счёт клиента по умолчанию,
             // повторный клик ловит стор (_quickPayInFlight).
@@ -247,7 +248,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
         setPayingId(null);
         setTodayList(list => list?.map(x => (x.id === s.id ? { ...x, isPaid: true } : x)) ?? list);
         reloadDashboard();
-        const sum = res.amount ? ` · ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}` : '';
+        const added = res.added ?? res.amount;
+        const sum = added ? ` · ${formatMoney(added, { currency: res.currency || 'GEL' })}` : '';
         // «Вернуть» — тот же путь, что снятие оплаты в шторке сессии:
         // unmarkPaidSession снимает отметку и удаляет платёж.
         undoToast(`Отмечено${sum}`, async () => {
@@ -446,8 +448,11 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 const wall = utcNaiveToTbilisi(s.date);
                                 const cancelled = CANCELLED.has(s.status);
                                 const started = parseUTC(s.date).getTime() <= nowMs;
-                                const amount = s.price ?? client?.basePrice;
-                                const currency = s.currency || client?.currency;
+                                // На кнопке — остаток по сессии (цена минус внесённое), а не вся цена.
+                                const owed = sessionDebt(s, client);
+                                const amount = owed.amount;
+                                const currency = owed.currency;
+                                const partial = partialPayment(s, client);
                                 // Прошедшая-по-времени PLANNED на экране — «Прошла»
                                 // (сервер закрывает их автозавершением).
                                 const shownStatus = s.status === 'PLANNED' && started ? 'COMPLETED' : s.status;
@@ -484,7 +489,9 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                     onClick={() => handlePay(s)}
                                                 >
                                                     {/* Действие, а не статус (G5-06). */}
-                                                    {amount ? `Отметить оплату · ${formatMoney(amount, { currency: currency ?? undefined })}` : 'Отметить оплату'}
+                                                    {partial
+                                                        ? `Доплатить · ${formatMoney(amount, { currency })}`
+                                                        : amount ? `Отметить оплату · ${formatMoney(amount, { currency })}` : 'Отметить оплату'}
                                                 </Button>
                                             )}
                                             {!cancelled && !started && !s.isBooked && !viewingOther && (

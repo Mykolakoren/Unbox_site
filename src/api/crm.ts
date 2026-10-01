@@ -159,6 +159,8 @@ export interface CrmPaymentCreate {
     account?: string;
     date?: string;
     sessionId?: string;
+    /** «Доплатить»: сервер не примет сумму больше остатка по сессии (защита от двойного клика). */
+    capToRemaining?: boolean;
 }
 
 /** Правка платежа: что не передано — не меняется. Клиента и сессию менять нельзя. */
@@ -416,7 +418,7 @@ export const crmApi = {
         return response.data;
     },
 
-    quickPaySession: async (id: string, account?: string): Promise<{ ok: boolean; amount: number; currency: string; account?: string }> => {
+    quickPaySession: async (id: string, account?: string): Promise<{ ok: boolean; amount: number; currency: string; account?: string; added?: number }> => {
         const response = await api.post(`/crm/sessions/${id}/quick-pay`, account ? { account } : {});
         return response.data;
     },
