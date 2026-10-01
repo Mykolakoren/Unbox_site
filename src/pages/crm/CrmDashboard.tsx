@@ -1,33 +1,34 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { totalInGel } from '../../utils/currency';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     CartesianGrid,
 } from 'recharts';
-import { format, addMonths, subMonths } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { crmApi } from '../../api/crm';
+import { format, addMonths, subMonths, isAfter, addDays } from 'date-fns';
+import { crmApi, type CrmClient, type CrmSession } from '../../api/crm';
 import { parseUTC } from '../../utils/dateUtils';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
-import { isAfter, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { statusLabel, getStatusDef } from '../../design/statuses';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { STATUS } from '../../design/tokens';
-import { formatMoney, formatGel, formatDayMonth, formatMonthLabel, formatTime } from '../../utils/format';
+import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
-import { Check } from 'lucide-react';
-
-// Подписи и цвета сессий — из общего словаря статусов (src/design/statuses.ts).
-// Раньше тут была своя карта «ЗАВЕРШЕНА / ОТМЕНА · КЛ.» с бирюзой для «прошла».
-const sessionStatusText = (code: string) => statusLabel('session', code, 'staff');
-const sessionStatusColor = (code: string) => STATUS[getStatusDef('session', code).tone].fg;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { undoToast } from '../../components/ui/undoToast';
+import { NewSessionSheet } from '../../components/crm/NewSessionSheet';
+import { NewClientSheet } from '../../components/crm/NewClientSheet';
+import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
+import { toastApiError } from '../../utils/errors';
+import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../utils/crmNextSession';
+import { Check, Plus, Circle, CheckCircle2 } from 'lucide-react';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
 function sessionsWord(n: number): string {
@@ -42,7 +43,13 @@ function dayTime(d: Date): string {
     return `${formatDayMonth(d, { withYear: 'auto' })}, ${formatTime(d)}`;
 }
 
+const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
+
+/** Сколько строк на полках «Долги» и «Без следующей встречи». */
+const SHELF_LIMIT = 5;
+
 export function CrmDashboard() {
+    useDocumentTitle('Дашборд · Psy-CRM');
     const { dashboard, fetchDashboard, loading, error } = useCrmStore();
     const navigate = useNavigate();
     const [calendarIdSaved, setCalendarIdSaved] = useState<string | null>(null);
@@ -71,6 +78,7 @@ export function CrmDashboard() {
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
         }).catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchDashboard, monthStr]);
 
     // Загрузка ≠ ошибка ≠ пусто (rule 8): пока данных нет — скелетон, а не
@@ -89,7 +97,6 @@ export function CrmDashboard() {
         );
     }
 
-    // ─── GRID HOUSE variant ───────────────────────────────────────────────
     // Новый месяц не загрузился, а на экране остались прежние цифры — не
     // прячем их, а честно говорим над ними, что они не обновились.
     const staleError = !!error && !loading && dashTried;
@@ -110,19 +117,18 @@ export function CrmDashboard() {
                 isThisMonth={isThisMonth}
                 navigate={navigate}
                 calendarIdSaved={calendarIdSaved}
+                reloadDashboard={reloadDashboard}
             />
         </>
     );
 }
 
 
-// StatCard (карточка старого дашборда до Grid House) нигде не рендерилась — удалена в wave 1.
-
 // ────────────────────────────────────────────────────────────────────────
-// GRID HOUSE — Dashboard variant.
-// Uses the same data (useCrmStore) but renders in the Grid House language:
-// hairlines, IBM Plex Sans/Mono, KPI strip, flat tables, no shadows/rounds.
-// Rollback: delete this function + the `if (useDesignFlag())` early return above.
+// GRID HOUSE — дашборд CRM (волна 3, G5-04).
+// Сверху то, что нужно сделать сегодня: «Сегодня» (все сессии дня, в т.ч.
+// прошедшие, с оплатой в один клик), «Долги», «Без следующей встречи».
+// Ниже — один ряд показателей месяца и график, ещё ниже — справочное.
 // ────────────────────────────────────────────────────────────────────────
 
 interface GHDashProps {
@@ -132,28 +138,145 @@ interface GHDashProps {
     isThisMonth: boolean;
     navigate: (path: string, state?: any) => void;
     calendarIdSaved: string | null;
+    reloadDashboard: () => void;
 }
 
-// Аудит 30.08: специалисты работают с телефона между сессиями — на узком
-// экране дашборд открывается блоком «Сегодня»: ближайшие сессии дня одним
-// вертикальным списком, тап ведёт в «Сессии» (там кнопка «Отметить оплату»).
-function useGHDashNarrow(bp = 768) {
-    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
-    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
-    return n;
+const monoLabel: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: '12px',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: GH.ink60,
+    fontWeight: 500,
+};
+const sectionHead: React.CSSProperties = {
+    fontFamily: GH_SANS,
+    fontSize: '20px',
+    fontWeight: 600,
+    letterSpacing: '-0.01em',
+    margin: 0,
+    color: GH.ink,
+};
+const hairline = `1px solid ${GH.ink10}`;
+const linkStyle: React.CSSProperties = { color: 'inherit', textDecoration: 'none' };
+const moreLinkStyle: React.CSSProperties = { fontFamily: GH_SANS, fontSize: 14, fontWeight: 500, color: GH.ink, textDecoration: 'underline', textUnderlineOffset: 3 };
+
+/** Шапка полки: заголовок слева, ссылка/счётчик справа. */
+function ShelfHead({ title, right }: { title: string; right?: React.ReactNode }) {
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
+            borderBottom: `1px solid ${GH.ink}`, paddingBottom: 10,
+        }}>
+            <h2 style={sectionHead}>{title}</h2>
+            {right}
+        </div>
+    );
 }
 
-function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMonth, navigate, calendarIdSaved }: GHDashProps) {
-    const ghNarrow = useGHDashNarrow();
+function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMonth, navigate, calendarIdSaved, reloadDashboard }: GHDashProps) {
     // Excel #33 — show specialist's own coworking bookings (the cabinets
     // they've reserved as a renter) on the CRM dashboard alongside their
     // therapy sessions. Two separate worlds, but admins want one screen
     // to plan their week.
     const { bookings, fetchBookings, currentUser } = useUserStore();
-    // «Отметить оплату» прямо из блока «Сегодня» (аудит 30.08, «Мой день» v2)
-    const { quickPaySession: ghQuickPay, fetchDashboard: ghRefetchDash } = useCrmStore();
-    const [payingId, setPayingId] = useState<string | null>(null);
+    const quickPaySession = useCrmStore(s => s.quickPaySession);
+    const viewAs = useCrmStore(s => s.viewAsSpecialistId);
+    // Админ смотрит чужой кабинет — кнопки создания прячем.
+    const viewingOther = !!viewAs;
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
+
+    // ── Клиенты: для имён в «Сегодня» и для шторок (нужен весь объект) ──
+    const [clients, setClients] = useState<CrmClient[] | null>(null);
+    const loadClients = useCallback(() => {
+        crmApi.getClients(false, viewAs ?? undefined)
+            .then(setClients)
+            .catch(() => setClients(prev => prev ?? []));
+    }, [viewAs]);
+    useEffect(() => { loadClients(); }, [loadClients]);
+    const clientById = useMemo(() => new Map((clients ?? []).map(c => [c.id, c])), [clients]);
+
+    // ── «Сегодня»: ВСЕ сессии дня по Тбилиси, включая прошедшие ─────────
+    // Сервер в upcomingSessions отдаёт только date >= now — прошедшие
+    // сегодня (их как раз надо отметить оплатой) туда не попадают.
+    const today = tbilisiToday();
+    const [todayList, setTodayList] = useState<CrmSession[] | null>(null);
+    const [todayFailed, setTodayFailed] = useState(false);
+    const loadToday = useCallback(() => {
+        setTodayFailed(false);
+        // В базе UTC: день по Батуми начинается накануне в 20:00 UTC —
+        // берём два дня и оставляем свой.
+        crmApi.getSessions({ dateFrom: addDaysYmd(today, -1), dateTo: today, specialistId: viewAs ?? undefined })
+            .then(list => setTodayList(
+                list
+                    .filter(s => utcNaiveToTbilisi(s.date)?.date === today)
+                    .sort((a, b) => a.date.localeCompare(b.date)),
+            ))
+            .catch(() => setTodayFailed(true));
+    }, [today, viewAs]);
+    useEffect(() => { loadToday(); }, [loadToday]);
+
+    /** Что-то поменялось в деньгах или сессиях — перечитать всё, что на экране. */
+    const refreshAll = () => {
+        loadToday();
+        loadClients();
+        reloadDashboard();
+    };
+
+    // ── Шторки ──────────────────────────────────────────────────────────
+    // undefined — закрыта; null — «Новая сессия» с поиском клиента.
+    const [newFor, setNewFor] = useState<CrmClient | null | undefined>(undefined);
+    const [debtFor, setDebtFor] = useState<CrmClient | null>(null);
+    const [newClientOpen, setNewClientOpen] = useState(false);
+
+    // ── Оплата в один клик (В5) ─────────────────────────────────────────
+    const [payingId, setPayingId] = useState<string | null>(null);
+    const handlePay = async (s: CrmSession) => {
+        if (payingId) return;
+        setPayingId(s.id);
+        let res: { amount: number; currency: string };
+        try {
+            // ТОЛЬКО quickPaySession: платёж на счёт клиента по умолчанию,
+            // повторный клик ловит стор (_quickPayInFlight).
+            res = await quickPaySession(s.id);
+        } catch {
+            // Стор уже показал «Не удалось отметить оплату».
+            setPayingId(null);
+            return;
+        }
+        setPayingId(null);
+        setTodayList(list => list?.map(x => (x.id === s.id ? { ...x, isPaid: true } : x)) ?? list);
+        reloadDashboard();
+        const sum = res.amount ? ` · ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}` : '';
+        // «Вернуть» — тот же путь, что снятие оплаты в шторке сессии:
+        // unmarkPaidSession снимает отметку и удаляет платёж.
+        undoToast(`Отмечено${sum}`, async () => {
+            try {
+                await crmApi.unmarkPaidSession(s.id);
+                toast.success('Отметка об оплате снята');
+            } catch (e) {
+                toastApiError(e, 'Не удалось снять отметку об оплате. Обновите страницу и попробуйте ещё раз');
+            } finally {
+                refreshAll();
+            }
+        });
+    };
+
+    // Кабинет под сессию — тот же путь, что в «Сессиях»: /dashboard/bookings
+    // с привязкой брони к сессии.
+    const bookCabinetFor = (s: CrmSession, clientName: string) => {
+        navigate('/dashboard/bookings', {
+            state: {
+                crmMode: {
+                    sessionId: s.id,
+                    clientId: s.clientId,
+                    clientName,
+                    date: parseUTC(s.date).toISOString(),
+                    duration: s.durationMinutes,
+                },
+            },
+        });
+    };
 
     // Merge-suggestion banner — when a CRM session and a cabinet booking
     // share the same date+time, the specialist usually wants them treated
@@ -185,8 +308,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
             // Drop the pair locally so the user sees instant feedback.
             setMergePairs(prev => prev.filter(p => p.sessionId !== pair.sessionId || p.bookingId !== pair.bookingId));
             toast.success(`Объединено: ${pair.clientName || 'клиент'} и кабинет`);
-        } catch {
-            toast.error('Не удалось объединить');
+        } catch (e) {
+            toastApiError(e, 'Не удалось объединить бронь и сессию. Попробуйте ещё раз');
         } finally {
             setMergingId(null);
         }
@@ -224,33 +347,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
             .sort((a, b) => a._dt.getTime() - b._dt.getTime())
             .slice(0, 8);
     })();
-    const monoLabel: React.CSSProperties = {
-        fontFamily: GH_MONO,
-        fontSize: '12px',
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: GH.ink60,
-        fontWeight: 500,
-    };
-    const bigNumber: React.CSSProperties = {
-        fontFamily: GH_SANS,
-        fontSize: '44px',
-        fontWeight: 700,
-        letterSpacing: '-0.03em',
-        lineHeight: 1,
-        color: GH.ink,
-        fontVariantNumeric: 'tabular-nums',
-    };
-    const sectionHead: React.CSSProperties = {
-        fontFamily: GH_SANS,
-        fontSize: '24px',
-        fontWeight: 600,
-        letterSpacing: '-0.015em',
-        margin: 0,
-        color: GH.ink,
-    };
 
-    const monthLabel = formatMonthLabel(currentMonth);
+    const monthLabel = formatMonthLabel(currentMonth, { capitalize: true });
     const revenueByCurrency = dashboard?.revenueByCurrency;
     const hasMultiCurrency = revenueByCurrency && Object.keys(revenueByCurrency).length > 1;
     const revenueValue = revenueByCurrency && Object.keys(revenueByCurrency).length > 0
@@ -261,144 +359,146 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     const debtTotal = debtByCurrency && Object.keys(debtByCurrency).length > 0
         ? totalInGel(debtByCurrency)
         : 0;
+    const unpaidCount = dashboard?.unpaidSessions ?? 0;
 
-    const kpiCells = [
+    // Один ряд показателей (G5-04). «Касса · с долгами» — все деньги,
+    // полученные в месяце, включая оплату старых долгов (решение В1).
+    const kpiCells: Array<{ label: string; value: string | number; to: string; warn?: boolean; sub?: string; hint?: string }> = [
         {
             label: 'Активных клиентов',
             value: dashboard?.activeClients ?? 0,
-            href: () => navigate('/crm/clients'),
+            to: '/crm/clients',
         },
         {
             label: 'Сессий за месяц',
             value: dashboard?.sessionsThisMonth ?? 0,
-            href: () => navigate('/crm/sessions'),
+            to: '/crm/sessions',
         },
         {
-            label: 'Неоплаченных',
-            value: dashboard?.unpaidSessions ?? 0,
-            href: () => navigate('/crm/finances'),
-            warn: (dashboard?.unpaidSessions ?? 0) > 0,
-        },
-        {
-            label: 'Доход за месяц',
+            label: 'Касса · с долгами',
             value: formatGel(revenueValue, { fraction: 0 }),
-            href: () => navigate('/crm/finances'),
+            to: '/crm/finances',
             sub: hasMultiCurrency
                 ? Object.entries(revenueByCurrency!).map(([c, v]) => formatMoney(v as number, { currency: c, fraction: 0 })).join(' · ')
                 : undefined,
-        },
-    ];
-
-    const kpiExtras = [
-        {
-            label: 'Средняя ставка/час',
-            value: formatGel(dashboard?.avgHourlyRate ?? 0, { fraction: 0 }),
+            hint: 'Все деньги, полученные в этом месяце, включая оплату старых долгов',
         },
         {
-            label: 'Мин — Макс ставка',
-            value: `${formatGel(dashboard?.minRate ?? 0)} — ${formatGel(dashboard?.maxRate ?? 0)}`,
-        },
-        {
-            label: 'Общий долг',
+            label: 'Долги сейчас',
             value: formatGel(debtTotal, { fraction: 0 }),
-            warn: hasDebt,
-            sub: hasMultiCurrency && debtByCurrency && Object.keys(debtByCurrency).length > 1
-                ? Object.entries(debtByCurrency!).map(([c, v]) => formatMoney(v as number, { currency: c, fraction: 0 })).join(' · ')
+            to: '/crm/finances',
+            warn: !!hasDebt,
+            sub: unpaidCount > 0
+                ? `${unpaidCount} ${sessionsWord(unpaidCount)}${hasMultiCurrency && debtByCurrency && Object.keys(debtByCurrency).length > 1
+                    ? ' · ' + Object.entries(debtByCurrency!).map(([c, v]) => formatMoney(v as number, { currency: c, fraction: 0 })).join(' · ')
+                    : ''}`
                 : undefined,
-            href: hasDebt ? () => navigate('/crm/finances') : undefined,
+            hint: 'Прошедшие неоплаченные сессии за всё время',
         },
     ];
 
-    // Сессии сегодняшнего дня из уже загруженных «ближайших»
-    const todayKey = new Date().toDateString();
-    const todaySessions = (dashboard?.upcomingSessions || []).filter(
-        (x) => parseUTC(x.date).toDateString() === todayKey
+    // Новый аккаунт: вместо стены нулей и пустого графика — чек-лист.
+    const isNewAccount = (dashboard?.activeClients ?? 0) === 0 && clients !== null && clients.length === 0;
+
+    const debts = dashboard?.debtByClient ?? [];
+    const noNext = dashboard?.clientsWithoutFutureSessions ?? [];
+    // «Дальше на неделе» — сегодняшние уже наверху, в «Сегодня».
+    const laterSessions = (dashboard?.upcomingSessions ?? []).filter(
+        x => utcNaiveToTbilisi(x.date)?.date !== today,
     );
+    const nowMs = Date.now();
+    const todayCount = todayList?.filter(s => !CANCELLED.has(s.status)).length ?? 0;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: ghNarrow ? '40px' : '72px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 48 }}>
+            <div>
+                {/* ── Шапка: сегодняшний день и «Новая сессия» ── */}
+                <PageHeader
+                    title="Сегодня"
+                    description={`${formatDateLabel(today, { capitalize: true })}${todayList ? ` · ${todayCount ? `${todayCount} ${sessionsWord(todayCount)}` : 'сессий нет'}` : ''}`}
+                    actions={viewingOther ? undefined : (
+                        <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNewFor(null)}>
+                            Новая сессия
+                        </Button>
+                    )}
+                />
 
-            {ghNarrow && (
-                <section style={{ border: `1px solid ${GH.ink}`, background: GH.paper }}>
-                    <div style={{
-                        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                        padding: '12px 14px', borderBottom: `1px solid ${GH.ink10}`,
-                    }}>
-                        <span style={monoLabel}>Сегодня · {formatDayMonth(new Date())}</span>
-                        {(dashboard?.unpaidSessions ?? 0) > 0 && (
-                            <button
-                                onClick={() => navigate('/crm/sessions')}
-                                style={{ ...monoLabel, color: GH.danger, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                            >
-                                Не оплачено: {dashboard?.unpaidSessions}
-                            </button>
-                        )}
-                    </div>
-                    {todaySessions.length === 0 ? (
-                        <div style={{ padding: '18px 14px', fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>
-                            Сегодня сессий нет.
+                {/* ── «Сегодня»: все сессии дня, вкл. прошедшие ── */}
+                <section aria-label="Сессии сегодня">
+                    {todayFailed ? (
+                        <ErrorBar message="Не удалось загрузить сессии на сегодня" onRetry={loadToday} />
+                    ) : todayList === null ? (
+                        <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <span className="sr-only">Загружаем сессии на сегодня…</span>
+                            <Skeleton height={40} radius={0} />
+                            <Skeleton height={40} radius={0} />
                         </div>
-                    ) : todaySessions.map((x) => {
-                        const dt = parseUTC(x.date);
-                        return (
-                            <div
-                                key={x.id}
-                                onClick={() => navigate('/crm/sessions')}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 12,
-                                    padding: '14px', borderTop: `1px solid ${GH.ink10}`,
-                                    cursor: 'pointer', minHeight: 48,
-                                }}
-                            >
-                                <span style={{ fontFamily: GH_MONO, fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                                    {formatTime(dt)}
-                                </span>
-                                <span style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {x.clientName}
-                                </span>
-                                {!x.isPaid && !x.status.startsWith('CANCELLED') ? (
-                                    <button
-                                        disabled={payingId === x.id}
-                                        onClick={async (e) => {
-                                            e.stopPropagation();
-                                            setPayingId(x.id);
-                                            try {
-                                                const r = await ghQuickPay(x.id);
-                                                toast.success(`Оплата отмечена: ${formatMoney(r.amount, { currency: r.currency })}`);
-                                                ghRefetchDash(format(currentMonth, 'yyyy-MM'));
-                                            } catch (err: any) {
-                                                toast.error(err?.response?.data?.detail || 'Не удалось отметить оплату');
-                                            } finally {
-                                                setPayingId(null);
-                                            }
-                                        }}
-                                        style={{
-                                            ...monoLabel, fontSize: 12, color: GH.paper,
-                                            background: GH.accent, border: 'none', cursor: 'pointer',
-                                            padding: '8px 10px', minHeight: 44,
-                                            opacity: payingId === x.id ? 0.6 : 1,
-                                        }}
-                                    >
-                                        {/* Действие, а не статус (G5-06): раньше кнопка
-                                            называлась «140 ₾ · Оплачено» и звучала как уже сделанное. */}
-                                        {payingId === x.id ? 'Отмечаем…' : (x.price ? `Отметить оплату · ${formatMoney(x.price, { currency: x.currency ?? undefined })}` : 'Отметить оплату')}
-                                    </button>
-                                ) : (
-                                    <span style={{ ...monoLabel, color: x.isPaid ? STATUS.ok.fg : sessionStatusColor(x.status), fontSize: 12 }}>
-                                        {x.isPaid ? statusLabel('payment', 'paid', 'staff') : sessionStatusText(x.status)}
-                                    </span>
-                                )}
-                            </div>
-                        );
-                    })}
-                    <div
-                        onClick={() => navigate('/crm/sessions')}
-                        style={{ padding: '10px 14px', borderTop: `1px solid ${GH.ink10}`, ...monoLabel, cursor: 'pointer' }}
-                    >
-                        Все сессии →
-                    </div>
+                    ) : todayList.length === 0 ? (
+                        <div style={{ padding: '12px 0', fontSize: 14, color: GH.ink60 }}>
+                            Сегодня сессий нет.{' '}
+                            <Link to="/crm/sessions" style={moreLinkStyle}>Все сессии</Link>
+                        </div>
+                    ) : (
+                        <div>
+                            {todayList.map(s => {
+                                const client = clientById.get(s.clientId);
+                                const name = client?.name || 'Клиент';
+                                const wall = utcNaiveToTbilisi(s.date);
+                                const cancelled = CANCELLED.has(s.status);
+                                const started = parseUTC(s.date).getTime() <= nowMs;
+                                const amount = s.price ?? client?.basePrice;
+                                const currency = s.currency || client?.currency;
+                                // Прошедшая-по-времени PLANNED на экране — «Прошла»
+                                // (сервер закрывает их автозавершением).
+                                const shownStatus = s.status === 'PLANNED' && started ? 'COMPLETED' : s.status;
+                                return (
+                                    <div key={s.id} style={{
+                                        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+                                        padding: '10px 0', borderBottom: hairline, minHeight: 56,
+                                        color: cancelled ? GH.ink60 : GH.ink,
+                                    }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', width: 52 }}>
+                                            {wall?.time ?? '—'}
+                                        </span>
+                                        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                                            <Link to={`/crm/clients/${s.clientId}`} style={{ ...linkStyle, fontSize: 16, fontWeight: 600 }}>
+                                                {name}
+                                            </Link>
+                                            <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                <span>{s.durationMinutes} мин</span>
+                                                {/* «Без кабинета» — нейтрально: онлайн-сессии не ошибка (M5). */}
+                                                {s.isBooked
+                                                    ? <span style={{ color: STATUS.ok.fg, display: 'inline-flex', alignItems: 'center', gap: 2 }}><Check size={12} aria-hidden="true" /> Кабинет</span>
+                                                    : <span>Без кабинета</span>}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                            {s.isPaid
+                                                ? <StatusBadge kind="payment" status="paid" audience="staff" />
+                                                : <StatusBadge kind="session" status={shownStatus} audience="staff" />}
+                                            {!cancelled && !s.isPaid && started && (
+                                                <Button
+                                                    loading={payingId === s.id}
+                                                    disabled={!!payingId && payingId !== s.id}
+                                                    onClick={() => handlePay(s)}
+                                                >
+                                                    {/* Действие, а не статус (G5-06). */}
+                                                    {amount ? `Отметить оплату · ${formatMoney(amount, { currency: currency ?? undefined })}` : 'Отметить оплату'}
+                                                </Button>
+                                            )}
+                                            {!cancelled && !started && !s.isBooked && !viewingOther && (
+                                                <Button variant="secondary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => bookCabinetFor(s, name)}>
+                                                    Кабинет
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </section>
-            )}
+            </div>
 
             {/* Merge-suggestions banner — appears only when there's at
                 least one unlinked (session, booking) pair at the same
@@ -414,30 +514,16 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     justifyContent: 'space-between',
                     gap: 16,
                     flexWrap: 'wrap',
-                    marginBottom: -56,
                 }}>
                     <div>
-                        <div style={{ ...monoLabel, marginBottom: 4 }}>СОВПАДЕНИЯ ПО ВРЕМЕНИ</div>
+                        <div style={{ ...monoLabel, marginBottom: 4 }}>Совпадения по времени</div>
                         <div style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink }}>
                             Найдено <b>{mergePairs.length}</b> {mergePairs.length === 1 ? 'пара' : mergePairs.length < 5 ? 'пары' : 'пар'} «бронь+сессия» в одно время. Объединить в одно событие?
                         </div>
                     </div>
-                    <button
-                        onClick={() => setMergeOpen(true)}
-                        style={{
-                            background: GH.accent,
-                            color: GH.paper,
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            padding: '10px 18px',
-                            border: 'none',
-                            cursor: 'pointer',
-                        }}
-                    >
+                    <Button variant="secondary" onClick={() => setMergeOpen(true)}>
                         Просмотреть
-                    </button>
+                    </Button>
                 </div>
             )}
 
@@ -452,7 +538,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
             >
                     <div>
                         {mergePairs.length === 0 ? (
-                            <div style={{ ...monoLabel, padding: '32px 0', textAlign: 'center' }}>
+                            <div style={{ fontSize: 14, color: GH.ink60, padding: '32px 0', textAlign: 'center' }}>
                                 Всё объединено
                             </div>
                         ) : (
@@ -464,7 +550,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         <div
                                             key={`${pair.sessionId}-${pair.bookingId}`}
                                             style={{
-                                                borderTop: `1px solid ${GH.ink10}`,
+                                                borderTop: hairline,
                                                 padding: '14px 0',
                                                 display: 'grid',
                                                 gridTemplateColumns: '1fr auto',
@@ -473,42 +559,20 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             }}
                                         >
                                             <div>
-                                                <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 700, color: GH.ink }}>
+                                                <div style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 600, color: GH.ink }}>
                                                     {pair.clientName || 'Клиент'} · {dayTime(dt)}
                                                 </div>
-                                                <div style={{ ...monoLabel, marginTop: 4 }}>
-                                                    {resName} · {pair.bookingDuration} МИН
+                                                <div style={{ fontSize: 14, color: GH.ink60, marginTop: 4 }}>
+                                                    {resName} · {pair.bookingDuration} мин
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', gap: 8 }}>
-                                                <button
-                                                    onClick={() => handleSkipMerge(pair)}
-                                                    style={{
-                                                        background: 'transparent', border: `1px solid ${GH.ink10}`,
-                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
-                                                        textTransform: 'uppercase', padding: '8px 12px',
-                                                        // На телефоне — палец, 44 px (rule 9).
-                                                        minHeight: ghNarrow ? 44 : undefined,
-                                                        cursor: 'pointer', color: GH.ink60,
-                                                    }}
-                                                >
+                                                <Button variant="secondary" onClick={() => handleSkipMerge(pair)}>
                                                     Пропустить
-                                                </button>
-                                                <button
-                                                    onClick={() => handleAcceptMerge(pair)}
-                                                    disabled={mergingId === pair.sessionId}
-                                                    style={{
-                                                        background: GH.ink, border: 'none',
-                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
-                                                        textTransform: 'uppercase', padding: '8px 14px',
-                                                        minHeight: ghNarrow ? 44 : undefined,
-                                                        cursor: mergingId === pair.sessionId ? 'default' : 'pointer',
-                                                        color: GH.paper,
-                                                        opacity: mergingId === pair.sessionId ? 0.5 : 1,
-                                                    }}
-                                                >
-                                                    {mergingId === pair.sessionId ? 'Объединяем…' : 'Объединить'}
-                                                </button>
+                                                </Button>
+                                                <Button loading={mergingId === pair.sessionId} onClick={() => handleAcceptMerge(pair)}>
+                                                    Объединить
+                                                </Button>
                                             </div>
                                         </div>
                                     );
@@ -518,452 +582,311 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     </div>
             </Sheet>
 
-            {/* ── Page header ── */}
-            <header>
-                <div style={monoLabel}>CRM · КАБИНЕТ</div>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    justifyContent: 'space-between',
-                    marginTop: '14px',
-                    gap: '24px',
-                    flexWrap: 'wrap',
-                }}>
-                    <h1 style={{
-                        fontFamily: GH_SANS,
-                        fontSize: 'clamp(44px, 5vw, 64px)',
-                        fontWeight: 700,
-                        letterSpacing: '-0.035em',
-                        lineHeight: 0.95,
-                        margin: 0,
-                        color: GH.ink,
-                        textTransform: 'capitalize',
-                    }}>
-                        {monthLabel}
-                    </h1>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'stretch',
-                        border: `1px solid ${GH.ink}`,
-                        background: GH.paper,
-                    }}>
-                        <button
-                            onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                            aria-label="Предыдущий месяц"
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                borderRight: `1px solid ${GH.ink10}`,
-                                padding: '12px 16px',
-                                cursor: 'pointer',
-                                fontFamily: GH_MONO,
-                                fontSize: '14px',
-                                color: GH.ink,
-                            }}
-                        >
-                            ←
-                        </button>
-                        <button
-                            onClick={() => setCurrentMonth(new Date())}
-                            disabled={isThisMonth}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                borderRight: `1px solid ${GH.ink10}`,
-                                padding: '12px 18px',
-                                fontFamily: GH_MONO,
-                                fontSize: '12px',
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                                color: isThisMonth ? GH.ink30 : GH.ink,
-                                cursor: isThisMonth ? 'default' : 'pointer',
-                            }}
-                        >
-                            Сейчас
-                        </button>
-                        <button
-                            onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                            aria-label="Следующий месяц"
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                padding: '12px 16px',
-                                cursor: 'pointer',
-                                fontFamily: GH_MONO,
-                                fontSize: '14px',
-                                color: GH.ink,
-                            }}
-                        >
-                            →
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            {/* ── KPI strip ── */}
-            <section>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                    borderTop: `1px solid ${GH.ink}`,
-                    borderBottom: `1px solid ${GH.ink}`,
-                }}>
-                    {kpiCells.map((cell, idx) => (
-                        <div
-                            key={idx}
-                            onClick={cell.href}
-                            style={{
-                                padding: '24px',
-                                borderRight: idx < kpiCells.length - 1 ? `1px solid ${GH.ink10}` : 'none',
-                                cursor: 'pointer',
-                                transition: 'background 0.12s',
-                            }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
-                            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                        >
-                            <div style={monoLabel}>{cell.label}</div>
-                            <div style={{
-                                ...bigNumber,
-                                marginTop: '12px',
-                                display: 'flex',
-                                alignItems: 'baseline',
-                                gap: '10px',
-                            }}>
-                                {cell.warn && (
-                                    <span style={{
-                                        width: '10px',
-                                        height: '10px',
-                                        background: GH.danger,
-                                        borderRadius: '50%',
-                                        display: 'inline-block',
-                                        flexShrink: 0,
-                                    }} />
-                                )}
-                                <span>{cell.value}</span>
-                            </div>
-                            {cell.sub && (
-                                <div style={{
-                                    ...monoLabel,
-                                    marginTop: '8px',
-                                    letterSpacing: '0.06em',
-                                }}>
-                                    {cell.sub}
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </section>
-
-            {/* ── Secondary KPI strip ── */}
-            <section>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    borderTop: `1px solid ${GH.ink10}`,
-                    borderBottom: `1px solid ${GH.ink10}`,
-                }}>
-                    {kpiExtras.map((cell, idx) => (
-                        <div
-                            key={idx}
-                            onClick={cell.href}
-                            style={{
-                                padding: '22px 24px',
-                                borderRight: idx < kpiExtras.length - 1 ? `1px solid ${GH.ink10}` : 'none',
-                                cursor: cell.href ? 'pointer' : 'default',
-                            }}
-                        >
-                            <div style={monoLabel}>{cell.label}</div>
-                            <div style={{
-                                fontFamily: GH_SANS,
-                                fontSize: '28px',
-                                fontWeight: 700,
-                                letterSpacing: '-0.02em',
-                                marginTop: '8px',
-                                color: GH.ink,
-                                fontVariantNumeric: 'tabular-nums',
-                                display: 'flex',
-                                alignItems: 'baseline',
-                                gap: '10px',
-                            }}>
-                                {cell.warn && (
-                                    <span style={{
-                                        width: '8px',
-                                        height: '8px',
-                                        background: GH.danger,
-                                        borderRadius: '50%',
-                                        display: 'inline-block',
-                                    }} />
-                                )}
-                                <span>{cell.value}</span>
-                            </div>
-                            {cell.sub && (
-                                <div style={{ ...monoLabel, marginTop: '6px' }}>{cell.sub}</div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </section>
-
-            {/* ── Revenue chart ── */}
-            {dashboard?.monthlyStats && dashboard.monthlyStats.length > 0 && (
+            {/* ── Новый аккаунт: чек-лист вместо нулей ── */}
+            {isNewAccount && (
                 <section>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        borderBottom: `1px solid ${GH.ink}`,
-                        paddingBottom: '14px',
-                        marginBottom: '24px',
-                        flexWrap: 'wrap',
-                        gap: '16px',
-                    }}>
-                        <h2 style={sectionHead}>Доход по месяцам</h2>
-                        <div style={{ display: 'flex', gap: '20px' }}>
-                            <span style={{ ...monoLabel, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ width: '14px', height: '10px', background: GH.ink, display: 'inline-block' }} />
-                                ПОЛУЧЕНО
-                            </span>
-                            <span style={{ ...monoLabel, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ width: '14px', height: '10px', background: GH.ink10, display: 'inline-block' }} />
-                                ОЖИДАЛОСЬ
-                            </span>
-                        </div>
-                    </div>
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: '20px', background: GH.paper }}>
-                        <ResponsiveContainer width="100%" height={260}>
-                            <BarChart data={dashboard.monthlyStats} barCategoryGap="24%">
-                                <CartesianGrid strokeDasharray="0" vertical={false} stroke={GH.ink10} />
-                                <XAxis
-                                    dataKey="month"
-                                    tickFormatter={(v: string) => {
-                                        const [, m] = v.split('-');
-                                        const months = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК'];
-                                        return months[parseInt(m, 10) - 1] || m;
-                                    }}
-                                    tick={{ fontSize: 12, fontFamily: GH_MONO, fill: GH.ink60, letterSpacing: '0.06em' }}
-                                    tickLine={false}
-                                    axisLine={{ stroke: GH.ink }}
-                                />
-                                <YAxis
-                                    tick={{ fontSize: 12, fontFamily: GH_MONO, fill: GH.ink60 }}
-                                    tickLine={false}
-                                    axisLine={false}
-                                />
-                                <Tooltip
-                                    cursor={{ fill: GH.ink5 }}
-                                    content={({ active, payload, label }: any) => {
-                                        if (!active || !payload?.length) return null;
-                                        const parts = String(label).split('-');
-                                        const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-                                        const title = parts.length >= 2 ? `${months[parseInt(parts[1], 10) - 1]} ${parts[0]}` : label;
-                                        const data = payload[0]?.payload || {};
-                                        return (
-                                            <div style={{
-                                                background: GH.paper,
-                                                border: `1px solid ${GH.ink}`,
-                                                padding: '14px 16px',
-                                                fontFamily: GH_SANS,
-                                                fontSize: '12px',
-                                                color: GH.ink,
-                                                minWidth: '180px',
-                                            }}>
-                                                <div style={{ ...monoLabel, marginBottom: '8px', color: GH.ink }}>{title}</div>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <span style={{ color: GH.ink60 }}>Ожидалось</span>
-                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.expected || 0), { fraction: 0 })}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                                    <span style={{ color: GH.ink60 }}>Получено</span>
-                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.received || 0), { fraction: 0 })}</span>
-                                                </div>
-                                                <div style={{ ...monoLabel, paddingTop: '6px', borderTop: `1px solid ${GH.ink10}` }}>
-                                                    {data.sessionCount || 0} {sessionsWord(data.sessionCount || 0)}
-                                                </div>
-                                            </div>
-                                        );
-                                    }}
-                                />
-                                <Bar dataKey="expected" fill={GH.ink10} radius={[0, 0, 0, 0]} />
-                                <Bar dataKey="received" fill={GH.ink} radius={[0, 0, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <ShelfHead title="С чего начать" />
+                    <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                        {[
+                            {
+                                done: false,
+                                title: 'Добавьте первого клиента',
+                                hint: 'Имя и код для календаря — остальное потом.',
+                                action: viewingOther ? null : <Button onClick={() => setNewClientOpen(true)} icon={<Plus size={16} aria-hidden="true" />}>Новый клиент</Button>,
+                            },
+                            {
+                                done: !!calendarIdSaved,
+                                title: 'Подключите Google Календарь',
+                                hint: 'Сессии из календаря подтянутся сами.',
+                                action: <Link to="/crm/settings" style={moreLinkStyle}>Настройки</Link>,
+                            },
+                            {
+                                done: false,
+                                title: 'Заполните анкету',
+                                hint: 'Её видят клиенты в каталоге специалистов.',
+                                action: <Link to="/crm/profile" style={moreLinkStyle}>Анкета</Link>,
+                            },
+                            {
+                                done: false,
+                                title: 'Забронируйте кабинет',
+                                hint: 'Unbox One · Uni · Neo — по часам.',
+                                action: <Link to="/crm/bookings" style={moreLinkStyle}>Бронирования</Link>,
+                            },
+                        ].map(step => (
+                            <li key={step.title} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0', borderBottom: hairline, flexWrap: 'wrap' }}>
+                                {step.done
+                                    ? <CheckCircle2 size={20} aria-label="Сделано" style={{ color: STATUS.ok.fg, flexShrink: 0 }} />
+                                    : <Circle size={20} aria-hidden="true" color={GH.ink30} style={{ flexShrink: 0 }} />}
+                                <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                                    <div style={{ fontSize: 16, fontWeight: 600 }}>{step.title}</div>
+                                    <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2 }}>{step.hint}</div>
+                                </div>
+                                {!step.done && step.action}
+                            </li>
+                        ))}
+                    </ol>
                 </section>
             )}
 
-            {/* ── Upcoming sessions table ── */}
-            <section>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    justifyContent: 'space-between',
-                    borderBottom: `1px solid ${GH.ink}`,
-                    paddingBottom: '14px',
-                    marginBottom: '0',
-                    flexWrap: 'wrap',
-                    gap: '16px',
-                }}>
-                    <h2 style={sectionHead}>Ближайшие сессии</h2>
-                    <button
-                        onClick={() => navigate('/crm/sessions')}
-                        style={{
-                            ...monoLabel,
-                            background: 'none',
-                            border: 'none',
-                            padding: 0,
-                            cursor: 'pointer',
-                            color: GH.ink,
-                        }}
-                    >
-                        ВСЕ СЕССИИ →
-                    </button>
-                </div>
-                {!dashboard?.upcomingSessions?.length ? (
-                    <div style={{
-                        padding: '48px 24px',
-                        textAlign: 'center',
-                        borderBottom: `1px solid ${GH.ink10}`,
-                    }}>
-                        <div style={monoLabel}>НЕТ ПРЕДСТОЯЩИХ СЕССИЙ</div>
-                        <div style={{
-                            fontFamily: GH_SANS,
-                            fontSize: '14px',
-                            color: GH.ink60,
-                            marginTop: '8px',
-                        }}>
-                            На ближайшие 7 дней ничего не запланировано.
-                        </div>
-                    </div>
-                ) : (
-                    <div>
-                        {/* Header row */}
-                        <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: '80px 72px 1fr auto 150px',
-                            gap: '20px',
-                            padding: '14px 4px',
-                            borderBottom: `1px solid ${GH.ink10}`,
-                            ...monoLabel,
-                        }}>
-                            <span>ДАТА</span>
-                            <span>ВРЕМЯ</span>
-                            <span>КЛИЕНТ</span>
-                            <span style={{ textAlign: 'right' }}>КАБИНЕТ</span>
-                            <span style={{ textAlign: 'right' }}>СТАТУС</span>
-                        </div>
-                        {dashboard.upcomingSessions.map((s) => {
-                            const dt = parseUTC(s.date);
+            {/* ── Две полки: «Долги» и «Без следующей встречи» ── */}
+            {!isNewAccount && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 32 }}>
+                    <section>
+                        <ShelfHead
+                            title="Долги"
+                            right={debts.length > SHELF_LIMIT
+                                ? <Link to="/crm/finances" style={moreLinkStyle}>Все ({debts.length})</Link>
+                                : undefined}
+                        />
+                        {debts.length === 0 ? (
+                            <div style={{ padding: '12px 0', fontSize: 14, color: GH.ink60 }}>
+                                Долгов нет — все прошедшие сессии оплачены.
+                            </div>
+                        ) : debts.slice(0, SHELF_LIMIT).map(d => {
+                            const client = clientById.get(d.clientId);
                             return (
-                                <div
-                                    key={s.id}
-                                    onClick={() => navigate('/crm/sessions')}
-                                    style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: '80px 72px 1fr auto 150px',
-                                        gap: '20px',
-                                        alignItems: 'baseline',
-                                        padding: '18px 4px',
-                                        borderBottom: `1px solid ${GH.ink10}`,
-                                        cursor: 'pointer',
-                                        transition: 'background 0.12s',
-                                    }}
-                                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
-                                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                                >
-                                    <div>
-                                        <div style={monoLabel}>
-                                            {format(dt, 'EEE', { locale: ru }).toUpperCase()}
-                                        </div>
-                                        <div style={{
-                                            fontFamily: GH_MONO,
-                                            fontSize: '18px',
-                                            fontWeight: 600,
-                                            color: GH.ink,
-                                            marginTop: '2px',
-                                            fontVariantNumeric: 'tabular-nums',
-                                        }}>
-                                            {formatDayMonth(dt)}
+                                <div key={d.clientId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: hairline, flexWrap: 'wrap' }}>
+                                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                                        <Link to={`/crm/clients/${d.clientId}`} style={{ ...linkStyle, fontSize: 16, fontWeight: 600 }}>
+                                            {d.clientName}
+                                        </Link>
+                                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
+                                            {d.unpaidSessionsCount} {sessionsWord(d.unpaidSessionsCount)} без оплаты
                                         </div>
                                     </div>
-                                    <div style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: '16px',
-                                        fontWeight: 500,
-                                        color: GH.ink,
-                                        fontVariantNumeric: 'tabular-nums',
-                                    }}>
-                                        {formatTime(dt)}
-                                    </div>
-                                    <div style={{
-                                        fontFamily: GH_SANS,
-                                        fontSize: '15px',
-                                        fontWeight: 500,
-                                        color: GH.ink,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                    }}>
-                                        {s.clientName}
-                                    </div>
-                                    {/* «Без кабинета» — нейтрально: онлайн-сессии не ошибка (M5). */}
-                                    <div style={{
-                                        ...monoLabel,
-                                        textAlign: 'right',
-                                        color: s.isBooked ? GH.ink : GH.ink60,
-                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4,
-                                    }}>
-                                        {s.isBooked ? <><Check size={12} aria-hidden="true" /> Кабинет</> : 'Без кабинета'}
-                                    </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <StatusBadge kind="session" status={s.status} audience="staff" variant="dot" />
-                                    </div>
+                                    {/* Открывает список неоплаченных клиента: там по строке
+                                        или «Отметить все» — с тем же вопросом, что в карточке. */}
+                                    <Button variant="secondary" disabled={!client} onClick={() => client && setDebtFor(client)}>
+                                        Отметить оплату · {formatMoney(d.totalDebt, { currency: d.currency, fraction: 0 })}
+                                    </Button>
                                 </div>
                             );
                         })}
+                    </section>
+
+                    <section>
+                        <ShelfHead
+                            title="Без следующей встречи"
+                            right={noNext.length > SHELF_LIMIT
+                                ? <Link to="/crm/clients" style={moreLinkStyle}>Все ({noNext.length})</Link>
+                                : undefined}
+                        />
+                        {noNext.length === 0 ? (
+                            <div style={{ padding: '12px 0', fontSize: 14, color: GH.ink60 }}>
+                                У всех активных клиентов есть следующая встреча.
+                            </div>
+                        ) : noNext.slice(0, SHELF_LIMIT).map(c => {
+                            const client = clientById.get(c.id);
+                            return (
+                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: hairline, flexWrap: 'wrap' }}>
+                                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                                        <Link to={`/crm/clients/${c.id}`} style={{ ...linkStyle, fontSize: 16, fontWeight: 600 }}>
+                                            {c.name}
+                                        </Link>
+                                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
+                                            {c.lastSessionDate
+                                                ? `Была ${formatDayMonth(parseUTC(c.lastSessionDate), { withYear: 'auto' })}`
+                                                : 'Сессий ещё не было'}
+                                        </div>
+                                    </div>
+                                    {!viewingOther && (
+                                        <Button variant="secondary" disabled={!client} onClick={() => client && setNewFor(client)}>
+                                            Записать
+                                        </Button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </section>
+                </div>
+            )}
+
+            {/* ── Месяц: один ряд показателей + график ── */}
+            {!isNewAccount && (
+                <section aria-label="Показатели месяца">
+                    <ShelfHead
+                        title={monthLabel}
+                        right={(
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Button variant="secondary" aria-label="Предыдущий месяц" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
+                                    &larr;
+                                </Button>
+                                <Button variant="quiet" disabled={isThisMonth} onClick={() => setCurrentMonth(new Date())}>
+                                    Этот месяц
+                                </Button>
+                                <Button variant="secondary" aria-label="Следующий месяц" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
+                                    &rarr;
+                                </Button>
+                            </div>
+                        )}
+                    />
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                        borderBottom: hairline,
+                    }}>
+                        {kpiCells.map((cell, idx) => (
+                            <Link
+                                key={cell.label}
+                                to={cell.to}
+                                title={cell.hint}
+                                style={{
+                                    ...linkStyle,
+                                    display: 'block',
+                                    padding: '20px 20px 20px 0',
+                                    paddingLeft: idx === 0 ? 0 : 20,
+                                    borderLeft: idx === 0 ? 'none' : hairline,
+                                    transition: 'background 0.12s',
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = GH.ink5; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            >
+                                <div style={monoLabel}>{cell.label}</div>
+                                <div style={{
+                                    fontFamily: GH_SANS, fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em',
+                                    lineHeight: 1.2, marginTop: 8, color: GH.ink, fontVariantNumeric: 'tabular-nums',
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                }}>
+                                    {cell.warn && (
+                                        <span aria-hidden="true" style={{ width: 8, height: 8, background: GH.danger, borderRadius: '50%', display: 'inline-block', flexShrink: 0 }} />
+                                    )}
+                                    <span>{cell.value}</span>
+                                </div>
+                                {cell.sub && (
+                                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 4 }}>{cell.sub}</div>
+                                )}
+                            </Link>
+                        ))}
                     </div>
-                )}
+
+                    {/* ── График: получено / ожидалось по месяцам ── */}
+                    {dashboard?.monthlyStats && dashboard.monthlyStats.some(m => (m.received || m.expected)) && (
+                        <div style={{ marginTop: 32 }}>
+                            <div style={{
+                                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                                marginBottom: 12, flexWrap: 'wrap', gap: 16,
+                            }}>
+                                <h3 style={{ ...sectionHead, fontSize: 16 }}>Доход по месяцам</h3>
+                                <div style={{ display: 'flex', gap: 20 }}>
+                                    <span style={{ fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span aria-hidden="true" style={{ width: 14, height: 10, background: GH.ink, display: 'inline-block' }} />
+                                        Получено
+                                    </span>
+                                    <span style={{ fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span aria-hidden="true" style={{ width: 14, height: 10, background: GH.ink10, display: 'inline-block' }} />
+                                        Ожидалось
+                                    </span>
+                                </div>
+                            </div>
+                            <div style={{ border: hairline, padding: 20, background: GH.paper }}>
+                                <ResponsiveContainer width="100%" height={240}>
+                                    <BarChart data={dashboard.monthlyStats} barCategoryGap="24%">
+                                        <CartesianGrid strokeDasharray="0" vertical={false} stroke={GH.ink10} />
+                                        <XAxis
+                                            dataKey="month"
+                                            tickFormatter={(v: string) => {
+                                                const [, m] = v.split('-');
+                                                const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+                                                return months[parseInt(m, 10) - 1] || m;
+                                            }}
+                                            tick={{ fontSize: 12, fontFamily: GH_SANS, fill: GH.ink60 }}
+                                            tickLine={false}
+                                            axisLine={{ stroke: GH.ink }}
+                                        />
+                                        <YAxis
+                                            tick={{ fontSize: 12, fontFamily: GH_MONO, fill: GH.ink60 }}
+                                            tickLine={false}
+                                            axisLine={false}
+                                        />
+                                        <Tooltip
+                                            cursor={{ fill: GH.ink5 }}
+                                            content={({ active, payload, label }: any) => {
+                                                if (!active || !payload?.length) return null;
+                                                const parts = String(label).split('-');
+                                                const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+                                                const title = parts.length >= 2 ? `${months[parseInt(parts[1], 10) - 1]} ${parts[0]}` : label;
+                                                const data = payload[0]?.payload || {};
+                                                return (
+                                                    <div style={{
+                                                        background: GH.paper,
+                                                        border: `1px solid ${GH.ink}`,
+                                                        padding: '12px 14px',
+                                                        fontFamily: GH_SANS,
+                                                        fontSize: '12px',
+                                                        color: GH.ink,
+                                                        minWidth: '180px',
+                                                    }}>
+                                                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                            <span style={{ color: GH.ink60 }}>Ожидалось</span>
+                                                            <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.expected || 0), { fraction: 0 })}</span>
+                                                        </div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                                            <span style={{ color: GH.ink60 }}>Получено</span>
+                                                            <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.received || 0), { fraction: 0 })}</span>
+                                                        </div>
+                                                        <div style={{ color: GH.ink60, paddingTop: '6px', borderTop: hairline }}>
+                                                            {data.sessionCount || 0} {sessionsWord(data.sessionCount || 0)}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }}
+                                        />
+                                        <Bar dataKey="expected" fill={GH.ink10} radius={[0, 0, 0, 0]} />
+                                        <Bar dataKey="received" fill={GH.ink} radius={[0, 0, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    )}
+                </section>
+            )}
+
+            {/* ── Дальше на неделе (сегодняшние — наверху) ── */}
+            <section>
+                <ShelfHead title="Дальше на неделе" right={<Link to="/crm/sessions" style={moreLinkStyle}>Все сессии</Link>} />
+                {laterSessions.length === 0 ? (
+                    <div style={{ padding: '12px 0', fontSize: 14, color: GH.ink60 }}>
+                        На ближайшие 7 дней больше ничего не запланировано.
+                    </div>
+                ) : laterSessions.map((s) => {
+                    const dt = parseUTC(s.date);
+                    return (
+                        <div
+                            key={s.id}
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'minmax(120px, 160px) 56px minmax(0, 1fr) auto',
+                                gap: 16,
+                                alignItems: 'center',
+                                padding: '12px 0',
+                                borderBottom: hairline,
+                            }}
+                        >
+                            <span style={{ fontSize: 14, color: GH.ink60 }}>{formatDateLabel(dt)}</span>
+                            <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatTime(dt)}</span>
+                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <Link to={`/crm/clients/${s.clientId}`} style={{ ...linkStyle, fontSize: 14, fontWeight: 600 }}>{s.clientName}</Link>
+                                <span style={{ fontSize: 12, color: s.isBooked ? STATUS.ok.fg : GH.ink60, marginLeft: 8 }}>
+                                    {s.isBooked ? 'Кабинет' : 'Без кабинета'}
+                                </span>
+                            </span>
+                            <StatusBadge kind="session" status={s.status} audience="staff" variant="dot" />
+                        </div>
+                    );
+                })}
             </section>
 
             {/* ── My coworking bookings (Excel #33) ── */}
-            <section style={{ marginBottom: '40px' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                    borderBottom: `1px solid ${GH.ink}`, paddingBottom: '14px', flexWrap: 'wrap', gap: 16,
-                }}>
-                    <h2 style={sectionHead}>Мои бронирования кабинетов</h2>
-                    <button
-                        onClick={() => navigate('/crm/bookings')}
-                        style={{ ...monoLabel, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink }}
-                    >
-                        ВСЕ БРОНИ →
-                    </button>
-                </div>
+            <section>
+                <ShelfHead title="Мои бронирования кабинетов" right={<Link to="/crm/bookings" style={moreLinkStyle}>Все брони</Link>} />
                 {upcomingMyBookings.length === 0 ? (
-                    <div style={{ padding: '32px 24px', textAlign: 'center', borderBottom: `1px solid ${GH.ink10}` }}>
-                        <div style={monoLabel}>НЕТ ПРЕДСТОЯЩИХ БРОНЕЙ</div>
-                        <div style={{ fontFamily: GH_SANS, fontSize: '14px', color: GH.ink60, marginTop: '8px' }}>
-                            На ближайшие 7 дней вы не арендовали ни одного кабинета.{' '}
-                            <button
-                                onClick={() => navigate('/crm/bookings')}
-                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink, textDecoration: 'underline' }}
-                            >
-                                Забронировать
-                            </button>
-                        </div>
+                    <div style={{ padding: '12px 0', fontSize: 14, color: GH.ink60 }}>
+                        На ближайшие 7 дней вы не арендовали ни одного кабинета.{' '}
+                        <Link to="/crm/bookings" style={moreLinkStyle}>Забронировать</Link>
                     </div>
                 ) : (
                     <div>
-                        <div style={{
-                            display: 'grid', gridTemplateColumns: '80px 110px 1fr 100px',
-                            gap: '20px', padding: '14px 4px', borderBottom: `1px solid ${GH.ink10}`,
-                            ...monoLabel,
-                        }}>
-                            <span>ДАТА</span>
-                            <span>ВРЕМЯ</span>
-                            <span>КАБИНЕТ</span>
-                            <span style={{ textAlign: 'right' }}>ЦЕНА</span>
-                        </div>
                         {upcomingMyBookings.map(b => {
                             const res = RESOURCES.find(r => r.id === b.resourceId);
                             const startT = b.startTime || '';
@@ -972,286 +895,99 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             const endMins = (hh || 0) * 60 + (mm || 0) + dur;
                             const endStr = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`;
                             return (
-                                <div
+                                <Link
                                     key={b.id}
-                                    onClick={() => navigate('/crm/bookings')}
+                                    to="/crm/bookings"
                                     style={{
-                                        display: 'grid', gridTemplateColumns: '80px 110px 1fr 100px',
-                                        gap: '20px', alignItems: 'baseline',
-                                        padding: '16px 4px', borderBottom: `1px solid ${GH.ink10}`,
-                                        cursor: 'pointer', transition: 'background 0.12s',
+                                        ...linkStyle,
+                                        display: 'grid', gridTemplateColumns: 'minmax(120px, 160px) 110px minmax(0, 1fr) auto',
+                                        gap: 16, alignItems: 'center',
+                                        padding: '12px 0', borderBottom: hairline,
+                                        transition: 'background 0.12s',
                                     }}
-                                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
-                                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = GH.ink5; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                                 >
-                                    <div>
-                                        <div style={monoLabel}>{format(b._dt, 'EEE', { locale: ru }).toUpperCase()}</div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 600 }}>{formatDayMonth(b._dt)}</div>
-                                    </div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                    <span style={{ fontSize: 14, color: GH.ink60 }}>{formatDateLabel(b._dt)}</span>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                                         {startT}–{endStr}
-                                    </div>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 14 }}>{res?.name || b.resourceId}</div>
-                                    <div style={{ textAlign: 'right', fontFamily: GH_MONO, fontSize: 13, fontWeight: 600 }}>
+                                    </span>
+                                    <span style={{ fontSize: 14 }}>{res?.name || b.resourceId}</span>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600 }}>
                                         {b.finalPrice ? formatGel(b.finalPrice) : '—'}
-                                    </div>
-                                </div>
+                                    </span>
+                                </Link>
                             );
                         })}
                     </div>
                 )}
             </section>
 
-            {/* ── Debts table ── */}
-            {dashboard?.debtByClient && dashboard.debtByClient.length > 0 && (
-                <section>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        borderBottom: `1px solid ${GH.ink}`,
-                        paddingBottom: '14px',
-                        flexWrap: 'wrap',
-                        gap: '16px',
-                    }}>
-                        <h2 style={sectionHead}>Долги клиентов</h2>
-                        <span style={monoLabel}>
-                            {String(dashboard.debtByClient.length).padStart(2, '0')} ЗАПИСЕЙ
-                        </span>
-                    </div>
-                    <div>
-                        {dashboard.debtByClient.map((d) => (
-                            <div
-                                key={d.clientId}
-                                onClick={() => navigate(`/crm/clients/${d.clientId}`)}
-                                style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '24px 1fr auto auto',
-                                    gap: '20px',
-                                    alignItems: 'baseline',
-                                    padding: '18px 4px',
-                                    borderBottom: `1px solid ${GH.ink10}`,
-                                    cursor: 'pointer',
-                                }}
-                                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
-                                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                            >
-                                <span style={{
-                                    width: '8px',
-                                    height: '8px',
-                                    background: GH.danger,
-                                    borderRadius: '50%',
-                                    marginTop: '8px',
-                                }} />
-                                <div style={{
-                                    fontFamily: GH_SANS,
-                                    fontSize: '15px',
-                                    fontWeight: 500,
-                                    color: GH.ink,
-                                }}>
-                                    {d.clientName}
-                                </div>
-                                <div style={monoLabel}>
-                                    {d.unpaidSessionsCount} {sessionsWord(d.unpaidSessionsCount)}
-                                </div>
-                                <div style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: '16px',
-                                    fontWeight: 600,
-                                    color: GH.ink,
-                                    textAlign: 'right',
-                                    fontVariantNumeric: 'tabular-nums',
-                                }}>
-                                    {formatMoney(d.totalDebt, { currency: d.currency, fraction: 0 })}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-            )}
-
-            {/* ── Clients without future sessions ── */}
-            {dashboard?.clientsWithoutFutureSessions && dashboard.clientsWithoutFutureSessions.length > 0 && (
-                <section>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        borderBottom: `1px solid ${GH.ink}`,
-                        paddingBottom: '14px',
-                        flexWrap: 'wrap',
-                        gap: '16px',
-                    }}>
-                        <h2 style={sectionHead}>Клиенты без будущих сессий</h2>
-                        <span style={monoLabel}>
-                            {String(dashboard.clientsWithoutFutureSessions.length).padStart(2, '0')} КЛИЕНТОВ
-                        </span>
-                    </div>
-                    <div>
-                        {dashboard.clientsWithoutFutureSessions.slice(0, 10).map((c, idx) => (
-                            <div
-                                key={c.id}
-                                onClick={() => navigate(`/crm/clients/${c.id}`)}
-                                style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '32px 1fr auto',
-                                    gap: '20px',
-                                    alignItems: 'baseline',
-                                    padding: '16px 4px',
-                                    borderBottom: `1px solid ${GH.ink10}`,
-                                    cursor: 'pointer',
-                                }}
-                                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
-                                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                            >
-                                <span style={monoLabel}>
-                                    {String(idx + 1).padStart(2, '0')}
-                                </span>
-                                <div style={{
-                                    fontFamily: GH_SANS,
-                                    fontSize: '15px',
-                                    fontWeight: 500,
-                                    color: GH.ink,
-                                }}>
-                                    {c.name}
-                                </div>
-                                <div style={{ ...monoLabel, color: GH.ink60 }}>
-                                    {c.lastSessionDate
-                                        ? `ПОСЛЕДНЯЯ · ${formatDayMonth(parseUTC(c.lastSessionDate), { withYear: 'auto' }).toUpperCase()}`
-                                        : 'НЕТ СЕССИЙ'}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-            )}
-
-            {/* ── Google Calendar strip ── */}
-            {calendarIdSaved && (
-                <section>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        borderTop: `1px solid ${GH.ink10}`,
-                        borderBottom: `1px solid ${GH.ink10}`,
-                        padding: '18px 4px',
-                        gap: '16px',
-                        flexWrap: 'wrap',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                            <span style={{
-                                width: '8px',
-                                height: '8px',
-                                background: STATUS.ok.fg,
-                                borderRadius: '50%',
-                            }} />
-                            <span style={{ ...monoLabel, color: GH.ink }}>GOOGLE CALENDAR · ПОДКЛЮЧЁН</span>
-                        </div>
-                        <button
-                            onClick={() => navigate('/crm/sessions')}
-                            style={{
-                                ...monoLabel,
-                                background: 'none',
-                                border: 'none',
-                                padding: 0,
-                                cursor: 'pointer',
-                                color: GH.ink,
-                            }}
-                        >
-                            СИНХРОНИЗАЦИЯ →
-                        </button>
-                    </div>
-                </section>
-            )}
-
-            {/* ── Quick actions ── */}
+            {/* ── Быстрые действия: без «→ ДЕЙСТВИЕ · 01», создание — шторками ── */}
             <section>
-                <div style={{
-                    borderBottom: `1px solid ${GH.ink}`,
-                    paddingBottom: '14px',
-                    marginBottom: '24px',
-                }}>
-                    <h2 style={sectionHead}>Быстрые действия</h2>
-                </div>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                    gap: '0',
-                    border: `1px solid ${GH.ink10}`,
-                }}>
-                    {([
-                        { label: 'Добавить клиента', sub: 'Создать новую карточку', path: '/crm/clients' },
-                        { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions' },
-                        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/crm/bookings' },
-                        // Excel #19 — кнопка "Купить абонемент" внутри CRM
-                        // (специалисты часто хотят оформить себе абонемент
-                        // прямо отсюда, не уходя в клиентский кабинет).
-                        { label: 'Купить абонемент', sub: 'Скидка 10–20% на аренду', path: '/subscriptions' },
-                        {
-                            label: 'Открыть Google Calendar',
-                            sub: calendarIdSaved ? 'Ваш личный календарь' : 'Google Calendar',
-                            // If the specialist has set their own calendarId, open it directly;
-                            // otherwise open the generic Google Calendar landing page.
-                            href: calendarIdSaved
+                <ShelfHead title="Быстрые действия" />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+                    {!viewingOther && (
+                        <>
+                            <Button variant="secondary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNewClientOpen(true)}>
+                                Новый клиент
+                            </Button>
+                            <Button variant="secondary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNewFor(null)}>
+                                Новая сессия
+                            </Button>
+                        </>
+                    )}
+                    <Button variant="secondary" onClick={() => navigate('/crm/bookings')}>
+                        Забронировать кабинет
+                    </Button>
+                    {/* Excel #19 — абонемент прямо из CRM, без ухода в клиентский
+                        кабинет: /crm/subscription (раньше — витрина /subscriptions). */}
+                    <Button variant="secondary" onClick={() => navigate('/crm/subscription')}>
+                        Купить абонемент
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        onClick={() => window.open(
+                            calendarIdSaved
                                 ? `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(calendarIdSaved)}`
                                 : 'https://calendar.google.com/calendar/u/0/r',
-                        },
-                    ] as Array<{ label: string; sub: string; path?: string; href?: string }>).map((action, idx, arr) => (
-                        <button
-                            key={action.path ?? action.href ?? idx}
-                            onClick={() => {
-                                if (action.href) {
-                                    window.open(action.href, '_blank', 'noopener,noreferrer');
-                                } else if (action.path) {
-                                    navigate(action.path);
-                                }
-                            }}
-                            style={{
-                                padding: '28px 24px',
-                                background: GH.paper,
-                                border: 'none',
-                                borderRight: idx < arr.length - 1 ? `1px solid ${GH.ink10}` : 'none',
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                                transition: 'background 0.12s',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '6px',
-                            }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = GH.ink; (e.currentTarget as HTMLButtonElement).style.color = GH.paper; }}
-                            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = GH.paper; (e.currentTarget as HTMLButtonElement).style.color = GH.ink; }}
-                        >
-                            <span style={{
-                                fontFamily: GH_MONO,
-                                fontSize: '12px',
-                                letterSpacing: '0.06em',
-                                textTransform: 'uppercase',
-                                opacity: 0.7,
-                            }}>
-                                → ДЕЙСТВИЕ · {String(idx + 1).padStart(2, '0')}
-                            </span>
-                            <span style={{
-                                fontFamily: GH_SANS,
-                                fontSize: '18px',
-                                fontWeight: 600,
-                                letterSpacing: '-0.01em',
-                            }}>
-                                {action.label}
-                            </span>
-                            <span style={{
-                                fontFamily: GH_MONO,
-                                fontSize: '12px',
-                                letterSpacing: '0.06em',
-                                opacity: 0.7,
-                            }}>
-                                {action.sub}
-                            </span>
-                        </button>
-                    ))}
+                            '_blank', 'noopener,noreferrer',
+                        )}
+                    >
+                        Открыть Google Календарь
+                    </Button>
                 </div>
+                {calendarIdSaved && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, fontSize: 14, color: GH.ink60 }}>
+                        <span aria-hidden="true" style={{ width: 8, height: 8, background: STATUS.ok.fg, borderRadius: '50%' }} />
+                        Google Календарь подключён ·{' '}
+                        <Link to="/crm/sessions" style={moreLinkStyle}>Синхронизация в «Сессиях»</Link>
+                    </div>
+                )}
             </section>
 
+            {/* ── Шторки волны 3 (стор не трогают — перечитываем сами) ── */}
+            <NewSessionSheet
+                open={newFor !== undefined}
+                onClose={() => setNewFor(undefined)}
+                client={newFor ?? undefined}
+                clients={(clients ?? []).filter(c => c.isActive)}
+                onCreated={() => refreshAll()}
+            />
+            {debtFor && (
+                <UnpaidSessionsSheet
+                    open={!!debtFor}
+                    onClose={() => setDebtFor(null)}
+                    client={debtFor}
+                    onChanged={() => refreshAll()}
+                />
+            )}
+            <NewClientSheet
+                open={newClientOpen}
+                onClose={() => setNewClientOpen(false)}
+                clients={clients ?? undefined}
+                onCreated={(c) => { refreshAll(); navigate(`/crm/clients/${c.id}`); }}
+            />
         </div>
     );
 }
