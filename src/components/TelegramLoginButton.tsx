@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from './ui/Button';
+import { rememberTelegramRedirect } from '../utils/loginRedirect';
 
 interface TelegramLoginButtonProps {
     botName: string;
@@ -11,6 +12,8 @@ interface TelegramLoginButtonProps {
     usePic?: boolean;
     /** Во всю ширину колонки — как кнопка Google над ней (G1-16). */
     block?: boolean;
+    /** Куда вернуть после входа (?redirect= страницы входа, уже проверенный). */
+    redirectTo?: string | null;
 }
 
 /**
@@ -44,12 +47,16 @@ interface TelegramLoginButtonProps {
 export const TelegramLoginButton = ({
     botName,
     block = false,
+    redirectTo,
 }: TelegramLoginButtonProps) => {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleClick = () => {
         if (isLoading) return;
         setIsLoading(true);
+        // Сервер после Telegram всегда ведёт на /dashboard — ?redirect= он не
+        // знает. Запоминаем возврат в этой вкладке; App заберёт его после входа.
+        rememberTelegramRedirect(redirectTo);
 
         const origin = window.location.origin;
         const callbackUrl = `${origin}/api/v1/auth/telegram/callback`;

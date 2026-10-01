@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { takeTelegramRedirect } from './utils/loginRedirect';
 // Мастер брони (/checkout) — в своём файле (волна 2, шаг 0).
 import { BookingWizard } from './components/Wizard/BookingWizard';
 // Store
@@ -121,6 +122,7 @@ let forceDesktopThisTab = false;
 
 function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     // 1. Check for token in URL (from Telegram Redirect Auth)
@@ -138,6 +140,14 @@ function App() {
       fetchCurrentUser();
       fetchBookings();
       fetchWaitlist();
+    }
+
+    // 3. Вернулись из Telegram (сервер всегда шлёт на /dashboard?source=telegram):
+    //    ?redirect= страницы входа кнопка запомнила в этой вкладке — ведём туда,
+    //    как после входа по почте / Google. Только свой путь «/…» (не «//…»).
+    if (token && params.get('source') === 'telegram') {
+      const back = takeTelegramRedirect();
+      if (back) navigate(back, { replace: true });
     }
 
   }, [fetchBookings, fetchCurrentUser, fetchWaitlist]);

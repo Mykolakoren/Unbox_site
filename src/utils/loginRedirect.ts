@@ -27,3 +27,34 @@ export function loginPathWithRedirect(path?: string): string {
     const safe = safeRedirectPath(here);
     return safe && safe !== '/' ? `/login?redirect=${encodeURIComponent(safe)}` : '/login';
 }
+
+// ── Возврат после входа через Telegram (доработка 01.10) ─────────────────
+//
+// Вход через Telegram уходит со страницы на oauth.telegram.org, а сервер
+// после него всегда отправляет на /dashboard?source=telegram — про ?redirect=
+// он не знает. Поэтому куда вернуть, запоминаем на фронте перед уходом в
+// Telegram (sessionStorage живёт в этой же вкладке и переживает переход на
+// чужой сайт и обратно), а после возврата забираем один раз. И при записи,
+// и при чтении путь проходит safeRedirectPath — только «/…», не «//…».
+
+const TG_REDIRECT_KEY = 'tgLoginRedirect';
+
+/** Перед уходом в Telegram: запомнить, куда вернуть (или забыть старое). */
+export function rememberTelegramRedirect(raw: string | null | undefined): void {
+    try {
+        const safe = safeRedirectPath(raw);
+        if (safe) sessionStorage.setItem(TG_REDIRECT_KEY, safe);
+        else sessionStorage.removeItem(TG_REDIRECT_KEY);
+    } catch { /* приватный режим без хранилища — вернём в кабинет, как раньше */ }
+}
+
+/** После возврата из Telegram: куда вернуть (один раз) или null. */
+export function takeTelegramRedirect(): string | null {
+    try {
+        const raw = sessionStorage.getItem(TG_REDIRECT_KEY);
+        sessionStorage.removeItem(TG_REDIRECT_KEY);
+        return safeRedirectPath(raw);
+    } catch {
+        return null;
+    }
+}

@@ -167,6 +167,8 @@ export function LoginPage() {
                 notice={redirectTo === '/become-specialist' || redirectTo === '/m/become-specialist'
                     ? 'Войдите или создайте аккаунт — затем откроется анкета специалиста'
                     : null}
+                // Telegram уводит со страницы — возврат кнопка запомнит сама.
+                redirectTo={redirectTo}
                 onGoogleSuccess={async (credential: string) => {
                     try {
                         await googleLogin(credential);
@@ -211,6 +213,8 @@ interface GridHouseLoginPageProps {
     handleSubmit: (e: React.FormEvent) => void;
     /** Одна строка над формой — зачем человека попросили войти. */
     notice?: string | null;
+    /** Безопасный ?redirect= — Telegram-кнопка запоминает его до возврата. */
+    redirectTo?: string | null;
     onGoogleSuccess: (credential: string) => Promise<void>;
     onGoogleError: () => void;
 }
@@ -243,6 +247,7 @@ function GridHouseLoginPage({
     setFormData,
     handleSubmit,
     notice,
+    redirectTo,
     onGoogleSuccess,
     onGoogleError,
 }: GridHouseLoginPageProps) {
@@ -527,7 +532,7 @@ function GridHouseLoginPage({
                                 На регистрации её нет, на входе — с пояснением. */}
                             {!isRegistering && (
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                                    <TelegramLoginButton botName="8209648149" block />
+                                    <TelegramLoginButton botName="8209648149" block redirectTo={redirectTo} />
                                     <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: GH.ink60, textAlign: 'center' }}>
                                         Работает, если Telegram уже привязан в профиле.
                                     </p>
