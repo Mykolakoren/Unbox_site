@@ -105,6 +105,15 @@ def find_due_pending(session: Session, *, lookahead_hours: float = 24.0) -> list
 CREDIT_TOPUP_WARNING_RATIO = 0.8  # warn user when credit-line utilisation crosses this
 
 
+def _resource_type(session: Session, resource_id: Optional[str]) -> Optional[str]:
+    """Тип помещения брони ('capsule' | 'cabinet' | …) — для доп. пула абонемента."""
+    if not resource_id:
+        return None
+    from app.models.resource import Resource
+    r = session.get(Resource, resource_id)
+    return getattr(r, "type", None) if r else None
+
+
 def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     """Apply the deferred charge to a `pending` booking.
 
@@ -164,8 +173,24 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
         # balance for hours they had already paid for.
         rem = subscription_pool.get_float(user.subscription, "remaining_hours")
         hrs = float(b.hours_deducted or (b.duration or 0) / 60.0)
-        if rem >= hrs > 0:
-            user.subscription = subscription_pool.debit_hours(user.subscription, hrs)
+        # Доп. пул (часы капсулы / «4 ч индивидуально»): раскладку «сколько из
+        # доп., сколько из основного» считаем ЗДЕСЬ, по живому пулу — при
+        # создании брони заранее она была только прикидкой (несколько будущих
+        # броней могли «рассчитывать» на один и тот же час капсулы). Без доп.
+        # пула для этой брони — ровно прежнее правило (остаток ≥ часов).
+        extra = 0.0
+        if subscription_pool.extra_applies(user.subscription, _resource_type(session, b.resource_id), b.format):
+            _x = subscription_pool.plan_split(
+                user.subscription, hrs,
+                resource_type=_resource_type(session, b.resource_id), format_type=b.format,
+            )
+            covered = _x is not None and hrs > 0
+            extra = _x or 0.0
+        else:
+            covered = rem >= hrs > 0
+        if covered:
+            user.subscription = subscription_pool.debit_hours(user.subscription, hrs, extra=extra)
+            subscription_pool.stamp_booking(b, hrs, extra)
             snapshot = hrs
             # Пиковая надбавка абонемента (pricing: final_price = subscription_peak_debt)
             # — это РЕАЛЬНЫЕ деньги, часами не покрывается. Немедленный путь списывает
@@ -215,6 +240,7 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             # §5#12: часы НЕ списаны (ушли в баланс) — обнуляем hours_deducted,
             # чтобы waive/refund вернул ДЕНЬГИ, а не фантомные часы в пул.
             b.hours_deducted = 0
+            subscription_pool.stamp_booking(b, 0, 0)
             logger.info(
                 "[billing] booking %s sub-fallback to balance: had %.2fh, needed %.2fh, charged %.2f₾ (cash-recomputed)",
                 b.id, rem, hrs, cash_amount,
@@ -309,7 +335,11 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
     hours_actually_used = float(b.hours_deducted or 0)
     if method == "subscription" and hours_actually_used > 0:
         if subscription_pool.hours_return_allowed(user.subscription, b.date):
-            user.subscription = subscription_pool.credit_hours(user.subscription, hours_actually_used)
+            # Часы — ровно в тот пул, откуда сняты (доп. / основной).
+            user.subscription = subscription_pool.credit_hours(
+                user.subscription, hours_actually_used, extra=subscription_pool.booking_extra(b),
+                kind=subscription_pool.kind_for_resource(_resource_type(session, b.resource_id)),
+            )
         # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
         # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
         _peak = float(b.final_price or 0)
