@@ -414,7 +414,7 @@ export function ConfirmationStep() {
                         targetUserId: state.bookingForUser || undefined,
                     });
                     const patternLabel = recurringPattern === 'weekly' ? 'каждую неделю' : recurringPattern === 'biweekly' ? 'раз в 2 недели' : 'раз в 4 недели';
-                    toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0, { fraction: 0 })}`);
+                    toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}`);
                     // Mark success BEFORE the refetch — the series IS created.
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;

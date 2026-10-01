@@ -122,7 +122,7 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
                 {/* Price */}
                 <div className="text-right shrink-0">
                     <div className="text-sm font-bold text-unbox-dark">
-                        {formatGel(booking.finalPrice, { fraction: 0 })}
+                        {formatGel(booking.finalPrice)}
                     </div>
                     <div className="text-caption text-ink-60">
                         {(booking.duration / 60).toFixed(1)}ч
@@ -249,7 +249,7 @@ export function SpecialistPortalHero({ user }: Props) {
                     <div className="flex gap-2 shrink-0">
                         {[
                             { icon: CalendarDays, label: 'Брони', value: totalBookings },
-                            { icon: Wallet, label: 'Баланс', value: formatGel(user.balance ?? 0, { fraction: 0 }) },
+                            { icon: Wallet, label: 'Баланс', value: formatGel(user.balance ?? 0) },
                         ].map(s => (
                             <div key={s.label} className="flex flex-col items-center gap-0.5 rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-2 sm:py-2.5"
                                 style={{ background: 'rgba(71,109,107,0.06)', border: '1px solid rgba(71,109,107,0.12)' }}
@@ -402,7 +402,7 @@ export function SpecialistPortalHero({ user }: Props) {
                                     </span>
                                 </div>
                                 <span className="text-sm text-ink-60 font-semibold">
-                                    {formatGel(b.finalPrice, { fraction: 0 })}
+                                    {formatGel(b.finalPrice)}
                                 </span>
                             </div>
                         ))}

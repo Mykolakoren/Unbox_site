@@ -692,7 +692,7 @@ function BookingsChessboard({
                 pattern: recurringPattern,
             });
             const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-            toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0, { fraction: 0 })}`);
+            toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}`);
             setNewSlots([]);
             setRecurringPattern('');
             await useUserStore.getState().fetchBookings();
@@ -2718,7 +2718,7 @@ function SeriesControls({
                 mode === 'until'
                     ? { untilDate: until, pattern }
                     : { addOccurrences: count, pattern });
-            toast.success(`Добавлено ${ruCountWord(r.created, ['сессия', 'сессии', 'сессий'])}${r.totalCost ? ` (${formatGel(r.totalCost, { sign: true, fraction: 0 })})` : ''}`);
+            toast.success(`Добавлено ${ruCountWord(r.created, ['сессия', 'сессии', 'сессий'])}${r.totalCost ? ` (${formatGel(r.totalCost, { sign: true })})` : ''}`);
             setOpen(false);
             await onChanged();
         } catch (e: any) {
@@ -3665,18 +3665,18 @@ function CrmQuickBookingModal({
                     <div className="bg-sunken rounded-lg p-3 space-y-1 text-sm">
                         <div className="flex justify-between text-ink-60">
                             <span>Кабинет ({duration} мин, {fmtLabel(chosenFormat)})</span>
-                            <span>{formatGel(pricing.basePrice, { fraction: 0 })}</span>
+                            <span>{formatGel(pricing.basePrice)}</span>
                         </div>
                         {pricing.extrasPrice > 0 && (
                             <div className="flex justify-between text-ink-60">
                                 <span>Доп. опции</span>
-                                <span>{formatGel(pricing.extrasPrice, { sign: true, fraction: 0 })}</span>
+                                <span>{formatGel(pricing.extrasPrice, { sign: true })}</span>
                             </div>
                         )}
                         {pricing.discountAmount > 0 && (
                             <div className="flex justify-between text-accent-ink">
                                 <span>Скидка</span>
-                                <span>−{formatGel(pricing.discountAmount, { fraction: 0 })}</span>
+                                <span>−{formatGel(pricing.discountAmount)}</span>
                             </div>
                         )}
                         {pricing.peakSlotCount > 0 && !useSubscription && (
@@ -3686,8 +3686,8 @@ function CrmQuickBookingModal({
                             <span>Итого</span>
                             <span>
                                 {useSubscription && enoughHoursOnSub
-                                    ? <>{hoursForSub} ч из абонемента{pricing.subscriptionPeakDebt > 0 ? ` + ${formatGel(pricing.subscriptionPeakDebt, { fraction: 0 })} за вечер` : ''}</>
-                                    : formatGel(pricing.finalPrice, { fraction: 0 })
+                                    ? <>{hoursForSub} ч из абонемента{pricing.subscriptionPeakDebt > 0 ? ` + ${formatGel(pricing.subscriptionPeakDebt)} за вечер` : ''}</>
+                                    : formatGel(pricing.finalPrice)
                                 }
                             </span>
                         </div>
