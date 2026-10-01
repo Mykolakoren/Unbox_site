@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { cashboxApi } from '../../../api/cashbox';
+import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../../utils/cashboxDuplicate';
+import { paymentErrorText } from '../../../utils/errors';
 import type { User } from '../../../store/types';
 import { Sheet } from '../../../components/ui/Sheet';
 import { Button } from '../../../components/ui/Button';
@@ -55,7 +56,8 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
         if (value <= 0) { toast.error('Введите сумму больше 0'); return; }
         setSaving(true);
         try {
-            await cashboxApi.createTransaction({
+            // 01.10: через защиту от дубля (409 duplicate_recent → «Записать ещё одну?»).
+            await createIncomeWithDuplicateGuard({
                 type: 'income',
                 amount: value,
                 payment_method: method,
@@ -65,10 +67,18 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
                 client_id: user.id || user.email,
                 credit_user_balance: true,
             } as any);
-            toast.success(`Баланс пополнен на ${formatGel(value)} — теперь ${formatGel(balance + value)}`);
-            await onDone();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
+            setSaving(false);
+            // Не подтвердили повтор — не ошибка, ничего не пишем и не ругаемся.
+            if (isDuplicateDeclined(err)) return;
+            toast.error(paymentErrorText(err, 'Не удалось пополнить баланс'));
+            return;
+        }
+        // Платёж уже записан: сбой обновления экрана не должен выглядеть как «не прошло».
+        toast.success(`Баланс пополнен на ${formatGel(value)} — теперь ${formatGel(balance + value)}`);
+        try {
+            await onDone();
+        } catch {
             setSaving(false);
         }
     };

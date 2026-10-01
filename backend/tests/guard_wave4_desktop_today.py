@@ -112,7 +112,11 @@ def test_today_cash_line_only_with_finance_access():
 # «Принять оплату» — вынесена, handleConfirm байт-в-байт
 # ─────────────────────────────────────────────────────────────────────────
 
-HANDLE_CONFIRM_FP = "4f175bb15d224eb5af9e1aa7efe55ea5ce6e698774dd8ae7d8110789eb201262"
+# 01.10 (guard_duplicate_payment_2026_10): handleConfirm осознанно изменён — запрос идёт через
+# createIncomeWithDuplicateGuard (дубль → «Записать ещё одну?»), платёж и fetchUsers разведены по
+# двум try, ошибка — paymentErrorText вместо «нужен доступ к кассе». Поля тела прежние.
+# Прежний отпечаток: 4f175bb15d224eb5af9e1aa7efe55ea5ce6e698774dd8ae7d8110789eb201262.
+HANDLE_CONFIRM_FP = "16309e7b20430aa1383eb467ddb7e70b797d442c2c6677e97efa7252f9d483e9"
 
 
 def test_accept_payment_handle_confirm_fingerprint():

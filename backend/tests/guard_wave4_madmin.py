@@ -79,7 +79,10 @@ def _mobile_admin_routes(app: str) -> str:
 
 # Сняты с кода ДО волны 4 (4ae3f09): TopupSheet.save == прежний submit из
 # MobileAdminUsers.tsx (только имя функции), performCancel и handleSubmit — как были.
-TOPUP_SAVE_FP = "a09bd23bbb62316e"
+# 01.10 (guard_duplicate_payment_2026_10): TopupSheet.save осознанно изменён — createIncomeWithDuplicateGuard
+# вместо cashboxApi.createTransaction, платёж и onDone разведены по двум try, ошибка — paymentErrorText.
+# Прежний отпечаток a09bd23bbb62316e.
+TOPUP_SAVE_FP = "27cf084fbdb167c5"
 PERFORM_CANCEL_FP = "4eedaafde0cd9b02"
 END_SHIFT_SUBMIT_FP = "5978bf9faa11448e"
 
@@ -89,7 +92,7 @@ def test_money_fingerprints():
     save = _block(topup, "const save = async")
     for field in ("type: 'income'", "category_id: 'cat-topup'", "credit_user_balance: true",
                   "payment_method: method", "branch,", "client_id: user.id || user.email",
-                  "cashboxApi.createTransaction("):
+                  "createIncomeWithDuplicateGuard("):
         assert field in save, f"TopupSheet.save: поле оплаты изменено — {field}"
     sheets = _m("bookingSheets.tsx")
     cancel = _block(sheets, "const performCancel = async")

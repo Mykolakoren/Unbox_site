@@ -37,6 +37,8 @@ import { ResetPasswordModal } from '../../components/admin/modals/ResetPasswordM
 import { MergeAccountsModal } from '../../components/admin/modals/MergeAccountsModal';
 import { api } from '../../api/client';
 import { cashboxApi } from '../../api/cashbox';
+import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../utils/cashboxDuplicate';
+import { paymentErrorText } from '../../utils/errors';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { Sheet } from '../../components/ui/Sheet';
@@ -269,7 +271,8 @@ export function AdminUserDetails() {
         // касса — отдельным вызовом без привязки клиента, отсюда рассинхрон.
         const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
         try {
-            await cashboxApi.createTransaction({
+            // 01.10: через защиту от дубля (409 duplicate_recent → «Записать ещё одну?»).
+            await createIncomeWithDuplicateGuard({
                 type: 'income',
                 amount,
                 payment_method: methodMap[method] || 'cash',
@@ -279,13 +282,19 @@ export function AdminUserDetails() {
                 client_id: user.id || user.email,
                 credit_user_balance: true,
             } as any);
-            // Баланс посчитал бэк — подтягиваем свежие данные и сумму оплат.
+        } catch (e: any) {
+            // Не подтвердили повтор — не ошибка, ничего не пишем и не ругаемся.
+            if (isDuplicateDeclined(e)) return;
+            toast.error(paymentErrorText(e, 'Не удалось пополнить баланс'));
+            return;
+        }
+        // Баланс посчитал бэк — подтягиваем свежие данные и сумму оплат. Платёж
+        // уже записан: сбой обновления экрана не должен выглядеть как «не прошло».
+        try {
             await fetchUsers();
             await reloadTotalPaid();
-            toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
-        }
+        } catch { /* экран обновится при следующем открытии */ }
+        toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
     };
 
     const handleUpdateCreditLimit = async (limit: number) => {

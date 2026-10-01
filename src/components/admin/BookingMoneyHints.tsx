@@ -3,7 +3,8 @@ import clsx from 'clsx';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
-import { cashboxApi } from '../../api/cashbox';
+import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../utils/cashboxDuplicate';
+import { paymentErrorText } from '../../utils/errors';
 import { useUserStore } from '../../store/userStore';
 import type { BookingHistoryItem, User } from '../../store/types';
 import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
@@ -152,7 +153,8 @@ export function AcceptPaymentButton({
         if (!client) return;
         const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
         try {
-            await cashboxApi.createTransaction({
+            // 01.10: через защиту от дубля (409 duplicate_recent → «Записать ещё одну?»).
+            await createIncomeWithDuplicateGuard({
                 type: 'income',
                 amount,
                 payment_method: methodMap[method] || 'cash',
@@ -162,11 +164,16 @@ export function AcceptPaymentButton({
                 client_id: client.id || client.email,
                 credit_user_balance: true,
             } as any);
-            await fetchUsers();
-            toast.success(`Оплата принята: ${formatGel(amount)} на баланс ${client.name}`);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось принять оплату (нужен доступ к кассе)');
+            // Не подтвердили повтор — не ошибка, ничего не пишем и не ругаемся.
+            if (isDuplicateDeclined(e)) return;
+            toast.error(paymentErrorText(e, 'Не удалось принять оплату'));
+            return;
         }
+        // Платёж уже записан: сбой обновления списка не должен выглядеть как
+        // «оплата не прошла» (01.10 — из-за этого внесли второй раз).
+        try { await fetchUsers(); } catch { /* список обновится сам */ }
+        toast.success(`Оплата принята: ${formatGel(amount)} на баланс ${client.name}`);
     };
 
     return (

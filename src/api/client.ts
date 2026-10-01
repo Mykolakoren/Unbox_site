@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 import {
-    apiErrorMessage, isNetworkError, isTimeoutError, markErrorToastShown,
+    apiErrorMessage, isDuplicatePayment, isNetworkError, isTimeoutError, markErrorToastShown,
     NETWORK_ERROR_TEXT, SERVER_ERROR_TEXT, TIMEOUT_ERROR_TEXT,
 } from '../utils/errors';
 import { loginPathWithRedirect } from '../utils/loginRedirect';
@@ -91,8 +91,13 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
+        // Запись в кассу (01.10): при сбое связи/шлюза платёж мог ПРОЙТИ — общий
+        // «Повторите» тут вреден (админ вносит заново → двойной платёж). Экран сам
+        // скажет «проверьте журнал кассы» (paymentErrorText), тост здесь не нужен.
+        const isCashboxWrite = method === 'post' && /\/cashbox\/transactions\/?$/.test(String(error.config?.url ?? ''));
+
         if (status && status >= 500) {
-            if (!isReadOnly) showErrorToastOnce(error, SERVER_ERROR_TEXT);
+            if (!isReadOnly && !isCashboxWrite) showErrorToastOnce(error, SERVER_ERROR_TEXT);
         } else if (status === 422 && detail) {
             // Use shared helper so we never end up trying to render an
             // {message, conflicts} object as a React child (Minified
@@ -106,18 +111,20 @@ api.interceptors.response.use(
             // calendar_near (01.10) — не ошибка, а вопрос специалисту: экран
             // сам предложит «Перенести существующую / Всё равно создать».
             const isCalendarNear = typeof detail === 'object' && detail.code === 'calendar_near';
-            if (!isMaintenanceConflict && !isCalendarNear) {
+            // duplicate_recent (01.10) — тоже вопрос, не ошибка: экран спросит
+            // «Записать ещё одну?» (utils/cashboxDuplicate.ts).
+            if (!isMaintenanceConflict && !isCalendarNear && !isDuplicatePayment(error)) {
                 showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
             }
         } else if (isTimeoutError(error)) {
             // Timeout — пробрасываем юзеру только если это write. Для GET
             // тихо роняем, кэш на странице остаётся на месте.
-            if (!isReadOnly) showErrorToastOnce(error, TIMEOUT_ERROR_TEXT);
+            if (!isReadOnly && !isCashboxWrite) showErrorToastOnce(error, TIMEOUT_ERROR_TEXT);
         } else if (isNetworkError(error)) {
             // Network errors могут быть «вы перешли в туннель / на лифте» —
             // тоже мешают на каждом фоновом fetch'е. Показываем только
             // на write-запросах.
-            if (!isReadOnly) showErrorToastOnce(error, NETWORK_ERROR_TEXT);
+            if (!isReadOnly && !isCashboxWrite) showErrorToastOnce(error, NETWORK_ERROR_TEXT);
         }
 
         return Promise.reject(error);

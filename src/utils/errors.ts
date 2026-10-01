@@ -94,6 +94,33 @@ export function apiErrorMessage(err: any, fallback = 'Что-то пошло н�
     return humanText(err?.message) ?? fallback;
 }
 
+// ── Запись денег в кассу: «получилось или нет» ─────────────────────────
+
+/** Сервер не ответил (или ответил шлюз после таймаута): запись МОГЛА пройти. */
+export const PAYMENT_UNCERTAIN_TEXT = 'Не удалось подтвердить запись. Проверьте журнал кассы, прежде чем вносить заново';
+
+/** 409 duplicate_recent: такой же приход по клиенту уже записан минуту назад
+ *  (backend cashbox/transactions.py). Это вопрос «записать ещё одну?», не ошибка —
+ *  общий api/client.ts второй тост для него не показывает. */
+export function isDuplicatePayment(err: any): boolean {
+    const d = err?.response?.data?.detail;
+    return err?.response?.status === 409 && !!d && typeof d === 'object' && d.code === 'duplicate_recent';
+}
+
+/**
+ * Текст ошибки записи денег в кассу. Админ раньше видел «нужен доступ к кассе»
+ * на ЛЮБОЙ сбой — в том числе когда платёж на самом деле записался (01.10
+ * вторая оплата 45 ₾ после «красной ошибки»). Теперь:
+ *   • сервер ответил отказом — его настоящие слова (или fallback);
+ *   • ответа нет / шлюз 502-504 / сбой после ответа — честное «неизвестно,
+ *     проверьте журнал», без догадок про права.
+ */
+export function paymentErrorText(err: any, fallback = 'Не удалось записать оплату'): string {
+    const status = err?.response?.status;
+    if (!err?.response || status === 502 || status === 503 || status === 504) return PAYMENT_UNCERTAIN_TEXT;
+    return apiErrorMessage(err, fallback);
+}
+
 // ── «Уведомление уже показано» ─────────────────────────────────────────
 
 const TOAST_SHOWN = '__unboxToastShown';

@@ -92,7 +92,12 @@ def _node_run(body: str):
 
 MONEY_FINGERPRINTS = [
     # (файл, начало, конец, отпечаток, что это)
-    (UD, "const handleAddFunds = async", "const handleUpdateCreditLimit", "db9e87fe1f162a33", "пополнение баланса из карточки"),
+    # 01.10 (guard_duplicate_payment_2026_10): handleAddFunds осознанно изменён — запрос идёт через
+    # createIncomeWithDuplicateGuard (409 «такая же оплата уже есть» → «Записать ещё одну?»), платёж и
+    # обновление экрана разведены по двум try (сбой fetchUsers больше не выглядит как «не прошло»),
+    # текст ошибки — paymentErrorText. Поля тела запроса прежние (их держит guard_wave4_polish).
+    # Прежний отпечаток db9e87fe1f162a33 (до 01.10).
+    (UD, "const handleAddFunds = async", "const handleUpdateCreditLimit", "f1e232a66d220245", "пополнение баланса из карточки"),
     (UD, "const handleUpdateCreditLimit = async", "const toggleFreeze", "82366847dc731d47", "кредитный лимит"),
     (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "406179f87bd4d36f", "продажа абонемента"),
     (UD, "const handleToSubscription = async", "// Excel #59", "883771eeb8c1df0e", "«На абонемент»"),

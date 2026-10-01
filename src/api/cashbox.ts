@@ -36,6 +36,10 @@ export interface CashboxTransactionCreate {
      *  (reversible on delete/edit). Backend ignores the flag unless
      *  type=income and client_id is set. */
     credit_user_balance?: boolean;
+    /** true = «да, это вторая настоящая оплата»: обходит защиту от дубля
+     *  (409 duplicate_recent). Ставит только utils/cashboxDuplicate.ts после
+     *  подтверждения админом. */
+    confirm_duplicate?: boolean;
 }
 
 export interface ExpenseCategory {

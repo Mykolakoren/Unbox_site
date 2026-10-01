@@ -266,6 +266,107 @@ def get_period_summary(
     }
 
 
+# ── Защита от двойного внесения оплаты клиента ────────────────────────
+# Случай 01.10: админ нажала «Принять оплату» (45 ₾), экран показал красную
+# ошибку, хотя сервер ответил 200 и платёж записался. Она внесла заново другим
+# способом через 23 секунды — на балансе клиента два платежа по 45 ₾.
+# Теперь второй такой же приход по тому же клиенту в течение 3 минут сервер
+# не пишет молча, а отвечает 409 duplicate_recent; фронт спрашивает «Записать
+# ещё одну?» и при «да» повторяет запрос с confirm_duplicate=true.
+DUPLICATE_WINDOW = timedelta(minutes=3)
+# Способ оплаты НЕ сравниваем: наличные и карта на ту же сумму — тот же дубль
+# (в реальном случае первая запись была картой, вторая — наличными).
+# Администратора тоже не сравниваем: с телефона и с компьютера могут нажать
+# двое; лишний вопрос стоит одного нажатия, а двойной платёж — денег клиента.
+_METHOD_RU = {"cash": "наличные", "card_tbc": "карта TBC", "card_bog": "карта BOG"}
+
+
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        return one
+    if 2 <= n10 <= 4 and not 12 <= n100 <= 14:
+        return few
+    return many
+
+
+def _ago_ru(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} {_plural_ru(seconds, 'секунду', 'секунды', 'секунд')} назад"
+    m = seconds // 60
+    return f"{m} {_plural_ru(m, 'минуту', 'минуты', 'минут')} назад"
+
+
+def _lock_client_for_payment(session: Session, key: str) -> None:
+    """Очередь по клиенту на время транзакции (pg advisory lock).
+
+    Два одновременных запроса «внести 45 ₾ клиенту X» без неё оба видят «дублей
+    нет» и оба пишут. Замок берём ДО проверки и держим до commit/rollback
+    (xact-lock снимается сам), второй запрос ждёт, потом читает уже записанную
+    первым операцию и получает 409. Строку клиента для FOR UPDATE не берём:
+    client_id бывает и id пользователя, и email, и id клиента Psy-CRM.
+    В SQLite (тесты, dev) нет параллельных писателей — замок не нужен.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(7101, hashtext(:k))"),
+        {"k": key},
+    )
+
+
+def _find_recent_duplicate(
+    session: Session, payload: CashboxTransactionCreate, target_user: Optional[User],
+) -> Optional[CashboxTransaction]:
+    """Самый свежий приход по этому клиенту на ту же сумму за последние 3 минуты."""
+    # created_at пишется моделью через datetime.now() (серверное время, на проде
+    # UTC) — сравниваем в той же шкале, а не с payload.date: дату админ может
+    # проставить задним числом.
+    since = datetime.now() - DUPLICATE_WINDOW
+    who = CashboxTransaction.client_id == payload.client_id
+    if target_user is not None:
+        # Тот же человек мог прийти под email, а не под UUID.
+        who = who | (CashboxTransaction.credited_user_id == str(target_user.id))
+    stmt = (
+        select(CashboxTransaction)
+        .where(CashboxTransaction.type == "income")
+        .where(who)
+        .where(CashboxTransaction.currency == payload.currency)
+        # Корректировки — не оплаты, их повтор не дубль.
+        .where(CashboxTransaction.payment_method != NON_MONEY_METHOD)
+        .where(CashboxTransaction.created_at >= since)
+        .where(func.abs(CashboxTransaction.amount - float(payload.amount)) < 0.005)
+        .order_by(desc(CashboxTransaction.created_at))
+    )
+    return session.exec(stmt).first()
+
+
+def _duplicate_payment_error(prev: CashboxTransaction) -> HTTPException:
+    secs = max(0, int((datetime.now() - prev.created_at).total_seconds()))
+    cur = "₾" if prev.currency == "GEL" else prev.currency
+    amount_txt = f"{prev.amount:g}".replace(".", ",")
+    method = _METHOD_RU.get(prev.payment_method, prev.payment_method)
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "duplicate_recent",
+            "message": (
+                f"Такая же операция по этому клиенту уже записана {_ago_ru(secs)} "
+                f"({amount_txt} {cur}, {method}). "
+                "Если это не ошибка, подтвердите ещё одну запись."
+            ),
+            "existing": {
+                "id": prev.id,
+                "amount": prev.amount,
+                "payment_method": prev.payment_method,
+                "created_at": prev.created_at.isoformat(),
+                "seconds_ago": secs,
+            },
+        },
+    )
+
+
 @router.post("/transactions", response_model=CashboxTransactionRead)
 def create_transaction(
     payload: CashboxTransactionCreate,
@@ -309,6 +410,21 @@ def create_transaction(
         # Prefer the user's canonical name for the cash-box record
         if not client_name and target_user.name:
             client_name = target_user.name
+
+    # ── Защита от двойного внесения (приход с клиентом, не корректировка) ──
+    # Замок и проверка — в той же транзакции, что и запись ниже (commit в конце).
+    if (
+        payload.type == "income"
+        and payload.client_id
+        and payload.payment_method != NON_MONEY_METHOD
+    ):
+        _lock_client_for_payment(
+            session, str(target_user.id) if target_user is not None else payload.client_id,
+        )
+        if not payload.confirm_duplicate:
+            prev = _find_recent_duplicate(session, payload, target_user)
+            if prev is not None:
+                raise _duplicate_payment_error(prev)
 
     # ── Normalise the operation date to UTC-naive ──
     # Frontend sends Tbilisi wall-clock as a naive ISO string

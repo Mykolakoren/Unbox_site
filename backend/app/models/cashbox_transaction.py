@@ -48,6 +48,11 @@ class CashboxTransactionCreate(SQLModel):
     # is topped up by `amount` and `credited_user_id` is recorded so the
     # credit can be reversed if the transaction is later deleted/edited.
     credit_user_balance: bool = False
+    # Защита от двойного внесения (01.10): если за последние минуты по этому
+    # клиенту уже есть приход на ту же сумму, сервер отвечает 409
+    # duplicate_recent. true = «да, это вторая настоящая оплата, запиши».
+    # Только в теле запроса — в таблицу не пишется.
+    confirm_duplicate: bool = False
 
 
 class CashboxTransactionRead(CashboxTransactionBase):

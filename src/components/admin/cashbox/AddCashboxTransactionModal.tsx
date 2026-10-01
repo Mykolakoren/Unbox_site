@@ -10,6 +10,8 @@ import { formatGel } from '../../../utils/format';
 import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
 import { undoToast } from '../../ui/undoToast';
 import { cashboxApi } from '../../../api/cashbox';
+import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../../utils/cashboxDuplicate';
+import { paymentErrorText } from '../../../utils/errors';
 import { useUserStore } from '../../../store/userStore';
 import { canUndoCashTx, claimCashUndo, releaseCashUndo } from './cashMoney';
 
@@ -256,7 +258,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
             } else {
                 // В5 (волна 4): то же тело запроса, что и раньше, но через
                 // cashboxApi — нужен id новой операции для «Вернуть».
-                const created = await cashboxApi.createTransaction({
+                // 01.10: приход с клиентом — через защиту от дубля (409 → «Записать ещё одну?»).
+                const created = await createIncomeWithDuplicateGuard({
                     type,
                     amount: value,
                     payment_method: paymentMethod,
@@ -295,8 +298,11 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
             }
             resetForm();
             onClose();
-        } catch {
-            toast.error('Не удалось записать операцию. Проверьте интернет и нажмите «Записать» ещё раз.');
+        } catch (err) {
+            // Не подтвердили повтор — не ошибка; форму оставляем открытой.
+            if (isDuplicateDeclined(err)) return;
+            // Раньше тут всегда «нажмите «Записать» ещё раз» — а запись могла пройти (01.10).
+            toast.error(paymentErrorText(err, 'Не удалось записать операцию'));
         } finally {
             setSaving(false);
         }
