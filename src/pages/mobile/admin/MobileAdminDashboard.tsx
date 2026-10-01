@@ -105,6 +105,10 @@ export function MobileAdminDashboard() {
         () => byClient(rowsToday, users).filter(c => c.today > 0 || c.total > 0),
         [rowsToday, users],
     );
+    // «Должны» делим: сначала те, с кого брать сегодня (today > 0), ниже — долг по
+    // другим броням (today = 0: брони уже списаны с баланса, брать не сегодня).
+    const owingToday = useMemo(() => owing.filter(c => c.today > 0), [owing]);
+    const owingLater = useMemo(() => owing.filter(c => !(c.today > 0)), [owing]);
 
     // Брони могли уже лежать в сторе (открывали «Брони») — тогда показываем их.
     const bookingsPending = !bookingsLoaded && bookings.length === 0;
@@ -128,6 +132,45 @@ export function MobileAdminDashboard() {
             branch: first ? branchOfBooking({ resourceId: first.cabinetId }) : undefined,
         });
     };
+
+    // Карточка должника «Должны»; later — долг не за сегодня (нейтральная рамка).
+    const renderOwing = (c: TodayClient, later = false) => (
+        <div key={c.userId} style={{
+            background: 'var(--color-card)', border: `1px solid ${later ? 'var(--color-ink-10)' : 'var(--status-danger-fg)'}`,
+            borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <Link
+                    to={`/m/admin/users/${encodeURIComponent(c.rows[0]?.userId || c.userId)}`}
+                    style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600, color: 'var(--color-ink)', textDecoration: 'none' }}
+                >
+                    {c.client}
+                </Link>
+                <span className="num" style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-danger-fg)' }}>
+                    {formatGel(c.total)}
+                </span>
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
+                За сегодня <span className="num">{formatGel(c.today)}</span>
+                {' · '}весь долг <span className="num">{formatGel(c.total)}</span>
+                {c.creditLimit !== null && <> · лимит <span className="num">{formatGel(c.creditLimit)}</span></>}
+                {c.overLimit && <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}> · сверх лимита</span>}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                {c.rows.map(r => `${r.time} ${r.cabinet}`).join(' · ')}
+            </div>
+            {canCash && (
+                <Button
+                    block
+                    icon={<Wallet size={16} aria-hidden="true" />}
+                    disabled={!(c.total > 0)}
+                    onClick={() => openPayFor(c)}
+                >
+                    Принять оплату · {formatGel(c.total)}
+                </Button>
+            )}
+        </div>
+    );
 
     return (
         <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -221,7 +264,7 @@ export function MobileAdminDashboard() {
                     aria-label="Что показать"
                     options={[
                         { value: 'all', label: bookingsPending ? 'Все' : `Все · ${rowsToday.length}` },
-                        { value: 'due', label: bookingsPending ? 'Должны' : `Должны · ${owing.length}` },
+                        { value: 'due', label: bookingsPending ? 'Должны' : `Должны · ${owingToday.length}` },
                         { value: 'tomorrow', label: bookingsPending ? 'Завтра' : `Завтра · ${rowsTomorrow.length}` },
                     ]}
                     value={seg}
@@ -237,43 +280,18 @@ export function MobileAdminDashboard() {
                         <EmptyState compact title="Сегодня никто не должен" hint="Все сегодняшние брони оплачены или идут по абонементу." />
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {owing.map(c => (
-                                <div key={c.userId} style={{
-                                    background: 'var(--color-card)', border: '1px solid var(--status-danger-fg)',
-                                    borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                        <Link
-                                            to={`/m/admin/users/${encodeURIComponent(c.rows[0]?.userId || c.userId)}`}
-                                            style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600, color: 'var(--color-ink)', textDecoration: 'none' }}
-                                        >
-                                            {c.client}
-                                        </Link>
-                                        <span className="num" style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-danger-fg)' }}>
-                                            {formatGel(c.total)}
-                                        </span>
+                            {owingToday.map(c => renderOwing(c))}
+                            {owingLater.length > 0 && (
+                                <div data-owing-later style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: owingToday.length > 0 ? 8 : 0 }}>
+                                    <div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>Долг по другим броням: не сегодня</div>
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                                            Эти брони уже списаны с баланса, оплатить их можно, когда клиент придёт
+                                        </div>
                                     </div>
-                                    <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
-                                        За сегодня <span className="num">{formatGel(c.today)}</span>
-                                        {' · '}весь долг <span className="num">{formatGel(c.total)}</span>
-                                        {c.creditLimit !== null && <> · лимит <span className="num">{formatGel(c.creditLimit)}</span></>}
-                                        {c.overLimit && <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}> · сверх лимита</span>}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                        {c.rows.map(r => `${r.time} ${r.cabinet}`).join(' · ')}
-                                    </div>
-                                    {canCash && (
-                                        <Button
-                                            block
-                                            icon={<Wallet size={16} aria-hidden="true" />}
-                                            disabled={!(c.total > 0)}
-                                            onClick={() => openPayFor(c)}
-                                        >
-                                            Принять оплату · {formatGel(c.total)}
-                                        </Button>
-                                    )}
+                                    {owingLater.map(c => renderOwing(c, true))}
                                 </div>
-                            ))}
+                            )}
                         </div>
                     )
                 ) : (

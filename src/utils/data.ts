@@ -290,6 +290,11 @@ export let SUBSCRIPTION_PLANS = [
         // / 'freeze_days'] (сторож guard_tariffs сверяет).
         freeReschedules: 0,
         freezeDays: 0,
+        // Доп. пул (владелец 01.10): часы капсулы / «4 ч индивидуально» — только
+        // капсула / только кабинеты. Сервер: subscription_sale.PLANS[...]
+        // ['extra_hours' / 'extra_kind'] (сторож guard_tariffs_extra сверяет).
+        extraHours: 1,
+        extraKind: 'capsule',
     },
     {
         id: 'WARM_START',
@@ -301,6 +306,8 @@ export let SUBSCRIPTION_PLANS = [
         formats: ['individual'],
         freeReschedules: 1,
         freezeDays: 0,
+        extraHours: 4,
+        extraKind: 'capsule',
     },
     {
         id: 'REGULAR_PRACTITIONER',
@@ -312,6 +319,8 @@ export let SUBSCRIPTION_PLANS = [
         formats: ['individual'],
         freeReschedules: 2,
         freezeDays: 7,
+        extraHours: 6,
+        extraKind: 'capsule',
         perks: ['2 переноса позже суток']
     },
     {
@@ -325,6 +334,8 @@ export let SUBSCRIPTION_PLANS = [
         formats: ['individual', 'group', 'intervision'],
         freeReschedules: 3,
         freezeDays: 30,
+        extraHours: 10,
+        extraKind: 'capsule',
         perks: ['Приоритет', 'Внеурочный доступ', 'Рекомендация']
     },
     {
@@ -337,6 +348,8 @@ export let SUBSCRIPTION_PLANS = [
         formats: ['group'],
         freeReschedules: 0,
         freezeDays: 0,
+        extraHours: 4,
+        extraKind: 'individual',
         perks: ['Анонс по базе']
     },
 ];

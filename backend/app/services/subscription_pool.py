@@ -60,7 +60,18 @@ _ALIASES: dict[str, str] = {
     "weekly_hours": "weeklyHours",
     "weekly_price": "weeklyPrice",
     "package_week": "packageWeek",
+    # Доп. пул (владелец 01.10, шаг 4): часы капсулы (Пробный 1, Тёплый 4,
+    # Регулярный 6, Профи+ 10) или «4 ч индивидуально» Группового мастера.
+    # extra_kind: 'capsule' | 'individual'. Остаток + израсходовано = всего.
+    "extra_hours_total": "extraHoursTotal",
+    "extra_hours_remaining": "extraHoursRemaining",
+    "extra_hours_used": "extraHoursUsed",
+    "extra_kind": "extraKind",
 }
+
+EXTRA_CAPSULE = "capsule"
+EXTRA_INDIVIDUAL = "individual"
+_EPS = 1e-9
 
 
 def get(sub: Optional[dict], field: str, default: Any = None) -> Any:
@@ -89,6 +100,217 @@ def update(sub: Optional[dict], **fields: Any) -> dict:
         new[field] = value
         new[_ALIASES.get(field, field)] = value
     return new
+
+
+# ── Движение часов ───────────────────────────────────────────────────────────
+# ЕДИНСТВЕННОЕ место, где меняются remaining_hours / used_hours. Раньше каждое
+# из ~18 мест (бронь, крон T-24ч, отмена, перенос, вырезка, сокращение, смена
+# формата/цены, подтверждение, Telegram, пополнение, продажа) писало пул руками
+# — и правило «вернуть ровно туда, откуда сняли» пришлось бы чинить в каждом.
+# Сторож guard_hours_pool_moves запрещает прямые записи вне этого файла.
+
+#
+# Доп. пул (extra) — часы капсулы или «4 ч индивидуально» Группового мастера.
+# Порядок списания (владелец 01.10):
+#   капсула           — сначала часы капсулы, потом основной пул час за час,
+#                       потом деньги;
+#   Групповой мастер  — индивидуальная бронь в КАБИНЕТЕ: сначала «4 ч
+#                       индивидуально», потом деньги (его основной пул — только
+#                       группы).
+# Одна бронь может взять часть из доп. пула, часть из основного: сначала доп.
+# до нуля, остаток из основного. В брони хранится hours_deducted (всего часов
+# абонемента) и extra_hours_deducted (из них доп.). Возврат — РОВНО туда же.
+# Если бронь ни из доп., ни из основного целиком не покрывается — она вся
+# деньгами (как и раньше с основным пулом: частичного «часы + деньги» нет).
+
+def _clamp_extra(hours: float, extra: Optional[float]) -> float:
+    h = float(hours or 0)
+    return max(0.0, min(float(extra or 0), h)) if h > 0 else 0.0
+
+
+def extra_kind(sub: Optional[dict]) -> Optional[str]:
+    kind = get(sub, "extra_kind")
+    return kind if kind in (EXTRA_CAPSULE, EXTRA_INDIVIDUAL) else None
+
+
+def extra_remaining(sub: Optional[dict]) -> float:
+    return max(0.0, get_float(sub, "extra_hours_remaining")) if extra_kind(sub) else 0.0
+
+
+def kind_for_resource(resource_type: Optional[str]) -> str:
+    """Какой доп. пул «подходит» брони по типу помещения: капсула → часы
+    капсулы, кабинет → «индивидуально»."""
+    return EXTRA_CAPSULE if (resource_type or "") == "capsule" else EXTRA_INDIVIDUAL
+
+
+def extra_applies(sub: Optional[dict], resource_type: Optional[str], format_type: Optional[str]) -> bool:
+    """Может ли доп. пул абонемента платить за такую бронь.
+
+    Часы капсулы — только капсула (любой формат). «4 ч индивидуально» — только
+    кабинет и только индивидуальный формат (не группы и не капсула).
+    """
+    kind = extra_kind(sub)
+    if kind == EXTRA_CAPSULE:
+        return (resource_type or "") == "capsule"
+    if kind == EXTRA_INDIVIDUAL:
+        return (resource_type or "") != "capsule" and (format_type or "individual") == "individual"
+    return False
+
+
+def plan_split(sub: Optional[dict], hours: float, *, resource_type: Optional[str],
+               format_type: Optional[str]) -> Optional[float]:
+    """Покрывает ли абонемент бронь ``hours`` часов ЦЕЛИКОМ и сколько из них
+    взять из доп. пула. None — не покрывает (бронь пойдёт деньгами).
+
+    Статус (пауза/срок) НЕ проверяет — это гейт вызывающего (is_active).
+    Без доп. пула — ровно прежнее правило: формат в тарифе и остаток ≥ часов
+    (с запасом 0.01 на float).
+    """
+    h = float(hours or 0)
+    x = min(extra_remaining(sub), h) if extra_applies(sub, resource_type, format_type) else 0.0
+    x = round(max(0.0, x), 4)
+    main_need = h - x
+    if x > 0 and main_need <= _EPS:
+        return x
+    included = get(sub, "included_formats", ["individual"]) or ["individual"]
+    if (format_type or "individual") not in included:
+        return None
+    if get_float(sub, "remaining_hours") >= main_need - 0.01:
+        return x
+    return None
+
+
+def live_extra(sub: Optional[dict], hours: float, *, resource_type: Optional[str],
+               format_type: Optional[str]) -> float:
+    """Сколько из ``hours`` взять из доп. пула прямо сейчас (без проверки
+    покрытия основного пула) — для мест, которые списывают безусловно
+    (подтверждение горячей брони)."""
+    if not extra_applies(sub, resource_type, format_type):
+        return 0.0
+    return round(min(extra_remaining(sub), float(hours or 0)), 4)
+
+
+def debit_hours(sub: Optional[dict], hours: float, extra: float = 0.0) -> dict:
+    """Списать ``hours`` часов абонемента, из них ``extra`` — из доп. пула.
+
+    Основной пул: остаток −(hours−extra) (не ниже 0), израсходовано +(hours−extra).
+    Доп. пул: остаток −extra (не ниже 0), израсходовано +extra.
+    """
+    h = float(hours or 0)
+    x = _clamp_extra(h, extra)
+    if x > 0 and not extra_kind(sub):
+        x = 0.0  # доп. пула нет — защитно всё из основного (так быть не должно)
+    m = h - x
+    rem = get_float(sub, "remaining_hours")
+    used = get_float(sub, "used_hours")
+    fields: dict = {"remaining_hours": max(0.0, rem - m), "used_hours": used + m}
+    if x > 0:
+        er = get_float(sub, "extra_hours_remaining")
+        eu = get_float(sub, "extra_hours_used")
+        fields.update(extra_hours_remaining=round(max(0.0, er - x), 4),
+                      extra_hours_used=round(eu + x, 4))
+    return update(sub, **fields)
+
+
+def credit_hours(sub: Optional[dict], hours: float, extra: float = 0.0,
+                 kind: Optional[str] = None) -> dict:
+    """Вернуть ``hours`` часов в пул, из них ``extra`` — в доп. пул.
+
+    Основной: остаток +(hours−extra), израсходовано −(hours−extra) (не ниже 0).
+    ``hours`` может быть отрицательным (ручная цена абонементной брони выше
+    прежней — легаси-поведение set_booking_price).
+
+    Доп.: остаток +extra, израсходовано −extra (не ниже 0). ``kind`` — вид
+    доп. пула, из которого часы снимались ('capsule' | 'individual'). Если у
+    ТЕКУЩЕГО абонемента доп. пула такого вида нет (бронь из прошлого
+    абонемента, а купили тариф без него / с другим) — часы возвращаются в
+    основной пул: клиент их оплатил и не теряет. Если возврат поднимает
+    остаток выше «всего» (бронь из прошлого абонемента того же вида) — «всего»
+    растёт, чтобы остаток + израсходовано = всего.
+    """
+    h = float(hours or 0)
+    x = _clamp_extra(h, extra)
+    cur_kind = extra_kind(sub)
+    to_extra = x > 0 and cur_kind is not None and (kind is None or kind == cur_kind)
+    m = h - (x if to_extra else 0.0)
+    rem = get_float(sub, "remaining_hours")
+    used = get_float(sub, "used_hours")
+    fields: dict = {"remaining_hours": rem + m, "used_hours": max(0.0, used - m)}
+    if to_extra:
+        er = get_float(sub, "extra_hours_remaining") + x
+        eu = max(0.0, get_float(sub, "extra_hours_used") - x)
+        total = get_float(sub, "extra_hours_total")
+        fields.update(extra_hours_remaining=round(er, 4), extra_hours_used=round(eu, 4))
+        if er + eu > total + _EPS:
+            fields["extra_hours_total"] = round(er + eu, 4)
+    return update(sub, **fields)
+
+
+def pool_label(hours: Optional[float], extra: Optional[float]) -> Optional[str]:
+    """Ярлык брони: 'main' | 'extra' | 'mixed' (None — часов абонемента нет)."""
+    h = float(hours or 0)
+    if h <= 0:
+        return None
+    x = _clamp_extra(h, extra)
+    if x <= _EPS:
+        return "main"
+    if x >= h - _EPS:
+        return "extra"
+    return "mixed"
+
+
+def stamp_booking(booking: Any, hours: Optional[float], extra: Optional[float]) -> None:
+    """Записать в бронь, сколько часов абонемента и из какого пула."""
+    h = float(hours or 0)
+    x = _clamp_extra(h, extra)
+    booking.hours_pool = pool_label(h, x)
+    booking.extra_hours_deducted = round(x, 4) if x > 0 else (0.0 if h > 0 else None)
+
+
+def booking_extra(booking: Any) -> float:
+    """Сколько часов брони списано из доп. пула (старые брони — 0)."""
+    return _clamp_extra(float(getattr(booking, "hours_deducted", 0) or 0),
+                        getattr(booking, "extra_hours_deducted", 0))
+
+
+def extra_fields(kind: Optional[str], total: float) -> dict:
+    """Поля доп. пула нового абонемента (пусто, если у тарифа его нет)."""
+    if kind not in (EXTRA_CAPSULE, EXTRA_INDIVIDUAL) or float(total or 0) <= 0:
+        return {}
+    t = round(float(total), 4)
+    return {"extra_kind": kind, "extra_hours_total": t, "extra_hours_remaining": t,
+            "extra_hours_used": 0.0}
+
+
+def grant_hours(sub: Optional[dict], hours: float) -> dict:
+    """Пополнение пула админом: остаток и «всего» +hours (израсходовано не трогаем)."""
+    h = float(hours or 0)
+    rem = get_float(sub, "remaining_hours")
+    total = get_float(sub, "total_hours")
+    return update(sub, remaining_hours=round(rem + h, 2), total_hours=round(total + h, 2))
+
+
+def grant_extra_hours(sub: Optional[dict], hours: float, kind: Optional[str] = None) -> dict:
+    """Пополнение доп. пула админом: остаток и «всего» +hours. Если у абонемента
+    доп. пула нет, заводим его вида ``kind`` (по умолчанию — капсула)."""
+    h = float(hours or 0)
+    cur = extra_kind(sub)
+    if cur is None:
+        return update(sub, **extra_fields(kind or EXTRA_CAPSULE, h))
+    er = get_float(sub, "extra_hours_remaining")
+    et = get_float(sub, "extra_hours_total")
+    return update(sub, extra_hours_remaining=round(er + h, 4), extra_hours_total=round(et + h, 4))
+
+
+def pool_fields(total: float, bonus: float = 0.0, used: float = 0.0) -> dict:
+    """Поля нового пула (snake_case; запишет update): всего, бонус, остаток, израсходовано."""
+    total, bonus, used = float(total), float(bonus), float(used)
+    return {
+        "total_hours": total,
+        "bonus_hours": bonus,
+        "remaining_hours": round(max(0.0, total + bonus - used), 2),
+        "used_hours": used,
+    }
 
 
 def sync(sub: Optional[dict]) -> dict:

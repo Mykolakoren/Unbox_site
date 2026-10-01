@@ -13,6 +13,7 @@ import {
     balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
+import { cartResourceKind } from '../../utils/subscriptionHours';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
 import { calculatePrice } from '../../utils/pricing';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
@@ -228,7 +229,9 @@ export function MobileCheckout() {
         bookingDate: state.date,
         bookings,
         ownerEmail: effectiveUser?.email,
-    }), [effectiveUser, state.format, state.date, bookings]);
+        // Часы капсулы / «4 ч индивидуально» идут первыми (см. subscriptionHours.ts).
+        resourceKind: cartResourceKind(cartItems.map(i => i.resourceId)),
+    }), [effectiveUser, state.format, state.date, bookings, cartItems]);
     // Серию бонусом явно не оплачиваем: сервер сам потратит бонус на первые
     // даты, если его хватит на встречу целиком (это видно в «примерке» серии).
     const plan = useMemo(

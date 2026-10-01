@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Snowflake, Ticket, Plus, MessageCircle } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { fmtHours, reservedSubscriptionHours, subscriptionHours } from '../../utils/paymentPriority';
+import { extraKindLabel, extraPool } from '../../utils/subscriptionHours';
 import { canBookCabinets } from '../../utils/permissions';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
@@ -140,6 +141,13 @@ export function MobileSubscription() {
                                 <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
                                 <InfoRow label="Осталось по абонементу" value={fmtHours(sub.remainingHours)} />
                                 <InfoRow label="Использовано" value={fmtHours(usedHours)} />
+                                {/* Доп. пул (владелец 01.10): часы капсулы / «4 ч индивидуально». */}
+                                {extraPool(sub) && (
+                                    <InfoRow
+                                        label={extraKindLabel(extraPool(sub)!.kind)}
+                                        value={`осталось ${fmtHours(extraPool(sub)!.remaining)} из ${fmtHours(extraPool(sub)!.total)}`}
+                                    />
+                                )}
                                 {/* Владелец 01.10: перенос позже суток (не позже чем за 3 ч) —
                                     N раз за абонемент. Показываем и 0, если переносы были. */}
                                 {((Number(sub.freeReschedules) || 0) > 0 || (Number(sub.freeReschedulesUsed) || 0) > 0) && (

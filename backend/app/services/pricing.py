@@ -37,6 +37,9 @@ class PriceBreakdown(BaseModel):
     # Subscription Details
     subscription_plan: Optional[str] = None
     hours_deducted: float = 0.0
+    # Из hours_deducted — сколько из доп. пула (часы капсулы / «4 ч
+    # индивидуально»), остальное из основного. См. subscription_pool.plan_split.
+    extra_hours_deducted: float = 0.0
 
     final_price: float
 
@@ -251,8 +254,16 @@ class PricingService:
         consecutive_total_hours: Optional[float] = None,
         exclude_booking_id: Optional[str] = None,  # for recompute: skip self
         ignore_subscription: bool = False,
+        subscription_hours_cover: bool = True,
     ) -> PriceBreakdown:
-        """`ignore_subscription=True` — посчитать цену так, будто абонемента нет.
+        """`subscription_hours_cover=False` — абонемент НЕ покрывает бронь часами
+        (ни основным, ни доп. пулом), но скидка абонемента SUBSCRIPTION_DISCOUNT
+        остаётся. Нужно цепочке «часы подряд»: она считает ДЕНЕЖНЫЕ брони, и живые
+        часы не должны делать их нулевыми, а скидку тарифа (Тёплый −10%, Регулярный
+        −15%, Профи+ −20%, Групповой мастер −25%) терять нельзя. Для клиента без
+        часов результат ровно прежний (как на main).
+
+        `ignore_subscription=True` — посчитать цену так, будто абонемента нет.
 
         Нужно недельному перерасчёту: он смотрит на брони ПРОШЕДШЕЙ недели,
         оплаченные с баланса, а абонемент читается ТЕКУЩИЙ. Если клиент купил
@@ -380,7 +391,9 @@ class PricingService:
         # с ignore_subscription при создании брони, а не сама цена.
 
         # A. Subscription (Priority 1)
-        if not ignore_subscription and self._apply_subscription(user, breakdown, resource, format_type):
+        if not ignore_subscription and self._apply_subscription(
+            user, breakdown, resource, format_type, hours_cover=subscription_hours_cover
+        ):
             return breakdown
 
         # A2. Личная ставка за час — эксклюзивна: цена уже посчитана по ней,
@@ -600,10 +613,14 @@ class PricingService:
         user: User, 
         breakdown: PriceBreakdown, 
         resource: Resource,
-        format_type: str
+        format_type: str,
+        hours_cover: bool = True,
     ) -> bool:
         """
         Attempts to apply subscription logic. Returns True if applied.
+
+        hours_cover=False — покрытие часами пропускается (как будто часов нет),
+        остаётся только скидка тарифа SUBSCRIPTION_DISCOUNT.
         """
         # Единый гейт: нет пула / на паузе / ИСТЁК → абонемент не покрывает бронь,
         # цена уходит на баланс. Раньше срок не проверялся вообще: истёкший
@@ -621,18 +638,28 @@ class PricingService:
             user.subscription, "included_formats", ["individual"]
         )
 
-        # 1. Format Check
-        if format_type not in included_formats:
+        # 1. Покрытие часами: доп. пул (часы капсулы / «4 ч индивидуально»
+        # Группового мастера) + основной пул, бронь целиком (владелец 01.10:
+        # капсула — сначала часы капсулы, потом общий пул; индивидуальная бронь
+        # Группового мастера — только «4 ч индивидуально», потом деньги).
+        # Без доп. пула — ровно прежнее правило: формат в тарифе и остаток ≥ часов.
+        extra = None
+        if hours_cover:
+            extra = subscription_pool.plan_split(
+                user.subscription, breakdown.booked_hours,
+                resource_type=getattr(resource, "type", None), format_type=format_type,
+            )
+
+        # 2. Format Check — тариф не покрывает этот формат ни часами, ни скидкой.
+        if extra is None and format_type not in included_formats:
             return False
 
-        # 2. Check Remaining Hours
-        remaining = subscription_pool.get_float(user.subscription, "remaining_hours")
-        
-        if remaining >= breakdown.booked_hours - 0.01: # Float safety
+        if extra is not None:
             # Full coverage by hours
             breakdown.applied_rule = "SUBSCRIPTION"
             breakdown.subscription_plan = plan_id
             breakdown.hours_deducted = breakdown.booked_hours
+            breakdown.extra_hours_deducted = extra
             # Peak hours debt: subscription covers base but peak surcharge = +5 GEL/hr
             if breakdown.peak_slot_count > 0:
                 peak_hours = breakdown.peak_slot_count / 2.0

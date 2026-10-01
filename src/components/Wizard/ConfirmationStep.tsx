@@ -37,6 +37,7 @@ import {
     balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
+import { cartResourceKind } from '../../utils/subscriptionHours';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
@@ -285,7 +286,10 @@ export function ConfirmationStep() {
         bookings,
         ownerEmail: effectiveUser?.email,
         excludeBookingId: state.editBookingId,
-    }), [effectiveUser, state.format, state.date, bookings, state.editBookingId]);
+        // Часы капсулы / «4 ч индивидуально» идут первыми — если корзина целиком
+        // капсула или целиком кабинеты (смешанную сервер разложит по слотам сам).
+        resourceKind: cartResourceKind(cartDetails.map(i => i.resourceId)),
+    }), [effectiveUser, state.format, state.date, bookings, state.editBookingId, cartDetails]);
     const plan = useMemo(
         () => paymentPlan({
             hours: totalBookingHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: totalPrice,

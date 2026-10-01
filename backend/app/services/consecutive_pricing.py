@@ -136,6 +136,14 @@ def recompute_chain_and_settle(
             duration_minutes=int(b.duration or 0),
             format_type=b.format,
             consecutive_total_hours=total_hours,
+            # Цепочка — только ДЕНЕЖНЫЕ брони (payment_method='balance'). Живой
+            # пул абонемента (в т.ч. доп. — часы капсулы / «индивидуально»)
+            # не должен превращать их в SUBSCRIPTION/0 ₾ с возвратом денег и
+            # без списания часов (ревизия доп. пула 01.10). Выключаем ТОЛЬКО
+            # покрытие часами: скидка абонемента (SUBSCRIPTION_DISCOUNT) остаётся,
+            # как на main (ревизия 01.10, B1: ignore_subscription=True съедал
+            # −10/−15/−20/−25% и клиент переплачивал).
+            subscription_hours_cover=False,
         )
 
         old_final = float(b.final_price or 0.0)

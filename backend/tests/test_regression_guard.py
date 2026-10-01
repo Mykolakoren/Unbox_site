@@ -429,7 +429,7 @@ def test_personal_hourly_rate_disables_all_discounts():
     assert "personal_hourly_rate" in src, "личная ставка за час пропала из движка"
     i = src.find('breakdown.applied_rule = "PERSONAL_RATE"')
     assert i != -1, "нет ветки PERSONAL_RATE"
-    sub = src.find("_apply_subscription(user, breakdown, resource, format_type)")
+    sub = src.find("self._apply_subscription(")
     assert sub != -1 and sub < i, (
         "ветка личной ставки оказалась ПЕРЕД абонементом — купленные часы "
         "перестанут сгорать и спишутся деньгами")
