@@ -45,6 +45,7 @@ import { Field, Input, type InputKind } from '../../components/ui/Field';
 import { statusLabel } from '../../design/statuses';
 import { COLOR, SHADOW, STATUS, Z } from '../../design/tokens';
 import { formatGel, formatDayMonth, formatTime } from '../../utils/format';
+import { cashBranchOfLastBooking } from '../../utils/cashBranch';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 
@@ -466,6 +467,11 @@ export function AdminUserDetails() {
                 onClose={() => setIsAddFundsOpen(false)}
                 onConfirm={handleAddFunds}
                 userName={user.name}
+                // Филиал — как в «Принять оплату»: по последней брони клиента.
+                // Не определился — окно не запишет без выбора: приход «Не указан»
+                // не попадал в остаток кассы ни Uni, ни One.
+                defaultBranch={cashBranchOfLastBooking(userBookings)}
+                requireBranch
             />
             <AssignSubscriptionModal
                 isOpen={isAssignSubOpen}
