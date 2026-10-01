@@ -1,5 +1,5 @@
-import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
     Plus,
@@ -7,35 +7,42 @@ import {
     X,
     Loader2,
     Banknote,
-    Pencil,
-    Trash2,
     LayoutGrid,
     RefreshCw,
     Unlink,
     AlertTriangle,
+    MoreHorizontal,
+    Pencil,
+    Trash2,
 } from 'lucide-react';
 import {
     format, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
     startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isToday as isTodayFn,
 } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
 import { crmApi } from '../../api/crm';
-import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient, CrmPayment } from '../../api/crm';
-import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
+import type { CrmSession, CrmSessionUpdate, CrmClient, CrmPayment } from '../../api/crm';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
+import { NewSessionSheet } from '../../components/crm/NewSessionSheet';
 import { toGel, CURRENCIES } from '../../utils/currency';
 import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { statusLabel, getStatusDef } from '../../design/statuses';
-import { STATUS } from '../../design/tokens';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { statusLabel } from '../../design/statuses';
+import { STATUS, SHADOW, Z } from '../../design/tokens';
 import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Sheet } from '../../components/ui/Sheet';
+import { undoToast } from '../../components/ui/undoToast';
+import { toastApiError } from '../../utils/errors';
+import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -82,25 +89,62 @@ function getEffectiveStatus(session: CrmSession): string {
     return session.status;
 }
 
-type ViewMode = 'list' | 'week' | 'chess';
+/** Оплата в один клик (решение В5): «Отметить оплату · 140 ₾» пишет платёж
+ *  на счёт клиента по умолчанию (ТОЛЬКО quickPaySession — стор ловит двойной
+ *  клик), затем тост «Отмечено · 140 ₾» с «Вернуть» на 5 с. «Вернуть» —
+ *  тот же путь, что снятие оплаты в шторке сессии: unmarkPaidSession
+ *  снимает отметку и удаляет платёж. */
+async function payWithUndo(
+    sessionId: string,
+    quickPay: (id: string, account?: string) => Promise<{ amount: number; currency: string }>,
+    onChanged: () => void,
+): Promise<void> {
+    let res: { amount: number; currency: string };
+    try {
+        res = await quickPay(sessionId);
+    } catch {
+        // Стор уже показал «Не удалось отметить оплату».
+        return;
+    }
+    onChanged();
+    const sum = res.amount ? ` · ${formatMoney(res.amount, { currency: res.currency || 'GEL' })}` : '';
+    undoToast(`Отмечено${sum}`, async () => {
+        try {
+            await crmApi.unmarkPaidSession(sessionId);
+            toast.success('Отметка об оплате снята');
+        } catch (e) {
+            toastApiError(e, 'Не удалось снять отметку об оплате. Обновите страницу и попробуйте ещё раз');
+        } finally {
+            onChanged();
+        }
+    });
+}
+
+type ViewMode = 'list' | 'week';
 
 export function CrmSessions() {
+    useDocumentTitle('Сессии · Psy-CRM');
     const navigate = useNavigate();
     const location = useLocation();
-    const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading, error } =
+    const [searchParams, setSearchParams] = useSearchParams();
+    const { sessions, clients, fetchSessions, fetchClients, updateSession, deleteSession, quickPaySession, loading, error } =
         useCrmStore();
+    // Админ смотрит чужой кабинет — создавать сессии отсюда нельзя.
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     // Пока первый ответ не пришёл — скелетон, а не «Сессий нет» (rule 8).
     const [fetchedOnce, setFetchedOnce] = useState(false);
     const [view, setView] = useState<ViewMode>('list');
-    const [chessDate, setChessDate] = useState<Date | undefined>();
     // Default: show previous month with COMPLETED filter so history is visible on first open
     const [currentMonth, setCurrentMonth] = useState(() => new Date());
     const [weekAnchor, setWeekAnchor] = useState(new Date());
     const [statusFilter, setStatusFilter] = useState<string>(
         (location.state as any)?.statusFilter || 'COMPLETED'
     );
-    const [showForm, setShowForm] = useState(false);
-    const [prefillDate, setPrefillDate] = useState<string | null>(null);
+    // «Новая сессия» — общая шторка (волна 3): «+ Новая», «+ Сессия» в
+    // неделе, кнопка быстрых действий и ссылка /crm/sessions?new=1.
+    const [newOpen, setNewOpen] = useState(false);
+    // Только что созданная сессия: прокрутить к ней и подсветить (G5-M1).
+    const [highlightId, setHighlightId] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [showSyncModal, setShowSyncModal] = useState(false);
     const [syncing, setSyncing] = useState(false);
@@ -119,6 +163,16 @@ export function CrmSessions() {
     // Always use full month range + extend to future for upcoming sessions
     const dateFrom = monthStart;
     const dateTo = monthEnd > futureEnd ? monthEnd : futureEnd;
+
+    // /crm/sessions?new=1 — сразу открыть «Новую сессию», а параметр убрать,
+    // чтобы «назад» и обновление страницы не открывали её снова.
+    useEffect(() => {
+        if (searchParams.get('new') !== '1') return;
+        if (!viewingOther) setNewOpen(true);
+        const next = new URLSearchParams(searchParams);
+        next.delete('new');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams, viewingOther]);
 
     const handleBookCab = (session: CrmSession, clientName: string) => {
         // → /dashboard/bookings (MyBookingsPage): подсветка времени сессии
@@ -140,6 +194,8 @@ export function CrmSessions() {
 
     // Local payments state for accurate revenue by real payment currency
     const [monthPayments, setMonthPayments] = useState<CrmPayment[]>([]);
+    // Отметили/сняли оплату — перечитать платежи месяца (иначе «Касса» стоит).
+    const [paymentsVersion, setPaymentsVersion] = useState(0);
 
     useEffect(() => {
         fetchClients();
@@ -177,7 +233,30 @@ export function CrmSessions() {
                 setMonthPayments(filtered);
             })
             .catch(() => {});
-    }, [monthStart, monthEnd]);
+    }, [monthStart, monthEnd, paymentsVersion]);
+
+    /** Перечитать сессии и платежи (после оплаты, «Вернуть», отвязки кабинета). */
+    const reload = () => {
+        fetchSessions({ dateFrom, dateTo });
+        setPaymentsVersion(v => v + 1);
+    };
+
+    /** Сессию записали в шторке: шторка стор не трогает — перечитываем сами,
+     *  включаем «Все» (новая — запланированная, в «Прошли» её не видно),
+     *  листаем к ней и подсвечиваем (G5-M1). */
+    const handleCreated = (session: CrmSession) => {
+        setStatusFilter('all');
+        setEditingId(null);
+        setHighlightId(session.id);
+        const ymd = utcNaiveToTbilisi(session.date)?.date;
+        if (ymd) setWeekAnchor(new Date(`${ymd}T12:00:00`));
+        if (ymd && (ymd < dateFrom || ymd > dateTo)) {
+            // Другой месяц — смена месяца сама перечитает список.
+            setCurrentMonth(new Date(`${ymd}T12:00:00`));
+        } else {
+            fetchSessions({ dateFrom, dateTo });
+        }
+    };
 
     const clientMap = useMemo(() => {
         const map = new Map<string, CrmClient>();
@@ -319,71 +398,80 @@ export function CrmSessions() {
                 fetchSessions({ dateFrom, dateTo });
             }
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Ошибка синхронизации');
+            toastApiError(err, 'Не удалось синхронизировать с Google Календарём. Попробуйте ещё раз');
         } finally {
             setSyncing(false);
         }
     };
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     return (
-        <GridHouseCrmSessions
-            view={view} setView={setView}
-            currentMonth={currentMonth} setCurrentMonth={setCurrentMonth}
-            weekAnchor={weekAnchor} setWeekAnchor={setWeekAnchor}
-            statusFilter={statusFilter} setStatusFilter={setStatusFilter}
-            showForm={showForm} setShowForm={setShowForm}
-            prefillDate={prefillDate} setPrefillDate={setPrefillDate}
-            editingId={editingId} setEditingId={setEditingId}
-            showSyncModal={showSyncModal} setShowSyncModal={setShowSyncModal}
-            syncing={syncing}
-            syncMonthsBack={syncMonthsBack} setSyncMonthsBack={setSyncMonthsBack}
-            syncMonthsForward={syncMonthsForward} setSyncMonthsForward={setSyncMonthsForward}
-            syncResult={syncResult} handleSync={handleSync}
-            syncExcluded={syncExcluded} setSyncExcluded={setSyncExcluded}
-            stats={stats}
-            upcomingGroups={upcomingGroups} pastGroups={pastGroups}
-            sessions={sessions} clientMap={clientMap}
-            clients={clients} loading={loading || !fetchedOnce}
-            loadError={fetchedOnce && !loading ? error : null}
-            onRetry={() => { fetchClients(); fetchSessions({ dateFrom, dateTo }); }}
-            createSession={createSession} updateSession={updateSession}
-            deleteSession={deleteSession} quickPaySession={quickPaySession}
-            handleBookCab={handleBookCab}
-            chessDate={chessDate} setChessDate={setChessDate}
-            navigate={navigate}
-        />
+        <>
+            <GridHouseCrmSessions
+                view={view} setView={setView}
+                currentMonth={currentMonth} setCurrentMonth={setCurrentMonth}
+                weekAnchor={weekAnchor} setWeekAnchor={setWeekAnchor}
+                statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+                onNewSession={viewingOther ? undefined : () => setNewOpen(true)}
+                highlightId={highlightId} setHighlightId={setHighlightId}
+                editingId={editingId} setEditingId={setEditingId}
+                showSyncModal={showSyncModal} setShowSyncModal={setShowSyncModal}
+                syncing={syncing}
+                syncMonthsBack={syncMonthsBack} setSyncMonthsBack={setSyncMonthsBack}
+                syncMonthsForward={syncMonthsForward} setSyncMonthsForward={setSyncMonthsForward}
+                syncResult={syncResult} handleSync={handleSync}
+                syncExcluded={syncExcluded} setSyncExcluded={setSyncExcluded}
+                stats={stats}
+                upcomingGroups={upcomingGroups} pastGroups={pastGroups}
+                sessions={sessions} clientMap={clientMap}
+                loading={loading || !fetchedOnce}
+                loadError={fetchedOnce && !loading ? error : null}
+                onRetry={() => { fetchClients(); fetchSessions({ dateFrom, dateTo }); }}
+                onReload={reload}
+                updateSession={updateSession}
+                deleteSession={deleteSession} quickPaySession={quickPaySession}
+                handleBookCab={handleBookCab}
+                navigate={navigate}
+            />
+            <NewSessionSheet
+                open={newOpen}
+                onClose={() => setNewOpen(false)}
+                onCreated={handleCreated}
+                clients={clients.filter(c => c.isActive)}
+            />
+        </>
     );
 }
 
+/** Неделя — дни по Grid House: заголовок дня и те же строки сессий, что в
+ *  списке (одно главное действие + «⋯ Ещё»). Раньше тут были скруглённые
+ *  карточки, зелёные значки кабинета и серые кнопки Tailwind (G5-11). */
 function WeekCalendar({
     weekAnchor,
     sessions,
     clientMap,
     navigate,
     onAddSession,
-    onBookRoom,
-    onBookCab,
-    updateSession,
-    quickPaySession,
+    rowProps,
 }: {
     weekAnchor: Date;
     sessions: CrmSession[];
     clientMap: Map<string, CrmClient>;
     navigate: ReturnType<typeof useNavigate>;
-    onAddSession: (dateStr: string) => void;
-    onBookRoom: (dateStr: string) => void;
-    onBookCab: (session: CrmSession, clientName: string) => void;
-    updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
+    /** Нет — создание скрыто (просмотр чужого кабинета). */
+    onAddSession?: () => void;
+    rowProps: Omit<GHSessionRowProps, 'session' | 'client' | 'narrow'>;
 }) {
     const weekStart = startOfWeek(weekAnchor, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(weekAnchor, { weekStartsOn: 1 });
     const days = eachDayOfInterval({ start: weekStart, end: weekEnd });
-    const [editingId, setEditingId] = useState<string | null>(null);
+    const quietBtn: React.CSSProperties = {
+        display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 32, padding: '0 10px',
+        fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, background: 'transparent',
+        border: ghsHairline, color: GH.ink, cursor: 'pointer',
+    };
 
     return (
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {days.map(day => {
                 const dayStr = format(day, 'yyyy-MM-dd');
                 const daySessions = sessions.filter(s => {
@@ -392,116 +480,53 @@ function WeekCalendar({
                 }).sort((a, b) => a.date.localeCompare(b.date));
 
                 const today = isTodayFn(day);
-                const past = day < new Date() && !today;
 
                 return (
-                    <div key={dayStr} className={`bg-card/70 rounded-2xl border overflow-hidden ${today ? 'border-unbox-green/40' : 'border-white/80'}`}>
+                    <section key={dayStr} aria-label={formatDateLabel(dayStr)} style={{ borderTop: `1px solid ${today ? GH.ink : GH.ink10}` }}>
                         {/* Day header */}
-                        <div className={`flex items-center justify-between px-4 py-2.5 ${today ? 'bg-unbox-green/5' : past ? 'bg-gray-50/60' : 'bg-card/50'}`}>
-                            <div className="flex items-center gap-2">
-                                <span className={`text-sm font-semibold capitalize ${today ? 'text-unbox-green' : past ? 'text-ink-60' : 'text-unbox-dark'}`}>
-                                    {format(day, 'EEEE', { locale: ru })}
-                                </span>
-                                <span className={`text-xs ${today ? 'text-unbox-green font-medium' : 'text-ink-60'}`}>
-                                    {formatDayMonth(day)}
-                                    {today && ' · Сегодня'}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                                <span style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 600, color: GH.ink }}>
+                                    {formatDateLabel(dayStr, { capitalize: true })}
+                                    {today && ' · сегодня'}
                                 </span>
                                 {daySessions.length > 0 && (
-                                    <span className="text-xs bg-unbox-green/10 text-unbox-green px-1.5 py-0.5 rounded-md font-medium">
+                                    <span style={{ ...ghsMono }}>
                                         {daySessions.length} {sessionsWord(daySessions.length)}
                                     </span>
                                 )}
                             </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => onBookRoom(dayStr)}
-                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-light bg-card hover:bg-unbox-light/40 text-ink-60 hover:text-unbox-dark transition-colors"
-                                >
-                                    <LayoutGrid className="w-3 h-3" />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {/* Шахматка — только в «Бронированиях» (В4). */}
+                                <button type="button" onClick={() => navigate('/crm/bookings')} style={quietBtn}>
+                                    <LayoutGrid size={14} aria-hidden="true" />
                                     Кабинеты
                                 </button>
-                                <button
-                                    onClick={() => onAddSession(format(day, "yyyy-MM-dd'T'10:00"))}
-                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-green/30 bg-unbox-green/5 text-unbox-green hover:bg-unbox-green/10 transition-colors"
-                                >
-                                    <Plus className="w-3 h-3" />
-                                    Сессия
-                                </button>
+                                {onAddSession && (
+                                    <button type="button" onClick={onAddSession} style={quietBtn}>
+                                        <Plus size={14} aria-hidden="true" />
+                                        Сессия
+                                    </button>
+                                )}
                             </div>
                         </div>
 
-                        {/* Sessions */}
                         {daySessions.length > 0 ? (
-                            <div className="divide-y divide-unbox-light/50">
-                                {daySessions.map(session => {
-                                    const client = clientMap.get(session.clientId);
-                                    const dt = parseSessionDate(session.date);
-                                    const isEditing = editingId === session.id;
-                                    const effectiveStatus = getEffectiveStatus(session);
-                                    const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
-                                    return (
-                                        <div key={session.id}>
-                                            <div className="flex items-center gap-3 px-4 py-2.5">
-                                                <div className="text-sm font-bold text-unbox-dark w-12 shrink-0">{format(dt, 'HH:mm')}</div>
-                                                {/* Полоска — цвет статуса из общего словаря (--status-*). */}
-                                                <div className="w-0.5 h-8 rounded-full shrink-0" style={{
-                                                    background: STATUS[getStatusDef('session', effectiveStatus).tone].fg,
-                                                }} />
-                                                <div className="flex-1 min-w-0">
-                                                    <div
-                                                        className="text-sm font-medium text-unbox-dark hover:text-unbox-green cursor-pointer transition-colors"
-                                                        onClick={(e) => { e.stopPropagation(); if (session.clientId) navigate(`/crm/clients/${session.clientId}`); }}
-                                                    >{client?.name || 'Клиент'}</div>
-                                                    <div className="text-xs text-ink-60">{session.durationMinutes} мин · {STATUS_LABELS[effectiveStatus]}</div>
-                                                </div>
-                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                    {session.isBooked ? (
-                                                        <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]">
-                                                            <Check className="w-3 h-3" aria-hidden="true" /> Кабинет
-                                                        </span>
-                                                    ) : !isCancelled && (
-                                                        <button
-                                                            onClick={() => onBookCab?.(session, client?.name || 'Клиент')}
-                                                            className="text-xs px-1.5 py-0.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-                                                        >+ Кабинет</button>
-                                                    )}
-                                                    <div className="font-semibold text-xs text-unbox-dark">{formatMoney(session.price ?? client?.basePrice, { currency: client?.currency })}</div>
-                                                    {!session.isPaid && !isCancelled && (
-                                                        <button
-                                                            onClick={async () => {
-                                                                try { await quickPaySession(session.id); toast.success('Оплата отмечена'); } catch { toast.error('Не удалось отметить оплату'); }
-                                                            }}
-                                                            className="inline-flex items-center gap-1 text-xs px-2 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-                                                        >
-                                                            <Banknote className="w-3.5 h-3.5" aria-hidden="true" />
-                                                            Отметить оплату
-                                                        </button>
-                                                    )}
-                                                    <button onClick={() => setEditingId(isEditing ? null : session.id)} aria-label="Изменить сессию" title="Изменить сессию" className="p-1 hover:bg-unbox-light/50 text-ink-60 hover:text-unbox-green rounded-lg transition-colors">
-                                                        <Pencil className="w-3.5 h-3.5" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            {isEditing && (
-                                                <SessionEditPanel
-                                                    session={session}
-                                                    clientCurrency={client?.currency}
-                                                    clientDefaultAccount={client?.defaultAccount}
-                                                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
-                                                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплата отмечена'); }}
-                                                    onCancel={() => setEditingId(null)}
-                                                    onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
-                                                    onRefresh={() => useCrmStore.getState().fetchSessions()}
-                                                />
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                            <div style={{ borderTop: ghsHairline }}>
+                                {daySessions.map(session => (
+                                    <GHSessionRow
+                                        key={session.id}
+                                        session={session}
+                                        client={clientMap.get(session.clientId)}
+                                        narrow
+                                        {...rowProps}
+                                    />
+                                ))}
                             </div>
                         ) : (
-                            <div className="px-4 py-3 text-xs text-ink-60 italic">Нет сессий</div>
+                            <div style={{ padding: '4px 0 8px', fontSize: 14, color: GH.ink60 }}>Нет сессий</div>
                         )}
-                    </div>
+                    </section>
                 );
             })}
         </div>
@@ -573,7 +598,9 @@ function SessionEditPanel({
                 await onSave(updateData);
             }
         } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
+            // Ошибки запроса стор уже показал («Не удалось обновить сессию» /
+            // «…отметить оплату»); здесь — только наши (например, кривая дата).
+            if (!err?.isAxiosError) toast.error('Не удалось сохранить сессию. Проверьте дату и время');
         } finally {
             setSaving(false);
         }
@@ -589,7 +616,8 @@ function SessionEditPanel({
             toast.success('Сессия отменена');
             onCancel();
         } catch (err: any) {
-            toast.error(err?.message || 'Не удалось отменить');
+            // Ошибку запроса стор уже показал («Не удалось обновить сессию»).
+            if (!err?.isAxiosError) toast.error('Не удалось отменить сессию. Попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
@@ -618,7 +646,7 @@ function SessionEditPanel({
             if (onRefresh) await onRefresh();
             onCancel();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || err?.message || 'Не удалось отвязать кабинет');
+            toastApiError(err, 'Не удалось отвязать кабинет. Попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
@@ -643,7 +671,7 @@ function SessionEditPanel({
             if (onRefresh) await onRefresh();
             onBookCab();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || err?.message || 'Не удалось отвязать кабинет');
+            toastApiError(err, 'Не удалось отвязать кабинет. Попробуйте ещё раз');
         } finally {
             setSaving(false);
         }
@@ -652,7 +680,9 @@ function SessionEditPanel({
     return (
         <form
             onSubmit={handleSubmit}
-            className="bg-unbox-light/40 border border-unbox-green border-t-0 rounded-b-xl px-4 py-3 space-y-3 animate-in fade-in slide-in-from-top-1"
+            aria-label="Правка сессии"
+            className="px-4 py-3 space-y-3"
+            style={{ background: GH.sunken, borderBottom: `1px solid ${GH.ink}`, borderLeft: `2px solid ${GH.ink}` }}
         >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
@@ -842,144 +872,6 @@ function SessionEditPanel({
     );
 }
 
-// ── Session Form ─────────────────────────────────────────────────────────────
-
-function SessionForm({
-    clients,
-    onSave,
-    onCancel,
-    prefillDate,
-}: {
-    clients: CrmClient[];
-    onSave: (data: CrmSessionCreate) => Promise<void>;
-    onCancel: () => void;
-    prefillDate?: string;
-}) {
-    const [clientId, setClientId] = useState('');
-    const [date, setDate] = useState(prefillDate ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"));
-    const [duration, setDuration] = useState('60');
-    const [price, setPrice] = useState('');
-    const [saving, setSaving] = useState(false);
-
-    const selectedClient = clients.find((c) => c.id === clientId);
-
-    useEffect(() => {
-        if (selectedClient) {
-            setPrice(String(selectedClient.basePrice));
-        }
-    }, [selectedClient]);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!clientId) return;
-        setSaving(true);
-        try {
-            await onSave({
-                clientId,
-                date: new Date(date).toISOString(),
-                durationMinutes: Number(duration),
-                price: price ? Number(price) : undefined,
-            });
-        } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <form
-            onSubmit={handleSubmit}
-            className="bg-card rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
-        >
-            <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg">Новая сессия</h3>
-                <button type="button" onClick={onCancel} className="p-1 hover:bg-unbox-light/50 rounded-lg">
-                    <X className="w-5 h-5 text-ink-60" />
-                </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Клиент <span className="text-[var(--status-danger-fg)]">*</span>
-                    </label>
-                    <select
-                        value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                        required
-                    >
-                        <option value="">Выберите клиента</option>
-                        {clients.map((c) => (
-                            <option key={c.id} value={c.id}>
-                                {c.name} {c.aliasCode ? `#${c.aliasCode}` : ''}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Дата и время <span className="text-[var(--status-danger-fg)]">*</span>
-                    </label>
-                    <input
-                        type="datetime-local"
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                        required
-                    />
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">Длительность (мин)</label>
-                    <select
-                        value={duration}
-                        onChange={(e) => setDuration(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                    >
-                        <option value="30">30 минут</option>
-                        <option value="45">45 минут</option>
-                        <option value="50">50 минут</option>
-                        <option value="60">60 минут</option>
-                        <option value="90">90 минут</option>
-                        <option value="120">2 часа</option>
-                    </select>
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Стоимость{selectedClient && `, ${currencySign(selectedClient.currency)}`}
-                    </label>
-                    <input
-                        type="number"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                        placeholder={selectedClient ? String(selectedClient.basePrice) : '0'}
-                    />
-                </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-4 py-2 text-sm text-ink-60 hover:bg-unbox-light/50 rounded-xl transition-colors"
-                >
-                    Отмена
-                </button>
-                <button
-                    type="submit"
-                    disabled={saving || !clientId}
-                    className="flex items-center gap-2 px-5 py-2 bg-unbox-green text-white text-sm font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-50 transition-colors"
-                >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Создать
-                </button>
-            </div>
-        </form>
-    );
-}
-
 // ─── Grid House: CrmSessions ─────────────────────────────────────────────────
 
 interface GHSessionsProps {
@@ -987,8 +879,9 @@ interface GHSessionsProps {
     currentMonth: Date; setCurrentMonth: (d: Date) => void;
     weekAnchor: Date; setWeekAnchor: React.Dispatch<React.SetStateAction<Date>>;
     statusFilter: string; setStatusFilter: (s: string) => void;
-    showForm: boolean; setShowForm: (v: boolean) => void;
-    prefillDate: string | null; setPrefillDate: (d: string | null) => void;
+    /** Нет — создание скрыто (просмотр чужого кабинета). */
+    onNewSession?: () => void;
+    highlightId: string | null; setHighlightId: (id: string | null) => void;
     editingId: string | null; setEditingId: (id: string | null) => void;
     showSyncModal: boolean; setShowSyncModal: (v: boolean) => void;
     syncing: boolean;
@@ -1001,23 +894,21 @@ interface GHSessionsProps {
     pastGroups: [string, CrmSession[]][];
     sessions: CrmSession[];
     clientMap: Map<string, CrmClient>;
-    clients: CrmClient[];
     loading: boolean;
     loadError: string | null;
     onRetry: () => void;
-    createSession: (data: CrmSessionCreate) => Promise<any>;
+    onReload: () => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     handleBookCab: (session: CrmSession, clientName: string) => void;
-    chessDate: Date | undefined; setChessDate: (d: Date | undefined) => void;
     navigate: ReturnType<typeof useNavigate>;
 }
 
 const ghsMono = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60 };
 const ghsHairline = `1px solid ${GH.ink10}`;
-// Колонки таблицы сессий: шапка и строки — одна сетка. Кнопки в строке —
-// 12 px (раньше «Pay / +Каб / Ред. / Уд.» 8 px в 120 px).
+// Колонки таблицы сессий: шапка и строки — одна сетка. В строке одно главное
+// действие («Отметить оплату · 140 ₾» или «Кабинет») и «⋯ Ещё» (G5-08).
 // Минимум сетки: 52 + 140 (клиент) + 44 + 84 + 130 + 236 + 5×8 зазоров = 726 px.
 // Уже GH_TABLE_MIN — строки складываются в карточки (меряем контейнер, а не
 // окно: сайдбар CRM съедает 260 px, и на окнах 960–1200 таблица не влезала).
@@ -1052,10 +943,10 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
     const [listRef, listW] = useElementWidth<HTMLDivElement>();
     // Карточки вместо таблицы, если контейнер списка уже минимума сетки.
     const tableNarrow = ghNarrow || listW < GH_TABLE_MIN;
+    // «Шахматка» отсюда убрана: она живёт в «Бронированиях» (В4).
     const VIEW_MODES: { key: ViewMode; label: string }[] = [
         { key: 'list', label: 'Список' },
         { key: 'week', label: 'Неделя' },
-        { key: 'chess', label: 'Шахматка' },
     ];
 
     const STATUS_TABS: { key: string; label: string }[] = [
@@ -1067,103 +958,100 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
     const allRows = [...p.upcomingGroups, ...p.pastGroups];
 
-    return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh', overflowX: 'hidden' }}>
-            {/* ── Compact head: breadcrumb + title + KPIs all on one row ──
-                Was three padded sections eating ~280px before any
-                content. Mirrored the CrmBookings tightening: title left
-                with the big "Завершено" number inline, secondary KPIs +
-                action buttons on the right. */}
-            <div style={{
-                padding: '20px clamp(16px, 4vw, 32px) 0',
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: 16,
-            }}>
-                <div style={{ minWidth: 0 }}>
-                    <div style={ghsMono}>CRM · Сессии</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 4, flexWrap: 'wrap' }}>
-                        <h1 style={{
-                            fontFamily: GH_SANS,
-                            fontSize: 'clamp(24px, 3vw, 36px)',
-                            fontWeight: 800,
-                            letterSpacing: '-0.02em',
-                            lineHeight: 1,
-                            margin: 0,
-                        }}>
-                            Сессии.
-                        </h1>
-                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                            <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                                {p.stats.completed}
-                            </span>
-                            <span style={{ ...ghsMono, fontSize: 12 }}>
-                                прошло · {formatMonthLabel(p.currentMonth)}
-                            </span>
-                        </span>
-                    </div>
-                </div>
+    // Новая сессия появилась в списке — листаем к ней и подсвечиваем (G5-M1).
+    const { highlightId, setHighlightId } = p;
+    useEffect(() => {
+        if (!highlightId) return;
+        const el = document.getElementById(`crm-session-${highlightId}`);
+        if (!el) return;
+        const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        el.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+        el.focus({ preventScroll: true });
+        const t = window.setTimeout(() => setHighlightId(null), 4000);
+        return () => window.clearTimeout(t);
+    }, [highlightId, setHighlightId, p.sessions, p.view]);
 
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        {[
-                            { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false, hint: 'Сессии этого месяца, которые ещё впереди' },
-                            { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false, hint: 'Прошедшие сессии без оплаты — долг клиентов за всё время' },
-                            { label: 'Заработано', value: p.stats.earnedLabel, color: undefined, sub: p.stats.earnedGel, multiline: true, hint: 'Проведённые и оплаченные сессии этого месяца — по дате сессии' },
-                            { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true, hint: 'Все деньги, полученные в этом месяце, включая оплату старых долгов. Бывает больше или меньше «Заработано»' },
-                        ].map(kpi => (
-                            <div key={kpi.label} title={kpi.hint} style={{ textAlign: 'right' as const, minWidth: 0, cursor: 'help' }}>
-                                <div style={{
-                                    fontSize: kpi.multiline && ghNarrow ? 13 : 16,
-                                    fontWeight: 700,
-                                    fontVariantNumeric: 'tabular-nums',
-                                    color: kpi.color || GH.ink,
-                                    whiteSpace: kpi.multiline && ghNarrow ? ('pre-line' as const) : ('normal' as const),
-                                    wordBreak: 'break-word' as const,
-                                    lineHeight: 1.25,
-                                }}>
-                                    {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
-                                </div>
-                                <div style={{ ...ghsMono, fontSize: 12 }}>{kpi.label}</div>
-                                {kpi.sub && <div style={{ ...ghsMono, fontSize: 12, color: kpi.color || GH.ink60 }}>{kpi.sub}</div>}
-                            </div>
-                        ))}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                            onClick={() => p.setShowSyncModal(true)}
-                            style={{ ...ghsMono, padding: '8px 14px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 }}
-                        >
+    const rowProps: Omit<GHSessionRowProps, 'session' | 'client' | 'narrow'> = {
+        editingId: p.editingId,
+        setEditingId: p.setEditingId,
+        highlightId: p.highlightId,
+        updateSession: p.updateSession,
+        deleteSession: p.deleteSession,
+        quickPaySession: p.quickPaySession,
+        onBookCab: p.handleBookCab,
+        onReload: p.onReload,
+        touch: ghNarrow,
+    };
+
+    const tabStyle = (active: boolean): React.CSSProperties => ({
+        fontFamily: GH_SANS, fontSize: 14, fontWeight: active ? 600 : 500,
+        minHeight: 40, padding: '0 16px',
+        background: active ? GH.ink : 'transparent',
+        color: active ? GH.paper : GH.ink60,
+        border: 'none', cursor: 'pointer',
+        marginBottom: -2,
+        borderBottom: active ? `2px solid ${GH.ink}` : '2px solid transparent',
+        transition: 'background 120ms, color 120ms',
+    });
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            {/* ── Шапка: общий PageHeader (G5-22) — тот же размер заголовка
+                и левый край, что у остальных экранов CRM. ── */}
+            <PageHeader
+                title="Сессии"
+                description={`Прошло ${p.stats.completed} · ${formatMonthLabel(p.currentMonth)}`}
+                actions={(
+                    <>
+                        <Button variant="secondary" icon={<RefreshCw size={16} aria-hidden="true" />} onClick={() => p.setShowSyncModal(true)}>
                             Синхронизация
-                        </button>
-                        <button
-                            onClick={() => { p.setPrefillDate(null); p.setShowForm(true); }}
-                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, padding: '8px 16px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}
-                        >
-                            + Новая
-                        </button>
+                        </Button>
+                        {p.onNewSession && (
+                            <Button icon={<Plus size={16} aria-hidden="true" />} onClick={p.onNewSession}>
+                                Новая
+                            </Button>
+                        )}
+                    </>
+                )}
+            />
+
+            {/* ── Деньги и счётчики месяца. Формулы — в CrmSessions (stats). ── */}
+            <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 24 }}>
+                {[
+                    { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false, hint: 'Сессии этого месяца, которые ещё впереди' },
+                    { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false, hint: 'Прошедшие сессии без оплаты — долг клиентов за всё время' },
+                    { label: 'Заработано', value: p.stats.earnedLabel, color: undefined, sub: p.stats.earnedGel, multiline: true, hint: 'Проведённые и оплаченные сессии этого месяца — по дате сессии' },
+                    { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true, hint: 'Все деньги, полученные в этом месяце, включая оплату старых долгов. Бывает больше или меньше «Заработано»' },
+                ].map(kpi => (
+                    <div key={kpi.label} title={kpi.hint} style={{ minWidth: 0, cursor: 'help' }}>
+                        <div style={{ ...ghsMono }}>{kpi.label}</div>
+                        <div style={{
+                            fontSize: 20,
+                            fontWeight: 600,
+                            marginTop: 4,
+                            fontVariantNumeric: 'tabular-nums',
+                            color: kpi.color || GH.ink,
+                            whiteSpace: kpi.multiline && ghNarrow ? ('pre-line' as const) : ('normal' as const),
+                            wordBreak: 'break-word' as const,
+                            lineHeight: 1.25,
+                        }}>
+                            {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
+                        </div>
+                        {kpi.sub && <div style={{ fontSize: 12, color: kpi.color || GH.ink60, marginTop: 2 }}>{kpi.sub}</div>}
                     </div>
-                </div>
+                ))}
             </div>
 
             {/* ── View mode tabs ── */}
-            <div style={{ display: 'flex', margin: '12px clamp(16px, 4vw, 32px) 0', borderBottom: `2px solid ${GH.ink}` }}>
+            <div role="tablist" aria-label="Вид" style={{ display: 'flex', borderBottom: `2px solid ${GH.ink}` }}>
                 {VIEW_MODES.map(v => (
                     <button
                         key={v.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={p.view === v.key}
                         onClick={() => p.setView(v.key)}
-                        style={{
-                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                            padding: '8px 18px',
-                            background: p.view === v.key ? GH.ink : 'transparent',
-                            color: p.view === v.key ? GH.paper : GH.ink60,
-                            border: 'none', cursor: 'pointer',
-                            marginBottom: -2,
-                            borderBottom: p.view === v.key ? `2px solid ${GH.ink}` : '2px solid transparent',
-                            transition: 'all 120ms',
-                        }}
+                        style={tabStyle(p.view === v.key)}
                     >
                         {v.label}
                     </button>
@@ -1171,89 +1059,62 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             </div>
 
             {/* ── Content ── */}
-            <div style={{ padding: '0 clamp(16px, 4vw, 32px) 64px' }}>
-                {/* Legacy session form */}
-                {p.showForm && (
-                    <div style={{ marginTop: 24 }}>
-                        <SessionForm
-                            clients={p.clients.filter(c => c.isActive)}
-                            prefillDate={p.prefillDate ?? undefined}
-                            onSave={async (data) => {
-                                await p.createSession(data);
-                                p.setShowForm(false);
-                                p.setPrefillDate(null);
-                                toast.success('Сессия создана');
-                            }}
-                            onCancel={() => { p.setShowForm(false); p.setPrefillDate(null); }}
-                        />
-                    </div>
-                )}
-
-                {p.view === 'chess' ? (
-                    // marginTop trimmed 24 → 12 — visual breathing room
-                    // doesn't need to be cavernous between tab strip and grid.
-                    <div style={{ marginTop: 12 }}><CrmChessboardView initialDate={p.chessDate} /></div>
-                ) : p.view === 'week' ? (
-                    <div style={{ marginTop: 12 }}>
+            <div style={{ paddingBottom: 64 }}>
+                {p.view === 'week' ? (
+                    <div style={{ marginTop: 16 }}>
                         {/* Week nav */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                            <button onClick={() => p.setWeekAnchor(d => subWeeks(d, 1))}
-                                aria-label="Предыдущая неделя"
-                                style={{ ...ghsMono, padding: '8px 12px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                            <Button variant="secondary" aria-label="Предыдущая неделя" onClick={() => p.setWeekAnchor(d => subWeeks(d, 1))}>
                                 &larr;
-                            </button>
-                            <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em' }}>
+                            </Button>
+                            <span style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 500 }}>
                                 {formatDayMonth(startOfWeek(p.weekAnchor, { weekStartsOn: 1 }))} &ndash;{' '}
                                 {formatDayMonth(endOfWeek(p.weekAnchor, { weekStartsOn: 1 }), { withYear: 'auto' })}
                             </span>
-                            <button onClick={() => p.setWeekAnchor(d => addWeeks(d, 1))}
-                                aria-label="Следующая неделя"
-                                style={{ ...ghsMono, padding: '8px 12px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
+                            <Button variant="secondary" aria-label="Следующая неделя" onClick={() => p.setWeekAnchor(d => addWeeks(d, 1))}>
                                 &rarr;
-                            </button>
+                            </Button>
                             {!isTodayFn(p.weekAnchor) && (
-                                <button onClick={() => p.setWeekAnchor(new Date())}
-                                    style={{ ...ghsMono, padding: '8px 12px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}>
-                                    Сейчас
-                                </button>
+                                <Button variant="quiet" onClick={() => p.setWeekAnchor(new Date())}>
+                                    Эта неделя
+                                </Button>
                             )}
                         </div>
+                        {p.loadError && (
+                            <ErrorBar message="Не удалось загрузить сессии" onRetry={p.onRetry} retrying={p.loading} className="mb-3" />
+                        )}
                         <WeekCalendar
                             weekAnchor={p.weekAnchor} sessions={p.sessions} clientMap={p.clientMap}
                             navigate={p.navigate}
-                            onAddSession={(d) => { p.setPrefillDate(d); p.setShowForm(true); }}
-                            onBookRoom={(d) => { p.setChessDate(new Date(d)); p.setView('chess'); }}
-                            onBookCab={p.handleBookCab}
-                            updateSession={p.updateSession} quickPaySession={p.quickPaySession}
+                            onAddSession={p.onNewSession}
+                            rowProps={rowProps}
                         />
                     </div>
                 ) : (
                     <div ref={listRef}>
                         {/* Month nav + status filters */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 24, paddingBottom: 12, borderBottom: ghsHairline }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 16, paddingBottom: 12, borderBottom: ghsHairline }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <button onClick={() => p.setCurrentMonth(subMonths(p.currentMonth, 1))}
-                                    aria-label="Предыдущий месяц"
-                                    style={{ ...ghsMono, padding: '6px 10px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
+                                <Button variant="secondary" aria-label="Предыдущий месяц" onClick={() => p.setCurrentMonth(subMonths(p.currentMonth, 1))}>
                                     &larr;
-                                </button>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'capitalize', minWidth: 120, textAlign: 'center' as const }}>
+                                </Button>
+                                <span style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 500, minWidth: 120, textAlign: 'center' as const }}>
                                     {formatMonthLabel(p.currentMonth, { capitalize: true })}
                                 </span>
-                                <button onClick={() => p.setCurrentMonth(addMonths(p.currentMonth, 1))}
-                                    aria-label="Следующий месяц"
-                                    style={{ ...ghsMono, padding: '6px 10px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
+                                <Button variant="secondary" aria-label="Следующий месяц" onClick={() => p.setCurrentMonth(addMonths(p.currentMonth, 1))}>
                                     &rarr;
-                                </button>
+                                </Button>
                             </div>
-                            <div style={{ display: 'flex', gap: 0 }}>
+                            <div role="group" aria-label="Статус" style={{ display: 'flex', gap: 0, flexWrap: 'wrap' }}>
                                 {STATUS_TABS.map(s => (
                                     <button
                                         key={s.key}
+                                        type="button"
+                                        aria-pressed={p.statusFilter === s.key}
                                         onClick={() => p.setStatusFilter(s.key)}
                                         style={{
-                                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                            padding: '8px 14px', background: 'transparent',
+                                            fontFamily: GH_SANS, fontSize: 14, fontWeight: p.statusFilter === s.key ? 600 : 500,
+                                            minHeight: 40, padding: '0 14px', background: 'transparent',
                                             color: p.statusFilter === s.key ? GH.ink : GH.ink60,
                                             border: 'none',
                                             borderBottom: p.statusFilter === s.key ? `2px solid ${GH.ink}` : '2px solid transparent',
@@ -1277,7 +1138,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         )}
 
                         {!p.loading && allRows.length > 0 && !tableNarrow && (
-                            <div style={{
+                            <div aria-hidden="true" style={{
                                 display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: GH_ROW_GAP,
                                 padding: '8px 0', borderBottom: ghsHairline,
                             }}>
@@ -1298,20 +1159,20 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                 <EmptyState
                                     title={p.statusFilter === 'all' ? 'В этом месяце сессий нет' : 'Сессий с таким статусом нет'}
                                     hint={p.statusFilter === 'all'
-                                        ? 'Добавьте сессию или подтяните её из Google Calendar.'
+                                        ? 'Добавьте сессию или подтяните её из Google Календаря.'
                                         : 'Новые сессии попадают во «Все» и «Запланированы».'}
                                     action={p.statusFilter === 'all'
-                                        ? { label: 'Новая сессия', onClick: () => { p.setPrefillDate(null); p.setShowForm(true); } }
+                                        ? (p.onNewSession ? { label: 'Новая сессия', onClick: p.onNewSession } : undefined)
                                         : { label: 'Показать все', onClick: () => p.setStatusFilter('all') }}
                                 />
                             )
                         ) : (
                             <div>
                                 {allRows.map(([day, daySessions]) => (
-                                    <div key={day}>
+                                    <section key={day} aria-label={formatDateLabel(day)}>
                                         {/* Day header */}
                                         <div style={{ padding: '16px 0 6px', borderBottom: ghsHairline }}>
-                                            <span style={{ fontFamily: GH_SANS, fontSize: 13, fontWeight: 600 }}>
+                                            <span style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 600 }}>
                                                 {formatDateLabel(day, { capitalize: true })}
                                             </span>
                                             <span style={{ ...ghsMono, marginLeft: 12, fontSize: 12 }}>
@@ -1326,18 +1187,11 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                                     key={session.id}
                                                     session={session}
                                                     client={p.clientMap.get(session.clientId)}
-                                                    isEditing={p.editingId === session.id}
-                                                    setEditingId={p.setEditingId}
-                                                    updateSession={p.updateSession}
-                                                    deleteSession={p.deleteSession}
-                                                    quickPaySession={p.quickPaySession}
-                                                    onBookCab={p.handleBookCab}
-                                                    navigate={p.navigate}
                                                     narrow={tableNarrow}
-                                                    touch={ghNarrow}
+                                                    {...rowProps}
                                                 />
                                             ))}
-                                    </div>
+                                    </section>
                                 ))}
                             </div>
                         )}
@@ -1345,120 +1199,213 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                 )}
             </div>
 
-            {/* Footer */}
-            <div style={{ borderTop: ghsHairline, padding: '16px clamp(16px, 4vw, 32px)', textAlign: 'center' }}>
-                <span style={ghsMono}>Unbox · CRM · Сессии · {new Date().getFullYear()}</span>
-            </div>
-
-            {/* Legacy sync modal */}
-            {p.showSyncModal && (
-                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => p.setShowSyncModal(false)}>
-                    <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                        <div className="p-6 space-y-5">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-lg font-bold text-unbox-dark flex items-center gap-2">
-                                    <RefreshCw className="w-5 h-5 text-unbox-green" />
-                                    Синхронизация с Google Calendar
-                                </h3>
-                                <button onClick={() => p.setShowSyncModal(false)} aria-label="Закрыть" className="text-ink-60 hover:text-gray-600">
-                                    <X className="w-5 h-5" />
-                                </button>
-                            </div>
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Период назад (месяцев)</label>
-                                    <select value={p.syncMonthsBack} onChange={e => p.setSyncMonthsBack(Number(e.target.value))}
-                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green">
-                                        <option value={0}>Только текущий</option>
-                                        <option value={1}>1 мес.</option>
-                                        <option value={3}>3 мес.</option>
-                                        <option value={6}>6 мес.</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Период вперёд (месяцев)</label>
-                                    <select value={p.syncMonthsForward} onChange={e => p.setSyncMonthsForward(Number(e.target.value))}
-                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green">
-                                        <option value={1}>1 мес.</option>
-                                        <option value={2}>2 мес.</option>
-                                        <option value={3}>3 мес.</option>
-                                    </select>
-                                </div>
-                            </div>
-                            {p.syncResult && (
-                                <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1">
-                                    <div className="font-medium mb-2">{p.syncResult.dryRun ? 'Предпросмотр (ничего не изменено):' : 'Результат:'}</div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Событий в календаре</span><span className="font-medium">{p.syncResult.totalEvents ?? 0}</span></div>
-                                    {p.syncResult.dryRun ? (
-                                        <>
-                                            <div className="flex justify-between"><span className="text-gray-500">Узнали клиента</span><span className="font-medium">{p.syncResult.matched ?? 0}</span></div>
-                                            <div className="flex justify-between"><span className="text-gray-500">Новых карточек клиентов</span><span className="font-medium text-[var(--status-ok-fg)]">{(p.syncResult.wouldCreateNames || []).filter((n: any) => !n.looksNonClient && !p.syncExcluded.has(n.name)).length}</span></div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-[var(--status-ok-fg)]">{p.syncResult.created ?? 0}</span></div>
-                                            <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
-                                        </>
-                                    )}
-                                    {p.syncResult.dryRun && (p.syncResult.wouldCreateNames || []).length > 0 && (
-                                        <div className="mt-2 p-2.5 rounded-lg bg-card border border-gray-200">
-                                            <div className="font-semibold text-unbox-dark">Кто станет новой карточкой клиента</div>
-                                            <div className="text-xs text-gray-500 mt-0.5 mb-1.5">
-                                                Снимите галочку, если это не клиент — такие события не будут превращаться в карточки и при автосинке.
+            {/* Синхронизация с Google — на общей шторке (X4-04): Esc, фокус
+                внутри, кнопки в подвале. Логика синка и исключений прежняя. */}
+            <Sheet
+                open={p.showSyncModal}
+                onClose={() => { if (!p.syncing) p.setShowSyncModal(false); }}
+                title="Синхронизация с Google Календарём"
+                width={480}
+                footer={(
+                    <>
+                        <Button block loading={p.syncing} onClick={() => p.handleSync(false)}>
+                            {p.syncing ? 'Синхронизируем…' : 'Синхронизировать'}
+                        </Button>
+                        <Button block variant="secondary" disabled={p.syncing} onClick={() => p.handleSync(true)}>
+                            Предпросмотр
+                        </Button>
+                    </>
+                )}
+            >
+                <div className="space-y-5">
+                    <div className="space-y-3">
+                        <label className="block">
+                            <span className="block text-sm font-medium mb-1" style={{ color: GH.ink }}>Период назад</span>
+                            <select value={p.syncMonthsBack} onChange={e => p.setSyncMonthsBack(Number(e.target.value))}
+                                className="w-full px-3 text-sm"
+                                style={{ minHeight: 'var(--control-h)', border: `1px solid ${GH.ink20}`, borderRadius: 'var(--radius-control)', background: GH.card, color: GH.ink }}>
+                                <option value={0}>Только текущий месяц</option>
+                                <option value={1}>1 месяц</option>
+                                <option value={3}>3 месяца</option>
+                                <option value={6}>6 месяцев</option>
+                            </select>
+                        </label>
+                        <label className="block">
+                            <span className="block text-sm font-medium mb-1" style={{ color: GH.ink }}>Период вперёд</span>
+                            <select value={p.syncMonthsForward} onChange={e => p.setSyncMonthsForward(Number(e.target.value))}
+                                className="w-full px-3 text-sm"
+                                style={{ minHeight: 'var(--control-h)', border: `1px solid ${GH.ink20}`, borderRadius: 'var(--radius-control)', background: GH.card, color: GH.ink }}>
+                                <option value={1}>1 месяц</option>
+                                <option value={2}>2 месяца</option>
+                                <option value={3}>3 месяца</option>
+                            </select>
+                        </label>
+                    </div>
+                    {p.syncResult && (
+                        <div className="p-4 text-sm space-y-1" style={{ background: GH.sunken, borderRadius: 'var(--radius-control)' }}>
+                            <div className="font-medium mb-2">{p.syncResult.dryRun ? 'Предпросмотр (ничего не изменено):' : 'Результат:'}</div>
+                            <div className="flex justify-between"><span style={{ color: GH.ink60 }}>Событий в календаре</span><span className="font-medium">{p.syncResult.totalEvents ?? 0}</span></div>
+                            {p.syncResult.dryRun ? (
+                                <>
+                                    <div className="flex justify-between"><span style={{ color: GH.ink60 }}>Узнали клиента</span><span className="font-medium">{p.syncResult.matched ?? 0}</span></div>
+                                    <div className="flex justify-between"><span style={{ color: GH.ink60 }}>Новых карточек клиентов</span><span className="font-medium text-[var(--status-ok-fg)]">{(p.syncResult.wouldCreateNames || []).filter((n: any) => !n.looksNonClient && !p.syncExcluded.has(n.name)).length}</span></div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="flex justify-between"><span style={{ color: GH.ink60 }}>Создано</span><span className="font-medium text-[var(--status-ok-fg)]">{p.syncResult.created ?? 0}</span></div>
+                                    <div className="flex justify-between"><span style={{ color: GH.ink60 }}>Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
+                                </>
+                            )}
+                            {p.syncResult.dryRun && (p.syncResult.wouldCreateNames || []).length > 0 && (
+                                <div className="mt-2 p-2.5" style={{ background: GH.card, border: `1px solid ${GH.ink10}`, borderRadius: 'var(--radius-control)' }}>
+                                    <div className="font-semibold" style={{ color: GH.ink }}>Кто станет новой карточкой клиента</div>
+                                    <div className="text-xs mt-0.5 mb-1.5" style={{ color: GH.ink60 }}>
+                                        Снимите галочку, если это не клиент — такие события не будут превращаться в карточки и при автосинке.
+                                    </div>
+                                    {(p.syncResult.wouldCreateNames || []).map((n: any) => (
+                                        n.looksNonClient ? (
+                                            <div key={n.name} className="text-xs py-1" style={{ color: GH.ink60 }} title="Похоже на личное дело — карточку не создадим">
+                                                — {n.name} <span className="italic">(похоже не клиент, пропустим)</span>
                                             </div>
-                                            {(p.syncResult.wouldCreateNames || []).map((n: any) => (
-                                                n.looksNonClient ? (
-                                                    <div key={n.name} className="text-xs text-ink-60 py-1" title="Похоже на личное дело — карточку не создадим">
-                                                        — {n.name} <span className="italic">(похоже не клиент, пропустим)</span>
-                                                    </div>
-                                                ) : (
-                                                    <label key={n.name} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={!p.syncExcluded.has(n.name)}
-                                                            onChange={e => {
-                                                                const next = new Set(p.syncExcluded);
-                                                                if (e.target.checked) next.delete(n.name); else next.add(n.name);
-                                                                p.setSyncExcluded(next);
-                                                            }}
-                                                            className="w-4 h-4 accent-unbox-green"
-                                                        />
-                                                        <span className={p.syncExcluded.has(n.name) ? 'text-ink-60 line-through' : ''}>{n.name}</span>
-                                                    </label>
-                                                )
-                                            ))}
-                                        </div>
-                                    )}
-                                    {(p.syncResult.calendarDuplicatesCount ?? 0) > 0 && (
-                                        <div className="mt-2 p-2.5 rounded-lg bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
-                                            <div className="font-semibold flex items-center gap-1.5">
-                                                <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
-                                                Дубли в календаре: {p.syncResult.calendarDuplicatesCount}
-                                            </div>
-                                            <div className="text-xs mt-1">
-                                                На одну встречу стоит несколько событий — удалите лишнее в Google Calendar:
-                                            </div>
-                                            {(p.syncResult.calendarDuplicates ?? []).slice(0, 6).map((d: any, i: number) => (
-                                                <div key={i} className="text-xs mt-0.5">
-                                                    • {d.summary} — {d.date ? `${formatDayMonth(d.date)}, ${formatTime(d.date)}` : '—'} (×{d.count})
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                        ) : (
+                                            <label key={n.name} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer" style={{ minHeight: 36 }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!p.syncExcluded.has(n.name)}
+                                                    onChange={e => {
+                                                        const next = new Set(p.syncExcluded);
+                                                        if (e.target.checked) next.delete(n.name); else next.add(n.name);
+                                                        p.setSyncExcluded(next);
+                                                    }}
+                                                    className="w-4 h-4"
+                                                    style={{ accentColor: GH.accent }}
+                                                />
+                                                <span className={p.syncExcluded.has(n.name) ? 'line-through' : ''} style={p.syncExcluded.has(n.name) ? { color: GH.ink60 } : undefined}>{n.name}</span>
+                                            </label>
+                                        )
+                                    ))}
                                 </div>
                             )}
-                            <div className="flex gap-3">
-                                <button onClick={() => p.handleSync(true)} disabled={p.syncing}
-                                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors">
-                                    {p.syncing ? 'Проверяем…' : 'Предпросмотр'}
-                                </button>
-                                <button onClick={() => p.handleSync(false)} disabled={p.syncing}
-                                    className="flex-1 px-4 py-2.5 bg-unbox-green text-white rounded-xl text-sm font-medium hover:bg-unbox-dark disabled:opacity-50 transition-colors">
-                                    {p.syncing ? 'Синхронизируем…' : 'Синхронизировать'}
-                                </button>
-                            </div>
+                            {(p.syncResult.calendarDuplicatesCount ?? 0) > 0 && (
+                                <div className="mt-2 p-2.5 bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]" style={{ borderRadius: 'var(--radius-control)' }}>
+                                    <div className="font-semibold flex items-center gap-1.5">
+                                        <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                        Дубли в календаре: {p.syncResult.calendarDuplicatesCount}
+                                    </div>
+                                    <div className="text-xs mt-1">
+                                        На одну встречу стоит несколько событий — удалите лишнее в Google Календаре:
+                                    </div>
+                                    {(p.syncResult.calendarDuplicates ?? []).slice(0, 6).map((d: any, i: number) => (
+                                        <div key={i} className="text-xs mt-0.5">
+                                            • {d.summary} — {d.date ? `${formatDayMonth(d.date)}, ${formatTime(d.date)}` : '—'} (×{d.count})
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    </div>
+                    )}
+                </div>
+            </Sheet>
+        </div>
+    );
+}
+
+// ─── «⋯ Ещё» — меню строки сессии ────────────────────────────────────────────
+
+/** Пункт меню «⋯ Ещё». Подпись — действие («Изменить», «Удалить»). */
+function MenuItem({ onSelect, danger, children, ...rest }: {
+    onSelect: () => void; danger?: boolean; children: React.ReactNode;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onSelect'>) {
+    return (
+        <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            onClick={onSelect}
+            style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 'var(--control-h)',
+                padding: '0 14px', background: 'transparent', border: 'none', textAlign: 'left',
+                fontFamily: GH_SANS, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap',
+                color: danger ? GH.danger : GH.ink, cursor: 'pointer',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            onFocus={e => (e.currentTarget.style.background = GH.ink5)}
+            onBlur={e => (e.currentTarget.style.background = 'transparent')}
+            {...rest}
+        >
+            {children}
+        </button>
+    );
+}
+
+/** Кнопка «⋯» и выпадающее меню: Esc и клик мимо закрывают, стрелки
+ *  ходят по пунктам, фокус возвращается на кнопку. */
+function RowMenu({ size, children }: { size: number; children: (close: () => void) => React.ReactNode }) {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+    const btnRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const close = (focusBack = true) => {
+        setOpen(false);
+        if (focusBack) btnRef.current?.focus();
+    };
+
+    useEffect(() => {
+        if (!open) return;
+        const items = () => Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+        items()[0]?.focus();
+        const onDown = (e: MouseEvent) => {
+            if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+            if (e.key === 'Tab') { setOpen(false); return; }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const list = items();
+                const i = list.indexOf(document.activeElement as HTMLButtonElement);
+                const next = e.key === 'ArrowDown' ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
+                list[next]?.focus();
+            }
+        };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onDown);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [open]);
+
+    return (
+        <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+                ref={btnRef}
+                type="button"
+                aria-label="Ещё действия"
+                title="Ещё"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    background: open ? GH.ink5 : 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink,
+                }}
+            >
+                <MoreHorizontal size={16} aria-hidden="true" />
+            </button>
+            {open && (
+                <div
+                    ref={menuRef}
+                    role="menu"
+                    aria-label="Действия с сессией"
+                    style={{
+                        position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 220,
+                        background: GH.card, border: `1px solid ${GH.ink}`, boxShadow: SHADOW.pop,
+                        zIndex: Z.dropdown, padding: '4px 0',
+                    }}
+                >
+                    {children(() => close())}
                 </div>
             )}
         </div>
@@ -1467,22 +1414,41 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
 // ─── GH: Строка сессии ───────────────────────────────────────────────────────
 
-function GHSessionRow({ session, client, isEditing, setEditingId, updateSession, deleteSession, quickPaySession, onBookCab, navigate, narrow, touch: touchScreen }: {
+interface GHSessionRowProps {
     session: CrmSession; client?: CrmClient;
-    isEditing: boolean; setEditingId: (id: string | null) => void;
+    editingId: string | null; setEditingId: (id: string | null) => void;
+    /** Только что созданная — подсветить. */
+    highlightId: string | null;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
-    navigate: ReturnType<typeof useNavigate>;
+    /** Перечитать сессии и платежи месяца. */
+    onReload: () => void;
     /** Карточка вместо строки таблицы (узкий контейнер). */
     narrow?: boolean;
     /** Телефон: цели касания 44 px. */
     touch?: boolean;
-}) {
+}
+
+/**
+ * Строка сессии (G5-08): одно главное действие —
+ *   «Отметить оплату · 140 ₾», если сессия началась и не оплачена (В5: в один
+ *   клик, тост «Отмечено · Вернуть»);
+ *   иначе «Кабинет», если кабинета нет;
+ * всё остальное — в «⋯ Ещё». Клик по строке (или Enter на ней) открывает
+ * правку, имя клиента — ссылка на карточку.
+ */
+function GHSessionRow({
+    session, client, editingId, setEditingId, highlightId, updateSession, deleteSession, quickPaySession,
+    onBookCab, onReload, narrow, touch: touchScreen,
+}: GHSessionRowProps) {
     const dt = parseSessionDate(session.date);
+    const isEditing = editingId === session.id;
+    const highlighted = highlightId === session.id;
     const effectiveStatus = getEffectiveStatus(session);
     const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
+    const clientName = client?.name || 'Клиент';
     // Одни слова для оплаты во всей CRM (G5-06): «Оплачено» — статус,
     // «Отметить оплату» — действие.
     // В узкой колонке таблицы длинный статус («Отменил специалист») переносится.
@@ -1490,22 +1456,26 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     const statusBadge = session.isPaid
         ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" className={badgeClass} />
         : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" className={badgeClass} />;
-    const price = formatMoney(session.price ?? client?.basePrice, { currency: client?.currency });
+    const amount = session.price ?? client?.basePrice;
+    const price = formatMoney(amount, { currency: client?.currency });
+
+    const canPay = !session.isPaid && !isCancelled;
+    const canBook = !session.isBooked && !isCancelled;
+    const primary: 'pay' | 'cab' | null = canPay && isPastSession(session) ? 'pay' : canBook ? 'cab' : null;
 
     // Кнопки строки: Plex Sans 12 px, без капса; на узком экране — 44 px (rule 9).
-    const touch = touchScreen ? 44 : 32;
-    const textBtnStyle: React.CSSProperties = {
-        fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, minHeight: touch, padding: '0 10px',
+    const size = touchScreen ? 44 : 32;
+    const mainBtnStyle: React.CSSProperties = {
+        fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, minHeight: size, padding: '0 10px',
         display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-        background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink,
-    };
-    const iconBtnStyle: React.CSSProperties = {
-        width: touch, height: touch, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60,
+        border: 'none', cursor: 'pointer',
     };
 
+    const [paying, setPaying] = useState(false);
     const handleQuickPay = async () => {
-        try { await quickPaySession(session.id); toast.success('Оплата отмечена'); } catch { toast.error('Не удалось отметить оплату'); }
+        if (paying) return;
+        setPaying(true);
+        try { await payWithUndo(session.id, quickPaySession, onReload); } finally { setPaying(false); }
     };
 
     const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -1518,91 +1488,134 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     : 'Сессия удалена',
             );
         } catch {
-            toast.error('Не удалось удалить сессию');
+            // Стор уже показал «Не удалось удалить сессию».
         }
     };
 
+    const toggleEdit = () => setEditingId(isEditing ? null : session.id);
+    // Клик по пустому месту строки — правка; по кнопкам и ссылке — их действие.
+    const onRowClick = (e: React.MouseEvent) => {
+        if ((e.target as HTMLElement).closest('button, a, input, select, [role="menu"]')) return;
+        toggleEdit();
+    };
+    const onRowKey = (e: React.KeyboardEvent) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEdit(); }
+    };
+
+    const nameLink = (
+        <Link
+            to={`/crm/clients/${session.clientId}`}
+            style={{ color: 'inherit', textDecoration: 'none', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+            onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+        >
+            {clientName}
+        </Link>
+    );
+
     const actions = (
         <>
-            {!session.isPaid && !isCancelled && (
-                <button onClick={handleQuickPay} title="Отметить оплату" style={{ ...textBtnStyle, background: GH.ink, color: GH.paper, border: 'none' }}>
-                    {/* В таблице — без значка, чтобы колонка действий влезала в 236 px. */}
-                    {narrow && <Banknote size={14} aria-hidden="true" />} Отметить оплату
+            {primary === 'pay' && (
+                <button type="button" onClick={handleQuickPay} disabled={paying} aria-busy={paying || undefined}
+                    style={{ ...mainBtnStyle, background: GH.ink, color: GH.paper, opacity: paying ? 0.6 : 1 }}>
+                    {narrow && <Banknote size={14} aria-hidden="true" />}
+                    {paying ? 'Отмечаем…' : (amount ? `Отметить оплату · ${price}` : 'Отметить оплату')}
                 </button>
             )}
-            {!session.isBooked && !isCancelled && (
-                <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={iconBtnStyle}
-                    title="Забронировать кабинет" aria-label="Забронировать кабинет">
-                    <LayoutGrid size={14} aria-hidden="true" />
+            {primary === 'cab' && (
+                <button type="button" onClick={() => onBookCab(session, clientName)}
+                    title="Забронировать кабинет под эту сессию"
+                    style={{ ...mainBtnStyle, background: 'transparent', border: ghsHairline, color: GH.ink }}>
+                    <Plus size={14} aria-hidden="true" /> Кабинет
                 </button>
             )}
-            <button onClick={() => setEditingId(isEditing ? null : session.id)}
-                title="Изменить" aria-label="Изменить сессию" aria-pressed={isEditing}
-                style={{ ...iconBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>
-                <Pencil size={14} aria-hidden="true" />
-            </button>
-            {/* Удаление — через общее окно (серия: «только эту / эту и будущие»),
-                как на телефоне; раньше тут было системное окно браузера. */}
-            <button onClick={() => setDeleteOpen(true)} title="Удалить" aria-label="Удалить сессию"
-                style={{ ...iconBtnStyle, color: GH.danger }}>
-                <Trash2 size={14} aria-hidden="true" />
-            </button>
+            <RowMenu size={size}>
+                {close => (
+                    <>
+                        <MenuItem aria-label="Изменить сессию" onSelect={() => { close(); toggleEdit(); }}>
+                            <Pencil size={14} aria-hidden="true" /> {isEditing ? 'Закрыть правку' : 'Изменить'}
+                        </MenuItem>
+                        {canPay && primary !== 'pay' && (
+                            <MenuItem onSelect={() => { close(); handleQuickPay(); }}>
+                                <Banknote size={14} aria-hidden="true" /> Отметить оплату{amount ? ` · ${price}` : ''}
+                            </MenuItem>
+                        )}
+                        {canBook && primary !== 'cab' && (
+                            <MenuItem onSelect={() => { close(); onBookCab(session, clientName); }}>
+                                <LayoutGrid size={14} aria-hidden="true" /> Забронировать кабинет
+                            </MenuItem>
+                        )}
+                        {/* Удаление — через общее окно (серия: «только эту / эту и
+                            будущие»). Красный — только здесь и в самом окне. */}
+                        <MenuItem danger aria-label="Удалить сессию" onSelect={() => { close(); setDeleteOpen(true); }}>
+                            <Trash2 size={14} aria-hidden="true" /> Удалить
+                        </MenuItem>
+                    </>
+                )}
+            </RowMenu>
         </>
     );
+
+    const rowBase: React.CSSProperties = {
+        borderBottom: ghsHairline,
+        // Отменённые — приглушаем цветом, не прозрачностью (текст не бледнее ink-60).
+        color: isCancelled ? GH.ink60 : undefined,
+        background: highlighted ? COLOR_HIGHLIGHT : isEditing ? GH.ink5 : 'transparent',
+        transition: 'background 400ms',
+        cursor: 'pointer',
+        outlineOffset: -2,
+    };
 
     return (
         <>
             {narrow ? (
-                /* ── Mobile: stacked card ── */
-                // Отменённые — приглушаем цветом, не прозрачностью (текст не бледнее ink-60).
-                <div style={{ padding: '12px 0', borderBottom: ghsHairline, color: isCancelled ? GH.ink60 : undefined }}>
+                /* ── Узко: карточка ── */
+                <div id={`crm-session-${session.id}`} tabIndex={0} onClick={onRowClick} onKeyDown={onRowKey}
+                    title="Нажмите, чтобы изменить" style={{ ...rowBase, padding: '12px 4px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{format(dt, 'HH:mm')}</span>
-                                <span
-                                    style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                    onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
-                                >
-                                    {client?.name || 'Клиент'}
-                                </span>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatTime(dt)}</span>
+                                {nameLink}
                                 {session.isBooked && <BookedMark />}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{session.durationMinutes}′</span>
-                                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{price}</span>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{session.durationMinutes} мин</span>
+                                <span style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{price}</span>
                                 {statusBadge}
                             </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 196 }}>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
                             {actions}
                         </div>
                     </div>
                 </div>
             ) : (
-                /* ── Desktop: grid row ── */
+                /* ── Таблица ── */
                 <div
+                    id={`crm-session-${session.id}`}
+                    tabIndex={0}
+                    onClick={onRowClick}
+                    onKeyDown={onRowKey}
+                    title="Нажмите, чтобы изменить"
                     style={{
+                        ...rowBase,
                         display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: GH_ROW_GAP,
-                        alignItems: 'center', padding: '8px 0', borderBottom: ghsHairline,
-                        color: isCancelled ? GH.ink60 : undefined, transition: 'background 120ms',
+                        alignItems: 'center', padding: '8px 0',
                     }}
-                    onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    onMouseEnter={e => { if (!highlighted && !isEditing) e.currentTarget.style.background = GH.ink5; }}
+                    onMouseLeave={e => { if (!highlighted && !isEditing) e.currentTarget.style.background = 'transparent'; }}
                 >
-                    <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{format(dt, 'HH:mm')}</div>
-                    <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default' }}
-                            onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
-                            onMouseEnter={e => (e.currentTarget.style.color = GH.accent)} onMouseLeave={e => (e.currentTarget.style.color = isCancelled ? GH.ink60 : GH.ink)}>
-                            {client?.name || 'Клиент'}
-                        </span>
+                    <div style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatTime(dt)}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', minWidth: 0 }}>
+                        {nameLink}
                         {session.isBooked && <BookedMark style={{ marginLeft: 8 }} />}
                     </div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{session.durationMinutes}′</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{price}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{price}</div>
                     <div>{statusBadge}</div>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
                         {actions}
                     </div>
                 </div>
@@ -1613,12 +1626,12 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     session={session}
                     clientCurrency={client?.currency}
                     clientDefaultAccount={client?.defaultAccount}
-                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
-                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплата отмечена'); }}
+                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); onReload(); }}
+                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплата отмечена'); onReload(); }}
                     onCancel={() => setEditingId(null)}
-                    onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
+                    onBookCab={() => onBookCab(session, clientName)}
                     onDelete={() => { setEditingId(null); setDeleteOpen(true); }}
-                    onRefresh={() => useCrmStore.getState().fetchSessions({ dateFrom: format(startOfMonth(new Date()), 'yyyy-MM-dd'), dateTo: format(addDays(new Date(), 60), 'yyyy-MM-dd') })}
+                    onRefresh={onReload}
                 />
             )}
             <DeleteSessionModal
@@ -1626,11 +1639,14 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                 onClose={() => setDeleteOpen(false)}
                 onConfirm={handleDelete}
                 isRecurring={Boolean(session.recurringGroupId)}
-                label={`${client?.name || 'Клиент'} — ${dayTime(dt)}`}
+                label={`${clientName} — ${dayTime(dt)}`}
             />
         </>
     );
 }
+
+/** Подложка только что созданной сессии — «выбрано» (бирюза-soft). */
+const COLOR_HIGHLIGHT = 'var(--color-accent-soft)';
 
 /** «С кабинетом» — у сессии есть бронь кабинета (статус ok, не бирюза). */
 function BookedMark({ style }: { style?: React.CSSProperties }) {
