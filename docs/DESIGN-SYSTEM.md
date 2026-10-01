@@ -119,3 +119,25 @@ sheet 200/201 · dialog 10050 · toast 10100 · tooltip 10200`.
 
 Словарь статусов (`statuses.ts`) и слово «Прошла» вместо «Завершена» — **на утверждение владельцу**;
 менять слова только там.
+
+## Волна 3 — шторки Psy-CRM (шаг 0, 01.10)
+
+Три общие шторки в `src/components/crm/` — на них строятся экраны CRM (телефон и компьютер),
+своих форм для этих действий не делаем. Все на `Sheet`, пишут только существующими вызовами,
+ошибки — `toastApiError`, после успеха зовут колбэк родителя (список обновляет родитель).
+
+| Шторка | Пропсы | Что делает |
+|---|---|---|
+| `NewSessionSheet` | `open, onClose, onCreated(session)`, `client?` (нет — поиск), `clients?`, `lastSession?` (undefined — найдёт сама, null — истории нет), `profileDurationMin?`, `successToast?` | Чипы «+1 нед · +2 нед · Другая дата», время, длительность, цена. Мягкие предупреждения «В это время уже …», «Вы в отпуске до …», «Это время уже прошло». Галочка «Добавить в Google Календарь» (В3) — только если календарь подключён (`settings.calendarId`), по умолчанию включена → `pushToCalendar`. Только `createSession`, без заметок. |
+| `NewClientSheet` | `open, onClose, onCreated(client)`, `clients?`, `initialName?`, `successToast?` | Имя, телефон, Telegram, код, ставка + валюта; «Ещё» — e-mail, теги, счёт. Код (В2) — сразу свободный `generateAliasCode`, занятый (в т.ч. у слитой карточки) не пускаем. Только `createClient`. |
+| `UnpaidSessionsSheet` | `open, onClose, client`, `sessions?`, `onChanged?` | Прошедшие неоплаченные сессии клиента. «Отметить оплату · 140 ₾» — `quickPaySession` из стора (защита от двойного тапа); «Отметить все (N) · 280 ₾» — `markAllPaid` с вопросом как в карточке клиента. Суммы по валютам раздельно. |
+
+`src/utils/crmNextSession.ts` — без импортов (сторож гоняет его через node):
+`suggestNextSession({ lastSession, client, profileDurationMin, weeks?, now? })` → `{ date, time, durationMinutes, price, currency, fromLastSession }`
+(тот же день недели и время по Батуми через неделю; длительность: прошлая → анкета → 60; цена — ставка клиента);
+`toTbilisiNaive(date, time)` → `'2026-10-07T19:00:00'` — так дата уходит на сервер (он сам переводит в UTC), **никогда не `toISOString()`**;
+`utcNaiveToTbilisi(dbDate)` → `{ date, time }` по Батуми; `generateAliasCode(existingCodes)` → свободный `'4821'`.
+
+Список клиентов `getClients(…, withStats=true)` теперь отдаёт `nextSessionDate` и `lastPastSessionDate`
+(UTC-naive, читать через `parseUTC`). `html, body` — `overflow-x: clip` (не `hidden`: тот ломал `sticky`).
+Сторож: `backend/tests/guard_wave3_foundation.py`.

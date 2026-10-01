@@ -23,6 +23,12 @@ export interface CrmClient {
      * when the list spans multiple specialists, so the booking-flow dropdown
      * can disambiguate "Maria → Yana" vs "Maria → Galina". */
     specialistName?: string;
+    /** Только с with_stats (волна 3): ближайшая будущая сессия, UTC-naive
+     *  ISO — разбирать через parseUTC. Отменённые не считаются. */
+    nextSessionDate?: string | null;
+    /** Только с with_stats (волна 3): последняя ПРОШЕДШАЯ сессия, UTC-naive
+     *  ISO. В отличие от lastSessionDate (максимум по всем, в т.ч. будущим). */
+    lastPastSessionDate?: string | null;
 }
 
 export interface CrmClientCreate {

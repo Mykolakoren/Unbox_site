@@ -201,6 +201,7 @@ def list_clients(
             paid_by_client[p.client_id] += float(p.amount or 0)
 
     result = []
+    now_utc = datetime.utcnow()
     for c in clients:
         c_dict = TherapistClientRead.model_validate(c).model_dump()
         base = c.base_price or 0
@@ -215,6 +216,17 @@ def list_clients(
             c_dict["lastSessionDate"] = last_date.isoformat() if last_date else None
         else:
             c_dict["lastSessionDate"] = None
+
+        # Волна 3, шаг 0: «Была» и «Следующая» для списка клиентов и
+        # «Без следующей встречи». lastSessionDate выше — максимум по ВСЕМ
+        # сессиям (в т.ч. будущим), его смысл не трогаем. Здесь — раздельно:
+        # последняя прошедшая и ближайшая будущая. Те же уже загруженные
+        # сессии (свой специалист, без отменённых), без новых запросов.
+        # Даты в базе — UTC-naive, поэтому сравниваем с utcnow().
+        past_dates = [s.date for s in sessions_all if s.date and s.date < now_utc]
+        future_dates = [s.date for s in sessions_all if s.date and s.date >= now_utc]
+        c_dict["lastPastSessionDate"] = max(past_dates).isoformat() if past_dates else None
+        c_dict["nextSessionDate"] = min(future_dates).isoformat() if future_dates else None
 
         # Unpaid sum — only COMPLETED sessions count as debt
         unpaid = [s for s in sessions_all if not s.is_paid and s.status == "COMPLETED"]

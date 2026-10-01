@@ -146,9 +146,12 @@
   --color-status-muted-fg:   var(--status-muted-fg);
 }
 
-/* ── Prevent horizontal scroll on mobile ── */
+/* ── Prevent horizontal scroll on mobile ──
+ * clip, а не hidden (X1-M3, волна 3): hidden делает html/body контейнером
+ * прокрутки, и position: sticky у шапок и подвалов внутри перестаёт липнуть.
+ * clip режет вылезающее так же, но прокрутку не создаёт. */
 html, body {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 
