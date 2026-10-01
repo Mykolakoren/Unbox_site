@@ -40,8 +40,9 @@ _ALLOWED = {
 }
 
 
-# Названия наличных счетов в CRM: исторически встречаются «Cash» и «cash».
-CASH_ACCOUNTS = {"cash", "наличные"}
+# Названия наличных счетов в CRM: исторически «Cash» и «cash», а для валют
+# заводятся свои — «Наличные EUR» (id «наличные_eur»), «Cash USD».
+CASH_PREFIXES = ("cash", "налич")
 
 
 def _enabled(specialist_id: str) -> bool:
@@ -49,7 +50,7 @@ def _enabled(specialist_id: str) -> bool:
 
 
 def _is_cash(account: Optional[str]) -> bool:
-    return (account or "").strip().lower() in CASH_ACCOUNTS
+    return (account or "").strip().lower().startswith(CASH_PREFIXES)
 
 
 def push_payment(payment, client_name: Optional[str]) -> None:
@@ -63,7 +64,9 @@ def push_payment(payment, client_name: Optional[str]) -> None:
                 "external_id": payment.id,
                 "amount": float(payment.amount or 0),
                 "currency": payment.currency or "GEL",
-                "account": payment.account or "Cash",
+                # Любой наличный счёт CRM — «cash»: в финансах наличные
+                # раскладываются по валюте платежа (cash:GEL, cash:EUR, …).
+                "account": "cash",
                 # Дата платежа, не сессии: книга расходов — про движение денег.
                 "date": payment.date.date().isoformat(),
                 "client_name": client_name,
