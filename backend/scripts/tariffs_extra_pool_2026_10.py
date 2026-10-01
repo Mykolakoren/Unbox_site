@@ -23,6 +23,7 @@
 
   cd /var/www/unbox/backend && PYTHONPATH=. venv/bin/python3 scripts/tariffs_extra_pool_2026_10.py --dry-run
   cd /var/www/unbox/backend && PYTHONPATH=. venv/bin/python3 scripts/tariffs_extra_pool_2026_10.py --apply
+  (+ --exclude=почта1,почта2 — не трогать этих клиентов)
 
 По умолчанию — dry-run (читает в транзакции READ ONLY, ничего не пишет).
 --apply: сначала JSON-бэкап в /root/backups (абонементы и затронутые брони,
@@ -264,6 +265,16 @@ def apply_one(session: Session, r: dict, now: datetime) -> bool:
     return True
 
 
+def _excluded() -> set[str]:
+    """--exclude=a@x,b@y — клиенты, которых не трогаем (решение владельца 01.10:
+    Света Розова на паузе — часы капсулы начислим, когда пауза закончится)."""
+    out: set[str] = set()
+    for a in sys.argv[1:]:
+        if a.startswith("--exclude="):
+            out |= {e.strip().lower() for e in a.split("=", 1)[1].split(",") if e.strip()}
+    return out
+
+
 def run(apply: bool) -> int:
     now = datetime.utcnow()
     with Session(engine) as session:
@@ -271,6 +282,11 @@ def run(apply: bool) -> int:
             # физически не может ничего записать
             session.execute(text("SET TRANSACTION READ ONLY"))
         rows = collect(session, now)
+        skip_emails = _excluded()
+        if skip_emails:
+            dropped = [r for r in rows if str(r.get("email", "")).lower() in skip_emails]
+            rows = [r for r in rows if r not in dropped]
+            print("Исключены по --exclude: " + (", ".join(str(r.get("email")) for r in dropped) or "никого не нашлось"))
         print_report(rows, apply)
         if not apply:
             session.rollback()
