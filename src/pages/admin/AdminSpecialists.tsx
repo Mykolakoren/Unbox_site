@@ -29,6 +29,10 @@ import { SkeletonList } from '../../components/ui/Skeleton';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { STATUS } from '../../design/tokens';
 import { formatGel, formatDayMonth } from '../../utils/format';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
+import { Field, Input, Select } from '../../components/ui/Field';
+import { ruCountWord } from '../../utils/plural';
 
 const CATEGORIES = [
     { value: '', label: 'Без категории' },
@@ -802,10 +806,28 @@ function ApplicationsPanel({
     onEdit: (s: SpecialistExtended) => void;
 }) {
     const [busyId, setBusyId] = useState<string | null>(null);
+    const { confirm } = useConfirmDialog();
     const pending = specialists.filter(s => s.applicationStatus === 'pending');
     const decided = specialists.filter(s => s.applicationStatus === 'approved' || s.applicationStatus === 'rejected');
 
     const act = async (s: SpecialistExtended, kind: 'approve' | 'reject') => {
+        // Волна 4: одобрение сразу публикует анкету в каталоге — сначала вопрос.
+        const name = `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || 'специалиста';
+        const ok = await confirm(kind === 'approve'
+            ? {
+                title: `Одобрить заявку: ${name}?`,
+                body: 'Анкета сразу появится в каталоге на сайте, клиенты смогут записываться.',
+                confirmLabel: 'Одобрить и опубликовать',
+                cancelLabel: 'Не сейчас',
+            }
+            : {
+                title: `Отклонить заявку: ${name}?`,
+                body: 'Анкета не попадёт в каталог. Специалист увидит, что заявка отклонена.',
+                confirmLabel: 'Отклонить заявку',
+                cancelLabel: 'Не сейчас',
+                tone: 'danger',
+            });
+        if (!ok) return;
         setBusyId(s.id);
         try {
             await api.post(`/specialists/admin/${s.id}/${kind}`);
@@ -832,11 +854,11 @@ function ApplicationsPanel({
                     <div style={{ ...ghaMono, fontSize: 12, color: GH.ink60 }}>{s.category || '—'}</div>
                 </div>
             </div>
-            <div style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 14, color: GH.ink60, lineHeight: 1.4 }}>
                 {s.tagline || <span style={{ fontStyle: 'italic' }}>—</span>}
             </div>
             <div style={{ ...ghaMono, fontSize: 12 }}>
-                {(s.formats || []).length} формат{(s.formats || []).length === 1 ? '' : 'а'}
+                {ruCountWord((s.formats || []).length, ['формат', 'формата', 'форматов'])}
             </div>
             <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {s.basePriceGel ? formatGel(s.basePriceGel) : '—'}
@@ -938,6 +960,7 @@ export function AdminSpecialists() {
     const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
     const [activeId, setActiveId] = useState<string | null>(null);
     const [specFilter, setSpecFilter] = useState<string>('all');
+    const [nameQuery, setNameQuery] = useState('');
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -962,6 +985,21 @@ export function AdminSpecialists() {
     useEffect(() => { load(); }, []);
 
     const handleToggleVisibility = async (s: SpecialistExtended) => {
+        const name = `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || 'специалиста';
+        const ok = await confirm(s.isVerified
+            ? {
+                title: `Скрыть ${name} из каталога?`,
+                body: 'Клиенты перестанут видеть анкету на сайте. Вернуть можно в любой момент.',
+                confirmLabel: 'Скрыть из каталога',
+                cancelLabel: 'Оставить',
+            }
+            : {
+                title: `Опубликовать ${name} в каталоге?`,
+                body: 'Анкета сразу появится на сайте — проверьте фото, описание и цену.',
+                confirmLabel: 'Опубликовать',
+                cancelLabel: 'Не сейчас',
+            });
+        if (!ok) return;
         setToggling(s.id);
         try {
             await api.patch(`/specialists/admin/${s.id}`, { isVerified: !s.isVerified });
@@ -1046,16 +1084,20 @@ export function AdminSpecialists() {
         return Array.from(tags).sort((a, b) => a.localeCompare(b, 'ru'));
     }, [specialists]);
 
+    // Поиск по имени + один выпадающий «Специализация» вместо стены из 29 тегов (G8-20).
     const filteredSpecialists = useMemo(() => {
-        if (specFilter === 'all') return specialists;
-        return specialists.filter(s => (s.specializations ?? []).includes(specFilter));
-    }, [specialists, specFilter]);
+        const q = nameQuery.trim().toLowerCase();
+        return specialists.filter(s =>
+            (specFilter === 'all' || (s.specializations ?? []).includes(specFilter))
+            && (!q || `${s.firstName ?? ''} ${s.lastName ?? ''}`.toLowerCase().includes(q)));
+    }, [specialists, specFilter, nameQuery]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     return (
 
         <GridHouseAdminSpecialists
-            specialists={filteredSpecialists} loading={loading}
+            specialists={filteredSpecialists} allSpecialists={specialists} loading={loading}
+            nameQuery={nameQuery} setNameQuery={setNameQuery}
             activeTab={activeTab} setActiveTab={setActiveTab}
             viewMode={viewMode} setViewMode={setViewMode}
             canAcceptRequests={canAcceptRequests} verifiedCount={verifiedCount}
@@ -1085,6 +1127,10 @@ const ghaHairline = `1px solid ${GH.ink10}`;
 
 interface GHAdminSpecialistsProps {
     specialists: SpecialistExtended[];
+    /** Без фильтров — для заявок и счётчиков. */
+    allSpecialists: SpecialistExtended[];
+    nameQuery: string;
+    setNameQuery: (v: string) => void;
     loading: boolean;
     activeTab: 'specialists' | 'crm-requests' | 'applications';
     setActiveTab: (t: 'specialists' | 'crm-requests' | 'applications') => void;
@@ -1110,7 +1156,7 @@ interface GHAdminSpecialistsProps {
 
 function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
     const {
-        specialists, loading, activeTab, setActiveTab, viewMode, setViewMode,
+        specialists, allSpecialists, nameQuery, setNameQuery, loading, activeTab, setActiveTab, viewMode, setViewMode,
         canAcceptRequests, verifiedCount, editing, setEditing,
         toggling, deleting, handleToggleVisibility, handleDelete,
         sensors, handleDragStart, handleDragEnd, activeSpecialist, load,
@@ -1125,73 +1171,42 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
     };
     const activeSpec = specFilter !== 'all' ? specFilter : undefined;
 
-    const hiddenCount = specialists.length - verifiedCount;
+    const hiddenCount = allSpecialists.length - verifiedCount;
+    const filtersOn = nameQuery.trim() !== '' || specFilter !== 'all';
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
-            {/* ── Head ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 20, marginBottom: 32 }}>
-                <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 8 }}>Админка · специалисты</p>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-                    <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0 }}>
-                        Специалисты
-                    </h1>
-                    {activeTab === 'specialists' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            {/* Добавить специалиста в каталог ЗА человека (owner 2026-08).
-                                Открывает ту же форму с пустой карточкой (id='' →
-                                режим создания). Аккаунт не обязателен — каталожная
-                                карточка живёт и без логина. */}
-                            <button
-                                onClick={() => setEditing({ id: '', firstName: '', lastName: '', isVerified: true } as any)}
-                                style={{
-                                    padding: '8px 16px', border: 'none', cursor: 'pointer',
-                                    background: GH.ink, color: GH.paper,
-                                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
-                                    textTransform: 'uppercase', borderRadius: 8,
-                                }}>
-                                + Добавить специалиста
-                            </button>
-                        <div style={{ display: 'flex' }}>
+            {/* ── Head: H1 = пункт меню, итог строкой, без английского «ADMIN · SPECIALISTS» ── */}
+            <PageHeader
+                title="Специалисты"
+                description={loading ? undefined
+                    : `${ruCountWord(allSpecialists.length, ['анкета', 'анкеты', 'анкет'])} · в каталоге ${verifiedCount} · скрыто ${hiddenCount}`}
+                actions={activeTab === 'specialists' ? (
+                    <>
+                        {/* Добавить специалиста в каталог ЗА человека (owner 2026-08).
+                            Та же форма с пустой карточкой (id='' → режим создания). */}
+                        <Button onClick={() => setEditing({ id: '', firstName: '', lastName: '', isVerified: true } as any)}>
+                            Добавить специалиста
+                        </Button>
+                        <div role="group" aria-label="Вид списка" style={{ display: 'flex' }}>
                             {(['table', 'cards'] as const).map((m, i) => (
-                                <button key={m} onClick={() => setViewMode(m)}
+                                <button key={m} type="button" onClick={() => setViewMode(m)} aria-pressed={viewMode === m}
                                     style={{
-                                        padding: '6px 16px', border: 'none', cursor: 'pointer',
-                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
+                                        padding: '0 16px', minHeight: 36, cursor: 'pointer',
+                                        fontFamily: GH_SANS, fontSize: 14,
                                         background: viewMode === m ? GH.ink : 'transparent',
-                                        color: viewMode === m ? GH.paper : GH.ink60,
-                                        borderTop: ghaHairline, borderBottom: ghaHairline,
-                                        borderLeft: ghaHairline,
-                                        borderRight: i === 1 ? ghaHairline : 'none',
+                                        color: viewMode === m ? GH.paper : GH.ink,
+                                        border: ghaHairline,
+                                        borderLeft: i === 1 ? 'none' : ghaHairline,
+                                        borderRadius: i === 0 ? '8px 0 0 8px' : '0 8px 8px 0',
                                     }}>
-                                    {m === 'table' ? 'ТАБЛИЦА' : 'КАРТОЧКИ'}
+                                    {m === 'table' ? 'Таблица' : 'Карточки'}
                                 </button>
                             ))}
                         </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* ── KPI strip ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 32, marginBottom: 32, alignItems: 'end' }}>
-                <div>
-                    <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 4 }}>ВСЕГО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
-                        {specialists.length}
-                    </span>
-                </div>
-                <div style={{ display: 'flex', gap: 28, paddingBottom: 6, flexWrap: 'wrap' }}>
-                    <div>
-                        <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 2 }}>ВИДИМЫХ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.accent }}>{verifiedCount}</span>
-                    </div>
-                    <div>
-                        <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 2 }}>СКРЫТЫХ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.ink60 }}>{hiddenCount}</span>
-                    </div>
-                </div>
-            </div>
+                    </>
+                ) : undefined}
+            />
 
             {/* ── Tabs ── */}
             {/* "Заявки" appears unconditionally — every admin should be able
@@ -1201,13 +1216,13 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
             <div style={{ display: 'flex', gap: 0, borderBottom: ghaHairline, marginBottom: 24 }}>
                 {(['specialists', 'applications', ...(canAcceptRequests ? ['crm-requests' as const] : [])] as const).map(tab => {
                     const pendingCount = tab === 'applications'
-                        ? specialists.filter(s => s.applicationStatus === 'pending').length
+                        ? allSpecialists.filter(s => s.applicationStatus === 'pending').length
                         : 0;
                     return (
                         <button key={tab} onClick={() => setActiveTab(tab)}
                             style={{
                                 padding: '10px 20px', border: 'none', cursor: 'pointer',
-                                fontFamily: GH_SANS, fontSize: 13, fontWeight: 600,
+                                fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
                                 background: 'transparent',
                                 color: activeTab === tab ? GH.ink : GH.ink60,
                                 borderBottom: activeTab === tab ? `2px solid ${GH.ink}` : '2px solid transparent',
@@ -1235,37 +1250,48 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                 <CrmAccessRequests />
             ) : activeTab === 'applications' ? (
                 <ApplicationsPanel
-                    specialists={specialists}
+                    specialists={allSpecialists}
                     onChange={load}
                     onEdit={setEditing}
                 />
             ) : (
                 <>
-                    {/* Specialization filter tags (GH) */}
-                    {allSpecTags.length > 1 && setSpecFilter && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
-                            {['all', ...allSpecTags].map(tag => (
-                                <button key={tag} onClick={() => setSpecFilter(tag)}
-                                    style={{
-                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                        padding: '4px 12px', border: ghaHairline, cursor: 'pointer',
-                                        background: specFilter === tag ? GH.ink : 'transparent',
-                                        color: specFilter === tag ? GH.paper : GH.ink60,
-                                    }}>
-                                    {tag === 'all' ? 'Все' : tag}
-                                </button>
-                            ))}
+                    {/* Поиск по имени + один выпадающий список (G8-20) вместо 29 тегов. */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', marginBottom: 24 }}>
+                        <div style={{ flex: '1 1 260px', maxWidth: 360 }}>
+                            <Field label="Поиск по имени">
+                                <Input kind="search" value={nameQuery} onChange={e => setNameQuery(e.target.value)} placeholder="Имя или фамилия" />
+                            </Field>
                         </div>
-                    )}
+                        {allSpecTags.length > 1 && setSpecFilter && (
+                            <div style={{ flex: '0 1 280px' }}>
+                                <Field label="Специализация">
+                                    <Select value={specFilter} onChange={e => setSpecFilter(e.target.value)}>
+                                        <option value="all">Все специализации</option>
+                                        {allSpecTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                                    </Select>
+                                </Field>
+                            </div>
+                        )}
+                        {filtersOn && (
+                            <Button variant="quiet" onClick={() => { setNameQuery(''); setSpecFilter?.('all'); }}>
+                                Сбросить · найдено {specialists.length}
+                            </Button>
+                        )}
+                    </div>
                     {loading ? (
                         <SkeletonList count={4} label="Загружаем специалистов" />
+                    ) : specialists.length === 0 && filtersOn ? (
+                        <p style={{ padding: '24px 0', color: GH.ink60, fontSize: 14 }}>
+                            Никого не нашли — измените поиск или выберите «Все специализации».
+                        </p>
                     ) : (
                         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                             {viewMode === 'cards' ? (
                                 <>
                                     <div style={{ ...ghaMono, color: GH.ink60, padding: '8px 0', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <GripVertical size={12} />
-                                        ПЕРЕТАЩИТЕ ДЛЯ СОРТИРОВКИ
+                                        Перетащите, чтобы поменять порядок в каталоге
                                     </div>
                                     <SortableContext items={specialists.map(s => s.id)} strategy={rectSortingStrategy}>
                                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -1288,12 +1314,12 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                                     <div style={{
                                         display: 'grid',
-                                        gridTemplateColumns: '48px 1fr 140px 160px 72px 72px 56px',
+                                        gridTemplateColumns: '48px 1fr 180px 160px 72px 80px 56px',
                                         borderBottom: `2px solid ${GH.ink}`,
                                         padding: '8px 0',
                                         minWidth: 700,
                                     }}>
-                                        {['№', 'СПЕЦИАЛИСТ', 'КАТЕГОРИЯ', 'СПЕЦИАЛИЗАЦИИ', 'ЦЕНА', 'ПОКАЗ', ''].map((h, i) => (
+                                        {['№', 'Специалист', 'Категория', 'Специализации', 'Цена', 'В каталоге', ''].map((h, i) => (
                                             <span key={i} style={{ ...ghaMono, color: GH.ink60, padding: '0 8px' }}>{h}</span>
                                         ))}
                                     </div>
@@ -1337,11 +1363,6 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                 />
             )}
 
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghaMono, color: GH.ink60 }}>Unbox · админка</span>
-                <span style={{ ...ghaMono, color: GH.ink60 }}>2026</span>
-            </div>
         </div>
     );
 }
@@ -1364,9 +1385,9 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id, disabled: specialist.isOwner });
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform), transition,
-        opacity: isDragging ? 0.3 : specialist.isVerified ? 1 : 0.45,
+        opacity: isDragging ? 0.3 : 1,
         display: 'grid',
-        gridTemplateColumns: '48px 1fr 140px 160px 72px 72px 56px',
+        gridTemplateColumns: '48px 1fr 180px 160px 72px 80px 56px',
         alignItems: 'center',
         borderBottom: ghaHairline,
         padding: '10px 0',
@@ -1443,13 +1464,15 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
             {/* Visibility toggle */}
             <div style={{ padding: '0 8px' }}>
                 <button onClick={onToggleVisibility} disabled={toggling}
+                    aria-label={specialist.isVerified ? 'Виден в каталоге — скрыть' : 'Скрыт — опубликовать в каталоге'}
+                    title={specialist.isVerified ? 'Скрыть из каталога' : 'Опубликовать в каталоге'}
                     style={{
-                        border: 'none', cursor: 'pointer', padding: '3px 8px',
-                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: specialist.isVerified ? 'rgba(71,109,107,0.12)' : GH.ink5,
-                        color: specialist.isVerified ? GH.accent : GH.ink60,
+                        border: 'none', cursor: 'pointer', padding: '3px 8px', borderRadius: 4,
+                        fontFamily: GH_SANS, fontSize: 12, fontWeight: 500,
+                        background: specialist.isVerified ? STATUS.ok.bg : STATUS.muted.bg,
+                        color: specialist.isVerified ? STATUS.ok.fg : STATUS.muted.fg,
                     }}>
-                    {toggling ? '…' : specialist.isVerified ? 'ВКЛ' : 'ВЫКЛ'}
+                    {toggling ? '…' : specialist.isVerified ? 'Виден' : 'Скрыт'}
                 </button>
             </div>
 
