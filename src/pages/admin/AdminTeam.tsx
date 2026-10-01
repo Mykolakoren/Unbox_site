@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, X, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { Plus, Pencil, Trash2, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { teamApi, type TeamMember, type TeamMemberCreate } from '../../api/team';
-import { createPortal } from 'react-dom';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
+import { Field, Input, Select, TextArea } from '../../components/ui/Field';
+import { ruCountWord } from '../../utils/plural';
 
 /* ── Grid House module-scope constants (prefix: ght) ── */
 const ghtHairline = `1px solid ${GH.ink10}`;
@@ -17,14 +21,6 @@ const ghtMono: React.CSSProperties = {
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
-};
-const ghtH1: React.CSSProperties = {
-    fontFamily: GH_SANS,
-    fontWeight: 800,
-    fontSize: 'clamp(28px, 3.5vw, 42px)',
-    lineHeight: 0.95,
-    letterSpacing: '-0.02em',
-    margin: 0,
 };
 
 const ROLE_TYPES = [
@@ -75,6 +71,9 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
             : defaultForm()
     );
     const [saving, setSaving] = useState(false);
+    const [initial] = useState(() => JSON.stringify(form));
+    const dirty = JSON.stringify(form) !== initial;
+    const { confirm: askClose } = useConfirmDialog();
 
     const set = (k: keyof FormData, v: string | number | boolean) =>
         setForm(f => ({ ...f, [k]: v }));
@@ -108,126 +107,76 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
         }
     };
 
-    return createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-                <button onClick={onClose} className="absolute top-4 right-4 text-ink-60 hover:text-ink" aria-label="Закрыть">
-                    <X size={20} />
-                </button>
-                <h3 className="text-lg font-bold text-unbox-dark mb-5">
-                    {member ? 'Редактировать участника' : 'Новый участник'}
-                </h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Photo preview */}
-                    <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 shrink-0">
-                            {form.photo_url ? (
-                                <img src={form.photo_url} alt="" className="w-full h-full object-cover" />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center text-ink-60 text-2xl font-bold">
-                                    {form.name[0]?.toUpperCase() || '?'}
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex-1">
-                            <label className="block text-xs font-medium text-ink-80 mb-1">URL фото</label>
-                            <input
-                                type="url"
-                                value={form.photo_url}
-                                onChange={e => set('photo_url', e.target.value)}
-                                placeholder="https://..."
-                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                            />
-                        </div>
-                    </div>
+    // Окно на общем Sheet (G8-17): Esc, фокус внутри, «Сохранить» в подвале.
+    // Клик мимо с несохранёнными правками — сначала вопрос.
+    const requestClose = async () => {
+        if (saving) return;
+        if (!dirty) { onClose(); return; }
+        const ok = await askClose({
+            title: 'Закрыть без сохранения?',
+            body: 'Изменения в карточке пропадут.',
+            confirmLabel: 'Закрыть без сохранения',
+            cancelLabel: 'Вернуться к карточке',
+        });
+        if (ok) onClose();
+    };
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-xs font-medium text-ink-80 mb-1">Имя *</label>
-                            <input
-                                type="text"
-                                value={form.name}
-                                onChange={e => set('name', e.target.value)}
-                                placeholder="Николай"
-                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-medium text-ink-80 mb-1">Тип роли</label>
-                            <select
-                                value={form.role_type}
-                                onChange={e => set('role_type', e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                            >
-                                {ROLE_TYPES.map(r => (
-                                    <option key={r.value} value={r.value}>{r.label}</option>
-                                ))}
-                            </select>
-                        </div>
+    return (
+        <Sheet
+            open
+            onClose={requestClose}
+            title={member ? 'Карточка в команде' : 'Новый участник команды'}
+            description="Карточки показываются на странице «Команда» на сайте."
+            width={520}
+            footer={
+                <>
+                    <Button block type="submit" form="team-member-form" loading={saving}>
+                        {member ? 'Сохранить карточку' : 'Добавить в команду'}
+                    </Button>
+                    <Button block variant="secondary" onClick={requestClose} disabled={saving}>Отмена</Button>
+                </>
+            }
+        >
+            <form id="team-member-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
+                    <div style={{ width: 64, height: 64, overflow: 'hidden', background: GH.sunken, flexShrink: 0, display: 'grid', placeItems: 'center', fontSize: 24, fontWeight: 600, color: GH.ink60 }}>
+                        {form.photo_url
+                            ? <img src={form.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : (form.name[0]?.toUpperCase() || '?')}
                     </div>
-
-                    <div>
-                        <label className="block text-xs font-medium text-ink-80 mb-1">Должность (отображаемая) *</label>
-                        <input
-                            type="text"
-                            value={form.role}
-                            onChange={e => set('role', e.target.value)}
-                            placeholder="Основатель, Администратор..."
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                            required
-                        />
+                    <div style={{ flex: 1 }}>
+                        <Field label="Ссылка на фото" optional>
+                            <Input type="url" value={form.photo_url} onChange={e => set('photo_url', e.target.value)} placeholder="https://..." />
+                        </Field>
                     </div>
-
-                    <div>
-                        <label className="block text-xs font-medium text-ink-80 mb-1">Bio (необязательно)</label>
-                        <textarea
-                            value={form.bio}
-                            onChange={e => set('bio', e.target.value)}
-                            rows={3}
-                            placeholder="Краткое описание..."
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green resize-none"
-                        />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-xs font-medium text-ink-80 mb-1">Порядок</label>
-                            <input
-                                type="number"
-                                value={form.sort_order}
-                                onChange={e => set('sort_order', parseInt(e.target.value) || 0)}
-                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                            />
-                        </div>
-                        <div className="flex items-end pb-0.5">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={form.is_active}
-                                    onChange={e => set('is_active', e.target.checked)}
-                                    className="w-4 h-4 accent-unbox-green"
-                                />
-                                <span className="text-sm text-ink-80">Активен</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-2">
-                        <button type="button" onClick={onClose}
-                            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-ink-80 text-sm font-medium hover:bg-gray-50">
-                            Отмена
-                        </button>
-                        <button type="submit" disabled={saving}
-                            className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 disabled:opacity-60">
-                            {saving ? 'Сохранение...' : member ? 'Сохранить' : 'Добавить'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>,
-        document.body
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <Field label="Имя" required>
+                        <Input kind="name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="Николай" />
+                    </Field>
+                    <Field label="Тип роли">
+                        <Select value={form.role_type} onChange={e => set('role_type', e.target.value)}>
+                            {ROLE_TYPES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </Select>
+                    </Field>
+                </div>
+                <Field label="Должность на сайте" required>
+                    <Input value={form.role} onChange={e => set('role', e.target.value)} placeholder="Основатель, администратор…" />
+                </Field>
+                <Field label="О себе" optional>
+                    <TextArea value={form.bio} onChange={e => set('bio', e.target.value)} rows={3} placeholder="Пара предложений о человеке" />
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
+                    <Field label="Порядок на сайте" hint="Меньше — выше">
+                        <Input kind="integer" value={String(form.sort_order)} onChange={e => set('sort_order', parseInt(e.target.value.replace(/\D/g, '')) || 0)} />
+                    </Field>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, cursor: 'pointer', fontSize: 14 }}>
+                        <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+                        Показывать на сайте
+                    </label>
+                </div>
+            </form>
+        </Sheet>
     );
 }
 
@@ -269,11 +218,21 @@ export function AdminTeam() {
     };
 
     const handleToggleActive = async (m: TeamMember) => {
+        // Скрыть с сайта — с вопросом; показать обратно — сразу.
+        if (m.isActive) {
+            const ok = await confirm({
+                title: `Скрыть ${m.name} с сайта?`,
+                body: 'Карточка пропадёт со страницы «Команда». Вернуть можно в любой момент.',
+                confirmLabel: 'Скрыть с сайта',
+                cancelLabel: 'Оставить',
+            });
+            if (!ok) return;
+        }
         try {
             await teamApi.update(m.id, { is_active: !m.isActive });
             load();
         } catch {
-            toast.error('Ошибка');
+            toast.error('Не удалось изменить видимость карточки');
         }
     };
 
@@ -282,12 +241,6 @@ export function AdminTeam() {
         senior_admin: 'Ст. администратор',
         admin: 'Администратор',
         other: 'Другое',
-    };
-    const ROLE_COLORS: Record<string, string> = {
-        founder: 'bg-unbox-green/15 text-unbox-green',
-        senior_admin: 'bg-sunken text-ink-80',
-        admin: 'bg-gray-100 text-ink-80',
-        other: 'bg-gray-50 text-ink-60',
     };
 
     return (
@@ -331,58 +284,48 @@ function GridHouseTeam({
     editMember,
     load,
 }: GridHouseTeamProps) {
-    const total = String(members.length).padStart(3, '0');
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
     useEffect(() => {
         const h = () => setNarrow(window.innerWidth < 768);
         window.addEventListener('resize', h);
         return () => window.removeEventListener('resize', h);
     }, []);
+    const hidden = members.filter(m => !m.isActive).length;
+
+    const actionBtn: React.CSSProperties = {
+        flex: 1,
+        minHeight: 36,
+        background: 'transparent',
+        border: `1px solid ${GH.ink10}`,
+        cursor: 'pointer',
+        color: GH.ink,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        fontFamily: GH_SANS,
+        fontSize: 12,
+    };
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
-                <div style={{ ...ghtMono, marginBottom: narrow ? 8 : 14 }}>Раздел · Команда</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
-                    <h1 style={{ ...ghtH1, fontSize: narrow ? 24 : ghtH1.fontSize }}>Команда на витрине.</h1>
-                    <div style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                        {total}
-                    </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ ...ghtMono, color: GH.ink60, fontSize: 12 }}>
-                        {narrow ? 'Показаны на сайте' : 'Карточки показываются на главной странице сайта'}
-                    </div>
-                    <button
-                        onClick={() => setEditMember(null)}
-                        style={{
-                            background: GH.ink,
-                            color: GH.paper,
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase' as const,
-                            padding: narrow ? '10px 14px' : '14px 22px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            whiteSpace: 'nowrap' as const,
-                        }}
-                    >
-                        <Plus size={narrow ? 12 : 14} /> Добавить
-                    </button>
-                </div>
-            </div>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            {/* ── Header: H1 = пункт меню, без «004» и «Команда на витрине.» (G8-11) ── */}
+            <PageHeader
+                title="Команда"
+                description={loading ? 'Карточки команды на странице «Команда» сайта.'
+                    : `${ruCountWord(members.length, ['карточка', 'карточки', 'карточек'])} на сайте${hidden > 0 ? ` · скрыто ${hidden}` : ''}. Порядок задаётся полем «Порядок на сайте».`}
+                actions={
+                    <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => setEditMember(null)}>
+                        Добавить в команду
+                    </Button>
+                }
+            />
 
             {/* ── Content ── */}
             {loading ? (
                 <SkeletonList count={4} label="Загружаем команду" />
             ) : members.length === 0 ? (
-                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghtHairline, padding: '48px 24px' }}>
+                <div style={{ border: ghtHairline, background: GH.card }}>
                     <EmptyState
                         title="Команда пока не собрана"
                         hint="Добавьте первого участника — он появится на странице «Команда»."
@@ -395,55 +338,39 @@ function GridHouseTeam({
                         display: 'grid',
                         gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
                         gap: 0,
-                        borderTop: `2px solid ${GH.ink}`,
-                        borderLeft: narrow ? undefined : ghtHairline,
+                        borderTop: ghtHairline,
+                        borderLeft: ghtHairline,
                     }}
                 >
-                    {members.map((m, idx) => (
+                    {members.map(m => (
                         <div
                             key={m.id}
                             style={{
                                 borderRight: ghtHairline,
                                 borderBottom: ghtHairline,
-                                background: GH.paper,
-                                opacity: m.isActive ? 1 : 0.5,
+                                background: GH.card,
                                 display: 'flex',
                                 flexDirection: 'column',
                             }}
                         >
                             {/* Photo / initial */}
-                            <div style={{ borderBottom: ghtHairline, aspectRatio: '3 / 4', position: 'relative', background: GH.paper, overflow: 'hidden' }}>
+                            <div style={{ borderBottom: ghtHairline, aspectRatio: '3 / 4', position: 'relative', background: GH.sunken, overflow: 'hidden' }}>
                                 {m.photoUrl ? (
-                                    <img src={m.photoUrl} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                    <img src={m.photoUrl} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: m.isActive ? 1 : 0.5 }} />
                                 ) : (
                                     <div
+                                        aria-hidden="true"
                                         style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontFamily: GH_SANS,
-                                            fontWeight: 800,
-                                            fontSize: 'clamp(80px, 12vw, 140px)',
-                                            lineHeight: 0.8,
-                                            letterSpacing: '-0.04em',
-                                            color: GH.ink,
-                                            userSelect: 'none',
+                                            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            fontFamily: GH_SANS, fontWeight: 600, fontSize: 64, color: GH.ink60, userSelect: 'none',
                                         }}
                                     >
                                         {m.name[0]}
                                     </div>
                                 )}
-                                <div style={{ position: 'absolute', top: 10, left: 12, ...ghtMono, color: GH.ink60, background: GH.paper, padding: '2px 6px', fontVariantNumeric: 'tabular-nums' }}>
-                                    {String(idx + 1).padStart(2, '0')}
-                                </div>
-                                <div style={{ position: 'absolute', top: 10, right: 12, ...ghtMono, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <GripVertical size={11} /> {m.sortOrder}
-                                </div>
                                 {!m.isActive && (
-                                    <div style={{ position: 'absolute', bottom: 10, left: 12, ...ghtMono, background: GH.ink, color: GH.paper, padding: '3px 7px' }}>
-                                        Скрыт
+                                    <div style={{ position: 'absolute', bottom: 10, left: 12, fontSize: 12, fontWeight: 500, background: GH.ink, color: GH.paper, padding: '3px 8px' }}>
+                                        Скрыт с сайта
                                     </div>
                                 )}
                             </div>
@@ -451,140 +378,59 @@ function GridHouseTeam({
                             {/* Body */}
                             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
                                 <div>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, lineHeight: 1.15 }}>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1.2 }}>
                                         {m.name}
                                     </div>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 13, color: GH.ink60, marginTop: 3, letterSpacing: '-0.005em' }}>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60, marginTop: 3 }}>
                                         {m.role}
                                     </div>
                                 </div>
-                                <div>
-                                    <span
-                                        style={{
-                                            fontFamily: GH_MONO,
-                                            fontSize: 12,
-                                            fontWeight: 600,
-                                            letterSpacing: '0.06em',
-                                            textTransform: 'uppercase',
-                                            padding: '4px 8px',
-                                            color: m.roleType === 'founder' ? GH.paper : GH.ink,
-                                            background: m.roleType === 'founder' ? GH.ink : 'transparent',
-                                            border: `1px solid ${GH.ink}`,
-                                        }}
-                                    >
-                                        {ROLE_LABEL[m.roleType] ?? m.roleType}
-                                    </span>
+                                <div style={{ ...ghtMono, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    <span>{ROLE_LABEL[m.roleType] ?? m.roleType}</span>
+                                    <span aria-hidden="true">·</span>
+                                    <span>порядок {m.sortOrder}</span>
                                 </div>
                                 {m.bio && (
                                     <div
                                         style={{
-                                            fontSize: 12,
-                                            lineHeight: 1.45,
-                                            color: GH.ink60,
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 2,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
+                                            fontSize: 12, lineHeight: 1.45, color: GH.ink60,
+                                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
                                         }}
                                     >
                                         {m.bio}
                                     </div>
                                 )}
+                                {/* Действия подписаны: значок + слово, корзина отделена и краснеет только при наведении (G8-19). */}
                                 <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: ghtHairline, display: 'flex', gap: 4 }}>
-                                    <button
-                                        onClick={() => setEditMember(m)}
-                                        title="Править"
-                                        style={{
-                                            flex: 1,
-                                            height: 30,
-                                            background: 'transparent',
-                                            border: `1px solid ${GH.ink10}`,
-                                            cursor: 'pointer',
-                                            color: GH.ink60,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}
-                                    >
-                                        <Pencil size={12} />
+                                    <button type="button" onClick={() => setEditMember(m)} aria-label={`Править карточку: ${m.name}`} style={actionBtn}>
+                                        <Pencil size={14} aria-hidden="true" /> Править
                                     </button>
                                     <button
+                                        type="button"
                                         onClick={() => handleToggleActive(m)}
-                                        title={m.isActive ? 'Скрыть' : 'Показать'}
-                                        style={{
-                                            flex: 1,
-                                            height: 30,
-                                            background: 'transparent',
-                                            border: `1px solid ${GH.ink10}`,
-                                            cursor: 'pointer',
-                                            color: GH.ink60,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}
+                                        aria-label={m.isActive ? `Скрыть с сайта: ${m.name}` : `Показать на сайте: ${m.name}`}
+                                        style={actionBtn}
                                     >
-                                        {m.isActive ? <EyeOff size={12} /> : <Eye size={12} />}
+                                        {m.isActive ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
+                                        {m.isActive ? 'Скрыть' : 'Показать'}
                                     </button>
                                     <button
+                                        type="button"
                                         onClick={() => handleDelete(m)}
-                                        title="Удалить"
-                                        style={{
-                                            flex: 1,
-                                            height: 30,
-                                            background: 'transparent',
-                                            border: `1px solid ${GH.ink10}`,
-                                            cursor: 'pointer',
-                                            color: GH.ink60,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}
-                                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = GH.danger; e.currentTarget.style.color = GH.danger; }}
-                                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = GH.ink10; e.currentTarget.style.color = GH.ink60; }}
+                                        title="Удалить из команды"
+                                        aria-label={`Удалить из команды: ${m.name}`}
+                                        className="team-trash"
+                                        style={{ ...actionBtn, flex: '0 0 36px', marginLeft: 4, color: GH.ink60 }}
                                     >
-                                        <Trash2 size={12} />
+                                        <Trash2 size={14} aria-hidden="true" />
                                     </button>
                                 </div>
                             </div>
                         </div>
                     ))}
-
-                    {/* Add slot */}
-                    <button
-                        onClick={() => setEditMember(null)}
-                        style={{
-                            borderRight: ghtHairline,
-                            borderBottom: ghtHairline,
-                            background: GH.ink5,
-                            minHeight: 260,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 14,
-                            cursor: 'pointer',
-                            color: GH.ink60,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = GH.paper; e.currentTarget.style.color = GH.ink; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = GH.ink5; e.currentTarget.style.color = GH.ink60; }}
-                    >
-                        <div style={{ width: 44, height: 44, border: '2px dashed currentColor', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Plus size={20} />
-                        </div>
-                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                            → Добавить
-                        </div>
-                    </button>
                 </div>
             )}
-
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ ...ghtMono, color: GH.ink60 }}>Unbox · админка · 2026</div>
-                <div style={{ ...ghtMono, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
-                    {total} участников
-                </div>
-            </div>
+            <style>{`.team-trash:hover { color: var(--status-danger-fg) !important; border-color: var(--status-danger-fg) !important; }`}</style>
 
             {editMember !== undefined && (
                 <MemberModal
