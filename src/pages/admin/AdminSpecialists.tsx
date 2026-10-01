@@ -860,7 +860,7 @@ function ApplicationsPanel({
             <div style={{ ...ghaMono, fontSize: 12 }}>
                 {ruCountWord((s.formats || []).length, ['формат', 'формата', 'форматов'])}
             </div>
-            <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            <div className="num" style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {s.basePriceGel ? formatGel(s.basePriceGel) : '—'}
             </div>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
@@ -1459,7 +1459,7 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
             </div>
 
             {/* Price */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, padding: '0 8px' }}>{formatGel(specialist.basePriceGel)}</div>
+            <div className="num" style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, padding: '0 8px' }}>{formatGel(specialist.basePriceGel)}</div>
 
             {/* Visibility toggle */}
             <div style={{ padding: '0 8px' }}>

@@ -953,7 +953,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             </span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                                                 <StatusBadge kind="booking" status={booking.status} audience="staff" />
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                                <span className="num" style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
                                                     {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
                                                 </span>
                                             </div>

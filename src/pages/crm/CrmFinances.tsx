@@ -407,7 +407,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                     <span style={{ fontSize: 13, color: GH.ink60, whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>
                                         {count} {sessionsWord(count)}
                                     </span>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: GH.danger, whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
+                                    <span className="num" style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: GH.danger, whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
                                         {formatMoney(total, { currency: client.currency })}
                                     </span>
                                     <span style={{ display: 'flex', gap: 8, marginLeft: 'auto', minWidth: 250, justifyContent: 'flex-end' }}>
@@ -478,7 +478,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                     <div style={{ fontFamily: GH_MONO, fontSize: 13, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
                                         {formatDayMonth(when, { withYear: 'auto' })} · {formatTime(when)}
                                     </div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginLeft: 'auto', whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
+                                    <div className="num" style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginLeft: 'auto', whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right' }}>
                                         {formatMoney(pay.amount, { currency: pay.currency, sign: true })}
                                     </div>
                                 </>

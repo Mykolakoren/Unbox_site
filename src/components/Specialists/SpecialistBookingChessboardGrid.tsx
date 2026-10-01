@@ -420,7 +420,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                     ].map(({ label, value, mono, bold }: { label: string; value: string; mono: boolean; bold?: boolean }) => (
                         <div key={label} style={{ display: 'contents' }}>
                             <dt style={{ ...monoCaps, color: GH.ink60 }}>{label}</dt>
-                            <dd style={{ margin: 0, color: GH.ink, fontWeight: bold ? 600 : 500, fontFamily: mono ? MONO : SANS }}>{value}</dd>
+                            <dd className={mono ? 'num' : undefined} style={{ margin: 0, color: GH.ink, fontWeight: bold ? 600 : 500, fontFamily: mono ? MONO : SANS }}>{value}</dd>
                         </div>
                     ))}
                 </dl>

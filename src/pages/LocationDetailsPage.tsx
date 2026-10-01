@@ -229,7 +229,7 @@ function GridHouseLocationDetails({
                         {minRate != null && (
                             <div style={{ padding: 16 }}>
                                 <div style={{ ...ghldMono, color: GH.ink60, marginBottom: 6 }}>Цена от</div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 40, fontWeight: 600, lineHeight: 1, color: GH.accent }}>
+                                <div className="num" style={{ fontFamily: GH_MONO, fontSize: 40, fontWeight: 600, lineHeight: 1, color: GH.accent }}>
                                     {formatGel(minRate)}
                                 </div>
                                 <div style={{ fontSize: 12, color: GH.ink60, marginTop: 4 }}>в час</div>

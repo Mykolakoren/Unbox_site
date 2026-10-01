@@ -848,7 +848,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 }}
                             >
                                 <span>{opt.label}</span>
-                                <span style={{ fontSize: 12, color: active ? COLOR.onInk : GH.ink60, fontFamily: GH_MONO }}>
+                                <span className="num" style={{ fontSize: 12, color: active ? COLOR.onInk : GH.ink60, fontFamily: GH_MONO }}>
                                     {opt.price} ₾/ч
                                 </span>
                             </button>
@@ -1185,7 +1185,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     title={`${opt.price} ₾/час`}
                                 >
                                     {opt.label}
-                                    <span style={{
+                                    <span className="num" style={{
                                         marginLeft: 6,
                                         fontSize: 12,
                                         color: active ? COLOR.onInk : GH.ink60,

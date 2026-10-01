@@ -823,11 +823,11 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{title}</div>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                                                             <span style={{ color: GH.ink60 }}>Ожидалось</span>
-                                                            <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.expected || 0), { fraction: 0 })}</span>
+                                                            <span className="num" style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.expected || 0), { fraction: 0 })}</span>
                                                         </div>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                                                             <span style={{ color: GH.ink60 }}>Получено</span>
-                                                            <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.received || 0), { fraction: 0 })}</span>
+                                                            <span className="num" style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.received || 0), { fraction: 0 })}</span>
                                                         </div>
                                                         <div style={{ color: GH.ink60, paddingTop: '6px', borderTop: hairline }}>
                                                             {data.sessionCount || 0} {sessionsWord(data.sessionCount || 0)}
@@ -917,7 +917,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         {startT}–{endStr}
                                     </span>
                                     <span style={{ fontSize: 14 }}>{res?.name || b.resourceId}</span>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600 }}>
+                                    <span className="num" style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600 }}>
                                         {b.finalPrice ? formatGel(b.finalPrice) : '—'}
                                     </span>
                                 </Link>

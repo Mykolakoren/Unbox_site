@@ -154,7 +154,7 @@ function GHCard({ specialist, compact, hasOnline, hasOffline, hasOfflineRoom, ha
                         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {formatText && <div style={{ fontSize: 12, color: GH.ink60 }}>{formatText}</div>}
                             {price !== null && (
-                                <div style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                <div className="num" style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
                                     от {formatGel(price)}
                                 </div>
                             )}

@@ -614,7 +614,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                             <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink }}>{debtor.name}</div>
                                             <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, marginTop: 2 }}>{debtor.email}</div>
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, textAlign: 'right' }}>
+                                        <div className="num" style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, textAlign: 'right' }}>
                                             {formatGel(debtor.balance, { fraction: 0 })}
                                         </div>
                                         <ChevronRight size={16} color={GH.ink60} />
@@ -777,7 +777,7 @@ function GHClientCard({
                         {user.phone || user.email}
                     </div>
                     {user.balance !== 0 && (
-                        <div style={{
+                        <div className="num" style={{
                             fontFamily: GH_MONO,
                             fontSize: 12,
                             fontWeight: 700,

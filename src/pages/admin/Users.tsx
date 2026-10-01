@@ -485,7 +485,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 </div>
                             </div>
                             {/* Balance */}
-                            <div style={{
+                            <div className="num" style={{
                                 fontFamily: GH_MONO, fontSize: 13, fontWeight: 700,
                                 color: user.balance < 0 ? GH.danger : GH.ink,
                                 fontVariantNumeric: 'tabular-nums',
@@ -550,7 +550,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                             <span style={{ fontSize: 14, color: user.role && user.role !== 'user' ? GH.ink : GH.ink60 }}>
                                 {roleLabel(user.role)}
                             </span>
-                            <div style={{
+                            <div className="num" style={{
                                 fontFamily: GH_MONO,
                                 fontSize: 14,
                                 fontWeight: 600,

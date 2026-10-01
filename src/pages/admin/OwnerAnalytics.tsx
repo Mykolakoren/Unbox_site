@@ -313,7 +313,7 @@ export function OwnerAnalytics() {
                                         {history.map(h => (
                                             <tr key={h.month} style={{ borderTop: `1px solid ${GH.ink10}` }}>
                                                 <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{formatMonthLabel(`${h.month.slice(0, 7)}-15`, { capitalize: true })}</td>
-                                                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: GH_MONO, whiteSpace: 'nowrap' }}>{formatGel(h.revenue, { fraction: 0 })}</td>
+                                                <td className="num" style={{ padding: '8px 10px', textAlign: 'right', fontFamily: GH_MONO, whiteSpace: 'nowrap' }}>{formatGel(h.revenue, { fraction: 0 })}</td>
                                                 <td style={{ padding: '8px 10px' }}>
                                                     <div style={{ height: 8, background: GH.ink10 }}>
                                                         <div style={{ height: '100%', width: `${Math.max(2, (h.revenue / maxHistRev) * 100)}%`, background: GH.accent }} />

@@ -842,7 +842,7 @@ function SpecialistRow({ specialist, narrow }: { specialist: Specialist; narrow:
             <div style={{ textAlign: 'right', paddingLeft: 8 }}>
                 {price !== null && (
                     <>
-                        <div
+                        <div className="num"
                             style={{
                                 fontFamily: GH_MONO,
                                 fontSize: narrow ? 14 : 16,
