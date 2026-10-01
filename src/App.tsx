@@ -95,6 +95,8 @@ const MobileAdminKB = lazy(() => import('./pages/mobile/admin/MobileAdminKB').th
 const MobileAdminBookings = lazy(() => import('./pages/mobile/admin/MobileAdminBookings').then(m => ({ default: m.MobileAdminBookings })));
 const MobileAdminCrm = lazy(() => import('./pages/mobile/admin/MobileAdminCrm').then(m => ({ default: m.MobileAdminCrm })));
 const MobileAdminWaitlist = lazy(() => import('./pages/mobile/admin/MobileAdminWaitlist').then(m => ({ default: m.MobileAdminWaitlist })));
+const MobileAdminUserCard = lazy(() => import('./pages/mobile/admin/MobileAdminUserCard').then(m => ({ default: m.MobileAdminUserCard })));
+const MobileAdminAccessRights = lazy(() => import('./pages/mobile/admin/MobileAdminAccessRights').then(m => ({ default: m.MobileAdminAccessRights })));
 const MobileSpecialists = lazy(() => import('./pages/mobile/MobileSpecialists').then(m => ({ default: m.MobileSpecialists })));
 const MobileSubscription = lazy(() => import('./pages/mobile/MobileSubscription').then(m => ({ default: m.MobileSubscription })));
 const MobileBonuses = lazy(() => import('./pages/mobile/MobileBonuses').then(m => ({ default: m.MobileBonuses })));
@@ -197,6 +199,8 @@ function App() {
         // в /m/admin/dashboard, и заявку/пользователя приходилось искать.
         [/^\/admin\/users\/([^/]+)\/?$/, '/m/admin/users/$1'],
         [/^\/admin\/knowledge-base\/?$/, '/m/admin/kb'],
+        // Волна 4 (G8-06): «Обслуживание» на телефоне — вкладка в «Кабинетах».
+        [/^\/admin\/maintenance\/?$/, '/m/admin/cabinets?tab=maintenance'],
         [/^\/admin\/(bookings|users|finance|tasks|specialists|crm|cabinets|team|waitlist|access-rights)\/?$/, '/m/admin/$1'],
         [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // остальные разделы админки
         [/^\/crm\/?$/, '/m/crm'],
@@ -226,7 +230,9 @@ function App() {
             // Preserve query+hash — deep-links like ?series=<group_id>
             // from Telegram reminders rely on the param surviving the
             // /dashboard/* → /m/* hop.
-            const tail = window.location.search + window.location.hash;
+            // У цели может быть свой ?tab= — тогда параметры адреса через «&».
+            const search = window.location.search;
+            const tail = (resolved.includes('?') && search ? '&' + search.slice(1) : search) + window.location.hash;
             window.history.replaceState({}, '', resolved + tail);
             window.dispatchEvent(new PopStateEvent('popstate'));
             break;
@@ -406,7 +412,8 @@ function App() {
           <Route path="dashboard" element={<MobileAdminDashboard />} />
           <Route path="tasks" element={<MobileAdminTasks />} />
           <Route path="users" element={<MobileAdminUsers />} />
-          <Route path="users/:email" element={<AdminUserDetails />} />
+          {/* Волна 4 (G9-04): нативная карточка — баланс первым, не десктопная страница. */}
+          <Route path="users/:email" element={<MobileAdminUserCard />} />
           <Route path="inbox" element={<MobileAdminInbox />} />
           <Route path="finance" element={<MobileAdminFinance />} />
           <Route path="cabinets" element={<MobileAdminCabinets />} />
@@ -420,7 +427,7 @@ function App() {
               т.к. их верстка уже flex-based и нормально работает. */}
           <Route path="bookings" element={<MobileAdminBookings />} />
           <Route path="crm" element={<MobileAdminCrm />} />
-          <Route path="access-rights" element={<AdminAccessRights />} />
+          <Route path="access-rights" element={<MobileAdminAccessRights />} />
           <Route path="waitlist" element={<MobileAdminWaitlist />} />
         </Route>
 
