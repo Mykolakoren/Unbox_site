@@ -12,7 +12,13 @@ import { ErrorBar } from '../../components/ui/ErrorBar';
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 });
 
 function firstOfMonth(d = new Date()) { return new Date(d.getFullYear(), d.getMonth(), 1); }
-function iso(d: Date) { return d.toISOString().slice(0, 10); }
+/** «2026-10-01» из локальной даты (полночь месяца). Не через toISOString: она
+ *  даёт UTC, и в Батуми (UTC+4) 1 октября 00:00 превращалось в «2026-09-30» —
+ *  «Этот месяц» ставил 30.09–01.10. */
+function iso(d: Date) {
+    const m = d.getMonth() + 1, day = d.getDate();
+    return `${d.getFullYear()}-${m < 10 ? '0' : ''}${m}-${day < 10 ? '0' : ''}${day}`;
+}
 
 export function OwnerAnalytics() {
     const currentUser = useUserStore(s => s.currentUser);
