@@ -24,6 +24,22 @@
   * Карточка клиента на телефоне снова декодирует :email второй раз
     (decodeURIComponent поверх useParams роняет страницу на «%»).
 
+  Доработка по демо-проверке (01.10, вечер):
+  * «Принять оплату» на компьютере снова «Не указан» филиал — приход не
+    попадал в остаток ни Uni, ни One. Филиал — по кабинету брони
+    (cashBranchOfBooking), не определился — окно не пишет без выбора.
+  * Шторка «Кабинет не закрыт» снова пишет «✓ оплачено» по payment_status,
+    хотя «Сегодня» и шахматка у той же брони — «к оплате 7 ₾».
+  * «Должны · N» на компьютере снова считает брони (на телефоне — клиентов).
+  * Строка «Касса: … наличные» не перечитывается после «Принять оплату».
+  * Брони архивного клиента — снова началом почты; или архив подмешан в
+    деньги (todayRows/byClient получают архивных клиентов).
+  * Вид: «Кто придёт» без фиксированных колонок (имя в 3 строки); в шахматке
+    «оплачено» в коротком блоке; плавающий «+» на «Сегодня» поверх строк;
+    роль в «Команде» в одну строку с подписью; /admin/users снова «Реестр
+    клиентов» вместо «Клиенты».
+  * «Аналитика»: «Этот месяц» снова через toISOString (30.09 вместо 01.10).
+
 Без сети и боевой базы (SQLite в памяти + node + чтение исходников):
     python3 backend/tests/guard_wave4_polish.py
 """
@@ -321,6 +337,105 @@ def test_user_card_no_double_decode():
     card = _code(MADMIN + "MobileAdminUserCard.tsx")
     assert "decodeURIComponent(" not in card, "двойной decodeURIComponent поверх useParams — URIError на «%»"
     assert "const param = rawParam || '';" in card
+
+
+# ── 8. Доработка по демо-проверке (01.10, вечер) ─────────────────────────
+
+def test_desktop_accept_payment_branch():
+    hints = _code(COMP + "BookingMoneyHints.tsx")
+    assert "branch={cashBranchOfBooking(booking)}" in hints, "попап брони: «Принять оплату» без филиала брони"
+    btn = hints[hints.index("export function AcceptPaymentButton("):]
+    assert "defaultBranch={branch}" in btn and "requireBranch" in btn, \
+        "«Принять оплату» снова с филиалом «Не указан» — приход мимо остатка Uni/One"
+    dash = _code(ADMIN + "Dashboard.tsx")
+    row = dash[dash.index("function CollectRow("):dash.index("function RecentBookings(")]
+    assert "cashBranchOfBooking({ resourceId: c.rows[0].cabinetId })" in row, "«Взять сегодня»: филиал не по кабинету брони"
+    modal = _code(COMP + "modals/AddFundsModal.tsx")
+    i = modal.index("const handleSubmit = ")
+    body = modal[i:modal.index("return createPortal(", i)]
+    gate = body.find("if (requireBranch && !branch) {")
+    assert gate != -1 and gate < body.find("onConfirm("), "без филиала оплата всё равно записывается"
+    assert "onConfirm(value, method, branch || undefined);" in body, "тело оплаты изменилось — только значение branch"
+    assert "aria-invalid={branchMissing || undefined}" in modal and "Выберите филиал" in modal, "поле филиала не подсвечено"
+    assert "BRANCHES.includes(defaultBranch)" in modal, "подставляется филиал не из списка кассы (Neo School)"
+    util = _code("src/utils/cashBranch.ts")
+    assert "export const CASH_BRANCHES = ['Unbox Uni', 'Unbox One'] as const;" in util
+    assert "export function cashBranchOfBooking(" in util and "CASH_BRANCHES as readonly string[]).includes(name)" in util
+    assert "from '../../../utils/cashBranch'" in _code(MADMIN + "adminPayment.ts"), "телефон и компьютер считают филиал по-разному"
+
+
+def test_conflict_sheet_no_paid_mark():
+    sheet = _code(COMP + "MaintenanceConflictSheet.tsx")
+    assert "DueBadge" not in sheet and "оплачено" not in sheet and "к оплате" not in sheet, \
+        "шторка «Кабинет не закрыт» снова «✓ оплачено / к оплате» не по dueMap — расходится с «Сегодня»"
+    assert "'списана с баланса'" in sheet, "нет нейтральной подписи «списана с баланса»"
+
+
+def test_desktop_due_segment_counts_clients():
+    dash = _code(ADMIN + "Dashboard.tsx")
+    assert "label: `Должны · ${summary.clients}`" in dash, "«Должны · N» на компьютере снова считает брони, а не клиентов"
+    mob = _code(MADMIN + "MobileAdminDashboard.tsx")
+    assert "`Должны · ${owing.length}`" in mob
+
+
+def test_cash_line_reloads_after_payment():
+    dash = _code(ADMIN + "Dashboard.tsx")
+    assert "}, [canCash, cashReq]);" in dash, "строка кассы не перечитывается"
+    assert "onPaid={reloadCash}" in dash and "onPaid={onPaid}" in dash, "после «Принять оплату» касса не обновляется"
+    hints = _code(COMP + "BookingMoneyHints.tsx")
+    assert "onConfirm={async (amount, method, b) => { await handleConfirm(amount, method, b); onPaid?.(); }}" in hints
+
+
+def test_archived_clients_named_not_counted():
+    hook = _code("src/hooks/useArchivedClients.ts")
+    assert "usersApi.getUsers(0, 5000, true)" in hook and "if (!u?.archivedAt) continue;" in hook
+    assert "cache" in hook, "архив грузится на каждую отрисовку"
+    for rel, feed in ((ADMIN + "Dashboard.tsx", "todayRows({ bookings, users, dueMap, dayKey, resources })"),
+                      (MADMIN + "MobileAdminDashboard.tsx", "todayRows({ bookings, users, dueMap, dayKey: todayKey, resources: RESOURCE_NAMES })")):
+        src = _code(rel)
+        assert "useArchivedClients(missingUserIds)" in src, f"{rel}: бронь архивного клиента снова началом почты"
+        assert ">архив<" in src, f"{rel}: нет пометки «архив»"
+        assert feed in src, f"{rel}: архивные клиенты подмешаны в деньги «Сегодня»"
+        assert "byClient(rows, users)" in src or "byClient(rowsToday, users)" in src
+
+
+def test_visual_polish_today_chess_team_users():
+    dash = _code(ADMIN + "Dashboard.tsx")
+    assert "tableLayout: 'fixed'" in dash and "<colgroup>" in dash, "«Кто придёт»: колонка клиента снова узкая"
+    chess = _code("src/components/admin/AdminChessboardView.tsx")
+    assert "const roomy = (cell.colspan ?? 1) >= 4;" in chess
+    assert "{roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}" in chess, "«оплачено» снова в коротком блоке"
+    assert "title={markLabel} aria-label={markLabel}" in chess, "у «✓» в коротком блоке нет подписи"
+    mob = _code(MADMIN + "MobileAdminDashboard.tsx")
+    assert "position: 'fixed'" not in mob, "«+» на «Сегодня» снова плавает поверх отметок оплаты"
+    assert 'aria-label="Новая бронь"' in mob
+    mb = _code(MADMIN + "MobileAdminBookings.tsx")
+    assert "paddingTop: 12, paddingBottom: 96" in mb, "«+» в «Бронях» закрывает последнюю строку"
+    team = _code(MADMIN + "MobileAdminTeam.tsx")
+    assert "maxWidth: '100%'" in team and "overflowWrap: 'anywhere'" in team, "роль в «Команде» снова обрезается"
+    users = _code(ADMIN + "Users.tsx")
+    assert '<PageHeader\n                title="Клиенты"' in users, "/admin/users: H1 не «Клиенты» (как в меню)"
+    assert "Реестр клиентов" not in users
+    assert "label: 'Клиенты'" in _code(ADMIN + "AdminLayout.tsx")
+
+
+def test_analytics_month_preset_local_date():
+    src = _read(ADMIN + "OwnerAnalytics.tsx")
+    assert "toISOString" not in _strip_comments(src), "«Аналитика»: даты снова через UTC (30.09 вместо 01.10)"
+    m = re.search(r"function firstOfMonth\(.*?\n(function iso\(d: Date\) \{.*?\n\})", src, flags=re.S)
+    assert m, "нет функций firstOfMonth / iso"
+    first = re.search(r"function firstOfMonth\(.*?\}\n", src).group(0)
+    node = _node()
+    if not node:
+        return
+    js = first.replace("(d = new Date())", "(d)") + re.sub(r"\(d: Date\)", "(d)", m.group(1)) + """
+const now = new Date(2026, 9, 1, 0, 30);
+console.log(JSON.stringify({ from: iso(firstOfMonth(now)), to: iso(now) }));
+"""
+    r = subprocess.run([node, "--input-type=module", "-e", js], capture_output=True, text=True,
+                       env={**os.environ, "TZ": "Asia/Tbilisi"}, timeout=30)
+    assert r.returncode == 0, r.stderr[:400]
+    assert json.loads(r.stdout.strip()) == {"from": "2026-10-01", "to": "2026-10-01"}, r.stdout
 
 
 if __name__ == "__main__":
