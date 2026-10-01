@@ -26,26 +26,30 @@ def _try_move_linked_booking(
     new_duration: int,
     specialist_id: str,
 ) -> None:
-    """Mirror a CRM session move onto its linked cabinet booking.
+    """Сессию перенесли в Google Calendar — что делать с бронью кабинета за ней.
 
-    Called from the sync update path when GCal reports a session at a new
-    time. Three outcomes:
-      A) Linked booking moves cleanly                            → booking updated
-      B) Slot is occupied in the same cabinet → look for free
-         alternatives at the new time across all resources       → notification with options
-      C) Booking not found / not confirmed                       → no-op, log warning
+    01.10 (денежный ревизор): синк больше НЕ двигает бронь сам. Раньше он
+    менял date/start_time/duration брони без пересчёта цены: перенос
+    18:00 → 20:00 оставлял final_price/charge_amount от старого времени
+    (пиковая надбавка терялась или клиент переплачивал), а событие 60 → 180
+    мин давало 3 часа кабинета по цене часа (у абонемента не менялся
+    hours_deducted). Проверок reschedule_booking (прошлое, waived, абонемент,
+    бонус) тоже не было.
 
-    No GCal write-back here — the calendar already shows the new time
-    (that's how we got here). We just keep the cabinet booking in sync.
+    Двигать можно было бы только неоплаченную (pending) бронь, которую крон
+    пересчитает по новому времени, — но крон (billing_defer.settle_pending_charge)
+    списывает СОХРАНЁННЫЙ final_price без пересчёта. Поэтому бронь не трогаем
+    вовсе: сессия переезжает, а специалист получает уведомление «перенесите
+    бронь сами» — перенос брони через штатный reschedule пересчитает цену.
+    `new_duration` оставлен в сигнатуре ради вызывающих; длительность брони
+    синк не меняет НИКОГДА.
     """
     from app.models.booking import Booking
     from app.models.notification import Notification
-    from app.models.resource import Resource
-    from app.services.booking import check_availability
 
     log = logging.getLogger(__name__)
-    # TherapySession.booking_id — str, Booking.id — UUID (см. такой же разбор
-    # в _cancel_booking_behind_session): отдаём session.get() настоящий UUID.
+    # TherapySession.booking_id — str, Booking.id — UUID: отдаём session.get()
+    # настоящий UUID (на Postgres str-ключ падал внутри драйвера).
     from uuid import UUID as _UUID
     try:
         _bid = ts.booking_id if not isinstance(ts.booking_id, str) else _UUID(ts.booking_id)
@@ -58,147 +62,34 @@ def _try_move_linked_booking(
                  ts.id, ts.booking_id)
         return
 
-    # `new_date` is UTC-naive (from crm_calendar._parse_event_dt), but
-    # Booking.date/start_time follow the Tbilisi-naive convention (midnight
-    # date + Tbilisi wall-clock "HH:MM"). Lift UTC → Tbilisi (+4h) before
-    # deriving start_time and the midnight booking.date, otherwise the moved
-    # booking shifts 4h / wrong day.
+    # `new_date` — UTC-naive (из _parse_event_dt), бронь хранит Тбилиси:
+    # полночь в `date` + "HH:MM" в `start_time`.
     from datetime import timedelta as _td_tbs
     new_date_tbs = new_date + _td_tbs(hours=4)
     new_start_time = f"{new_date_tbs.hour:02d}:{new_date_tbs.minute:02d}"
-    new_booking_date = new_date_tbs.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # Same cabinet, new time — happiest path. Use exclude_booking_id so
-    # the booking we're moving doesn't conflict with itself.
-    is_available, reason = check_availability(
-        session,
-        resource_id=booking.resource_id,
-        date=new_booking_date,
-        start_time=new_start_time,
-        duration=new_duration,
-        exclude_booking_id=str(booking.id),
+    same_slot = (
+        booking.date.date() == new_date_tbs.date()
+        and (booking.start_time or "")[:5] == new_start_time
     )
-    if is_available:
-        booking.date = new_booking_date
-        booking.start_time = new_start_time
-        booking.duration = new_duration
-        booking.updated_at = datetime.now()
-        session.add(booking)
-        log.info("[crm-sync] booking %s moved with session %s → %s %s",
-                 booking.id, ts.id, new_booking_date.date(), new_start_time)
-        return
+    if same_slot:
+        return  # бронь уже на новом времени — сообщать нечего
 
-    # Conflict — find alternative cabinets free at the new time. We check
-    # every resource at the same location first (most likely substitute),
-    # then resources at other locations as a fallback.
-    resources = session.exec(select(Resource)).all()
-    same_loc = [r for r in resources if r.location_id == booking.location_id and r.id != booking.resource_id]
-    other_loc = [r for r in resources if r.location_id != booking.location_id]
-    alternatives: list[str] = []
-    for r in same_loc + other_loc:
-        ok, _ = check_availability(
-            session,
-            resource_id=r.id,
-            date=new_booking_date,
-            start_time=new_start_time,
-            duration=new_duration,
-        )
-        if ok:
-            loc_label = ''
-            if r.location_id != booking.location_id:
-                loc_label = f" · {r.location_id}"
-            alternatives.append(f"{r.name}{loc_label}")
-        if len(alternatives) >= 5:
-            break
-
-    title = "Конфликт переноса брони"
-    alt_line = (
-        "Свободны: " + ", ".join(alternatives)
-        if alternatives else "Все кабинеты заняты в это время."
-    )
-    desc = (
-        f"Сессия перенесена в Google Calendar на {new_date_tbs.strftime('%d.%m %H:%M')} "
-        f"(было {(old_date + _td_tbs(hours=4)).strftime('%d.%m %H:%M')}), но текущий кабинет "
-        f"({booking.resource_id}) занят: {reason or 'нет деталей'}. "
-        f"{alt_line}"
-    )
-    notif = Notification(
+    booking_when = f"{booking.date.strftime('%d.%m')} {booking.start_time}"
+    session.add(Notification(
         recipient_id=specialist_id,
         type="booking_conflict",
-        title=title,
-        description=desc,
+        title="Встреча перенесена — бронь кабинета осталась на месте",
+        description=(
+            f"Встреча перенесена в календаре на {new_date_tbs.strftime('%d.%m %H:%M')} "
+            f"(было {(old_date + _td_tbs(hours=4)).strftime('%d.%m %H:%M')}), "
+            f"а бронь кабинета {booking.resource_id} осталась на {booking_when} — "
+            f"перенесите её сами (цена пересчитается) или отмените, если не нужна."
+        ),
         icon="alert-triangle",
         link=f"/crm/clients/{ts.client_id}",
-    )
-    session.add(notif)
-    log.warning("[crm-sync] booking %s conflict on move to %s %s — %d alts",
-                booking.id, new_booking_date.date(), new_start_time, len(alternatives))
-
-
-def _cancel_booking_behind_session(session: Session, ts: TherapySession, reason: str) -> bool:
-    """Cancel the cabinet booking behind a session that vanished from Google Calendar.
-
-    Sync used to just flip the booking to `cancelled` — no refund, no cleanup:
-    a booking the client had already PAID for was cancelled with the money kept,
-    and its cabinet event stayed in Google (slot free in the chessboard, busy in
-    the calendar). Now it goes through the same refund path as a manual cancel,
-    and the cabinet's own GCal event is removed.
-
-    Returns True when a booking was actually cancelled.
-    """
-    if not ts.booking_id:
-        return False
-
-    # Imported lazily: bookings.routes is a router module, and importing it at
-    # module scope risks an import cycle.
-    from app.models.booking import Booking
-    from app.api.v1.bookings.routes import (
-        _refund_booking_to_owner,
-        _resolve_booking_owner,
-    )
-    from app.services.google_calendar import gcal_service
-
-    log = logging.getLogger(__name__)
-    try:
-        # TherapySession.booking_id is a str, Booking.id is a UUID — hand
-        # session.get() a real UUID or the lookup blows up inside the driver
-        # (the old code swallowed that in a broad except and cancelled nothing).
-        from uuid import UUID as _UUID
-        bid = ts.booking_id
-        if isinstance(bid, str):
-            try:
-                bid = _UUID(bid)
-            except ValueError:
-                log.warning("[crm-sync] booking_id %r is not a UUID", ts.booking_id)
-                return False
-
-        b = session.get(Booking, bid)
-        if not b or b.status != "confirmed":
-            return False
-
-        owner = _resolve_booking_owner(session, b)
-        if owner:
-            # Skips `pending`/`waived` internally — nothing was charged there.
-            _refund_booking_to_owner(session, b, owner, refund_percent=1.0)
-        else:
-            log.warning("[crm-sync] booking %s cancelled without refund: owner not found", b.id)
-
-        if b.gcal_event_id:
-            try:
-                gcal_service.delete_event(b.gcal_event_id, b.resource_id)
-            except Exception as e:
-                log.warning("[crm-sync] cabinet GCal delete failed for booking %s: %r", b.id, e)
-            b.gcal_event_id = None
-
-        b.status = "cancelled"
-        b.cancellation_reason = reason
-        b.cancelled_by = "auto-sync"
-        b.updated_at = datetime.now()
-        session.add(b)
-        return True
-    except Exception as e:
-        log.warning("[crm-sync] failed to cancel linked booking %s: %r", ts.booking_id, e)
-        return False
+    ))
+    log.warning("[crm-sync] session %s moved to %s, booking %s left at %s — specialist notified",
+                ts.id, new_date_tbs, booking.id, booking_when)
 
 
 def _delete_session_safely(session: Session, ts: TherapySession) -> None:
@@ -230,6 +121,12 @@ _CANCELLED_STATUSES = ("CANCELLED_CLIENT", "CANCELLED_THERAPIST")
 _PUBLIC_REQUEST_NOTE = "Заявка через публичный сайт. Кабинет и оплата — отдельно."
 
 
+# Где синк помнит свои отмены (без миграции БД): user.crm_data[_SYNC_CANCEL_KEY]
+# = {session_id: статус до отмены}. Ручную отмену специалиста синк не трогает.
+_SYNC_CANCEL_KEY = "sync_cancelled_sessions"
+_SYNC_CANCEL_CAP = 500  # старые записи вытесняются — словарь не растёт вечно
+
+
 def _tbs_day(dt: datetime):
     """Календарный день по Тбилиси (UTC+4) для UTC-naive времени сессии."""
     from datetime import timedelta as _td
@@ -238,8 +135,11 @@ def _tbs_day(dt: datetime):
 
 def _session_has_value(session: Session, ts: TherapySession) -> bool:
     """Есть ли в сессии то, что нельзя молча стереть: оплата, платежи,
-    заметки (TherapistNote или встроенная ts.notes) или бронь кабинета."""
+    заметки (TherapistNote или встроенная ts.notes), бронь кабинета,
+    статус «Проведена» (это долг клиента) или проставленная цена."""
     if ts.is_paid or ts.booking_id:
+        return True
+    if ts.status == "COMPLETED" or ts.price is not None:
         return True
     inline = (ts.notes or "").strip()
     if inline and inline != _PUBLIC_REQUEST_NOTE:
@@ -256,7 +156,7 @@ def _session_has_value(session: Session, ts: TherapySession) -> bool:
 
 
 def _keep_valuable_session(
-    session: Session, ts: TherapySession, kept: list,
+    session: Session, ts: TherapySession, kept: list, marks: Optional[dict] = None,
 ) -> bool:
     """Событие сессии удалено/исчезло в Google (режим «календарь главный»).
 
@@ -269,10 +169,16 @@ def _keep_valuable_session(
       • пустая сессия (ничего из перечисленного) → вызывающий удаляет её,
         как раньше.
     Возвращает True, если сессию надо СОХРАНИТЬ (удалять нельзя).
+
+    `marks` — {session_id: прежний статус}: так синк помнит, что отмену
+    поставил ОН (а не специалист), и вернёт статус, если событие с тем же
+    id снова появится в календаре (см. _SYNC_CANCEL_KEY).
     """
     if not _session_has_value(session, ts):
         return False
     if ts.status not in _CANCELLED_STATUSES:
+        if marks is not None:
+            marks[str(ts.id)] = ts.status
         ts.status = "CANCELLED_THERAPIST"
         ts.updated_at = datetime.now()
         session.add(ts)
@@ -297,9 +203,7 @@ def _relink_moved_events(
 
     Кандидат — сессия того же клиента, того же дня по Тбилиси, не отменённая,
     у которой нет google_event_id ИЛИ её событие больше не живо (не пришло в
-    выдаче/отменено). Разница ≤3 ч — любой такой кандидат; больше 3 ч, но тот
-    же день — только «сирота» с мёртвым id (её иначе удалила бы уборка).
-    Пары разбираются от ближайшей по времени: два события одного клиента в
+    выдаче/отменено), и разница во времени ≤3 ч. Пары разбираются от ближайшей по времени: два события одного клиента в
     один день → сессия достаётся ближайшему.
 
     Возвращает (сколько перепривязано, множество обработанных gid).
@@ -354,8 +258,10 @@ def _relink_moved_events(
             if str(ts.client_id) != str(e["client_id"]) or _tbs_day(ts.date) != e_day:
                 continue
             gap = abs((ts.date - e["date"]).total_seconds())
-            if gap > 3 * 3600 and not ts.google_event_id:
-                continue  # дальше 3 ч берём только сирот с мёртвым id
+            # ±3 ч для всех, в т.ч. сирот с мёртвым id (ревизор 01.10: «тот же
+            # день, любое время» склеивал утреннюю и вечернюю встречи).
+            if gap > 3 * 3600:
+                continue
             pairs.append((gap, e, ts))
     pairs.sort(key=lambda p: p[0])
 
@@ -792,6 +698,11 @@ def sync_from_calendar(
     # Сессии с оплатой/заметками/бронью, которые при удалении события НЕ
     # стёрты, а отменены (01.10) — по ним одно уведомление специалисту.
     kept_cancelled: list = []
+    # Отмены, поставленные синком (не специалистом): {session_id: прежний статус}.
+    _crm = current_user.crm_data if isinstance(current_user.crm_data, dict) else {}
+    sync_marks: dict = dict(_crm.get(_SYNC_CANCEL_KEY) or {})
+    _marks_before = dict(sync_marks)
+    restored = 0
 
     # ── Перенос в календаре ≠ новая встреча (01.10) ───────────────────────
     # «Живые» события — все неотменённые из выдачи (вкл. unmatched/ambiguous:
@@ -840,8 +751,9 @@ def sync_from_calendar(
                 # 01.10: сессию с оплатой/заметками/бронью только отменяем —
                 # деньги не двигаем, бронь кабинета НЕ снимаем (специалист
                 # получит уведомление). Удаляем только пустую.
-                if _keep_valuable_session(session, existing, kept_cancelled):
+                if _keep_valuable_session(session, existing, kept_cancelled, sync_marks):
                     continue
+                sync_marks.pop(str(existing.id), None)
                 _delete_session_safely(session, existing)
                 deleted_on_cancel += 1
             continue
@@ -856,6 +768,19 @@ def sync_from_calendar(
             )
         ).first()
         if existing:
+            # 01.10: событие, из-за исчезновения которого СИНК отменил сессию,
+            # вернулось (тот же id) → возвращаем прежний статус. Ручную отмену
+            # специалиста (её нет в sync_marks) не трогаем.
+            _prev = sync_marks.pop(str(existing.id), None)
+            if _prev is not None and existing.status == "CANCELLED_THERAPIST":
+                existing.status = (
+                    "COMPLETED"
+                    if _prev == "COMPLETED" and entry["date"] <= datetime.utcnow()
+                    else "PLANNED"
+                )
+                existing.updated_at = datetime.now()
+                session.add(existing)
+                restored += 1
             if abs((existing.date - entry["date"]).total_seconds()) > 60:
                 old_date = existing.date
                 existing.date = entry["date"]
@@ -993,8 +918,9 @@ def sync_from_calendar(
             continue
         # 01.10: та же защита, что для отменённых событий — ценную сессию
         # (оплата/заметки/бронь) отменяем без движения денег, пустую удаляем.
-        if _keep_valuable_session(session, ts, kept_cancelled):
+        if _keep_valuable_session(session, ts, kept_cancelled, sync_marks):
             continue
+        sync_marks.pop(str(ts.id), None)
         _delete_session_safely(session, ts)
         orphans_cancelled += 1
 
@@ -1031,28 +957,57 @@ def sync_from_calendar(
 
     if kept_cancelled and not dry_run:
         from app.models.notification import Notification as _KeptNotif
-        _names = {
-            c.id: c.name for c in clients
-        }
-        _items = [
-            f"{_names.get(t.client_id, 'клиент')} {(t.date + _td(hours=4)).strftime('%d.%m %H:%M')}"
-            for t in kept_cancelled
-        ]
+        from app.models.booking import Booking as _KeptBooking
+        from uuid import UUID as _KeptUUID
+        _names = {c.id: c.name for c in clients}
+        _items = []
+        _bookings = []
+        for t in kept_cancelled:
+            _items.append(
+                f"{_names.get(t.client_id, 'клиент')} "
+                f"{(t.date + _td(hours=4)).strftime('%d.%m %H:%M')}"
+            )
+            if t.booking_id:
+                try:
+                    _b = session.get(_KeptBooking, _KeptUUID(str(t.booking_id)))
+                except (ValueError, TypeError):
+                    _b = None
+                if _b is not None and _b.status == "confirmed":
+                    _bookings.append(
+                        f"кабинет {_b.resource_id} {_b.date.strftime('%d.%m')} {_b.start_time}"
+                        + (" (не оплачена)" if _b.payment_status == "pending" else "")
+                    )
+        _desc = (
+            "Встреча удалена в Google Календаре — сессия отменена, "
+            "оплата/бронь сохранены, проверьте: "
+            + ", ".join(_items[:8])
+            + (f" и ещё {len(_items) - 8}" if len(_items) > 8 else "")
+            + "."
+        )
+        if _bookings:
+            _desc += (
+                " Брони кабинета остались: " + ", ".join(_bookings[:8])
+                + ". Неоплаченная бронь спишется за 24 ч до начала — отмените её, "
+                "если встреча не состоится."
+            )
+        _desc += " Если встреча всё же будет — верните статус сессии."
         session.add(_KeptNotif(
             recipient_id=uid,
             type="calendar_session_cancelled",
             title="Встреча удалена в календаре — сессия отменена",
-            description=(
-                "Встреча удалена в Google Календаре — сессия отменена, "
-                "оплата/бронь сохранены, проверьте: "
-                + ", ".join(_items[:8])
-                + (f" и ещё {len(_items) - 8}" if len(_items) > 8 else "")
-                + ". Если бронь кабинета больше не нужна — отмените её сами; "
-                "если встреча всё же будет — верните статус сессии."
-            ),
+            description=_desc,
             icon="calendar-x",
             link="/crm/sessions",
         ))
+
+    # Запоминаем свои отмены (без миграции — в crm_data специалиста).
+    if not dry_run and sync_marks != _marks_before:
+        if len(sync_marks) > _SYNC_CANCEL_CAP:
+            sync_marks = dict(list(sync_marks.items())[-_SYNC_CANCEL_CAP:])
+        # Новый dict, а не правка на месте: JSON-колонка иначе не увидит изменение.
+        current_user.crm_data = {**_crm, _SYNC_CANCEL_KEY: sync_marks}
+        if isinstance(current_user, User):
+            session.add(current_user)
 
     if orphans_cancelled > 0 or deleted_on_cancel > 0:
         logging.getLogger(__name__).info(
@@ -1119,6 +1074,8 @@ def sync_from_calendar(
         "deleted_on_cancel": deleted_on_cancel,
         # 01.10: события, привязанные к уже существующим сессиям (перенос).
         "relinked": relinked,
+        # 01.10: отменённые синком сессии, чьё событие вернулось.
+        "restored": restored,
         # Защитный режим: сколько удалений из Google задержано (сессии целы).
         "deletions_held": len(set(deletions_held)),
         "auto_created_clients": auto_created_clients,
