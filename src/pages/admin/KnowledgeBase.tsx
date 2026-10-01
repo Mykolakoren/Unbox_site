@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { PageHeader } from '../../components/ui/PageHeader';
 import { FileText, Sun, Moon, Clock, BookOpen, AlertCircle, ChevronDown, Star } from 'lucide-react';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -7,7 +8,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 type SectionId = 'morning' | 'evening' | 'day' | 'rules' | 'pricing' | 'subscriptions' | 'glossary';
 
 export function AdminKnowledgeBase() {
-        const [expandedIds, setExpandedIds] = useState<Set<SectionId>>(new Set(['morning']));
+    const [expandedIds, setExpandedIds] = useState<Set<SectionId>>(new Set(['morning']));
 
     return <GridHouseKnowledgeBase expandedIds={expandedIds} setExpandedIds={setExpandedIds} />;
 }
@@ -23,6 +24,7 @@ type GHKBProps = {
 };
 
 function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
+    const reduceMotion = useReducedMotion();
     const toggle = (id: SectionId) => {
         setExpandedIds(prev => {
             const next = new Set(prev);
@@ -34,7 +36,6 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
 
     type GHSection = {
         id: SectionId;
-        num: string;
         title: string;
         subtitle: string;
         body: React.ReactNode;
@@ -435,28 +436,23 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
     );
 
     const sections: GHSection[] = [
-        { id: 'morning', num: '01', title: 'Утренний чек-лист.', subtitle: 'Открытие, подготовка филиала, чистота', body: <MorningChecklist /> },
-        { id: 'day', num: '02', title: 'В течение дня.', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
-        { id: 'evening', num: '03', title: 'Вечерний чек-лист.', subtitle: 'Выключение, уборка, отчёт по кассе', body: <EveningChecklist /> },
-        { id: 'rules', num: '04', title: 'Правила пространства.', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
-        { id: 'pricing', num: '05', title: 'Ценовая политика.', subtitle: 'Тарифы, скидки, приветственный час, кэшбэк', body: <Pricing /> },
-        { id: 'subscriptions', num: '06', title: 'Абонементы.', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
-        { id: 'glossary', num: '07', title: 'Глоссарий.', subtitle: 'Термины: бронь vs сессия, статусы, способы оплаты', body: <Glossary /> },
+        { id: 'morning', title: 'Утренний чек-лист', subtitle: 'Открытие, подготовка филиала, чистота', body: <MorningChecklist /> },
+        { id: 'day', title: 'В течение дня', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
+        { id: 'evening', title: 'Вечерний чек-лист', subtitle: 'Выключение, уборка, отчёт по кассе', body: <EveningChecklist /> },
+        { id: 'rules', title: 'Правила пространства', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
+        { id: 'pricing', title: 'Ценовая политика', subtitle: 'Тарифы, скидки, приветственный час, кэшбэк', body: <Pricing /> },
+        { id: 'subscriptions', title: 'Абонементы', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
+        { id: 'glossary', title: 'Глоссарий', subtitle: 'Термины: бронь vs сессия, статусы, способы оплаты', body: <Glossary /> },
     ];
 
     return (
-        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-            <div style={{ maxWidth: 1100, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
-                {/* HEAD */}
-                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
-                    <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · База знаний</div>
-                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: '0 0 16px 0' }}>
-                        Справочник и чек-листы.
-                    </h1>
-                    <p style={{ fontFamily: GH_SANS, fontSize: 16, lineHeight: 1.5, color: GH.ink60, maxWidth: 640, margin: 0 }}>
-                        Вся необходимая информация, правила и процедуры для работы администраторов — в одном индексе.
-                    </p>
-                </div>
+        <div style={{ color: GH.ink, fontFamily: GH_SANS }}>
+            <div style={{ maxWidth: 1100 }}>
+                {/* HEAD: H1 = пункт меню (G8-11) */}
+                <PageHeader
+                    title="База знаний"
+                    description="Чек-листы смены, правила, цены и абонементы — всё для работы администратора в одном месте."
+                />
 
                 {/* SECTIONS */}
                 <div>
@@ -465,14 +461,17 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                         return (
                             <div key={section.id} style={{ borderTop: `1px solid ${GH.ink10}` }}>
                                 <button
+                                    type="button"
                                     onClick={() => toggle(section.id)}
+                                    aria-expanded={isExpanded}
+                                    aria-controls={`kb-${section.id}`}
                                     style={{
                                         width: '100%',
                                         display: 'grid',
-                                        gridTemplateColumns: '60px 1fr 40px',
+                                        gridTemplateColumns: '1fr 40px',
                                         alignItems: 'center',
                                         gap: 20,
-                                        padding: '24px 0',
+                                        padding: '16px 0',
                                         background: 'transparent',
                                         border: 'none',
                                         textAlign: 'left',
@@ -480,17 +479,16 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                         color: GH.ink,
                                     }}
                                 >
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60 }}>{section.num}</div>
                                     <div>
-                                        <div style={{ fontFamily: GH_SANS, fontSize: 'clamp(20px, 2.2vw, 28px)', fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.1 }}>
+                                        <div style={{ fontFamily: GH_SANS, fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
                                             {section.title}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
+                                        <div style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60, marginTop: 4 }}>
                                             {section.subtitle}
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, border: `1px solid ${GH.ink10}` }}>
-                                        <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                                        <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.2 }}>
                                             <ChevronDown size={16} />
                                         </motion.div>
                                     </div>
@@ -498,13 +496,15 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                 <AnimatePresence initial={false}>
                                     {isExpanded && (
                                         <motion.div
+                                            id={`kb-${section.id}`}
                                             initial={{ height: 0, opacity: 0 }}
                                             animate={{ height: 'auto', opacity: 1 }}
                                             exit={{ height: 0, opacity: 0 }}
-                                            transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                                            // «Уменьшить движение» — раскрываем без анимации высоты (G8-18).
+                                            transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
                                             style={{ overflow: 'hidden' }}
                                         >
-                                            <div style={{ paddingLeft: 80, paddingBottom: 32, paddingRight: 40 }}>
+                                            <div style={{ paddingBottom: 32, paddingRight: 40 }}>
                                                 {section.body}
                                             </div>
                                         </motion.div>
@@ -513,10 +513,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                             </div>
                         );
                     })}
-                    <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 20, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Unbox · Справочник · {new Date().getFullYear()}</span>
-                        <span>{sections.length} разделов</span>
-                    </div>
+                    <div style={{ borderTop: `1px solid ${GH.ink10}` }} />
                 </div>
             </div>
         </div>
