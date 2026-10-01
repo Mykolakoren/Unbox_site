@@ -24,7 +24,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { AccountSelect } from '../../components/crm/AccountSelect';
-import { accountLabel as accountLabelOf, defaultPaymentAccount } from '../../utils/paymentAccounts';
+import { accountLabel as accountLabelOf, defaultPaymentAccount, matchAccount } from '../../utils/paymentAccounts';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { ruPlural } from '../../utils/plural';
 import { sessionDebt, sessionDebtIn } from '../../utils/sessionMoney';
@@ -540,7 +540,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
         try {
             // 07.09: у счёта может быть своя валюта (напр. Mono → UAH) —
             // она важнее валюты клиента.
-            const accCurrency = useCrmStore.getState().paymentAccounts.find(a => a.id === account)?.currency;
+            const accCurrency = matchAccount(account, useCrmStore.getState().paymentAccounts)?.currency;
             await onSave({ clientId, amount: Number(amount), currency: accCurrency || selectedClient?.currency, account: account || undefined });
         } catch {
             // Ошибку уже показал стор (crmStore.createPayment) — второй тост не нужен.
