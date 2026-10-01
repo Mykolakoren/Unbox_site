@@ -50,6 +50,20 @@ const getMethodLabelFull = (m: string) => {
     }
 };
 
+/**
+ * Описание показываем, только если оно что-то добавляет (G7-07): авто-тексты
+ * вида «Пополнение баланса: Алиса В.» повторяют категорию и клиента и съедали
+ * ширину — из-за них уезжали за край «Админ» и кнопки правки.
+ */
+function extraDescription(tx: CashboxTransaction): string | null {
+    const d = (tx.description || '').trim();
+    if (!d) return null;
+    const client = (tx.clientName || '').trim();
+    if (client && d.includes(client) && /^(Пополнение баланса|Оплата|Абонемент)/i.test(d) && d.length <= client.length + 40) return null;
+    if (tx.categoryName && d.toLowerCase() === tx.categoryName.toLowerCase()) return null;
+    return d;
+}
+
 interface Props {
     filteredTransactions: CashboxTransaction[];
     onRefresh?: () => void;
@@ -139,7 +153,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                 {/* Доделки R1 — column widths increased + px-3 gutter on every cell.
                     Previous layout had py-only padding, so columns touched
                     on narrow viewports. minWidth bumped to match new widths. */}
-                <table className="w-full text-left border-collapse" style={{ minWidth: 1100 }}>
+                <table className="w-full text-left border-collapse" style={{ minWidth: 960 }}>
                     <thead>
                         <tr className="text-xs text-ink-60 border-b border-gray-100">
                             <th className="font-medium py-3 pl-2 pr-3 whitespace-nowrap" style={{ width: 110 }}>Дата</th>
@@ -191,7 +205,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                         <span className="text-gray-700 text-sm">{tx.clientName || '—'}</span>
                                     </td>
                                     <td className="py-3 px-3 align-top">
-                                        <span className="text-gray-600 text-sm truncate max-w-[220px] block">{tx.description || '—'}</span>
+                                        <span className="text-gray-600 text-sm truncate max-w-[220px] block" title={tx.description || undefined}>{extraDescription(tx) || '—'}</span>
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <span className="text-xs text-gray-600">{tx.adminName || '—'}</span>

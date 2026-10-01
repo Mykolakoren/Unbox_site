@@ -221,6 +221,9 @@ interface GHAdminUsersProps {
 
 type SortMode = 'name' | 'balance' | 'date';
 type FilterMode = 'all' | 'debtors';
+/** G7-17: сотрудники не мешаются с клиентами — отдельный чип «Команда». */
+type Audience = 'clients' | 'team';
+const TEAM_ROLES = ['owner', 'senior_admin', 'admin'];
 
 function useNarrow(bp = 768) {
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
@@ -238,12 +241,18 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
 
     const [sortMode, setSortMode] = useState<SortMode>('name');
     const [filterMode, setFilterMode] = useState<FilterMode>('all');
+    const [audience, setAudience] = useState<Audience>('clients');
     const narrow = useNarrow();
+
+    const isTeam = (u: User) => TEAM_ROLES.includes(u.role || '');
+    const audienceUsers = filteredUsers.filter(u => (audience === 'team') === isTeam(u));
+    const clientsCount = filteredUsers.filter(u => !isTeam(u)).length;
+    const teamCount = filteredUsers.length - clientsCount;
 
     // Apply filter
     const filtered = filterMode === 'debtors'
-        ? filteredUsers.filter(u => u.balance < 0)
-        : filteredUsers;
+        ? audienceUsers.filter(u => u.balance < 0)
+        : audienceUsers;
 
     // Apply sort
     const sorted = [...filtered].sort((a, b) => {
@@ -253,9 +262,10 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
         return 0;
     });
 
-    const totalFmt = String(sorted.length).padStart(3, '0');
-    const allFmt = String(users.length).padStart(3, '0');
-    const debtorCount = filteredUsers.filter(u => u.balance < 0).length;
+    // G7-13: количества без нулей впереди («40», а не «040» — читалось как номер).
+    const totalFmt = String(sorted.length);
+    const allFmt = String(users.length);
+    const debtorCount = audienceUsers.filter(u => u.balance < 0).length;
 
     const roleLabel = (role: string | undefined) =>
         role === 'owner' ? 'Владелец'
@@ -335,7 +345,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                     <div>
                         <p style={{ ...ghMono, color: GH.ink60, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
                         <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger, fontVariantNumeric: 'tabular-nums' }}>
-                            {String(debtorCount).padStart(3, '0')}
+                            {debtorCount}
                         </span>
                     </div>
                 )}
@@ -377,6 +387,26 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
 
             {/* ── Sort / Filter controls ── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+                <div role="group" aria-label="Кого показать" style={{ display: 'flex', gap: 8, marginRight: 8 }}>
+                    {([['clients', 'Клиенты', clientsCount], ['team', 'Команда', teamCount]] as const).map(([key, label, n]) => (
+                        <button
+                            key={key}
+                            type="button"
+                            aria-pressed={audience === key}
+                            onClick={() => setAudience(key)}
+                            style={{
+                                fontFamily: GH_SANS, fontSize: 14, fontWeight: audience === key ? 600 : 400,
+                                padding: '6px 12px', border: `1px solid ${audience === key ? GH.ink : GH.ink10}`,
+                                background: audience === key ? GH.ink : 'transparent',
+                                color: audience === key ? GH.paper : GH.ink,
+                                cursor: 'pointer', whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {label} · {n}
+                        </button>
+                    ))}
+                </div>
+                <div style={{ width: 1, height: 20, background: GH.ink10, margin: '0 4px' }} />
                 <span style={{ ...monoLabel, marginRight: 4 }}>СОРТ:</span>
                 <button onClick={() => setSortMode('name')} style={sortBtn('name', 'Имя')}>Имя</button>
                 <button onClick={() => setSortMode('balance')} style={sortBtn('balance', 'Баланс')}>Баланс</button>
@@ -512,15 +542,14 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                     {/* Column headers */}
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                        gridTemplateColumns: '1fr 140px 120px 80px 140px 76px',
                         gap: 16,
                         padding: '12px 0',
                         borderBottom: ghHairline,
                         minWidth: 720,
                         ...monoLabel,
                     }}>
-                        <div>#</div>
-                        <div>КЛИЕНТ</div>
+                        <div>{audience === 'team' ? 'СОТРУДНИК' : 'КЛИЕНТ'}</div>
                         <div>РОЛЬ</div>
                         <div style={{ textAlign: 'right' }}>БАЛАНС</div>
                         <div style={{ textAlign: 'center' }}>СКИДКА</div>
@@ -528,12 +557,12 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                         <div style={{ textAlign: 'right' }}></div>
                     </div>
 
-                    {sorted.map((user, idx) => (
+                    {sorted.map((user) => (
                         <div
                             key={user.email}
                             style={{
                                 display: 'grid',
-                                gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                                gridTemplateColumns: '1fr 140px 120px 80px 140px 76px',
                                 gap: 16,
                                 minWidth: 720,
                                 padding: '18px 0',
@@ -541,15 +570,6 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 alignItems: 'center',
                             }}
                         >
-                            <div style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                letterSpacing: '0.06em',
-                                color: GH.ink60,
-                                fontVariantNumeric: 'tabular-nums',
-                            }}>
-                                {String(idx + 1).padStart(3, '0')}
-                            </div>
                             <Link
                                 to={`/admin/users/${encodeURIComponent(user.email)}`}
                                 style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
@@ -562,25 +582,12 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                     {user.email}{user.phone ? ` · ${user.phone}` : ''}
                                 </div>
                             </Link>
-                            <button
-                                onClick={() => setSelectedUser(user)}
-                                title="Изменить роль"
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    padding: '5px 9px',
-                                    background: user.role === 'owner' ? GH.ink : 'transparent',
-                                    color: user.role === 'owner' ? GH.paper : GH.ink,
-                                    border: `1px solid ${GH.ink}`,
-                                    cursor: 'pointer',
-                                    justifySelf: 'start',
-                                }}
-                            >
+                            {/* G7-17: роль — просто текст. Раньше бейдж был кнопкой
+                                «Изменить роль» — случайный клик открывал смену роли.
+                                Менять — через «Роль и цены» справа. */}
+                            <span style={{ fontSize: 14, color: user.role && user.role !== 'user' ? GH.ink : GH.ink60 }}>
                                 {roleLabel(user.role)}
-                            </button>
+                            </span>
                             <div style={{
                                 fontFamily: GH_MONO,
                                 fontSize: 14,
@@ -614,11 +621,11 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
                                 <Link
                                     to={`/admin/users/${encodeURIComponent(user.email)}`}
-                                    title="Карточка"
-                                    aria-label={`Карточка: ${user.name || user.email}`}
+                                    title="Открыть карточку"
+                                    aria-label={`Открыть карточку: ${user.name || user.email}`}
                                     style={{
-                                        width: 32,
-                                        height: 32,
+                                        width: 36,
+                                        height: 36,
                                         background: 'transparent',
                                         border: ghHairline,
                                         cursor: 'pointer',
@@ -632,11 +639,11 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 </Link>
                                 <button
                                     onClick={() => setSelectedUser(user)}
-                                    title="Быстрые настройки"
-                                    aria-label={`Быстрые настройки: ${user.name || user.email}`}
+                                    title="Роль, скидка и тип цен"
+                                    aria-label={`Роль, скидка и тип цен: ${user.name || user.email}`}
                                     style={{
-                                        width: 32,
-                                        height: 32,
+                                        width: 36,
+                                        height: 36,
                                         background: 'transparent',
                                         border: ghHairline,
                                         cursor: 'pointer',
@@ -654,10 +661,6 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                 </div>
             )}
 
-            {/* ── Footer ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, paddingTop: 16 }}>
-                <p style={{ ...ghMono, color: GH.ink60, margin: 0 }}>Unbox · админка · 2026</p>
-            </div>
 
             {/* Modals (reuse legacy internals) */}
             {selectedUser && (
