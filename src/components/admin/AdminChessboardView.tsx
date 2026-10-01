@@ -9,7 +9,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -19,7 +19,7 @@ import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { BookingMoneyHints } from './BookingMoneyHints';
-import { computeDueByBooking, dueLabel } from '../../utils/dueAmounts';
+import { computeDueByBooking, dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type RefundOption } from './AdminCancelBookingModal';
 import { BookingPriceModal } from './BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -571,6 +571,46 @@ export function AdminChessboardView() {
     }, []);
     const mobileRes = filteredResources[mobileResIdx] ?? filteredResources[0] ?? null;
 
+    // ── Ширина слота (G7-admin-core-M4): на ноутбуке (< 1600 px) 36 px вместо
+    // 44 px — иначе вечерние часы (19–22) уходят за край, а вечер — самое
+    // загруженное время. Колонка «Продолжить» справа — только при выделении.
+    const [slotW, setSlotW] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 1600 ? 36 : 44));
+    useEffect(() => {
+        const check = () => setSlotW(window.innerWidth < 1600 ? 36 : 44);
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    }, []);
+    const hasNewSelection = selectedNewBlocks.length > 0;
+    const continueColW = hasNewSelection ? 110 : 0;
+    const gridWidth = 130 + TIME_SLOTS.length * slotW + continueColW;
+
+    // Сегодня — сразу прокручиваем сетку к текущему часу (час назад слева),
+    // чтобы админ видел «сейчас и дальше», а не утро. Другой день — с начала.
+    const gridWrapRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (isMobile || highlightId) return;
+        const wrap = gridWrapRef.current;
+        if (!wrap) return;
+        const now = tbilisiNow();
+        const isTodayShown = format(selectedDate, 'yyyy-MM-dd') === now.ymd;
+        const t = window.setTimeout(() => {
+            const th = wrap.querySelector<HTMLElement>('th[data-slot]');
+            // Ближайший горизонтально прокручиваемый предок таблицы (ChessboardScroller).
+            let scroller: HTMLElement | null = th?.closest('table')?.parentElement ?? null;
+            while (scroller && scroller !== wrap && !(scroller.scrollWidth > scroller.clientWidth + 1)) {
+                scroller = scroller.parentElement;
+            }
+            if (!scroller || scroller === wrap) return;
+            if (!isTodayShown) { scroller.scrollLeft = 0; return; }
+            const hour = Math.max(0, now.h - 1);
+            const target = wrap.querySelector<HTMLElement>(`th[data-slot="${String(hour).padStart(2, '0')}:00"]`);
+            if (!target) return;
+            const delta = target.getBoundingClientRect().left - scroller.getBoundingClientRect().left - 130;
+            scroller.scrollLeft += delta;
+        }, 50);
+        return () => window.clearTimeout(t);
+    }, [selectedDate, isMobile, slotW, highlightId]);
+
     // ── Mobile hour-pairs for 2-column grid ──
     const mobileHourPairs = useMemo(() => {
         const pairs: [string, string | null][] = [];
@@ -668,6 +708,13 @@ export function AdminChessboardView() {
         // Срочная бронь, ожидающая решения админа — красная рамка-пунктир,
         // чтобы её было видно прямо на сетке без перехода в фильтр «Ожидает».
         if (b.status === 'pending_approval') return 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-dashed';
+        // Неоплаченная (к оплате > 0, прошедшая или будущая) — тон danger,
+        // сплошная рамка (решение владельца В2: «чтобы админы были внимательнее»).
+        // Сумма — только из dueMap (computeDueByBooking).
+        const dueInfo = dueMap.get(b.id);
+        if (dueInfo && dueInfo.due > 0 && (b.status === 'confirmed' || b.status === 'completed')) {
+            return 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-2';
+        }
         if (b.status === 'completed')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)]/30';
         if (b.status === 're-rented')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)] border-dashed';
         if (b.isReRentListed)          return 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)] border-dashed';
@@ -1071,6 +1118,7 @@ export function AdminChessboardView() {
                             <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
                             <div className="text-xs truncate font-medium">{getUserName(b.userId)}</div>
                         </div>
+                        <CellDueMark info={dueMap.get(b.id)} />
                     </button>
                 );
             }
@@ -1567,8 +1615,11 @@ export function AdminChessboardView() {
                 ))}
             </div>
 
-            {/* ── Grid ── */}
-            <ChessboardScroller minGridWidth={130 + TIME_SLOTS.length * 44 + 110}>
+            {/* ── Grid + панель брони справа (G7-12): панель сужает сетку, а не
+                закрывает вечерние часы, как раньше плавающее окно в углу. */}
+            <div className="flex gap-3 items-start">
+            <div ref={gridWrapRef} className="flex-1 min-w-0">
+            <ChessboardScroller minGridWidth={gridWidth} stepPx={slotW * 4}>
                 <table
                     className="border-collapse text-xs"
                     // table-layout:fixed — колонки строго по colgroup (44px/слот),
@@ -1577,15 +1628,15 @@ export function AdminChessboardView() {
                     // столбцы сбивали при чтении диапазона времени.
                     style={{
                         tableLayout: 'fixed',
-                        width: `${130 + TIME_SLOTS.length * 44 + 110}px`,
-                        minWidth: `${130 + TIME_SLOTS.length * 44 + 110}px`,
+                        width: `${gridWidth}px`,
+                        minWidth: `${gridWidth}px`,
                     }}
                 >
                     {/* Column widths */}
                     <colgroup>
                         <col style={{ width: '130px', minWidth: '130px' }} />
-                        {TIME_SLOTS.map(s => <col key={s} style={{ width: '44px', minWidth: '44px' }} />)}
-                        <col style={{ width: '110px', minWidth: '110px' }} />
+                        {TIME_SLOTS.map(s => <col key={s} style={{ width: `${slotW}px`, minWidth: `${slotW}px` }} />)}
+                        {hasNewSelection && <col style={{ width: '110px', minWidth: '110px' }} />}
                     </colgroup>
 
                     {/* Header: time labels */}
@@ -1599,6 +1650,7 @@ export function AdminChessboardView() {
                             {TIME_SLOTS.map(slot => (
                                 <th
                                     key={slot}
+                                    data-slot={slot}
                                     className={clsx(
                                         "border-r border-b border-unbox-light/50 text-center py-1.5 px-0",
                                         isPeakTime(slot) && "bg-amber-50/50"
@@ -1610,7 +1662,7 @@ export function AdminChessboardView() {
                                     }
                                 </th>
                             ))}
-                            <th className="sticky right-0 bg-unbox-light/40 border-l border-b border-unbox-light/50 z-20 w-28 p-2" />
+                            {hasNewSelection && <th className="sticky right-0 bg-unbox-light/40 border-l border-b border-unbox-light/50 z-20 w-28 p-2" />}
                         </tr>
                     </thead>
 
@@ -1647,7 +1699,7 @@ export function AdminChessboardView() {
                                                         onDragEnd={() => setDraggedBooking(null)}
                                                         onClick={() => setSelectedBooking(isSelected ? null : b)}
                                                         className={clsx(
-                                                            'w-full h-[38px] rounded border px-1 py-0.5 text-left overflow-hidden transition-all cursor-grab active:cursor-grabbing',
+                                                            'relative w-full h-[38px] rounded border px-1 py-0.5 text-left overflow-hidden transition-all cursor-grab active:cursor-grabbing',
                                                             getBookingStyle(b),
                                                             isSelected
                                                                 ? 'ring-2 ring-unbox-green ring-offset-1 shadow-sm'
@@ -1662,23 +1714,29 @@ export function AdminChessboardView() {
                                                             )}
                                                             <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
-                                                        {/* Сколько взять (вариант В): цена, «✓» — брать нечего,
-                                                            «→ X ₾» — взять меньше. Теперь и на часовой брони
-                                                            (2 клетки): там без времени (оно видно по сетке),
-                                                            а при частичной оплате — только «→ X ₾», чтобы влезло. */}
-                                                        {(cell.colspan ?? 1) >= 2 && (() => {
+                                                        {/* «к оплате / ✓ оплачено» (В2) — на КАЖДОЙ брони, в т.ч.
+                                                            прошедшей. 30-минутная (одна клетка) — значок в углу,
+                                                            подпись — в aria-label/title. Сумма — только из dueMap. */}
+                                                        {cell.colspan === 1 ? (
+                                                            <CellDueMark info={dueMap.get(b.id)} corner />
+                                                        ) : (() => {
                                                             const d = dueMap.get(b.id);
                                                             const wide = (cell.colspan ?? 1) >= 3;
-                                                            const partial = !!d && d.due > 0 && d.due < d.price;
                                                             return (
-                                                                <div className="text-xs leading-tight truncate font-normal tabular-nums">
-                                                                    {wide && <>{b.startTime} · </>}
-                                                                    {(wide || !partial) && formatGel(b.finalPrice)}
-                                                                    {d && d.due <= 0 && (
-                                                                        <Check size={12} strokeWidth={3} className="inline ml-0.5 -mt-0.5" aria-label={dueLabel(d)} />
-                                                                    )}
-                                                                    {partial && d && (
-                                                                        <span className="font-bold">{wide ? ' ' : ''}→ {formatGel(Math.round(d.due * 10) / 10)}</span>
+                                                                <div className="text-xs leading-tight truncate tabular-nums flex items-center gap-1">
+                                                                    {wide && <span className="font-normal">{b.startTime}</span>}
+                                                                    {d && d.due > 0 ? (
+                                                                        <span className="font-semibold inline-flex items-center gap-0.5">
+                                                                            <AlertCircle size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
+                                                                            {wide ? 'к оплате ' : ''}{formatGel(d.due)}
+                                                                        </span>
+                                                                    ) : d ? (
+                                                                        <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]">
+                                                                            <Check size={12} strokeWidth={3} className="shrink-0" aria-hidden="true" />
+                                                                            {wide ? 'оплачено' : formatGel(b.finalPrice)}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="font-normal">{b.paymentMethod === 'subscription' ? 'абонемент' : formatGel(b.finalPrice)}</span>
                                                                     )}
                                                                 </div>
                                                             );
@@ -1771,8 +1829,8 @@ export function AdminChessboardView() {
                                         );
                                     })}
 
-                                    {/* Sticky right column */}
-                                    <td className="sticky right-0 bg-white border-l border-unbox-light/40 z-10 h-[40px] p-1 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]">
+                                    {/* Sticky right column — только когда что-то выделено. */}
+                                    {hasNewSelection && <td className="sticky right-0 bg-white border-l border-unbox-light/40 z-10 h-[40px] p-1 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]">
                                         {getNewBlockForResource(resource.id) ? (
                                             <button
                                                 onClick={handleContinueNewBooking}
@@ -1782,7 +1840,7 @@ export function AdminChessboardView() {
                                                 <span>Продолжить</span>
                                             </button>
                                         ) : null}
-                                    </td>
+                                    </td>}
                                 </tr>
                             );
                         })}
@@ -1790,7 +1848,7 @@ export function AdminChessboardView() {
                         {filteredResources.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={TIME_SLOTS.length + 2}
+                                    colSpan={TIME_SLOTS.length + (hasNewSelection ? 2 : 1)}
                                     className="p-10 text-center text-ink-60"
                                 >
                                     Нет ресурсов для отображения
@@ -1802,7 +1860,10 @@ export function AdminChessboardView() {
             </ChessboardScroller>
 
             {/* ── Legend ── */}
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-gray-700 pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-gray-100">
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-ink pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-unbox-light" data-chess-legend>
+                {/* Деньги (В2) — первыми: это главный вопрос у стойки. */}
+                <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />к оплате 36 ₾ — взять с клиента</span>
+                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено</span>
                 <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
                 <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
                 <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
@@ -1810,34 +1871,16 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)]/30" label={statusLabel('booking', 'completed', 'staff')} />
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
                 <span className="flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> серия</span>
-                <span className="flex items-center gap-1.5"><Check size={14} strokeWidth={3} aria-hidden="true" /> брать нечего</span>
-                <span className="flex items-center gap-1.5 num">→ 12 ₾ — взять меньше цены</span>
+                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — к оплате</span>
             </div>
-
-            {/* ── Admin Quick Booking Modal ──
-                Uses the same queue logic as the mobile branch so multi-
-                period selections (e.g. cab 5 at 10:00–11:00 AND 13:00–14:00)
-                walk the modal through every chunk. Earlier desktop just
-                wiped state on first onBooked, so admins reported "только
-                первый слот сохранился, остальные пропали". */}
-            {adminBookSlot && (
-                <AdminQuickBookingModal
-                    slot={adminBookSlot}
-                    users={users}
-                    onClose={() => {
-                        // Cancelling mid-queue drops the remaining chunks but
-                        // keeps the selection visible in the chips so the
-                        // admin can retry without re-clicking the cells.
-                        setAdminBookSlot(null);
-                        setPendingChunks([]);
-                    }}
-                    onBooked={advanceBookingQueue}
-                />
-            )}
-
-            {/* ── Booking detail popup (bottom-right) ── */}
+            </div>
+            {/* ── Панель брони — справа от сетки, сетку не закрывает (G7-12). ── */}
             {selectedBooking && (
-                <div className="fixed bottom-6 right-6 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-unbox-light/60 animate-in slide-in-from-bottom-2 duration-200">
+                <aside
+                    aria-label="Бронь"
+                    data-booking-panel
+                    className="w-80 shrink-0 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white rounded-2xl border border-unbox-light/60 animate-in fade-in duration-150"
+                >
                     {/* Header */}
                     <div className="px-4 py-3 flex justify-between items-start border-b border-unbox-light">
                         <div className="overflow-hidden">
@@ -2041,7 +2084,29 @@ export function AdminChessboardView() {
                             </div>
                         );
                     })()}
-                </div>
+                </aside>
+            )}
+            </div>
+
+            {/* ── Admin Quick Booking Modal ──
+                Uses the same queue logic as the mobile branch so multi-
+                period selections (e.g. cab 5 at 10:00–11:00 AND 13:00–14:00)
+                walk the modal through every chunk. Earlier desktop just
+                wiped state on first onBooked, so admins reported "только
+                первый слот сохранился, остальные пропали". */}
+            {adminBookSlot && (
+                <AdminQuickBookingModal
+                    slot={adminBookSlot}
+                    users={users}
+                    onClose={() => {
+                        // Cancelling mid-queue drops the remaining chunks but
+                        // keeps the selection visible in the chips so the
+                        // admin can retry without re-clicking the cells.
+                        setAdminBookSlot(null);
+                        setPendingChunks([]);
+                    }}
+                    onBooked={advanceBookingQueue}
+                />
             )}
 
             <ExtendBookingModal
@@ -2104,6 +2169,42 @@ export function AdminChessboardView() {
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
+
+/** «к оплате / ✓ оплачено» в клетке шахматки (В2). corner — значок в углу
+ *  30-минутной брони (одна клетка): подпись целиком — в aria-label и title.
+ *  Записи в dueMap нет (абонемент, прощённая, обслуживание) — ничего. */
+function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corner?: boolean }) {
+    if (!info) return null;
+    const owes = info.due > 0;
+    const label = owes ? `к оплате ${formatGel(info.due)}` : 'оплачено';
+    if (corner) {
+        return (
+            <span
+                role="img"
+                aria-label={label}
+                title={label}
+                className={clsx(
+                    'absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl',
+                    owes
+                        ? 'bg-[var(--status-danger-fg)] text-[var(--status-danger-bg)]'
+                        : 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]',
+                )}
+            >
+                {owes
+                    ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
+                    : <Check size={12} strokeWidth={3} aria-hidden="true" />}
+            </span>
+        );
+    }
+    return (
+        <span className={clsx('ui-badge shrink-0', owes ? 'ui-badge--danger' : 'ui-badge--ok')}>
+            {owes
+                ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
+                : <Check size={12} strokeWidth={3} aria-hidden="true" />}
+            <span className="num">{owes ? formatGel(info.due) : 'оплачено'}</span>
+        </span>
+    );
+}
 function LegendItem({ color, label }: { color: string; label: React.ReactNode }) {
     return (
         <div className="flex items-center gap-2">
