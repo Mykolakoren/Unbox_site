@@ -98,7 +98,7 @@ export function AdminLayout() {
             items: [
                 { path: '/admin/specialists', icon: Star, label: 'Специалисты' },
                 { path: '/admin/team', icon: UsersRound, label: 'Команда' },
-                { path: '/admin/posts', icon: Newspaper, label: 'Новости' },
+                { path: '/admin/posts', icon: Newspaper, label: 'Новости и статьи' },
                 { path: '/admin/knowledge-base', icon: BookOpen, label: 'База знаний' },
                 { path: '/admin/crm', icon: Filter, label: 'Воронка клиентов' },
             ],
