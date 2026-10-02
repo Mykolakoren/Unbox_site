@@ -71,7 +71,7 @@ export function DueBadge({
     // Ещё не списана, а взять нечего — покрыта плюсом на балансе: другой знак
     // (контурный кружок, нейтральный тон), не «✓» — денег за неё никто не вносил.
     const covered = charged === false;
-    const label = covered ? 'покрыто балансом' : paidLabel;
+    const label = charged === false ? 'покрыто балансом' : paidLabel;
     return (
         <span
             className={clsx('ui-badge', covered ? 'ui-badge--muted' : 'ui-badge--ok', variant === 'dot' && 'ui-badge--dot', className)}

@@ -157,7 +157,7 @@ def test_cell_due_mark_three_branches():
 def test_regular_tile_three_branches():
     code = _code(CHESS)
     tile = _chunk(code, "const kind = dueMarkKind(d);", "})()}")
-    assert "kind === 'owes' ?" in tile and "kind === 'covered' ?" in tile and "kind === 'paid' ?" in tile, \
+    assert "kind === 'owes' && d ?" in tile and "kind === 'covered' ?" in tile and "kind === 'paid' ?" in tile, \
         "в обычной плитке не три ветки owes/covered/paid"
     cov = tile[tile.index("kind === 'covered' ? ("):tile.index("kind === 'paid' ? (")]
     assert "<CircleDashed" in cov and "<Check" not in cov, "ветка covered в плитке рисует галочку или не кружок"
@@ -185,10 +185,11 @@ def test_legend_items():
     code = _read(CHESS)
     legend = code[code.index("data-chess-legend"):code.index("{/* ── Панель брони")]
     assert "(!) к оплате 36 ₾ — взять с клиента" in legend, "в легенде нет «(!) к оплате … — взять с клиента»"
-    assert "✓ оплачено — деньги уже списаны с баланса" in legend, "в легенде нет «✓ оплачено — деньги уже списаны с баланса»"
-    assert "◌ с баланса — деньги спишутся с баланса за сутки до начала, брать ничего не нужно" in legend, \
-        "в легенде нет пункта «◌ с баланса …»"
-    assert "<CircleDashed" in legend, "в легенде у «с баланса» нет значка-кружка"
+    assert "оплачено — деньги уже списаны с баланса" in legend, "в легенде нет «оплачено — деньги уже списаны с баланса»"
+    assert "с баланса — деньги спишутся с баланса за сутки до начала, брать ничего не нужно" in legend, \
+        "в легенде нет пункта «с баланса …»"
+    assert "<CircleDashed" in legend and "<Check" in legend and "<AlertCircle" in legend, \
+        "в легенде нет значков (!), галочки и кружка (сами символы ✓ и ◌ в тексте не пишем — эмодзи-сторож)"
 
 
 # ── 4. Список броней / «Сегодня» / телефон: один DueBadge ───────────────
