@@ -180,6 +180,14 @@ def run_weekly_rebates(
             recomputed = float(breakdown.final_price or 0.0)  # без недельной (pricing.py)
             correct_at_T = recomputed - weekly_extra
             stored = float(b.final_price or 0.0)
+            # Допы (кофе, песочница, проектор, кушетка) — не аренда: движок цены
+            # их не знает, и без вычета скидка «возвращала» клиенту цену допов
+            # (владелец 02.10: исправить дальше, прошлые начисления не трогать).
+            # Вычитаем, как при делении брони (bookings/routes.py, split): цена
+            # допов из реестра, не больше уплаченного.
+            extras_price = round(float(PricingService.calculate_extras_price(list(b.extras or []))), 2)
+            extras_price = min(extras_price, max(0.0, round(stored, 2)))
+            stored = stored - extras_price
             rebate += max(0.0, stored - correct_at_T)
 
         rebate = round(rebate, 2)
@@ -327,7 +335,12 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
         weekly_extra = base * (max(0, tier - duration_pct) / 100.0)
         recomputed = float(breakdown.final_price or 0.0)
         correct_at_T = recomputed - weekly_extra
-        return max(0.0, float(b.final_price or 0.0) - correct_at_T)
+        stored = float(b.final_price or 0.0)
+        # Допы — не аренда: вычитаем, как в run_weekly_rebates (держать синхронно).
+        extras_price = round(float(PricingService.calculate_extras_price(list(b.extras or []))), 2)
+        extras_price = min(extras_price, max(0.0, round(stored, 2)))
+        stored = stored - extras_price
+        return max(0.0, stored - correct_at_T)
 
     this_rebate = round(_rebate_for(booking), 2)
     week_rebate = round(sum(_rebate_for(b) for b in week), 2)

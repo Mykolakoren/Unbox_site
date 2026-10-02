@@ -641,6 +641,9 @@ def _weekly_rebate_recheck(session: Session, rows: list[dict], params: dict) -> 
             recomputed = float(breakdown.final_price or 0.0)
             correct_at_T = recomputed - weekly_extra
             stored = float(b.final_price or 0.0)
+            extras_price = round(float(PricingService.calculate_extras_price(list(b.extras or []))), 2)
+            extras_price = min(extras_price, max(0.0, round(stored, 2)))
+            stored = stored - extras_price
             rebate += max(0.0, stored - correct_at_T)
 
         rebate = round(rebate, 2)
