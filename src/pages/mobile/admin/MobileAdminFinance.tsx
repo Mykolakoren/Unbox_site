@@ -8,7 +8,7 @@ import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi, type CashboxPeriodSummary } from '../../../api/cashbox';
 import { Navigate } from 'react-router-dom';
 import { useUserStore } from '../../../store/userStore';
-import { userCanAccessFinance } from '../../../utils/permissions';
+import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { Sheet } from '../../../components/ui/Sheet';
 import { undoToast } from '../../../components/ui/undoToast';
@@ -23,10 +23,14 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel, formatMonthLabel, formatTime } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
+import { DaySummary } from '../../../components/admin/cashbox/DaySummary';
+import { WeeklyRebates } from '../../../components/admin/cashbox/WeeklyRebates';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
 type Branch = typeof BRANCHES[number];
 type Period = 'day' | 'week' | 'month';
+/** Раздел кассы на телефоне: операции, «Итоги дня», «Недельные скидки» (02.10). */
+type View = 'cash' | 'day' | 'rebates';
 
 const PERIOD_LABEL: Record<Period, string> = {
     day: 'Сегодня',
@@ -112,6 +116,11 @@ function MobileAdminFinanceScreen() {
     const currentUser = useUserStore(s => s.currentUser);
 
     const [branch, setBranch] = useState<Branch>('all');
+    const [view, setView] = useState<View>('cash');
+    // «Итоги дня» и «Скидки» — отчёты по всем клиентам: только с правом отчётов.
+    const canReports = hasPermission(currentUser, 'finance.view_reports');
+    // Ключ перезагрузки «Итогов дня»: после своей операции цифры должны обновиться.
+    const [dayReload, setDayReload] = useState(0);
     const [period, setPeriod] = useState<Period>('day');
     const [offset, setOffset] = useState(0);
     // Редактирование транзакции — ТОЛЬКО владелец (owner 2026-06-28).
@@ -159,11 +168,14 @@ function MobileAdminFinanceScreen() {
     }), [range, branchParam, fetchTransactions]);
 
     /** После записи/правки/закрытия смены — остатки, лента и итоги разом. */
-    const reloadAll = () => Promise.all([
-        fetchBalance(branchParam),
-        loadTransactions(),
-        loadSummary(),
-    ]);
+    const reloadAll = () => {
+        setDayReload(n => n + 1);
+        return Promise.all([
+            fetchBalance(branchParam),
+            loadTransactions(),
+            loadSummary(),
+        ]);
+    };
 
     useEffect(() => {
         fetchBalance(branchParam);
@@ -243,7 +255,23 @@ function MobileAdminFinanceScreen() {
                 Касса
             </h1>
 
-            {/* Филиал — один фильтр на весь экран. */}
+            {/* Раздел: операции / итоги дня / недельные скидки (решение владельца 02.10). */}
+            {canReports && (
+                <Segmented<View>
+                    aria-label="Раздел кассы"
+                    options={[
+                        { value: 'cash', label: 'Операции' },
+                        { value: 'day', label: 'Итоги дня' },
+                        { value: 'rebates', label: 'Скидки' },
+                    ]}
+                    value={view}
+                    onChange={setView}
+                    className="mb-3"
+                />
+            )}
+
+            {/* Филиал — один фильтр на весь экран (недельные скидки — по всем филиалам). */}
+            {view !== 'rebates' && (
             <div role="group" aria-label="Филиал" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
                 {BRANCHES.map(b => (
                     <Chip
@@ -256,7 +284,16 @@ function MobileAdminFinanceScreen() {
                     </Chip>
                 ))}
             </div>
+            )}
 
+            {view === 'day' && canReports && (
+                <DaySummary branch={branchParam} compact reloadKey={dayReload} clientPath={k => `/m/admin/users/${encodeURIComponent(k)}`} />
+            )}
+            {view === 'rebates' && canReports && (
+                <WeeklyRebates compact clientPath={k => `/m/admin/users/${encodeURIComponent(k)}`} />
+            )}
+
+            {(view === 'cash' || !canReports) && (<>
             {/* 1. Сейчас в кассе — не зависит от периода. */}
             <section aria-label="Сейчас в кассе" style={{ marginBottom: 16 }}>
                 <SectionTitle>Сейчас в кассе · {branch === 'all' ? 'все филиалы' : branch}</SectionTitle>
@@ -374,6 +411,7 @@ function MobileAdminFinanceScreen() {
                     ))}
                 </div>
             )}
+            </>)}
 
             {/* FAB */}
             <button

@@ -18,6 +18,8 @@ import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type To
 import { hasPermission } from '../../utils/permissions';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
 import { useArchivedClients } from '../../hooks/useArchivedClients';
+import { useRecentWeeklyRebates } from '../../hooks/useRecentWeeklyRebates';
+import { weeklyRebateNote, rebateFor, rebateRowsOnce } from '../../utils/weeklyRebateNote';
 import { ruCountWord } from '../../utils/plural';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
@@ -131,6 +133,9 @@ export function AdminDashboard() {
     // ── Касса: только при доступе к финансам ──
     const canCash = hasPermission(currentUser, 'finance.manage_cashbox')
         || hasPermission(currentUser, 'finance.view_reports');
+    // Недельные скидки с последнего понедельника — метка у клиента (02.10):
+    // «скидка за неделю +9 ₾ уже учтена в «к оплате»», чтобы её не вычитали вручную.
+    const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
     const [cash, setCash] = useState<{ cash: number | null; openedAt: string | null; shiftKnown: boolean } | null>(null);
     // Перечитываем строку кассы и после «Принять оплату» — иначе «наличные»
     // стояли старые до перезагрузки страницы. Ответ, пришедший позже нового
@@ -175,6 +180,7 @@ export function AdminDashboard() {
             onPaid={reloadCash}
             archived={archived}
             recentBookings={recentBookings}
+            rebates={rebates}
         />
     );
 }
@@ -196,6 +202,8 @@ interface TodayProps {
     /** Архивные клиенты по userId брони — только имя для подписи. */
     archived: Map<string, AppUser>;
     recentBookings: BookingHistoryItem[];
+    /** Недельная скидка с последнего понедельника, ₾ — по id клиента и почте. */
+    rebates: Map<string, number>;
 }
 
 const hairline = `1px solid ${GH.ink10}`;
@@ -208,7 +216,7 @@ const monoLabel: React.CSSProperties = {
 };
 
 function GridHouseToday({
-    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, onPaid, archived, recentBookings,
+    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, onPaid, archived, recentBookings, rebates,
 }: TodayProps) {
     const navigate = useNavigate();
     const [filter, setFilter] = useState<'all' | 'due'>('all');
@@ -221,6 +229,8 @@ function GridHouseToday({
 
     const dueRows = rows.filter(r => r.due !== null && r.due > 0);
     const shown = filter === 'due' ? dueRows : rows;
+    // Метка недельной скидки — один раз на клиента, у его первой брони в списке.
+    const rebateRow = rebateRowsOnce(shown, rebates);
     const toCollect = clients.filter(c => c.today > 0 || c.total > 0);
     // «Взять сегодня» — только те, у кого есть что взять за сегодняшние брони.
     // Остальные с общим долгом (today = 0: брони уже списаны с баланса) — отдельным
@@ -344,6 +354,7 @@ function GridHouseToday({
                                     const arch = archived.get(r.userId);
                                     const name = arch?.name || r.client;
                                     const phone = r.phone || arch?.phone || null;
+                                    const rebate = rebateRow.get(r.bookingId) ?? 0;
                                     return (
                                         <tr
                                             key={r.bookingId}
@@ -383,6 +394,11 @@ function GridHouseToday({
                                                         <a href={`tel:${phone}`} onClick={e => e.stopPropagation()} style={{ color: GH.ink60 }}>{phone}</a>
                                                     </div>
                                                 )}
+                                                {rebate > 0 && (
+                                                    <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, lineHeight: 1.35 }}>
+                                                        {weeklyRebateNote(rebate)}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
@@ -417,7 +433,7 @@ function GridHouseToday({
                         ) : collectToday.length > 0 && (
                             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                                 {collectToday.map(c => (
-                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} />
+                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} rebates={rebates} />
                                 ))}
                             </ul>
                         )}
@@ -433,7 +449,7 @@ function GridHouseToday({
                             </div>
                             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                                 {collectLater.map(c => (
-                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} />
+                                    <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} rebates={rebates} />
                                 ))}
                             </ul>
                         </section>
@@ -511,9 +527,10 @@ function CashLine({ cash, dayKey }: { cash: TodayProps['cash']; dayKey: string }
     );
 }
 
-function CollectRow({ c, user, onPaid }: { c: TodayClient; user: AppUser | null; onPaid: () => void }) {
+function CollectRow({ c, user, onPaid, rebates }: { c: TodayClient; user: AppUser | null; onPaid: () => void; rebates: Map<string, number> }) {
     // В3: по умолчанию — весь долг клиента, подпись «из них за сегодня».
     const amount = c.total > 0 ? c.total : c.today;
+    const rebate = rebateFor(rebates, c.userId, c.rows[0]?.userId, user?.id, user?.email);
     const hint = c.total > 0
         ? (c.today > 0
             ? `Весь долг ${formatGel(c.total)}, из них за сегодня ${formatGel(c.today)}`
@@ -541,6 +558,9 @@ function CollectRow({ c, user, onPaid }: { c: TodayClient; user: AppUser | null;
                     <span className="ui-badge ui-badge--danger">сверх лимита</span>
                 )}
             </div>
+            {rebate > 0 && (
+                <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg }}>{weeklyRebateNote(rebate)}</div>
+            )}
             <div>
                 {/* Филиал — по кабинету первой сегодняшней брони (rows по времени), как на телефоне. */}
                 <AcceptPaymentButton

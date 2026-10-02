@@ -79,3 +79,5 @@ tmp/
 
 # Graphify knowledge graph (генерируется локально)
 graphify-out/
+# Симлинк node_modules в worktree агентов (без косой черты — иначе ссылка не игнорируется)
+node_modules
