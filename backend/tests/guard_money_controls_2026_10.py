@@ -683,7 +683,7 @@ def test_income_without_branch_sql():
     _cash(s, 600, type="expense", branch=None, method="card_bog", desc=card, when=recent)
     _cash(s, 600, branch=None, method="card_tbc", desc=card, when=recent)    # пара в тот же день — не тревога
     _cash(s, 600, branch=None, method="card_tbc", desc=card, when=recent.replace(hour=11))  # ✓ второй приход без своего расхода
-    _cash(s, 200, type="expense", branch=None, method="card_bog", desc=card, when=datetime(2026, 9, 10, 9))
+    _cash(s, 200, type="expense", branch=None, method="card_bog", desc=card, when=datetime(2026, 9, 26, 9))
     _cash(s, 200, branch=None, method="card_tbc", desc=card, when=datetime(2026, 9, 25, 9))  # ✓ «близнец» — в другой день
     # не считаются:
     _cash(s, 60, branch="Unbox One", when=recent)
@@ -773,6 +773,7 @@ def test_repeat_income_same_day_sql():
     x = _user(s, "x@x.ge", "Клиент Х")
     y = _user(s, "y@x.ge", "Клиент У")
     z = _user(s, "z@x.ge", "Клиент Z")
+    w = _user(s, "w@x.ge", "Клиент W")
     # ✓ Х: 20 ₾ в 08:45 по Тбилиси (до окна суток) картой в Uni и в 19:04 наличными в One — 01.10
     _pay(s, x, 20, datetime(2026, 10, 1, 4, 45), method="card_tbc", branch="Unbox Uni", admin="Лиза")
     _pay(s, x, 20, datetime(2026, 10, 1, 15, 4), branch="Unbox One", admin="Валентина")
@@ -793,6 +794,10 @@ def test_repeat_income_same_day_sql():
               desc="Допы к броне (дозаказ): coffee_meama")
     _cash(s, 15, when=datetime(2026, 10, 1, 9, 0))   # без клиента
     _cash(s, 15, when=datetime(2026, 10, 1, 9, 1))
+    # W: пара 01.10 в 05:00 и 06:00 по Тбилиси — день тот же, но до окна суток:
+    # её сообщил вчерашний запуск, сегодня — не повторяем
+    _pay(s, w, 40, datetime(2026, 10, 1, 1, 0))
+    _pay(s, w, 40, datetime(2026, 10, 1, 2, 0))
     check = _check(ma, "repeat_income_same_day")
     rows = ma.run_check(s, check, ma.audit_params(NOW))
     got = sorted((r["day"], r["client"], r["amount"], r["times"]) for r in rows)
@@ -802,6 +807,9 @@ def test_repeat_income_same_day_sql():
     assert "19:04 наличные · Unbox One · Валентина" in xx["entries"], xx
     # Через сутки те же пары не повторяются: каждое событие — один раз.
     assert ma.run_check(s, check, ma.audit_params(NOW + timedelta(days=1))) == []
+    # А пары W и Z сообщил вчерашний запуск.
+    earlier = {(r["client"], r["amount"]) for r in ma.run_check(s, check, ma.audit_params(NOW - timedelta(days=1)))}
+    assert {("Клиент W", 40.0), ("Клиент Z", 30.0)} <= earlier, earlier
 
 
 def test_shift_discrepancies_day_sql():
