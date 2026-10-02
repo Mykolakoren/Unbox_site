@@ -30,7 +30,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toString().replace('.', '
  * Тамрико: бронь «оплачено», а свежего платежа нет — деньги списаны с баланса,
  * внесённого раньше). Только подпись, суммы не считаем.
  */
-export function paymentSourceLine(b: BookingHistoryItem): string | null {
+export function paymentSourceLine(b: BookingHistoryItem, due?: DueInfo): string | null {
     const status = b.paymentStatus;
     const method = String(b.paymentMethod || '');
     if (!status || method === 'service') return null;
@@ -41,6 +41,9 @@ export function paymentSourceLine(b: BookingHistoryItem): string | null {
     const amount = b.chargeAmount != null ? ` · ${formatGel(b.chargeAmount)}` : '';
     if (method === 'subscription') return `Списано часами абонемента${when ? ` ${when}` : ''}`;
     if (method === 'bonus') return `Оплачено бонусным часом${when ? ` ${when}` : ''}`;
+    // Бронь списана с баланса, но баланс в минусе (клиент должен): деньги НЕ получены.
+    // 02.10: админ увидел «Оплачено с баланса» у брони Марии Кирдун, а клиент не платил.
+    if (due && due.due > 0) return `Списано с баланса${when ? ` ${when}` : ''}${amount} · клиент ещё не оплатил`;
     return `Оплачено с баланса${when ? ` ${when}` : ''}${amount}`;
 }
 
@@ -97,7 +100,7 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
         }
     }
 
-    const payLine = paymentSourceLine(booking);
+    const payLine = paymentSourceLine(booking, due);
 
     const rebateLine = est?.lastRebate && est.lastRebate.amount > 0
         ? `в т.ч. недельная скидка +${formatGel(est.lastRebate.amount)} от ${formatDayMonth(est.lastRebate.date)} — уже на балансе`
