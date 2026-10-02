@@ -1,7 +1,7 @@
 """Cashbox — shift reports + analytics."""
 from typing import List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlmodel import Session, select, func, col, desc
 from app.db.session import get_session
 from app.models.user import User
@@ -10,6 +10,7 @@ from app.models.cashbox_transaction import CashboxTransaction
 from app.models.shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
 from app.models.shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
 from app.api.v1.cashbox import require_cashbox, require_reports
+from app.services.shift_alert import notify_shift_discrepancy
 
 router = APIRouter()
 
@@ -257,6 +258,7 @@ def list_shifts(
 @router.post("/shifts", response_model=ShiftReportRead)
 def end_shift(
     payload: ShiftReportCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     current_user: User = Depends(require_cashbox),
 ):
@@ -366,6 +368,21 @@ def end_shift(
         )
         session.add(recon)
         session.commit()
+
+    # Владельцу — в Telegram, если |расхождение| больше порога (5 ₾, решение
+    # 02.10): раньше корректировка выше писалась молча, и о недостаче в кассе
+    # владелец не узнавал. Шлём ПОСЛЕ записи отчёта и корректировки, в фоне:
+    # смена уже закрыта, сбой Telegram её не роняет (только лог), повторный
+    # запрос второго сообщения не даёт (см. services/shift_alert.py).
+    notify_shift_discrepancy(
+        background_tasks,
+        branch=branch,
+        admin_name=current_user.name or "",
+        expected=expected,
+        actual=payload.actual_balance,
+        discrepancy=discrepancy,
+        notes=payload.notes,
+    )
 
     return report
 
