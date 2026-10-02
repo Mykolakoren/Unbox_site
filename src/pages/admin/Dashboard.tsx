@@ -68,10 +68,14 @@ export function AdminDashboard() {
         setStatus(prev => (ok ? 'ready' : prev === 'ready' ? 'ready' : 'error'));
     }, [fetchAllBookings]);
 
+    // Ждём роль вошедшего: без неё fetchAllBookings молча отказывается, и «Сегодня»
+    // показало бы «никого нет» (02.10, тот же случай, что «Гость · 0 ₾» в шахматке).
+    const viewerRole = currentUser?.role;
     useEffect(() => {
+        if (!viewerRole) return;
         fetchUsers();
         void load();
-    }, [fetchUsers, load]);
+    }, [viewerRole, fetchUsers, load]);
 
     // «Сегодня» — по Батуми; в полночь лента сама переключается на новый день.
     const [dayKey, setDayKey] = useState(() => batumiDayKey());

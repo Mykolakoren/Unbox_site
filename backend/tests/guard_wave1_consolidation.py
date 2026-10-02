@@ -105,7 +105,8 @@ def test_crm_access_toggle_error_is_shown():
 def test_admin_bookings_loads_full_list_before_empty_state():
     src = _read("src/pages/admin/Bookings.tsx")
     # Список грузит полный набор сам; шахматка — сама (без двойного запроса).
-    assert re.search(r"if \(viewMode !== 'list' \|\| allListStatus === 'ready'\) return;\s*void loadAllBookings\(\);", src), \
+    # 02.10: дополнительно ждём роль вошедшего (viewerRole), иначе fetchAllBookings молча отказывается.
+    assert re.search(r"if \(!viewerRole \|\| viewMode !== 'list' \|\| allListStatus === 'ready'\) return;\s*void loadAllBookings\(\);", src), \
         "/admin/bookings не грузит полный список на mount"
     assert "await fetchAllBookings()" in src, "loadAllBookings не зовёт fetchAllBookings"
     i = src.index('title="Броней не найдено"')

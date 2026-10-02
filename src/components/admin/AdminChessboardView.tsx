@@ -199,10 +199,19 @@ export function AdminChessboardView() {
     const [, setNewDragTick] = useState(0);
     const forceNewDragUpdate = () => setNewDragTick(t => t + 1);
 
+    // Полный список броней и клиентов грузим, когда уже известна роль вошедшего.
+    // 02.10: при свежем входе шахматка монтировалась раньше, чем подгружался
+    // currentUser — fetchAllBookings молча отказывался (роль неизвестна), и на
+    // экране оставались обезличенные публичные брони «Гость · 0 ₾», а без списка
+    // клиентов вместо имён шли почты. Перезапускаем, как только роль появилась.
+    const viewerRole = useUserStore(s => s.currentUser?.role);
+    const fetchUsersForNames = useUserStore(s => s.fetchUsers);
     useEffect(() => {
-        fetchAllBookings();
         fetchResources();
-    }, [fetchAllBookings, fetchResources]);
+        if (!viewerRole) return;
+        fetchAllBookings();
+        fetchUsersForNames();
+    }, [viewerRole, fetchAllBookings, fetchResources, fetchUsersForNames]);
 
     // ── Week days ──────────────────────────────────────────────────────────────
     const weekDays = useMemo(() =>

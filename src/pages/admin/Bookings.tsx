@@ -133,11 +133,13 @@ export function AdminBookings() {
     };
     // Только для списка: шахматка (AdminChessboardView) сама грузит полный
     // список на mount — иначе два одинаковых тяжёлых запроса (6000+ броней).
+    const viewerRole = useUserStore(s => s.currentUser?.role);
     useEffect(() => {
-        if (viewMode !== 'list' || allListStatus === 'ready') return;
+        // Роль ещё не подгрузилась — fetchAllBookings молча откажется; ждём её (02.10).
+        if (!viewerRole || viewMode !== 'list' || allListStatus === 'ready') return;
         void loadAllBookings();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [viewMode]);
+    }, [viewMode, viewerRole]);
 
     useEffect(() => {
         // На mount — один раз. Дополнительно дёргаем при возврате на вкладку,
