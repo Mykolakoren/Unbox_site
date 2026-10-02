@@ -332,19 +332,19 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
     this_rebate = round(_rebate_for(booking), 2)
     week_rebate = round(sum(_rebate_for(b) for b in week), 2)
 
-    # Последний недельный кредит за прошлую неделю (если за 8 дней был) — чтобы
-    # попап брони мог сказать «в т.ч. недельная скидка +9 ₾ от 28.09 — уже на балансе».
-    from app.models.balance_ledger import BalanceLedger
-    last = session.exec(
-        select(BalanceLedger).where(
-            BalanceLedger.user_id == str(user.id),
-            BalanceLedger.reason == "weekly_rebate",
-            BalanceLedger.created_at >= datetime.utcnow() - timedelta(days=8),
-        ).order_by(BalanceLedger.created_at.desc())
-    ).first()
+    # Недельная скидка, начисленная с последнего понедельника по Тбилиси, — чтобы
+    # попап брони сказал «скидка за неделю +9 ₾ уже учтена в «к оплате»». Правило
+    # одно с меткой в «Сегодня» (02.10): day_summary.recent_weekly_rebates. Раньше
+    # тут было «за 8 дней» — в понедельник попап ещё показывал прошлую скидку,
+    # когда новой у клиента не было, а «Сегодня» — уже нет.
+    from app.services.day_summary import recent_weekly_rebates
+    recent = recent_weekly_rebates(session, user_id=str(user.id))
     last_rebate = (
-        {"amount": float(last.delta), "date": (last.created_at + timedelta(hours=4)).strftime("%d.%m")}
-        if last else None
+        {
+            "amount": round(sum(float(r.delta or 0) for r in recent), 2),
+            "date": (recent[0].created_at + timedelta(hours=4)).strftime("%d.%m"),
+        }
+        if recent else None
     )
     if week_rebate < MIN_REBATE_GEL:
         week_rebate, this_rebate = 0.0, 0.0

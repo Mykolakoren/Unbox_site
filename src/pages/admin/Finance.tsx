@@ -21,6 +21,8 @@ import { PreCloseShiftChecklist } from '../../components/admin/cashbox/PreCloseS
 import { ShiftReportsTable } from '../../components/admin/cashbox/ShiftReportsTable';
 import { CashboxAnalytics } from '../../components/admin/cashbox/CashboxAnalytics';
 import { ReconciliationExport } from '../../components/admin/cashbox/ReconciliationExport';
+import { DaySummary } from '../../components/admin/cashbox/DaySummary';
+import { WeeklyRebates } from '../../components/admin/cashbox/WeeklyRebates';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
 import { excludeAdjustments } from '../../components/admin/cashbox/cashMoney';
 import { cashboxApi, type CashboxTransaction, type CashboxPeriodSummary, type CashboxAnalytics as CashboxAnalyticsData } from '../../api/cashbox';
@@ -33,7 +35,9 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { Segmented } from '../../components/ui/Chip';
 
-type Tab = 'transactions' | 'categories' | 'shifts';
+// «Итоги дня» и «Недельные скидки» (решение владельца 02.10): админы сверяют день
+// и скидки с сайтом, а не со своим Excel.
+type Tab = 'transactions' | 'day' | 'rebates' | 'categories' | 'shifts';
 type PeriodMode = 'day' | 'week' | 'month' | 'custom';
 type TxType = 'all' | 'income' | 'expense';
 
@@ -480,6 +484,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
     ];
     const tabs: { value: Tab; label: string }[] = [
         { value: 'transactions', label: 'Операции' },
+        { value: 'day', label: 'Итоги дня' },
+        { value: 'rebates', label: 'Недельные скидки' },
         ...(p.canManageCategories ? [{ value: 'categories' as Tab, label: 'Категории' }] : []),
         { value: 'shifts', label: 'Смены' },
     ];
@@ -659,6 +665,17 @@ function GridHouseAdminFinance(p: GHAFProps) {
                 </div>
                 <div style={{ border: `1px solid ${GH.ink10}`, background: GH.paper }}>
                     {p.tab === 'transactions' && <CashboxTransactionTable filteredTransactions={p.filtered} onRefresh={p.refetchTransactions} />}
+                    {/* Итоги дня — свой выбор дня (по Тбилиси), филиал — общий фильтр кассы. */}
+                    {p.tab === 'day' && (
+                        <div style={{ padding: 16 }}>
+                            <DaySummary branch={p.selectedBranch || undefined} clientPath={k => `/admin/users/${encodeURIComponent(k)}`} />
+                        </div>
+                    )}
+                    {p.tab === 'rebates' && (
+                        <div style={{ padding: 16 }}>
+                            <WeeklyRebates clientPath={k => `/admin/users/${encodeURIComponent(k)}`} />
+                        </div>
+                    )}
                     {p.tab === 'categories' && p.canManageCategories && <div style={{ padding: 16 }}><CategoryManager /></div>}
                     {p.tab === 'shifts' && <ShiftReportsTable />}
                 </div>

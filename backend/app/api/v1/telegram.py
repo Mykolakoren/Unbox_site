@@ -440,6 +440,21 @@ def daily_summary_endpoint(
         br_line = " · ".join(f"{k}: <b>{v:g}</b> ₾" for k, v in sorted(income_by_branch.items(), key=lambda x: -x[1]))
         lines.append(f"• Приход по филиалам: {br_line}")
 
+    # Итоги дня по филиалам (02.10) — ТА ЖЕ функция, что экран «Итоги дня» в
+    # кассе (services/day_summary.compute_day_summary): пришло нал/TBC/BOG без
+    # корректировок и «должны на конец дня». Сбой блока не мешает сводке.
+    # Эндпоинт ничего не пишет, поэтому после сбоя сессию просто откатываем.
+    try:
+        from app.services.day_summary import compute_day_summary, telegram_day_lines
+        day_lines = telegram_day_lines(compute_day_summary(session, (yesterday_start + TBS).date()))
+    except Exception:
+        logger.exception("daily-summary: итоги дня по филиалам не посчитались")
+        session.rollback()
+        day_lines = []
+    if day_lines:
+        lines.append("")
+        lines.extend(day_lines)
+
     lines.append("")
     lines.append("<b>Остатки на утро</b>")
     lines.append(f"• {_fmt_money_dict({k: round(v, 2) for k, v in balance_by_method.items()})}")

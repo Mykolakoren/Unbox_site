@@ -1,6 +1,6 @@
 """
 Cashbox module — финансовый учёт: транзакции, категории, смены, аналитика.
-Sub-modules: transactions, categories, shifts.
+Sub-modules: transactions, categories, shifts, reconciliation, day_summary.
 """
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
@@ -64,9 +64,11 @@ def build_category_tree(categories: List[ExpenseCategory]) -> List[dict]:
 
 
 # ── Sub-routers ──────────────────────────────────────────────────────────────
-from app.api.v1.cashbox import transactions, categories, shifts, reconciliation  # noqa: E402
+from app.api.v1.cashbox import transactions, categories, shifts, reconciliation, day_summary  # noqa: E402
 
 router.include_router(transactions.router)
 router.include_router(categories.router)
 router.include_router(shifts.router)
 router.include_router(reconciliation.router)
+# «Итоги дня» и «Недельные скидки» (02.10) — только чтение.
+router.include_router(day_summary.router)

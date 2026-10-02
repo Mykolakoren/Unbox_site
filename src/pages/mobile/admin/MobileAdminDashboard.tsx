@@ -11,7 +11,7 @@ import { RESOURCES } from '../../../utils/data';
 import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { useAdminDueMap, acceptPaymentFor, branchOfBooking, type AcceptPayment } from './adminPayment';
-import { userCanAccessFinance } from '../../../utils/permissions';
+import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
 import { TopupSheet } from './TopupSheet';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import { Button } from '../../../components/ui/Button';
@@ -21,6 +21,8 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { formatDateLabel, formatGel } from '../../../utils/format';
 import { useArchivedClients } from '../../../hooks/useArchivedClients';
+import { useRecentWeeklyRebates } from '../../../hooks/useRecentWeeklyRebates';
+import { weeklyRebateNote, rebateFor, rebateRowsOnce } from '../../../utils/weeklyRebateNote';
 
 /** 1 клиент, 2 клиента, 5 клиентов. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -115,6 +117,9 @@ export function MobileAdminDashboard() {
     const isOwnerish = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
     // «Принять оплату» — только с правом на кассу (как вкладка «Касса»).
     const canCash = userCanAccessFinance(currentUser);
+    // Недельные скидки с последнего понедельника — метка у клиента (02.10):
+    // «скидка за неделю +9 ₾ уже учтена в «к оплате»», чтобы её не вычитали вручную.
+    const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
 
     const openRow = (r: TodayRow) => {
         const b = bookings.find(x => x.id === r.bookingId);
@@ -134,7 +139,9 @@ export function MobileAdminDashboard() {
     };
 
     // Карточка должника «Должны»; later — долг не за сегодня (нейтральная рамка).
-    const renderOwing = (c: TodayClient, later = false) => (
+    const renderOwing = (c: TodayClient, later = false) => {
+        const rebate = rebateFor(rebates, c.userId, c.rows[0]?.userId);
+        return (
         <div key={c.userId} style={{
             background: 'var(--color-card)', border: `1px solid ${later ? 'var(--color-ink-10)' : 'var(--status-danger-fg)'}`,
             borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
@@ -159,6 +166,9 @@ export function MobileAdminDashboard() {
             <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                 {c.rows.map(r => `${r.time} ${r.cabinet}`).join(' · ')}
             </div>
+            {rebate > 0 && (
+                <div data-weekly-rebate-note style={{ fontSize: 12, color: 'var(--status-ok-fg)' }}>{weeklyRebateNote(rebate)}</div>
+            )}
             {canCash && (
                 <Button
                     block
@@ -170,7 +180,8 @@ export function MobileAdminDashboard() {
                 </Button>
             )}
         </div>
-    );
+        );
+    };
 
     return (
         <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -300,9 +311,11 @@ export function MobileAdminDashboard() {
                         if (rows.length === 0) {
                             return <EmptyState compact title={seg === 'tomorrow' ? 'Завтра броней нет' : 'Сегодня броней нет'} />;
                         }
+                        // Метка недельной скидки — один раз на клиента, у первой брони.
+                        const rebateRow = rebateRowsOnce(rows, rebates);
                         return (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                {rows.map(r => <DayRow key={r.bookingId} row={r} archivedName={archived.get(r.userId)?.name} onOpen={() => openRow(r)} />)}
+                                {rows.map(r => <DayRow key={r.bookingId} row={r} archivedName={archived.get(r.userId)?.name} rebate={rebateRow.get(r.bookingId)} onOpen={() => openRow(r)} />)}
                             </div>
                         );
                     })()
@@ -404,7 +417,7 @@ const bannerStyle: React.CSSProperties = {
 };
 
 /** Строка дня: время · клиент · кабинет · «к оплате / ✓». Неоплаченная — рамкой danger (В2). */
-function DayRow({ row, archivedName, onOpen }: { row: TodayRow; archivedName?: string; onOpen: () => void }) {
+function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archivedName?: string; rebate?: number; onOpen: () => void }) {
     const owes = row.due !== null && row.due > 0;
     const note = row.status === 'completed' ? ' · прошла'
         : row.status === 'pending_approval' ? ' · ждёт одобрения' : '';
@@ -439,6 +452,11 @@ function DayRow({ row, archivedName, onOpen }: { row: TodayRow; archivedName?: s
                 <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {row.cabinet}{note}
                 </span>
+                {!!rebate && rebate > 0 && (
+                    <span data-weekly-rebate-note style={{ display: 'block', fontSize: 12, color: 'var(--status-ok-fg)', whiteSpace: 'normal', lineHeight: 1.35 }}>
+                        {weeklyRebateNote(rebate)}
+                    </span>
+                )}
             </span>
             <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} />
         </button>
