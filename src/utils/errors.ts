@@ -99,8 +99,9 @@ export function apiErrorMessage(err: any, fallback = 'Что-то пошло н�
 /** Сервер не ответил или ответил сбоем 5xx (в т.ч. шлюз после таймаута): запись МОГЛА пройти. */
 export const PAYMENT_UNCERTAIN_TEXT = 'Не удалось подтвердить запись. Проверьте журнал кассы, прежде чем вносить заново';
 
-/** 409 duplicate_recent: такой же приход по клиенту уже записан минуту назад
- *  (backend cashbox/transactions.py). Это вопрос «записать ещё одну?», не ошибка —
+/** 409 duplicate_recent: такой же приход по клиенту уже записан — только что
+ *  (3 минуты) или сегодня по Тбилиси (backend cashbox/transactions.py; оба случая
+ *  под одним кодом, текст приходит с сервера). Это вопрос «записать ещё одну?», не ошибка —
  *  общий api/client.ts второй тост для него не показывает. */
 export function isDuplicatePayment(err: any): boolean {
     const d = err?.response?.data?.detail;

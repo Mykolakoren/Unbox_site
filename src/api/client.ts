@@ -117,7 +117,7 @@ api.interceptors.response.use(
             // calendar_near (01.10) — не ошибка, а вопрос специалисту: экран
             // сам предложит «Перенести существующую / Всё равно создать».
             const isCalendarNear = typeof detail === 'object' && detail.code === 'calendar_near';
-            // duplicate_recent (01.10) — тоже вопрос, не ошибка: экран спросит
+            // duplicate_recent (01.10; с 02.10 и «уже сегодня») — тоже вопрос, не ошибка: экран спросит
             // «Записать ещё одну?» (utils/cashboxDuplicate.ts).
             if (!isMaintenanceConflict && !isCalendarNear && !isDuplicatePayment(error) && !isCashboxWrite) {
                 showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });

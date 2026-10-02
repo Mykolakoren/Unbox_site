@@ -273,6 +273,12 @@ def get_period_summary(
 # Теперь второй такой же приход по тому же клиенту в течение 3 минут сервер
 # не пишет молча, а отвечает 409 duplicate_recent; фронт спрашивает «Записать
 # ещё одну?» и при «да» повторяет запрос с confirm_duplicate=true.
+#
+# Расширение 02.10: то же самое, но за ВЕСЬ ТЕКУЩИЙ ДЕНЬ по Тбилиси (мягкое
+# предупреждение). Случай: админ внесла Тамрико 20 ₾ в 12:45 в Uni и ещё раз
+# 20 ₾ в 19:04 в One — окно в 3 минуты такое не ловит, у клиента появился
+# ложный депозит. Код ответа тот же (duplicate_recent) — фронту менять нечего,
+# отличается только текст и поле existing.window ("recent" / "today").
 DUPLICATE_WINDOW = timedelta(minutes=3)
 # Способ оплаты НЕ сравниваем: наличные и карта на ту же сумму — тот же дубль
 # (в реальном случае первая запись была картой, вторая — наличными).
@@ -334,14 +340,29 @@ def _lock_client_for_payment(session: Session, key: str) -> None:
     session.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
 
 
-def _find_recent_duplicate(
-    session: Session, payload: CashboxTransactionCreate, target_user: Optional[User],
-) -> Optional[CashboxTransaction]:
-    """Самый свежий приход по этому клиенту на ту же сумму за последние 3 минуты."""
+def _server_now() -> datetime:
+    """Серверное «сейчас» в той же шкале, что и created_at (naive, на проде UTC).
+    Вынесено в функцию, чтобы сторож мог подставить своё время."""
+    return datetime.now()
+
+
+def _tbilisi_day_start_utc(now: datetime) -> datetime:
+    """Начало текущего календарного дня по Тбилиси (UTC+4) в naive UTC.
+
+    now — naive UTC. Полночь Тбилиси = 20:00 UTC предыдущих суток: в 19:00 UTC
+    день ещё прежний, а в 20:30 UTC (00:30 по Тбилиси) уже новый.
+    """
+    local = now + timedelta(hours=4)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=4)
+
+
+def _duplicate_candidates(
+    payload: CashboxTransactionCreate, target_user: Optional[User], since: datetime,
+):
+    """Запрос: приходы по этому клиенту на ту же сумму и валюту с момента since."""
     # created_at пишется моделью через datetime.now() (серверное время, на проде
     # UTC) — сравниваем в той же шкале, а не с payload.date: дату админ может
     # проставить задним числом.
-    since = datetime.now() - DUPLICATE_WINDOW
     who = CashboxTransaction.client_id == payload.client_id
     if target_user is not None:
         # Тот же человек мог прийти под email, а не под UUID (и зачисление на
@@ -352,7 +373,7 @@ def _find_recent_duplicate(
             | (CashboxTransaction.client_id == target_user.email)
             | (CashboxTransaction.credited_user_id == str(target_user.id))
         )
-    stmt = (
+    return (
         select(CashboxTransaction)
         .where(CashboxTransaction.type == "income")
         .where(who)
@@ -363,31 +384,67 @@ def _find_recent_duplicate(
         .where(func.abs(CashboxTransaction.amount - float(payload.amount)) < 0.005)
         .order_by(desc(CashboxTransaction.created_at))
     )
-    return session.exec(stmt).first()
 
 
-def _duplicate_payment_error(prev: CashboxTransaction, current_admin_id: str) -> HTTPException:
-    secs = max(0, int((datetime.now() - prev.created_at).total_seconds()))
+def _find_recent_duplicate(
+    session: Session, payload: CashboxTransactionCreate, target_user: Optional[User],
+) -> Optional[CashboxTransaction]:
+    """Самый свежий приход по этому клиенту на ту же сумму за последние 3 минуты."""
+    since = _server_now() - DUPLICATE_WINDOW
+    return session.exec(_duplicate_candidates(payload, target_user, since)).first()
+
+
+def _find_today_duplicate(
+    session: Session, payload: CashboxTransactionCreate, target_user: Optional[User],
+) -> Optional[CashboxTransaction]:
+    """Самый свежий такой же приход с начала текущего дня по Тбилиси (любой
+    способ оплаты, филиал и админ). Удалённая запись из таблицы уже исчезла —
+    дублем не считается."""
+    since = _tbilisi_day_start_utc(_server_now())
+    return session.exec(_duplicate_candidates(payload, target_user, since)).first()
+
+
+def _duplicate_payment_error(
+    prev: CashboxTransaction, current_admin_id: str, window: str = "recent",
+) -> HTTPException:
+    now = _server_now()
+    secs = max(0, int((now - prev.created_at).total_seconds()))
     cur = "₾" if prev.currency == "GEL" else prev.currency
     amount_txt = f"{prev.amount:g}".replace(".", ",")
     method = _METHOD_RU.get(prev.payment_method, prev.payment_method)
-    # Первую запись сделал другой администратор — скажем, кто (может, коллега с телефона).
-    by = f", записал(а) {prev.admin_name}" if prev.admin_name and prev.admin_id != current_admin_id else ""
+    # Время по Тбилиси: created_at хранится в UTC.
+    time_local = (prev.created_at + timedelta(hours=4)).strftime("%H:%M")
+    if window == "today":
+        where = f" ({prev.branch})" if prev.branch else ""
+        who = f" (записал(а) {prev.admin_name})" if prev.admin_name else ""
+        message = (
+            f"Сегодня в {time_local}{where} этому клиенту уже внесено "
+            f"{amount_txt} {cur} ({method}){who}. "
+            "Если это второй платёж, подтвердите ещё одну запись."
+        )
+    else:
+        # Первую запись сделал другой администратор — скажем, кто (может, коллега с телефона).
+        by = f", записал(а) {prev.admin_name}" if prev.admin_name and prev.admin_id != current_admin_id else ""
+        message = (
+            f"Такая же операция по этому клиенту уже записана {_ago_ru(secs)} "
+            f"({amount_txt} {cur}, {method}{by}). "
+            "Если это не ошибка, подтвердите ещё одну запись."
+        )
     return HTTPException(
         status_code=409,
         detail={
             "code": "duplicate_recent",
-            "message": (
-                f"Такая же операция по этому клиенту уже записана {_ago_ru(secs)} "
-                f"({amount_txt} {cur}, {method}{by}). "
-                "Если это не ошибка, подтвердите ещё одну запись."
-            ),
+            "message": message,
             "existing": {
                 "id": prev.id,
                 "amount": prev.amount,
                 "payment_method": prev.payment_method,
                 "created_at": prev.created_at.isoformat(),
                 "seconds_ago": secs,
+                "window": window,
+                "branch": prev.branch,
+                "admin_name": prev.admin_name,
+                "time_local": time_local,
             },
         },
     )
@@ -456,6 +513,11 @@ def create_transaction(
             prev = _find_recent_duplicate(session, payload, lookup_user)
             if prev is not None:
                 raise _duplicate_payment_error(prev, str(current_user.id))
+            # Не в последние 3 минуты, но уже сегодня (по Тбилиси) — мягкое
+            # предупреждение с временем и филиалом первой записи.
+            prev = _find_today_duplicate(session, payload, lookup_user)
+            if prev is not None:
+                raise _duplicate_payment_error(prev, str(current_user.id), window="today")
 
     # ── Normalise the operation date to UTC-naive ──
     # Frontend sends Tbilisi wall-clock as a naive ISO string

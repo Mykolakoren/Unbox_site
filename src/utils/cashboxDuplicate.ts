@@ -8,8 +8,12 @@ import { isDuplicatePayment } from './errors';
  * Случай: админ нажала «Принять оплату» (45 ₾), увидела красную ошибку, хотя
  * платёж записался, и внесла заново — у клиента два платежа. Теперь сервер на
  * второй такой же приход по клиенту в течение 3 минут отвечает 409
- * `duplicate_recent` (backend cashbox/transactions.py). Здесь этот ответ
- * превращается в вопрос с текстом сервера:
+ * `duplicate_recent` (backend cashbox/transactions.py). С 02.10 тот же код и за
+ * весь текущий день по Тбилиси (случай Тамрико: 20 ₾ в 12:45 в Uni и снова
+ * в 19:04 в One); от «только что» он отличается лишь текстом сервера
+ * («Сегодня в 12:45 (Unbox Uni) этому клиенту уже внесено…») и
+ * detail.existing.window = 'today'. Здесь этот ответ превращается в вопрос
+ * с текстом сервера:
  *   «Записать ещё одну» — повтор с confirm_duplicate: true;
  *   «Отмена»            — ничего не пишем, бросаем DuplicatePaymentDeclined.
  *
@@ -40,7 +44,7 @@ export async function createIncomeWithDuplicateGuard(
         const detail = (err as { response?: { data?: { detail?: { message?: unknown } } } }).response?.data?.detail;
         const message = typeof detail?.message === 'string' && detail.message
             ? detail.message
-            : 'Такая же операция по этому клиенту уже записана только что. Если это не ошибка, подтвердите ещё одну запись.';
+            : 'Такая же операция по этому клиенту уже записана. Если это не ошибка, подтвердите ещё одну запись.';
         const again = await confirmAction({
             title: 'Такой платёж уже записан',
             body: message,
