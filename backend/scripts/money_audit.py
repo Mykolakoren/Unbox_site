@@ -25,7 +25,9 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from datetime import datetime, time, timedelta, timezone
+from typing import Any, Callable, Optional
+from uuid import UUID
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -33,16 +35,25 @@ from sqlalchemy import text  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 from app.db.session import engine  # noqa: E402
+from app.services.pricing import PricingService  # noqa: E402
 
 
 class Check:
-    """Одна проверка: заголовок, SQL и человеческое объяснение, что это значит."""
+    """Одна проверка: заголовок, SQL и человеческое объяснение, что это значит.
 
-    def __init__(self, key: str, title: str, sql: str, why: str):
+    02.10: SQL может брать окна времени параметрами (:since_30d и др., см.
+    audit_params), а `post` — досчитать результат в Python, когда одного SQL
+    мало (перепроверка недельной скидки зовёт тот же движок цен, что и
+    начисление). post(session, rows, params) -> строки-расхождения.
+    """
+
+    def __init__(self, key: str, title: str, sql: str, why: str,
+                 post: Optional[Callable[..., list[dict[str, Any]]]] = None):
         self.key = key
         self.title = title
         self.sql = sql
         self.why = why
+        self.post = post
 
 
 CHECKS: list[Check] = [
@@ -276,6 +287,370 @@ CHECKS: list[Check] = [
 ]
 
 
+# ═══ Контроль денег без Excel (решение владельца 02.10) ═════════════════════
+# Владелец уходит от таблиц админов: то, что раньше сверяли глазами в Excel,
+# теперь ловит ревизор. Окна времени — параметрами (audit_params), а не now()
+# в SQL: так SQL этих проверок одинаково работает в Postgres и на SQLite,
+# где их гоняет сторож (tests/guard_money_controls_2026_10.py).
+
+TBILISI = timedelta(hours=4)
+
+# Законно бесплатные по правилу движка цен: comp-аккаунты (владелец, Ирина —
+# PricingService.COMP_ACCOUNTS) и служебная запись владельца admin@unbox.com.
+_FREE_BY_RULE_EMAILS = ", ".join(
+    "'" + e.replace("'", "''") + "'"
+    for e in sorted({*PricingService.COMP_ACCOUNTS, "admin@unbox.com"})
+)
+
+_METHOD_RU = {"cash": "наличные", "card_tbc": "карта TBC", "card_bog": "карта BOG"}
+
+
+def audit_params(now_utc: Optional[datetime] = None) -> dict[str, Any]:
+    """Окна времени для проверок — naive UTC, как даты лежат в базе."""
+    from app.services.shift_alert import SHIFT_DISCREPANCY_ALERT_GEL
+    from app.services.weekly_rebate import last_completed_week_start
+
+    now = now_utc or datetime.now(timezone.utc).replace(tzinfo=None)
+    today_tb = (now + TBILISI).date()
+    # Недельную скидку крон начисляет в пн 01:00 UTC. До 03:00 UTC понедельника
+    # перепроверяем позапрошлую неделю — иначе тревога раньше самого начисления.
+    rebate_week = last_completed_week_start(now.date())
+    if now.weekday() == 0 and now.hour < 3:
+        rebate_week -= timedelta(days=7)
+    # Начисление за неделю W делает крон в понедельник сразу после неё — в ленте
+    # его ищем с этого понедельника и до следующего.
+    credit_from = datetime.combine(rebate_week + timedelta(days=7), time.min)
+    return {
+        "since_30d": now - timedelta(days=30),
+        # booking.date — календарная дата брони (полночь), сравниваем с датой.
+        "book_since": datetime.combine(today_tb - timedelta(days=30), time.min),
+        # Полночь по Тбилиси 7 дней назад, в UTC (20:00 UTC накануне).
+        "since_7d": datetime.combine(today_tb - timedelta(days=7), time.min) - TBILISI,
+        "shift_alert_gel": SHIFT_DISCREPANCY_ALERT_GEL,
+        "rebate_week": rebate_week,
+        "rebate_credit_from": credit_from,
+        "rebate_credit_to": credit_from + timedelta(days=7),
+    }
+
+
+def _as_dt(value: Any) -> datetime:
+    """Postgres отдаёт datetime, SQLite через text() — строку."""
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+
+def _norm_id(value: Any) -> str:
+    """UUID в одном виде: SQLite хранит его без дефисов, Postgres — с ними.
+    Не-UUID (email, id клиента Psy-CRM) — как есть."""
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    try:
+        return str(UUID(raw))
+    except ValueError:
+        return raw
+
+
+def _repeat_income_by_day(session: Session, rows: list[dict], params: dict) -> list[dict]:
+    """Группируем приходы: клиент + сумма + валюта + календарный день по Тбилиси."""
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        who = (_norm_id(r.get("credited_user_id")) or _norm_id(r.get("email_user_id"))
+               or _norm_id(r.get("client_id")))
+        local = _as_dt(r["created_at"]) + TBILISI
+        key = (who, round(float(r["amount"] or 0.0), 2), r.get("currency") or "GEL", local.date())
+        groups.setdefault(key, []).append({**r, "_local": local})
+    out = []
+    for (who, amount, currency, day), items in groups.items():
+        if len(items) < 2:
+            continue
+        entries = "; ".join(
+            f"{it['_local']:%H:%M} {_METHOD_RU.get(it.get('payment_method'), it.get('payment_method'))}"
+            f" · {it.get('branch') or 'без филиала'} · {it.get('admin_name') or '?'}"
+            for it in items
+        )
+        client = next((it["client_name"] for it in items if it.get("client_name")), who)
+        out.append({"day": day.isoformat(), "client": client, "amount": amount,
+                    "currency": currency, "times": len(items), "entries": entries})
+    out.sort(key=lambda x: (x["day"], str(x["client"])), reverse=True)
+    return out
+
+
+def _user_label(session: Session, uid: str) -> tuple:
+    from app.models.user import User
+    try:
+        u = session.get(User, UUID(uid))
+    except (ValueError, TypeError):
+        u = None
+    return (u.email, u.name, None, None) if u else (uid, None, None, None)
+
+
+def _weekly_rebate_recheck(session: Session, rows: list[dict], params: dict) -> list[dict]:
+    """Ожидаемая недельная скидка за прошлую неделю против начисленной в ленте.
+
+    Формула — копия run_weekly_rebates (services/weekly_rebate.py): чистой
+    функции расчёта там нет (расчёт и начисление в одном цикле, а dry_run
+    пропускает уже начисленных клиентов — сравнить не с чем). Держать
+    синхронно: сторож guard_money_controls_2026_10 сверяет ключевые строки
+    формулы в обоих файлах и сравнивает результат с настоящим начислением.
+    """
+    from sqlmodel import select
+    from app.models.booking import Booking
+    from app.models.user import User
+    from app.models.weekly_rebate import WeeklyRebate
+    from app.services import subscription_pool
+    from app.services.weekly_rebate import MIN_REBATE_GEL
+
+    week_start = params["rebate_week"]
+    credited: dict[str, float] = {}
+    for r in rows:
+        uid = _norm_id(r["user_id"])
+        credited[uid] = round(credited.get(uid, 0.0) + float(r["credited"] or 0.0), 2)
+    journal = {
+        _norm_id(j.user_id): round(float(j.amount or 0.0), 2)
+        for j in session.exec(select(WeeklyRebate).where(WeeklyRebate.week_start == week_start)).all()
+    }
+
+    start_dt = datetime(week_start.year, week_start.month, week_start.day)
+    end_dt = start_dt + timedelta(days=7)
+    pricing = PricingService(session)
+    bookings = session.exec(
+        select(Booking).where(
+            Booking.status == "confirmed",
+            Booking.date >= start_dt,
+            Booking.date < end_dt,
+        )
+    ).all()
+    by_user: dict[str, list] = {}
+    for b in bookings:
+        key = str(b.user_uuid) if b.user_uuid else (b.user_id or "")
+        if not key:
+            continue
+        by_user.setdefault(key, []).append(b)
+
+    expected: dict[str, float] = {}
+    who: dict[str, tuple] = {}
+    for user_bookings in by_user.values():
+        user = None
+        first = user_bookings[0]
+        if first.user_uuid:
+            try:
+                user = session.get(User, first.user_uuid if isinstance(first.user_uuid, UUID) else UUID(str(first.user_uuid)))
+            except (ValueError, TypeError):
+                user = None
+        if user is None and first.user_id:
+            user = session.exec(select(User).where(User.email == first.user_id)).first()
+        if user is None:
+            continue
+        uid = _norm_id(user.id)
+        if uid in expected:
+            continue  # брони того же клиента и под uuid, и под email — начислено один раз
+        total_hours = sum(b.duration / 60.0 for b in user_bookings)
+        tier = PricingService.weekly_tier_percent(total_hours)
+        who.setdefault(uid, (user.email, user.name, round(total_hours, 1), tier))
+        # Недельный пакет скидку за объём не получает. Но пакет мог появиться уже
+        # ПОСЛЕ начисления (Галина Белостоцкая: скидка за 21–27.09 пришла 28.09,
+        # пакет — с 29.09): тогда начисленное сверяем с формулой, а без начисления
+        # у пакета ждём 0.
+        if subscription_pool.get(user.subscription, "weekly_package", False) and credited.get(uid, 0.0) < 0.01:
+            continue
+        if tier == 0:
+            continue
+
+        rebate = 0.0
+        for b in user_bookings:
+            if b.payment_method != "balance":
+                continue
+            if b.payment_status in ("pending", "waived"):
+                continue
+            try:
+                try:
+                    _h, _m = map(int, (b.start_time or "0:0").split(":"))
+                    _start = b.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+                except Exception:
+                    _start = b.date
+                breakdown = pricing.calculate_price(
+                    user=user,
+                    resource_id=b.resource_id,
+                    start_time=_start,
+                    duration_minutes=b.duration,
+                    format_type=b.format or "individual",
+                    exclude_booking_id=b.id,
+                    ignore_subscription=True,
+                )
+            except Exception:
+                continue
+            base = breakdown.discountable_base or 0.0
+            if base <= 0:
+                continue
+            duration_pct = int(breakdown.discount_percent or 0)
+            weekly_extra = base * (max(0, tier - duration_pct) / 100.0)
+            recomputed = float(breakdown.final_price or 0.0)
+            correct_at_T = recomputed - weekly_extra
+            stored = float(b.final_price or 0.0)
+            rebate += max(0.0, stored - correct_at_T)
+
+        rebate = round(rebate, 2)
+        if rebate < MIN_REBATE_GEL:
+            continue
+        expected[uid] = rebate
+
+    out = []
+    for uid in sorted(set(expected) | set(credited)):
+        exp = expected.get(uid, 0.0)
+        got = credited.get(uid, 0.0)
+        if abs(exp - got) <= 0.01:
+            continue
+        email, name, hours, tier = who.get(uid) or _user_label(session, uid)
+        out.append({
+            "week_start": week_start.isoformat(), "email": email, "name": name,
+            "hours": hours, "tier_percent": tier,
+            "expected": exp, "credited": got, "journal": journal.get(uid, 0.0),
+        })
+    return out
+
+
+CHECKS += [
+    Check(
+        key="income_without_branch",
+        title="Приход денег без филиала",
+        why=(
+            "Остаток кассы (и сверка на закрытии смены) считается по филиалу — Unbox One "
+            "или Unbox Uni. Приход без филиала не попадает в остаток НИ ОДНОЙ кассы: деньги "
+            "в ящике есть, а на сайте их нет, на закрытии смены они всплывут «лишними» и "
+            "уйдут в корректировку. Что делать: открыть операцию в Финансах и проставить "
+            "филиал, где взяли деньги. Смотрим последние 30 дней; корректировки "
+            "(adjustment, выравнивание кассы) не в счёт. Перевод между картами без филиала "
+            "(«Перевод: Карта BOG → Карта TBC» — пара расход+приход) — тоже не в счёт: "
+            "банковский счёт общий, выручки в нём нет. Перевод В НАЛИЧНЫЕ без филиала "
+            "показываем — эти деньги легли в ящик конкретного филиала."
+        ),
+        sql="""
+            SELECT t.id, substr(CAST(t.date AS TEXT), 1, 16) AS date,
+                   t.amount, t.currency, t.payment_method, t.category_id,
+                   t.client_name, t.admin_name, t.description
+            FROM cashbox_transactions t
+            WHERE t.type = 'income'
+              AND t.payment_method <> 'adjustment'
+              AND coalesce(t.category_id, '') <> 'cash_reconciliation'
+              AND (t.branch IS NULL OR trim(t.branch) = '')
+              AND (t.date >= :since_30d OR t.created_at >= :since_30d)
+              AND NOT (
+                    t.payment_method IN ('card_tbc', 'card_bog')
+                AND substr(coalesce(t.description, ''), 1, 8) = 'Перевод:'
+                AND EXISTS (
+                        SELECT 1 FROM cashbox_transactions x
+                        WHERE x.type = 'expense'
+                          AND x.description = t.description
+                          AND abs(x.amount - t.amount) < 0.005
+                          AND coalesce(x.branch, '') = coalesce(t.branch, '')
+                    )
+              )
+            ORDER BY t.date DESC
+        """,
+    ),
+    Check(
+        key="free_booking",
+        title="Бронь за 0 ₾ — кабинет уходит бесплатно",
+        why=(
+            "Подтверждённая бронь (будущая или за последние 30 дней) стоит 0 ₾, хотя она "
+            "не по абонементу, не бонусом, не служебная (уборка/обслуживание) и штраф по ней "
+            "не прощали. Так выглядела утечка 1630 ₾ (ярлык «баланс» при цене абонемента), "
+            "и так же выглядит ручная цена 0 ₾. Законно бесплатные не показываем: "
+            "comp-аккаунты движка цен (владелец, Ирина), служебная запись admin@unbox.com, "
+            "клиенты с личной скидкой 100 % (Яна Педан, служебный аккаунт центра) и "
+            "«Час в подарок» (бесплатный час клиента погашен). Что делать: открыть бронь — "
+            "если бесплатно по ошибке, поставить цену; если по договорённости — "
+            "оформить её личной скидкой или бонусом, чтобы бронь ушла из списка."
+        ),
+        sql=f"""
+            SELECT b.id AS booking_id, coalesce(u.email, b.user_id) AS email, u.name,
+                   substr(CAST(b.date AS TEXT), 1, 10) AS date, b.start_time, b.duration,
+                   b.resource_id, b.payment_method, b.payment_status, b.applied_rule,
+                   b.base_price, b.created_by_name
+            FROM booking b LEFT JOIN "user" u ON u.id = b.user_uuid
+            WHERE b.status = 'confirmed'
+              AND coalesce(b.final_price, 0) < 0.01
+              AND b.date >= :book_since
+              AND coalesce(b.payment_method, '') NOT IN ('subscription', 'bonus', 'service')
+              AND coalesce(b.payment_status, '') <> 'waived'
+              AND coalesce(b.applied_rule, '') <> 'BONUS_HOUR'
+              AND lower(coalesce(u.email, b.user_id, '')) NOT IN ({_FREE_BY_RULE_EMAILS})
+              AND NOT (coalesce(u.pricing_system, '') = 'personal'
+                       AND coalesce(u.personal_discount_percent, 0) >= 100)
+            ORDER BY b.date DESC, b.start_time
+        """,
+    ),
+    Check(
+        key="weekly_rebate_recheck",
+        title="Недельная скидка за прошлую неделю начислена не той суммой",
+        why=(
+            "Независимая перепроверка: ревизор заново считает скидку за прошлую неделю по "
+            "правилам services/weekly_rebate.py (тот же движок цен) и сравнивает с тем, что "
+            "реально пришло клиенту на баланс (лента balance_ledger, reason='weekly_rebate', "
+            "начисление в понедельник после недели). Разница больше 0,01 ₾ — крон не "
+            "прошёл, начислил дважды или не ту сумму; либо бронь недели отменили или "
+            "переоценили уже после начисления. Что делать: сверить брони клиента за неделю "
+            "и ленту баланса; недостающее или лишнее поправить корректировкой баланса."
+        ),
+        sql="""
+            SELECT l.user_id, sum(l.delta) AS credited, count(*) AS entries
+            FROM balance_ledger l
+            WHERE l.reason = 'weekly_rebate'
+              AND l.created_at >= :rebate_credit_from
+              AND l.created_at < :rebate_credit_to
+            GROUP BY l.user_id
+        """,
+        post=_weekly_rebate_recheck,
+    ),
+    Check(
+        key="repeat_income_same_day",
+        title="Повторный приход за день: тому же клиенту та же сумма дважды",
+        why=(
+            "Не баг кода, а сигнал бизнесу: с 02.10 сайт при повторном приходе спрашивает "
+            "«это второй платёж?», и админ может подтвердить. Здесь — все такие пары за "
+            "последние 7 дней (тот же клиент, та же сумма и валюта, тот же календарный день "
+            "по Тбилиси), в том числе подтверждённые. Что делать: если клиент платил один "
+            "раз — удалить лишнюю запись в Финансах (зачисление на баланс откатится само)."
+        ),
+        sql="""
+            SELECT t.id, t.created_at, t.amount, t.currency, t.payment_method, t.branch,
+                   t.admin_name, t.client_name, t.client_id, t.credited_user_id,
+                   u.id AS email_user_id
+            FROM cashbox_transactions t
+            LEFT JOIN "user" u ON u.email = t.client_id
+            WHERE t.type = 'income'
+              AND t.payment_method <> 'adjustment'
+              AND coalesce(t.category_id, '') <> 'cash_reconciliation'
+              AND coalesce(t.credited_user_id, t.client_id, '') <> ''
+              AND t.created_at >= :since_7d
+            ORDER BY t.created_at
+        """,
+        post=_repeat_income_by_day,
+    ),
+    Check(
+        key="shift_discrepancies_week",
+        title="Расхождения кассы на закрытии смен за 7 дней (больше 5 ₾)",
+        why=(
+            "Не баг кода, а сигнал бизнесу: при закрытии смены пересчитанные деньги "
+            "разошлись с остатком на сайте больше чем на 5 ₾ (порог владельца), и сайт "
+            "выровнял кассу корректирующей операцией (cash_reconciliation). О каждом таком "
+            "закрытии владелец сразу получает сообщение в Telegram; здесь — сводка за "
+            "неделю. Что делать: спросить админа смены, откуда разница (сдача, приход или "
+            "расход без записи)."
+        ),
+        sql="""
+            SELECT substr(CAST(sr.shift_end AS TEXT), 1, 16) AS shift_end_utc, sr.branch,
+                   sr.admin_name, sr.expected_balance AS expected, sr.actual_balance AS actual,
+                   sr.discrepancy, sr.notes
+            FROM shift_reports sr
+            WHERE sr.shift_end >= :since_7d
+              AND abs(sr.discrepancy) > :shift_alert_gel
+            ORDER BY sr.shift_end DESC
+        """,
+    ),
+]
+
+
 def _send_telegram_alert(violations: dict[str, list], titles: dict[str, str]) -> None:
     """Шлём владельцу сводку расхождений. Тихо выходим, если бот не настроен."""
     try:
@@ -294,15 +669,33 @@ def _send_telegram_alert(violations: dict[str, list], titles: dict[str, str]) ->
         print(f"[money_audit] не смог отправить алерт: {exc}", file=sys.stderr)
 
 
+def run_check(session: Session, check: Check, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Строки-расхождения одной проверки. SQL получает только те параметры
+    окна, которые в нём есть (у первых десяти проверок их нет вовсе)."""
+    stmt = text(check.sql)
+    wanted = {k: v for k, v in params.items() if k in stmt.compile().params}
+    rows = [dict(r) for r in session.exec(stmt, params=wanted).mappings().all()]
+    if check.post is not None:
+        rows = check.post(session, rows, params)
+    return rows
+
+
 def run(as_json: bool, alert: bool = False) -> int:
     results: dict[str, list[dict[str, Any]]] = {}
+    params = audit_params()
 
     with Session(engine) as session:
         # READ ONLY на уровне транзакции: ревизор физически не может ничего испортить.
         session.exec(text("SET TRANSACTION READ ONLY"))
         for check in CHECKS:
-            rows = session.exec(text(check.sql)).mappings().all()
-            results[check.key] = [dict(r) for r in rows]
+            # Каждая проверка — в своей точке сохранения: если одна упадёт (новые
+            # досчитывают в Python), остальные всё равно выполнятся, а сбой будет
+            # виден в отчёте и в Telegram как строка этой проверки.
+            try:
+                with session.begin_nested():
+                    results[check.key] = run_check(session, check, params)
+            except Exception as exc:  # noqa: BLE001
+                results[check.key] = [{"ошибка_проверки": f"{type(exc).__name__}: {exc}"[:300]}]
 
     violations = {k: v for k, v in results.items() if v}
 
