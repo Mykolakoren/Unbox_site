@@ -661,7 +661,10 @@ def _send_telegram_alert(violations: dict[str, list], titles: dict[str, str]) ->
             return
         lines = ["🔎 <b>Ревизор кассы/денег — расхождения</b>", ""]
         for key, rows in violations.items():
-            lines.append(f"• {titles.get(key, key)}: <b>{len(rows)}</b>")
+            if rows and "ошибка_проверки" in rows[0]:
+                lines.append(f"• {titles.get(key, key)}: <b>проверка не выполнилась</b> — смотреть лог")
+            else:
+                lines.append(f"• {titles.get(key, key)}: <b>{len(rows)}</b>")
         lines.append("")
         lines.append("Проверить: <code>money_audit.py</code> на сервере.")
         telegram_service.send_message(chat_id=str(chat_id), text="\n".join(lines))

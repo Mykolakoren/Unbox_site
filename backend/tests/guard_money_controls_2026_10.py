@@ -314,6 +314,20 @@ def test_shift_alert_failure_does_not_break_close():
     finally:
         shift_alert.format_message = real
 
+    # Даже если модуля сообщений нет (выложили shifts.py без shift_alert.py) —
+    # смена закрывается, корректировка пишется, сбой в логе.
+    saved = sys.modules.get("app.services.shift_alert")
+    sys.modules["app.services.shift_alert"] = None  # import → ImportError
+    try:
+        s3 = _db()
+        _cash(s3, 100.0)
+        with _logs("app.api.v1.cashbox.shifts") as logs3:
+            rep3 = _close(s3, 80.0)
+        assert round(rep3.discrepancy, 2) == -20.0 and len(_recon(s3)) == 1
+        assert any("не удалось поставить" in r.getMessage() for r in logs3), "сбой импорта не попал в лог"
+    finally:
+        sys.modules["app.services.shift_alert"] = saved
+
 
 def test_shift_alert_not_repeated_on_retry():
     from app.services.shift_alert import notify_shift_discrepancy
@@ -366,6 +380,8 @@ def test_shift_alert_after_close_is_written():
     i_notify = body.index("notify_shift_discrepancy(")
     assert i_commit < i_notify < body.index("return report"), "сообщение — только после записи отчёта и корректировки"
     assert 'category_id="cash_reconciliation"' in body, "корректировка при закрытии смены пропала"
+    call = body[body.rindex("try:", 0, i_notify):body.index("return report")]
+    assert "except Exception" in call, "вызов сообщения не обёрнут в try/except — сбой уронит закрытие смены"
     assert shift_alert.SHIFT_DISCREPANCY_ALERT_GEL == 5.0, "порог владельца — 5 ₾"
     assert shift_alert.fmt_gel(7600) == f"7{NBSP}600{NBSP}₾"
     assert shift_alert.fmt_gel(-20, sign=True) == f"−20{NBSP}₾"
@@ -635,6 +651,12 @@ def test_audit_runner_survives_failing_check():
     out = json.loads(buf.getvalue())
     assert code == 1 and out["violations"] == {"broken": 1, "after": 1}, out
     assert "ошибка_проверки" in out["details"]["broken"][0], out
+    # В Telegram упавшая проверка видна как «не выполнилась», а не как «1 расхождение».
+    with _telegram() as sent:
+        ma._send_telegram_alert(out["details"], {"broken": "Сломана", "after": "После сломанной"})
+    text = _plain(sent[0]["text"])
+    assert sent[0]["chat_id"] == "OWNER-CHAT"
+    assert "Сломана: проверка не выполнилась" in text and "После сломанной: 1" in text, text
 
 
 if __name__ == "__main__":

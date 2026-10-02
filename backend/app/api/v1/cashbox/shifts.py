@@ -1,4 +1,5 @@
 """Cashbox — shift reports + analytics."""
+import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
@@ -10,7 +11,8 @@ from app.models.cashbox_transaction import CashboxTransaction
 from app.models.shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
 from app.models.shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
 from app.api.v1.cashbox import require_cashbox, require_reports
-from app.services.shift_alert import notify_shift_discrepancy
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -374,15 +376,19 @@ def end_shift(
     # владелец не узнавал. Шлём ПОСЛЕ записи отчёта и корректировки, в фоне:
     # смена уже закрыта, сбой Telegram её не роняет (только лог), повторный
     # запрос второго сообщения не даёт (см. services/shift_alert.py).
-    notify_shift_discrepancy(
-        background_tasks,
-        branch=branch,
-        admin_name=current_user.name or "",
-        expected=expected,
-        actual=payload.actual_balance,
-        discrepancy=discrepancy,
-        notes=payload.notes,
-    )
+    try:
+        from app.services.shift_alert import notify_shift_discrepancy
+        notify_shift_discrepancy(
+            background_tasks,
+            branch=branch,
+            admin_name=current_user.name or "",
+            expected=expected,
+            actual=payload.actual_balance,
+            discrepancy=discrepancy,
+            notes=payload.notes,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("[shift-alert] не удалось поставить сообщение о расхождении кассы")
 
     return report
 
