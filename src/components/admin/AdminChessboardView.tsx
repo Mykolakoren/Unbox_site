@@ -1366,23 +1366,6 @@ export function AdminChessboardView() {
                                 )}
                                 <InfoRow label="Статус" value={bookingStatusBadge(selectedBooking)} />
                                 <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
-                                {/* Deferred-billing payment status — only show if explicitly set
-                                    (legacy rows = NULL = silent). Keeps the panel uncluttered for
-                                    bookings created before the 24h-defer rollout. */}
-                                {selectedBooking.paymentStatus && (
-                                    <InfoRow
-                                        label="Оплата"
-                                        value={
-                                            selectedBooking.paymentStatus === 'pending'
-                                                ? `${statusLabel('payment', 'pending', 'staff')} (за 24 ч до начала)`
-                                                : selectedBooking.paymentStatus === 'waived'
-                                                    ? `Штраф снят${selectedBooking.waiverReason ? ` · ${selectedBooking.waiverReason}` : ''}`
-                                                    : selectedBooking.chargedAt
-                                                        ? `${statusLabel('payment', 'paid', 'staff')} ${formatDayMonth(parseUTC(selectedBooking.chargedAt), { timeZone: BATUMI_TZ })}, ${formatTime(parseUTC(selectedBooking.chargedAt), { timeZone: BATUMI_TZ })}`
-                                                        : statusLabel('payment', 'paid', 'staff')
-                                        }
-                                    />
-                                )}
                             </div>
                             {/* Pending hot-booking — Approve / Reject inline в попапе.
                                 Раньше эти кнопки были только в списке /admin/bookings,

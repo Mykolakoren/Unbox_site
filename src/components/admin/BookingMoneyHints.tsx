@@ -10,6 +10,7 @@ import type { BookingHistoryItem, User } from '../../store/types';
 import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AddFundsModal } from './modals/AddFundsModal';
 import { formatDayMonth, formatGel } from '../../utils/format';
+import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { Button } from '../ui/Button';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
 
@@ -24,6 +25,25 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toString().replace('.', '
  *  - баланс клиента и кнопка «Принять оплату» — то же пополнение через кассу,
  *    что в карточке клиента, без перехода в неё.
  */
+/**
+ * Откуда взялась оплата брони — одной строкой (просьба владельца 02.10, случай
+ * Тамрико: бронь «оплачено», а свежего платежа нет — деньги списаны с баланса,
+ * внесённого раньше). Только подпись, суммы не считаем.
+ */
+export function paymentSourceLine(b: BookingHistoryItem): string | null {
+    const status = b.paymentStatus;
+    const method = String(b.paymentMethod || '');
+    if (!status || method === 'service') return null;
+    if (status === 'waived') return `Штраф снят${b.waiverReason ? ` · ${b.waiverReason}` : ''}`;
+    if (status === 'pending') return 'Спишется с баланса за 24 ч до начала';
+    // paid
+    const when = b.chargedAt ? formatDayMonth(parseUTC(b.chargedAt), { timeZone: BATUMI_TZ }) : '';
+    const amount = b.chargeAmount != null ? ` · ${formatGel(b.chargeAmount)}` : '';
+    if (method === 'subscription') return `Списано часами абонемента${when ? ` ${when}` : ''}`;
+    if (method === 'bonus') return `Оплачено бонусным часом${when ? ` ${when}` : ''}`;
+    return `Оплачено с баланса${when ? ` ${when}` : ''}${amount}`;
+}
+
 export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryItem; due?: DueInfo }) {
     const users = useUserStore(s => s.users);
     const client = users.find(u => u.email === booking.userId || u.id === booking.userId);
@@ -77,6 +97,8 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
         }
     }
 
+    const payLine = paymentSourceLine(booking);
+
     const rebateLine = est?.lastRebate && est.lastRebate.amount > 0
         ? `в т.ч. недельная скидка +${formatGel(est.lastRebate.amount)} от ${formatDayMonth(est.lastRebate.date)} — уже на балансе`
         : null;
@@ -94,6 +116,12 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                         )}
                         {rebateLine && <span className="block text-xs font-normal text-[var(--status-ok-fg)]">{rebateLine}</span>}
                     </span>
+                </div>
+            )}
+            {payLine && (
+                <div className="flex justify-between gap-3">
+                    <span className="text-ink-60 shrink-0">Оплата</span>
+                    <span className="font-medium text-unbox-dark text-right">{payLine}</span>
                 </div>
             )}
             {weeklyLine && (
