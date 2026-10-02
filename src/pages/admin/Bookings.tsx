@@ -28,6 +28,9 @@ import { ruCountWord, ruPlural } from '../../utils/plural';
 import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
 import { subscriptionLifecycle } from '../../utils/subscription';
 import { statusLabel } from '../../design/statuses';
+import { hasPermission } from '../../utils/permissions';
+import { useRecentWeeklyRebates } from '../../hooks/useRecentWeeklyRebates';
+import { weeklyRebateNote, rebateRowsOnce } from '../../utils/weeklyRebateNote';
 
 type ViewMode = 'list' | 'grid';
 type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
@@ -102,7 +105,7 @@ export function AdminBookings() {
     // chessboard right away so the highlighted booking is visible.
     const viewFromQuery = searchParams.get('view');
     const navigate = useNavigate();
-    const { bookings, users, fetchUsers, fetchAllBookings, cancelBooking, listForReRent } = useUserStore();
+    const { bookings, users, fetchUsers, fetchAllBookings, cancelBooking, listForReRent, currentUser } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -370,6 +373,20 @@ export function AdminBookings() {
         return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
     }, [bookings, users]);
 
+    // Недельная скидка с последнего понедельника — та же метка, что в «Сегодня»
+    // (ревизия 02.10): один раз на клиента, у его первой брони в списке.
+    const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
+    const canonClient = new Map<string, string>();
+    for (const u of users) {
+        const key = String(u.id || u.email || '');
+        if (u.id) canonClient.set(String(u.id), key);
+        if (u.email) canonClient.set(u.email, key);
+    }
+    const rebateRow = rebateRowsOnce(
+        filteredBookings.map(b => ({ bookingId: b.id, clientKey: canonClient.get(b.userId) || b.userId, userId: b.userId })),
+        rebates,
+    );
+
     const [approvingId, setApprovingId] = useState<string | null>(null);
     const [rejectingId, setRejectingId] = useState<string | null>(null);
 
@@ -473,6 +490,7 @@ export function AdminBookings() {
                 allListStatus={allListStatus}
                 onRetryAll={() => { void loadAllBookings(); }}
                 dueMap={dueMap}
+                rebateRow={rebateRow}
                 onOpenInGrid={openInGrid}
             />
         </>
@@ -507,6 +525,8 @@ type GHAdminBookingsProps = {
     onRetryAll: () => void;
     /** «Сколько взять» по брони — computeDueByBooking. */
     dueMap: Map<string, DueInfo>;
+    /** Недельная скидка клиента (bookingId → ₾) — метка один раз на клиента. */
+    rebateRow: Map<string, number>;
     /** Открыть бронь в шахматке (та же панель брони). */
     onOpenInGrid: (bookingId: string) => void;
 };
@@ -519,7 +539,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
         convertingId, handleMove, handleApprove, handleReject,
         approvingId, rejectingId, extendingId,
-        allListStatus, onRetryAll, dueMap, onOpenInGrid,
+        allListStatus, onRetryAll, dueMap, rebateRow, onOpenInGrid,
     } = props;
 
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -971,7 +991,14 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 {resourceName} · {booking.locationId === 'unbox_one' ? 'One' : 'Uni'} · {(booking.duration ?? 0) / 60}ч
                                             </div>
                                         </div>
-                                        <div><DueBadge due={info?.due} paid={!!info} charged={info?.charged} /></div>
+                                        <div>
+                                            <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
+                                            {!!rebateRow.get(booking.id) && (
+                                                <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, marginTop: 4, lineHeight: 1.35 }}>
+                                                    {weeklyRebateNote(rebateRow.get(booking.id)!)}
+                                                </div>
+                                            )}
+                                        </div>
                                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                             {rowActions(booking, true)}
                                         </div>
@@ -1050,6 +1077,11 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         </div>
                                                         <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booking.userId}</div>
                                                     </button>
+                                                    {!!rebateRow.get(booking.id) && (
+                                                        <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, marginTop: 4, lineHeight: 1.35 }}>
+                                                            {weeklyRebateNote(rebateRow.get(booking.id)!)}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td style={{ padding: '12px 10px' }}>
                                                     <div style={{ color: GH.ink }}>{resourceName}</div>

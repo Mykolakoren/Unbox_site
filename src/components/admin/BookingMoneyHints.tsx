@@ -13,6 +13,7 @@ import { formatDayMonth, formatGel } from '../../utils/format';
 import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { Button } from '../ui/Button';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
+import { weeklyRebateNote } from '../../utils/weeklyRebateNote';
 
 type Estimate = Awaited<ReturnType<typeof bookingsApi.getWeeklyEstimate>>;
 
@@ -102,8 +103,11 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
 
     const payLine = paymentSourceLine(booking, due);
 
+    // Та же формулировка, что метка в «Сегодня» (02.10), и то же правило: скидка,
+    // начисленная с последнего понедельника. Раньше строка выводила «от —»:
+    // сервер присылает дату как «28.09», formatDayMonth её не разбирал.
     const rebateLine = est?.lastRebate && est.lastRebate.amount > 0
-        ? `в т.ч. недельная скидка +${formatGel(est.lastRebate.amount)} от ${formatDayMonth(est.lastRebate.date)} — уже на балансе`
+        ? weeklyRebateNote(est.lastRebate.amount)
         : null;
 
     return (
@@ -117,7 +121,12 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                         {due.due > 0 && due.due < due.price && (
                             <span className="block text-xs font-normal text-ink-60">из {formatGel(due.price)} — часть уже на балансе</span>
                         )}
-                        {rebateLine && <span className="block text-xs font-normal text-[var(--status-ok-fg)]">{rebateLine}</span>}
+                        {rebateLine && (
+                            <span data-weekly-rebate-note className="block text-xs font-normal text-[var(--status-ok-fg)]"
+                                title={est?.lastRebate?.date ? `Начислена ${est.lastRebate.date} на баланс клиента` : undefined}>
+                                {rebateLine}
+                            </span>
+                        )}
                     </span>
                 </div>
             )}

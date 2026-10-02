@@ -95,6 +95,100 @@ export interface CashboxPeriodSummary {
     adjustmentCount: number;
 }
 
+/** Деньги по счетам: наличные / TBC / BOG (ключи camelCase — интерцептор). */
+export interface DayMoney {
+    cash: number;
+    cardTbc: number;
+    cardBog: number;
+    total: number;
+    count: number;
+}
+
+/** Уже есть в журнале, но не «пришло/ушло»: расхождение смены, корректировка остатка. */
+export interface DayCorrection {
+    income: number;
+    expense: number;
+    /** + излишек / − недостача */
+    net: number;
+    count: number;
+}
+
+export interface DayShift {
+    /** open — открыта сейчас (на конец дня); closed — закрыта в этот день; none — не было. */
+    status: 'open' | 'closed' | 'none';
+    openedAt: string | null;
+    openedBy: string | null;
+    closedAt: string | null;
+    closedBy: string | null;
+    /** Закрыли общую смену (по всем филиалам) — цифр по филиалу у неё нет. */
+    closedAllBranches: boolean;
+    expected: number | null;
+    actual: number | null;
+    discrepancy: number | null;
+    closes: number;
+    /** Наличные по записям кассы филиала на конец дня («должно быть в кассе»). */
+    cashByRecords: number;
+}
+
+export interface DayBranchBlock {
+    /** null — операции без филиала. */
+    branch: string | null;
+    income: DayMoney;
+    expense: DayMoney;
+    shiftRecon: DayCorrection;
+    balanceFix: DayCorrection;
+    /** Перевод между своими счетами (income — сколько перевели): не «пришло» и не «ушло». */
+    transfer: DayCorrection;
+    /** Списано с балансов клиентов за брони этого дня (по локации брони). */
+    charges: { charged: number; refunded: number; net: number; bookings: number };
+    shift: DayShift | null;
+}
+
+/** GET /cashbox/day-summary — «Итоги дня» (считает сервер, services/day_summary.py). */
+export interface CashboxDaySummary {
+    date: string;
+    branch: string | null;
+    isToday: boolean;
+    branches: DayBranchBlock[];
+    total: Omit<DayBranchBlock, 'branch' | 'shift'>;
+    /** Корректировки балансов (не деньги): недельная скидка, правка баланса клиента. */
+    adjustments: { income: number; expense: number; count: number };
+    /** Операции дня без филиала (кроме корректировок) — видны только во «Все». */
+    unassigned: { count: number; income: number; expense: number };
+    /** Недельные скидки, начисленные в этот день (по понедельникам). */
+    weeklyRebates: { amount: number; count: number };
+    /** Клиенты с балансом ниже нуля на конец дня (сегодня — сейчас). */
+    debtors: {
+        /** false — день раньше стартовых остатков ленты баланса (21.07.2026): данных нет. */
+        available: boolean;
+        /** С какого дня есть данные о долгах (ГГГГ-ММ-ДД). */
+        since: string | null;
+        count: number;
+        amount: number;
+        /** Из них сотрудники (admin / senior_admin / owner). */
+        staffCount: number;
+        staffAmount: number;
+        items: { userId: string; name: string; email: string; debt: number; staff: boolean }[];
+        asOf: string;
+    };
+}
+
+/** GET /cashbox/weekly-rebates — недельные скидки за неделю броней. */
+export interface WeeklyRebateReport {
+    weekStart: string;
+    weekEnd: string;
+    creditedOn: string;
+    items: { userId: string; name: string; email: string | null; hours: number; percent: number; amount: number; creditedAt: string | null }[];
+    count: number;
+    total: number;
+}
+
+/** GET /cashbox/weekly-rebates/recent — начислено с последнего понедельника (лента баланса). */
+export interface RecentWeeklyRebates {
+    since: string;
+    items: { userId: string; email: string | null; amount: number; creditedAt: string }[];
+}
+
 export interface CashboxAnalytics {
     dailyData: { date: string; income: number; expense: number }[];
     categoryBreakdown: { categoryName: string; total: number; percentage: number }[];
@@ -274,6 +368,34 @@ export const cashboxApi = {
 
     correctBalance: async (payload: { payment_method: string; new_balance: number; reason?: string }): Promise<any> => {
         const { data } = await api.post('/cashbox/balance-correction', payload);
+        return data;
+    },
+};
+
+/**
+ * Отчёты кассы — ТОЛЬКО ЧТЕНИЕ (решение владельца 02.10): «Итоги дня» и
+ * «Недельные скидки». Отдельно от cashboxApi: тела денежных вызовов там держит
+ * отпечаток сторожа (guard_wave4_money_desk), а здесь денег не двигаем.
+ * Все цифры считает сервер (services/day_summary.py).
+ */
+export const cashboxReportsApi = {
+    /** «Итоги дня» по Тбилиси (date — ГГГГ-ММ-ДД). branch не передан — все филиалы. */
+    getDaySummary: async (params: { date: string; branch?: string }): Promise<CashboxDaySummary> => {
+        const { data } = await api.get('/cashbox/day-summary', {
+            params: { date: params.date, branch: params.branch },
+        });
+        return data;
+    },
+
+    /** Недельные скидки за неделю броней (weekStart — любой день недели; пусто — прошлая неделя). */
+    getWeeklyRebates: async (weekStart?: string): Promise<WeeklyRebateReport> => {
+        const { data } = await api.get('/cashbox/weekly-rebates', { params: weekStart ? { week_start: weekStart } : {} });
+        return data;
+    },
+
+    /** Скидки, начисленные с последнего понедельника, — для метки в «Сегодня». */
+    getRecentWeeklyRebates: async (): Promise<RecentWeeklyRebates> => {
+        const { data } = await api.get('/cashbox/weekly-rebates/recent');
         return data;
     },
 };
