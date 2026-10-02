@@ -2539,8 +2539,10 @@ def create_recurring_booking(
                     existing.price = crm_client_obj.base_price
                 if existing.currency is None:
                     existing.currency = crm_client_obj.currency
-                if existing.account is None:
-                    existing.account = crm_client_obj.default_account
+                # Счёт НЕ копируем (01.10): у неоплаченной сессии пустой счёт
+                # = «взять счёт клиента по умолчанию в момент оплаты». Копия
+                # при создании «замораживала» старый счёт после его смены
+                # (кейс «Андрей и Надежда»: платёж ушёл на Cash вместо TBC).
                 session.add(existing)
             else:
                 ts = _TS(
@@ -2551,7 +2553,8 @@ def create_recurring_booking(
                     status="PLANNED",
                     price=crm_client_obj.base_price,
                     currency=crm_client_obj.currency,
-                    account=crm_client_obj.default_account,
+                    # account не заполняем: пусто = счёт клиента по умолчанию
+                    # на момент оплаты (см. комментарий выше).
                     is_booked=True,
                     booking_id=str(booking.id),
                     recurring_group_id=crm_session_group_id,
@@ -3111,7 +3114,8 @@ def extend_recurring_series(
                         status="PLANNED",
                         price=ext_crm_client.base_price,
                         currency=ext_crm_client.currency,
-                        account=ext_crm_client.default_account,
+                        # account не заполняем: пусто = счёт клиента по
+                        # умолчанию на момент оплаты.
                         is_booked=True,
                         booking_id=str(new_booking.id),
                         recurring_group_id=ext_session_group_id,
