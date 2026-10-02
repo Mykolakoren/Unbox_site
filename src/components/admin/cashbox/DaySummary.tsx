@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { cashboxApi, type CashboxDaySummary, type DayBranchBlock, type DayCorrection, type DayMoney, type DayShift } from '../../../api/cashbox';
+import { cashboxReportsApi, type CashboxDaySummary, type DayBranchBlock, type DayCorrection, type DayMoney, type DayShift } from '../../../api/cashbox';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Field';
 import { ErrorBar } from '../../ui/ErrorBar';
@@ -53,32 +53,30 @@ export function DaySummary({
 }) {
     const today = batumiDayKey();
     const [day, setDay] = useState(today);
-    const [data, setData] = useState<CashboxDaySummary | null>(null);
-    const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-    const seq = useRef(0);
-
-    const load = useCallback(async () => {
-        // Быстро листают дни — поздний ответ старого запроса не перетирает новый.
-        const my = ++seq.current;
-        setStatus('loading');
-        try {
-            const r = await cashboxApi.getDaySummary({ date: day, branch });
-            if (my !== seq.current) return;
-            setData(r);
-            setStatus('ready');
-        } catch {
-            if (my === seq.current) setStatus('error');
-        }
-    }, [day, branch]);
-    useEffect(() => { void load(); }, [load]);
+    // Ответ хранится вместе с ключом запроса (день + филиал): пока ключ не совпал
+    // с текущим — идёт загрузка; быстро листают дни — поздний ответ старого
+    // запроса отбрасывается (cancelled) и чужие цифры не показываются.
+    const key = `${day}|${branch ?? ''}`;
+    const [result, setResult] = useState<{ key: string; data?: CashboxDaySummary; failed?: boolean } | null>(null);
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        cashboxReportsApi.getDaySummary({ date: day, branch })
+            .then(r => { if (!cancelled) setResult({ key, data: r }); })
+            .catch(() => { if (!cancelled) setResult({ key, failed: true }); });
+        return () => { cancelled = true; };
+    }, [day, branch, key, attempt]);
+    const retry = () => { setResult(null); setAttempt(n => n + 1); };
 
     const isToday = day === today;
-    const shown = data && data.date === day && (data.branch ?? undefined) === branch ? data : null;
+    const current = result && result.key === key ? result : null;
+    const shown = current?.data ?? null;
+    const failed = !!current?.failed;
     const radius = compact ? 12 : RADIUS.grid;
 
     return (
         <section aria-label="Итоги дня" data-day-summary style={{ display: 'flex', flexDirection: 'column', gap: 12, color: COLOR.ink }}>
-            {/* Выбор дня: ‹ день › + «Сегодня» + календарь. */}
+            {/* Выбор дня: ‹ день › + «Сегодня» + календарь (на телефоне — второй строкой). */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                 <Button
                     variant="quiet"
@@ -98,25 +96,27 @@ export function DaySummary({
                     disabled={day >= today}
                     onClick={() => setDay(d => (d >= today ? d : addDays(d, 1)))}
                 />
-                {!isToday && (
-                    <Button variant="secondary" size={compact ? 'touch' : 'auto'} onClick={() => setDay(today)}>Сегодня</Button>
-                )}
-                <Input
-                    kind="date"
-                    aria-label="Выбрать день"
-                    value={day}
-                    max={today}
-                    onChange={e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) setDay(e.target.value > today ? today : e.target.value); }}
-                    style={{ width: 160, marginLeft: compact ? 0 : 'auto' }}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: compact ? '1 0 100%' : undefined, marginLeft: compact ? 0 : 'auto' }}>
+                    {!isToday && (
+                        <Button variant="secondary" size={compact ? 'touch' : 'auto'} onClick={() => setDay(today)}>Сегодня</Button>
+                    )}
+                    <Input
+                        kind="date"
+                        aria-label="Выбрать день"
+                        value={day}
+                        max={today}
+                        onChange={e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) setDay(e.target.value > today ? today : e.target.value); }}
+                        style={{ width: compact ? undefined : 160, flex: compact ? 1 : undefined, minWidth: 0 }}
+                    />
+                </div>
             </div>
 
-            {status === 'error' && (
-                <ErrorBar message="Не удалось загрузить итоги дня" onRetry={() => { void load(); }} />
+            {failed && (
+                <ErrorBar message="Не удалось загрузить итоги дня" onRetry={retry} />
             )}
 
             {!shown ? (
-                status !== 'error' && <SkeletonList count={compact ? 2 : 1} label="Считаем итоги дня" cardHeight={compact ? 160 : 200} />
+                !failed && <SkeletonList count={compact ? 2 : 1} label="Считаем итоги дня" cardHeight={compact ? 160 : 200} />
             ) : (
                 <>
                     <div style={{
@@ -156,15 +156,23 @@ function Card({ title, aside, radius, children }: { title: ReactNode; aside?: Re
 }
 
 /** Строка «подпись … сумма»; sub — пояснение мельче под ней. */
-function Line({ label, value, sub, tone, strong = true }: {
+function Line({ label, value, sub, tone, strong = true, text = false }: {
     label: ReactNode; value?: ReactNode; sub?: ReactNode; tone?: string; strong?: boolean;
+    /** Значение — слова, а не сумма: обычный шрифт, перенос строк. */
+    text?: boolean;
 }) {
     return (
         <div style={{ padding: '8px 0', borderTop: `1px solid ${COLOR.ink08}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
                 <span style={{ fontSize: 14, fontWeight: strong ? 600 : 400 }}>{label}</span>
                 {value !== undefined && (
-                    <span className="num" style={{ fontSize: strong ? 16 : 14, fontWeight: strong ? 600 : 400, whiteSpace: 'nowrap', color: tone || COLOR.ink }}>
+                    <span
+                        className={text ? undefined : 'num'}
+                        style={{
+                            fontSize: strong && !text ? 16 : 14, fontWeight: strong ? 600 : 400, color: tone || COLOR.ink,
+                            whiteSpace: text ? 'normal' : 'nowrap', textAlign: 'right',
+                        }}
+                    >
                         {value}
                     </span>
                 )}
@@ -231,19 +239,20 @@ function chargesSub(c: DayBranchBlock['charges']): string {
 }
 
 function ShiftLine({ shift, isToday, day }: { shift: DayShift; isToday: boolean; day: string }) {
+    /** «в 21:45» — в этот день; «1 октября в 21:45» — в другой (по Тбилиси). */
     const at = (iso: string | null) => {
         if (!iso) return '';
         const d = parseUTC(iso);
-        const sameDay = batumiDayKey(d) === day;
-        return `${sameDay ? '' : `${formatDayMonth(d, { timeZone: BATUMI_TZ })}, `}${formatTime(d, { timeZone: BATUMI_TZ })}`;
+        const time = formatTime(d, { timeZone: BATUMI_TZ });
+        return batumiDayKey(d) === day ? `в ${time}` : `${formatDayMonth(d, { timeZone: BATUMI_TZ })} в ${time}`;
     };
     let text: string;
     let tone: string;
     if (shift.status === 'open') {
-        text = `Открыта с ${at(shift.openedAt)}${shift.openedBy ? ` · ${shift.openedBy}` : ''}`;
+        text = `Открыта ${at(shift.openedAt).replace(/^в /, 'с ')}${shift.openedBy ? ` · ${shift.openedBy}` : ''}`;
         tone = STATUS.ok.fg;
     } else if (shift.status === 'closed') {
-        text = `Закрыта в ${at(shift.closedAt)}${shift.closedBy ? ` · ${shift.closedBy}` : ''}`;
+        text = `Закрыта ${at(shift.closedAt)}${shift.closedBy ? ` · ${shift.closedBy}` : ''}`;
         tone = COLOR.ink;
     } else {
         text = isToday ? 'Ещё не закрыта' : 'В этот день не закрывали';
@@ -254,12 +263,14 @@ function ShiftLine({ shift, isToday, day }: { shift: DayShift; isToday: boolean;
     return (
         <Line
             label="Смена"
-            value={<span style={{ fontSize: 14, fontWeight: 600, color: tone, whiteSpace: 'normal', textAlign: 'right' }}>{text}</span>}
+            text
+            tone={tone}
+            value={text}
             sub={shift.closedAt && shift.closedAllBranches ? (
                 <span>закрыли общую смену по всем филиалам — цифры смотрите в «Сменах»</span>
             ) : shift.closedAt ? (
                 <span>
-                    {shift.status === 'open' && <>закрывали в {at(shift.closedAt)} · </>}
+                    {shift.status === 'open' && <>закрывали {at(shift.closedAt)} · </>}
                     ожидалось <span className="num" style={{ color: COLOR.ink }}>{formatGel(shift.expected)}</span>
                     {' · '}по факту <span className="num" style={{ color: COLOR.ink }}>{formatGel(shift.actual)}</span>
                     {' · '}расхождение <span className="num" style={{ color: discTone, fontWeight: 600 }}>
@@ -307,10 +318,10 @@ function CommonCard({ data, radius, clientPath }: { data: CashboxDaySummary; rad
         >
             <div style={{ fontSize: 12, color: COLOR.ink60, marginBottom: 6, lineHeight: 1.45 }}>
                 {debtors.count > 0
-                    ? `${ruCountWord(debtors.count, ['клиент', 'клиента', 'клиентов'])} с балансом ниже нуля`
+                    ? `${ruCountWord(debtors.count, ['клиент', 'клиента', 'клиентов'])} с минусом на балансе`
                     : 'Ни у кого нет минуса на балансе'}
                 {data.isToday ? ' — сейчас, день ещё идёт' : ''}
-                {' · по всем филиалам: у клиента нет филиала'}
+                {' · общее по всем филиалам'}
             </div>
             {list.length > 0 && (
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>

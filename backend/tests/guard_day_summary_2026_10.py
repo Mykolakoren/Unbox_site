@@ -544,7 +544,7 @@ def test_day_summary_block_desktop_and_mobile():
         assert text in ds, f"в «Итогах дня» нет «{text}»"
     assert "'Сверка с таблицей: сравните наличные, TBC и BOG по филиалу'" in ds, "нет подсказки про сверку"
     assert "{DAY_SUMMARY_HINT}" in ds
-    assert "cashboxApi.getDaySummary(" in ds and "batumiDayKey()" in ds, "день не по Тбилиси / не с сервера"
+    assert "cashboxReportsApi.getDaySummary(" in ds and "batumiDayKey()" in ds, "день не по Тбилиси / не с сервера"
     assert "formatGel(" in ds and "toFixed(" not in ds and ".reduce(" not in ds, \
         "в «Итогах дня» свои денежные подсчёты или формат мимо utils/format"
     api = _code("src/api/cashbox.ts")
@@ -557,7 +557,7 @@ def test_day_summary_block_desktop_and_mobile():
     assert "<DaySummary branch={branchParam} compact" in mob, "на телефоне нет «Итогов дня»"
     assert "<WeeklyRebates compact" in mob and "{ value: 'day', label: 'Итоги дня' }" in mob
     wr = _code("src/components/admin/cashbox/WeeklyRebates.tsx")
-    assert "cashboxApi.getWeeklyRebates(" in wr and "Итого" in wr and "formatGel(" in wr
+    assert "cashboxReportsApi.getWeeklyRebates(" in wr and "Итого" in wr and "formatGel(" in wr
 
 
 def test_rebate_note_in_today_and_popup():
@@ -570,7 +570,7 @@ def test_rebate_note_in_today_and_popup():
         assert "weeklyRebateNote(" in src and "data-weekly-rebate-note" in src, f"{rel}: нет метки недельной скидки"
         assert "rebateRowsOnce(" in src, f"{rel}: метка не один раз на клиента"
     hook = _code("src/hooks/useRecentWeeklyRebates.ts")
-    assert "cashboxApi.getRecentWeeklyRebates()" in hook and "rebateIndex(" in hook
+    assert "cashboxReportsApi.getRecentWeeklyRebates()" in hook and "rebateIndex(" in hook
     hints = _code("src/components/admin/BookingMoneyHints.tsx")
     assert "weeklyRebateNote(est.lastRebate.amount)" in hints, "в попапе брони другая формулировка скидки"
     assert "в т.ч. недельная скидка" not in hints and "formatDayMonth(est.lastRebate.date)" not in hints, \

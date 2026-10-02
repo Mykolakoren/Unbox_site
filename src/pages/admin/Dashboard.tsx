@@ -395,7 +395,7 @@ function GridHouseToday({
                                                     </div>
                                                 )}
                                                 {rebate > 0 && (
-                                                    <div data-weekly-rebate-note title={weeklyRebateNote(rebate)} style={{ fontSize: 12, color: STATUS.ok.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                    <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, lineHeight: 1.35 }}>
                                                         {weeklyRebateNote(rebate)}
                                                     </div>
                                                 )}

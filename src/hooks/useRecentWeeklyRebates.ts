@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { cashboxApi } from '../api/cashbox';
+import { cashboxReportsApi } from '../api/cashbox';
 import { rebateIndex } from '../utils/weeklyRebateNote';
 
 /**
@@ -15,7 +15,7 @@ export function useRecentWeeklyRebates(enabled: boolean): Map<string, number> {
     useEffect(() => {
         if (!enabled) return;
         let cancelled = false;
-        cashboxApi.getRecentWeeklyRebates()
+        cashboxReportsApi.getRecentWeeklyRebates()
             .then(r => { if (!cancelled) setIdx(rebateIndex(r?.items || [])); })
             .catch(() => { /* метка необязательная */ });
         return () => { cancelled = true; };

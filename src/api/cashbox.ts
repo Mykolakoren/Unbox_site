@@ -253,26 +253,6 @@ export const cashboxApi = {
         return data;
     },
 
-    /** «Итоги дня» по Тбилиси (date — ГГГГ-ММ-ДД). branch не передан — все филиалы. */
-    getDaySummary: async (params: { date: string; branch?: string }): Promise<CashboxDaySummary> => {
-        const { data } = await api.get('/cashbox/day-summary', {
-            params: { date: params.date, branch: params.branch },
-        });
-        return data;
-    },
-
-    /** Недельные скидки за неделю броней (weekStart — любой день недели; пусто — прошлая неделя). */
-    getWeeklyRebates: async (weekStart?: string): Promise<WeeklyRebateReport> => {
-        const { data } = await api.get('/cashbox/weekly-rebates', { params: weekStart ? { week_start: weekStart } : {} });
-        return data;
-    },
-
-    /** Скидки, начисленные с последнего понедельника, — для метки в «Сегодня». */
-    getRecentWeeklyRebates: async (): Promise<RecentWeeklyRebates> => {
-        const { data } = await api.get('/cashbox/weekly-rebates/recent');
-        return data;
-    },
-
     /** Excel для сверки с таблицей админов за месяц (YYYY-MM). */
     downloadReconciliation: async (month: string): Promise<Blob> => {
         const response = await api.get(`/cashbox/reconciliation.xlsx`, { params: { month }, responseType: 'blob' });
@@ -377,6 +357,34 @@ export const cashboxApi = {
 
     correctBalance: async (payload: { payment_method: string; new_balance: number; reason?: string }): Promise<any> => {
         const { data } = await api.post('/cashbox/balance-correction', payload);
+        return data;
+    },
+};
+
+/**
+ * Отчёты кассы — ТОЛЬКО ЧТЕНИЕ (решение владельца 02.10): «Итоги дня» и
+ * «Недельные скидки». Отдельно от cashboxApi: тела денежных вызовов там держит
+ * отпечаток сторожа (guard_wave4_money_desk), а здесь денег не двигаем.
+ * Все цифры считает сервер (services/day_summary.py).
+ */
+export const cashboxReportsApi = {
+    /** «Итоги дня» по Тбилиси (date — ГГГГ-ММ-ДД). branch не передан — все филиалы. */
+    getDaySummary: async (params: { date: string; branch?: string }): Promise<CashboxDaySummary> => {
+        const { data } = await api.get('/cashbox/day-summary', {
+            params: { date: params.date, branch: params.branch },
+        });
+        return data;
+    },
+
+    /** Недельные скидки за неделю броней (weekStart — любой день недели; пусто — прошлая неделя). */
+    getWeeklyRebates: async (weekStart?: string): Promise<WeeklyRebateReport> => {
+        const { data } = await api.get('/cashbox/weekly-rebates', { params: weekStart ? { week_start: weekStart } : {} });
+        return data;
+    },
+
+    /** Скидки, начисленные с последнего понедельника, — для метки в «Сегодня». */
+    getRecentWeeklyRebates: async (): Promise<RecentWeeklyRebates> => {
+        const { data } = await api.get('/cashbox/weekly-rebates/recent');
         return data;
     },
 };

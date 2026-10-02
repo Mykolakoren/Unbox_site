@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { cashboxApi, type WeeklyRebateReport } from '../../../api/cashbox';
+import { cashboxReportsApi, type WeeklyRebateReport } from '../../../api/cashbox';
 import { Button } from '../../ui/Button';
 import { EmptyState } from '../../ui/EmptyState';
 import { ErrorBar } from '../../ui/ErrorBar';
@@ -38,27 +38,28 @@ export function WeeklyRebates({ compact = false, clientPath }: {
     // null — неделю выбирает сервер (прошлая); дальше листаем от неё.
     const [week, setWeek] = useState<string | null>(null);
     const [latest, setLatest] = useState<string | null>(null);
-    const [data, setData] = useState<WeeklyRebateReport | null>(null);
-    const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-    const seq = useRef(0);
-
-    const load = useCallback(async () => {
-        const my = ++seq.current;
-        setStatus('loading');
-        try {
-            const r = await cashboxApi.getWeeklyRebates(week ?? undefined);
-            if (my !== seq.current) return;
-            setData(r);
-            if (week === null) setLatest(r.weekStart);
-            setStatus('ready');
-        } catch {
-            if (my === seq.current) setStatus('error');
-        }
-    }, [week]);
-    useEffect(() => { void load(); }, [load]);
+    // Ответ хранится с ключом запроса (неделя или «прошлая»): поздний ответ
+    // старого запроса отбрасывается, пока ключ не совпал — идёт загрузка.
+    const key = week ?? 'latest';
+    const [result, setResult] = useState<{ key: string; data?: WeeklyRebateReport; failed?: boolean } | null>(null);
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        cashboxReportsApi.getWeeklyRebates(week ?? undefined)
+            .then(r => {
+                if (cancelled) return;
+                setResult({ key, data: r });
+                if (week === null) setLatest(r.weekStart);
+            })
+            .catch(() => { if (!cancelled) setResult({ key, failed: true }); });
+        return () => { cancelled = true; };
+    }, [week, key, attempt]);
+    const retry = () => { setResult(null); setAttempt(n => n + 1); };
 
     const current = week ?? latest;
-    const shown = data && (week === null || data.weekStart === week) ? data : null;
+    const done = result && result.key === key ? result : null;
+    const shown = done?.data ?? null;
+    const failed = !!done?.failed;
     const canNext = !!current && !!latest && current < latest;
 
     return (
@@ -88,10 +89,10 @@ export function WeeklyRebates({ compact = false, clientPath }: {
                 )}
             </div>
 
-            {status === 'error' && <ErrorBar message="Не удалось загрузить недельные скидки" onRetry={() => { void load(); }} />}
+            {failed && <ErrorBar message="Не удалось загрузить недельные скидки" onRetry={retry} />}
 
             {!shown ? (
-                status !== 'error' && <SkeletonList count={3} label="Загружаем недельные скидки" cardHeight={48} />
+                !failed && <SkeletonList count={3} label="Загружаем недельные скидки" cardHeight={48} />
             ) : (
                 <>
                     <p style={{ margin: 0, fontSize: 14, color: COLOR.ink60, lineHeight: 1.5 }}>
