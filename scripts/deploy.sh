@@ -55,6 +55,18 @@ deploy_front() {
     rm -rf /tmp/dist-new/*
     tar xzf /tmp/unbox-dist.tgz -C /tmp/dist-new
     echo 'new bundle:' \$(grep -o 'index-[A-Za-z0-9_-]*\.js' /tmp/dist-new/index.html | head -1)
+    # Старые вкладки (особенно у админов и в мобильном PWA) после выкладки просят
+    # чанки прошлой версии (assets/LoginPage-<hash>.js), а их нет → «error loading
+    # dynamically imported module». Докладываем в новый assets файлы текущей папки
+    # и 3 последних бэкапов (от новых к старым), БЕЗ перезаписи файлов нового билда
+    # (cp -n; хэши в именах не конфликтуют, -p сохраняет дату). Файлы старше 14 дней
+    # выбрасываем — иначе папка росла бы вечно. Пустые папки/нет файлов — не ошибка (set -e).
+    mkdir -p /tmp/dist-new/assets
+    for OLD in $REMOTE_FRONT_DIR \$(ls -dt $REMOTE_FRONT_DIR-backup-* 2>/dev/null | head -3); do
+      if [ -d \"\$OLD/assets\" ]; then cp -n -p -r \"\$OLD/assets/.\" /tmp/dist-new/assets/ || true; fi
+    done
+    find /tmp/dist-new/assets -type f -mtime +14 -delete || true
+    echo 'assets in new dist (with old chunks):' \$(ls /tmp/dist-new/assets | wc -l)
     mv $REMOTE_FRONT_DIR $REMOTE_FRONT_DIR-backup-\$TS
     mv /tmp/dist-new $REMOTE_FRONT_DIR
     rm -f /tmp/unbox-dist.tgz

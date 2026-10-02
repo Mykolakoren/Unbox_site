@@ -3,6 +3,7 @@ import { AlertTriangle, RotateCcw, Copy, MessageCircle } from 'lucide-react';
 import { Button } from './Button';
 import { FONT, STATUS } from '../../design/tokens';
 import { useUserStore } from '../../store/userStore';
+import { isChunkLoadError, reloadOnceForStaleBundle } from '../../utils/chunkRecovery';
 
 /** Куда писать, если экран упал (тот же Telegram, что в SpecialistGate). */
 const ADMIN_CONTACT_URL = 'https://t.me/UnboxCenter';
@@ -34,17 +35,6 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     this.state = { hasError: false, error: null, componentStack: null };
   }
 
-  componentDidMount() {
-    // If we got here, the children rendered successfully → drop the
-    // chunk-retry flag so a future deploy can auto-recover too. Without
-    // this the flag stays in sessionStorage forever and a second
-    // stale-bundle event on the same path silently shows the error
-    // screen instead of reloading.
-    try {
-      sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
-    } catch { /* private mode / disabled storage */ }
-  }
-
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
@@ -54,44 +44,15 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     this.setState({ componentStack: errorInfo.componentStack ?? null });
 
     // ── Stale-tab auto-recovery ──
-    // When we ship a new bundle, rsync --delete removes the old chunks. Any
-    // tab opened before the deploy still has the previous index.js with
-    // references to those now-gone chunk filenames. The first lazy import
-    // (e.g. clicking on /crm) then fails with "Failed to fetch dynamically
-    // imported module". We detect that shape of error and force-reload
-    // with a cache-busting query so iOS Safari can't serve the stale
-    // index.html out of bfcache.
-    const msg = (error?.message || '').toLowerCase();
-    const isChunkLoad =
-      msg.includes('failed to fetch dynamically imported module') ||
-      msg.includes('loading chunk') ||
-      msg.includes('importing a module script failed') ||
-      (error as any)?.name === 'ChunkLoadError';
-
-    if (isChunkLoad) {
-      // Guard against an infinite loop: only reload once per URL.
-      const flag = `unbox_chunk_retry_${window.location.pathname}`;
-      if (!sessionStorage.getItem(flag)) {
-        sessionStorage.setItem(flag, '1');
-        // Small timeout so the state update above has a chance to flush.
-        setTimeout(() => {
-          // Cache-bust: changing the URL forces Safari/iOS off bfcache
-          // and off the disk cache for the HTML document, which then
-          // pulls the fresh <script src="index-<NEW_HASH>.js">.
-          const url = new URL(window.location.href);
-          url.searchParams.set('_cb', String(Date.now()));
-          window.location.replace(url.toString());
-        }, 250);
-      }
-    }
+    // После выкладки старые чанки пропадают с сервера, а вкладка, открытая до
+    // выкладки, всё ещё ссылается на них (Chrome: «Failed to fetch dynamically
+    // imported module», Firefox: «error loading dynamically imported module»).
+    // Узнаём такую ошибку и один раз перезагружаем страницу с cache-bust
+    // параметром — формулировки и защита от цикла в utils/chunkRecovery.
+    if (isChunkLoadError(error)) reloadOnceForStaleBundle();
   }
 
   handleReload = () => {
-    // Сбрасываем флаг авто-перезагрузки, чтобы следующий «устаревший бандл»
-    // снова мог перезагрузиться сам.
-    try {
-      sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
-    } catch { /* noop */ }
     window.location.reload();
   };
 
