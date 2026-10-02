@@ -4,6 +4,7 @@ import { crmApi } from '../api/crm';
 import { calendarNearConflict } from '../utils/crmCalendarConflict';
 import { toastApiError } from '../utils/errors';
 import { paidLocally } from '../utils/sessionMoney';
+import { fetchExchangeRates } from '../utils/currency';
 
 // Dedup concurrent quick-pay calls per session id — a double-tap on the "Оплатить"
 // button (the flag flips isPaid only AFTER the await) would otherwise fire two
@@ -105,6 +106,8 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
 
     fetchClients: async (activeOnly = false, withStats = false, specialistId?: string) => {
         set({ loading: true, error: null });
+        // Курсы валют для «≈ ₾» — вошедшему подтягиваем здесь (модуль сам грузит их только при токене).
+        void fetchExchangeRates();
         try {
             // Explicit `specialistId` (admin-proxy booking flow) wins over
             // the persistent `viewAsSpecialistId` (admin CRM viewer mode).

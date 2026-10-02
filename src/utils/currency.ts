@@ -56,8 +56,14 @@ export async function fetchExchangeRates(): Promise<Record<string, number>> {
     return EXCHANGE_RATES;
 }
 
-// Auto-fetch on module load (non-blocking)
-fetchExchangeRates();
+// Auto-fetch on module load (non-blocking) — ТОЛЬКО для вошедшего пользователя.
+// 02.10 (инцидент): модуль попал в общий бандл (crmStore → sessionMoney), и без
+// токена запрос курсов получал 401 → перезагрузка /login → снова запрос: вход
+// на сайт зависал у всех разлогиненных. Вошедшему курсы подтягиваются здесь и
+// при загрузке данных CRM (crmStore.fetchClients).
+if (typeof localStorage !== 'undefined' && localStorage.getItem('token')) {
+    void fetchExchangeRates();
+}
 
 /** Convert amount to GEL equivalent */
 export function toGel(amount: number, currency: string): number {

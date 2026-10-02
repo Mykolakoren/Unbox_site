@@ -85,6 +85,12 @@ api.interceptors.response.use(
         if (status === 401 || (status === 403 && detail === 'Could not validate credentials')) {
             localStorage.removeItem('token');
             const { pathname, search, hash } = window.location;
+            // Уже на /login и это фоновое чтение (GET): перезагружать страницу нельзя —
+            // иначе любой анонимный GET даёт бесконечный цикл «401 → /login → 401»
+            // (инцидент 02.10: вход на сайт не открывался). Ошибку просто отдаём дальше.
+            if (pathname.startsWith('/login') && isReadOnly) {
+                return Promise.reject(error);
+            }
             window.location.href = pathname.startsWith('/login')
                 ? '/login' + search
                 : loginPathWithRedirect(pathname + search + hash);
