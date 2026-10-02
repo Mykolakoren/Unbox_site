@@ -56,10 +56,10 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
     // «Принять оплату» (пополнение баланса) — только с правом на кассу, как
     // вкладка «Касса» (волна 4, доработка). Одна проверка на «Сегодня» и «Брони».
-    const currentUser = useUserStore(s => s.currentUser);
-    const canCash = userCanAccessFinance(currentUser);
+    const canCash = userCanAccessFinance(useUserStore(s => s.currentUser));
     // Недельная скидка клиента с последнего понедельника — та же метка, что в
     // «Сегодня» (ревизия 02.10), чтобы её не вычли из «к оплате» второй раз.
+    const currentUser = useUserStore(s => s.currentUser);
     const users = useUserStore(s => s.users);
     const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
     const rebateOf = (b: BookingHistoryItem): number => {
