@@ -322,18 +322,16 @@ def daily_summary_endpoint(
     if secret != expected:
         raise HTTPException(status_code=401, detail="Invalid secret")
 
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from datetime import timedelta as _td
     from app.models.cashbox_transaction import CashboxTransaction
 
     # "Yesterday" is the full Tbilisi (UTC+4) calendar day ending at the most
-    # recent midnight Tbilisi time. Convert that window back to naive UTC to
-    # match what the DB stores.
+    # recent midnight Tbilisi time, as naive UTC (what the DB stores). Границы
+    # дня — одна функция с «Итогами дня» (services/day_summary.day_bounds_utc).
+    from app.services.day_summary import day_bounds_utc, tbilisi_today
     TBS = _td(hours=4)
-    now_utc = _dt.utcnow()
-    now_tbs = now_utc + TBS
-    today_tbs_midnight_utc = (now_tbs.replace(hour=0, minute=0, second=0, microsecond=0) - TBS)
-    yesterday_start = today_tbs_midnight_utc - _td(days=1)
-    yesterday_end = today_tbs_midnight_utc
+    yesterday = tbilisi_today() - _td(days=1)
+    yesterday_start, yesterday_end = day_bounds_utc(yesterday)
     date_label = (yesterday_start + TBS).strftime("%d.%m.%Y")
 
     # ── Bookings summary ──
@@ -433,7 +431,9 @@ def daily_summary_endpoint(
         lines.append(f"• Выручка (по броням): {loc_rev}")
 
     lines.append("")
-    lines.append("<b>Касса</b>")
+    # Подпись (02.10): это ВСЕ операции журнала, с корректировками и переводами —
+    # не путать с блоком «Пришло по филиалам (без корректировок)» ниже.
+    lines.append("<b>Касса</b> (все операции журнала, с корректировками)")
     lines.append(f"• Приход: <b>{total_income:g}</b> ₾ — {_fmt_money_dict(income_by_method)}")
     lines.append(f"• Расход: <b>{total_expense:g}</b> ₾ — {_fmt_money_dict(expense_by_method)}")
     if income_by_branch:
@@ -446,7 +446,7 @@ def daily_summary_endpoint(
     # Эндпоинт ничего не пишет, поэтому после сбоя сессию просто откатываем.
     try:
         from app.services.day_summary import compute_day_summary, telegram_day_lines
-        day_lines = telegram_day_lines(compute_day_summary(session, (yesterday_start + TBS).date()))
+        day_lines = telegram_day_lines(compute_day_summary(session, yesterday))
     except Exception:
         logger.exception("daily-summary: итоги дня по филиалам не посчитались")
         session.rollback()

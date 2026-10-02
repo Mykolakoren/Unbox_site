@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
-import { userCanAccessFinance } from '../../../utils/permissions';
+import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
+import { useRecentWeeklyRebates } from '../../../hooks/useRecentWeeklyRebates';
+import { weeklyRebateNote, rebateFor } from '../../../utils/weeklyRebateNote';
 import { bookingsApi } from '../../../api/bookings';
 import { RESOURCES } from '../../../utils/data';
 import type { BookingHistoryItem, User } from '../../../store/types';
@@ -54,7 +56,16 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
     // «Принять оплату» (пополнение баланса) — только с правом на кассу, как
     // вкладка «Касса» (волна 4, доработка). Одна проверка на «Сегодня» и «Брони».
-    const canCash = userCanAccessFinance(useUserStore(s => s.currentUser));
+    const currentUser = useUserStore(s => s.currentUser);
+    const canCash = userCanAccessFinance(currentUser);
+    // Недельная скидка клиента с последнего понедельника — та же метка, что в
+    // «Сегодня» (ревизия 02.10), чтобы её не вычли из «к оплате» второй раз.
+    const users = useUserStore(s => s.users);
+    const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
+    const rebateOf = (b: BookingHistoryItem): number => {
+        const u = users.find(x => x.email === b.userId || x.id === b.userId);
+        return rebateFor(rebates, b.userId, u?.id, u?.email);
+    };
     const [busy, setBusy] = useState<string | null>(null);
     const { confirm } = useConfirmDialog();
     // Отмена и смена цены — через нижние шторки. Раньше это были 2-3 системных
@@ -195,6 +206,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
                     onExtend={() => doExtend(booking)}
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(booking.userId)}`)}
                     pay={canCash && acceptPayment ? acceptPayment(booking) : null}
+                    rebateNote={rebateOf(booking) > 0 ? weeklyRebateNote(rebateOf(booking)) : null}
                 />
             )}
 
@@ -255,7 +267,7 @@ function formatDurationStandalone(min: number): string {
 }
 
 function ActionSheet({
-    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser, pay,
+    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser, pay, rebateNote,
 }: {
     booking: BookingHistoryItem;
     userName: string;
@@ -270,6 +282,8 @@ function ActionSheet({
     onExtend: () => void;
     onOpenUser: () => void;
     pay?: { sub: string; onClick: () => void } | null;
+    /** «скидка за прошлую неделю +9 ₾ уже учтена в «к оплате»» — если была. */
+    rebateNote?: string | null;
 }) {
     const canCancel = booking.status === 'confirmed' || booking.status === 'pending_approval';
     const canApprove = booking.status === 'pending_approval';
@@ -310,6 +324,11 @@ function ActionSheet({
                 {discount && (
                     <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '0 0 12px' }}>
                         {discount}
+                    </p>
+                )}
+                {rebateNote && (
+                    <p data-weekly-rebate-note style={{ fontSize: 14, color: 'var(--status-ok-fg)', margin: '0 0 12px' }}>
+                        {rebateNote}
                     </p>
                 )}
 

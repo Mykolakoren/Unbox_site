@@ -9,7 +9,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../store/cashboxStore';
 import { useUserStore } from '../../store/userStore';
-import { userCanAccessFinance } from '../../utils/permissions';
+import { userCanAccessFinance, hasPermission } from '../../utils/permissions';
 import { BalanceCard } from '../../components/admin/cashbox/BalanceCard';
 import { CashboxTransactionTable } from '../../components/admin/cashbox/CashboxTransactionTable';
 import { AddCashboxTransactionModal } from '../../components/admin/cashbox/AddCashboxTransactionModal';
@@ -207,11 +207,16 @@ function AdminFinancePage() {
     }, [period, selectedBranch]);
     useEffect(() => { loadSummary(); }, [loadSummary]);
 
+    // «Итоги дня» перечитываются после любой записи/правки операции и смены
+    // (ревизия 02.10: иначе админ не видит свою операцию и вносит её второй раз).
+    const [dayReload, setDayReload] = useState(0);
+    const bumpDay = useCallback(() => setDayReload(n => n + 1), []);
     const refetchTransactions = () => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
         fetchTransactions({ dateFrom, dateTo, limit: TX_LIMIT });
         loadSummary();
+        bumpDay();
     };
 
     useEffect(() => {
@@ -311,6 +316,8 @@ function AdminFinancePage() {
                 yesterdayShiftStatus={yesterdayShiftStatus}
                 currentOpenShift={currentOpenShift}
                 refetchShiftState={refetchShiftState}
+                dayReload={dayReload}
+                bumpDay={bumpDay}
             />
         );
 }
@@ -354,6 +361,9 @@ type GHAFProps = {
     yesterdayShiftStatus: 'closed' | 'missed';
     currentOpenShift: any | null;
     refetchShiftState: () => void;
+    /** Ключ перезагрузки «Итогов дня» и как его сдвинуть (после операции / смены). */
+    dayReload: number;
+    bumpDay: () => void;
 };
 
 /** Меню «⋯» в шапке кассы: редкие действия (корректировка, недельные кредиты, выгрузка). */
@@ -482,10 +492,15 @@ function GridHouseAdminFinance(p: GHAFProps) {
         { value: 'income', label: 'Приходы' },
         { value: 'expense', label: 'Расходы' },
     ];
+    // Итоги дня и недельные скидки — отчёты по всем клиентам: только с правом
+    // отчётов (как сервер, require_reports).
+    const canReports = hasPermission(currentUser, 'finance.view_reports');
     const tabs: { value: Tab; label: string }[] = [
         { value: 'transactions', label: 'Операции' },
-        { value: 'day', label: 'Итоги дня' },
-        { value: 'rebates', label: 'Недельные скидки' },
+        ...(canReports ? [
+            { value: 'day' as Tab, label: 'Итоги дня' },
+            { value: 'rebates' as Tab, label: 'Недельные скидки' },
+        ] : []),
         ...(p.canManageCategories ? [{ value: 'categories' as Tab, label: 'Категории' }] : []),
         { value: 'shifts', label: 'Смены' },
     ];
@@ -666,12 +681,16 @@ function GridHouseAdminFinance(p: GHAFProps) {
                 <div style={{ border: `1px solid ${GH.ink10}`, background: GH.paper }}>
                     {p.tab === 'transactions' && <CashboxTransactionTable filteredTransactions={p.filtered} onRefresh={p.refetchTransactions} />}
                     {/* Итоги дня — свой выбор дня (по Тбилиси), филиал — общий фильтр кассы. */}
-                    {p.tab === 'day' && (
+                    {p.tab === 'day' && canReports && (
                         <div style={{ padding: 16 }}>
-                            <DaySummary branch={p.selectedBranch || undefined} clientPath={k => `/admin/users/${encodeURIComponent(k)}`} />
+                            <DaySummary
+                                branch={p.selectedBranch || undefined}
+                                reloadKey={p.dayReload}
+                                clientPath={k => `/admin/users/${encodeURIComponent(k)}`}
+                            />
                         </div>
                     )}
-                    {p.tab === 'rebates' && (
+                    {p.tab === 'rebates' && canReports && (
                         <div style={{ padding: 16 }}>
                             <WeeklyRebates clientPath={k => `/admin/users/${encodeURIComponent(k)}`} />
                         </div>
@@ -733,14 +752,14 @@ function GridHouseAdminFinance(p: GHAFProps) {
             />
             <EndShiftModal
                 isOpen={p.showEndShift}
-                onClose={() => { p.setShowEndShift(false); p.setChecklistSkipReason(null); p.refetchShiftState(); }}
+                onClose={() => { p.setShowEndShift(false); p.setChecklistSkipReason(null); p.refetchShiftState(); p.bumpDay(); }}
                 branch={p.selectedBranch || undefined}
                 checklistSkipReason={p.checklistSkipReason || undefined}
             />
             <OpenShiftModal
                 isOpen={p.showOpenShift}
                 onClose={() => p.setShowOpenShift(false)}
-                onOpened={p.refetchShiftState}
+                onOpened={() => { p.refetchShiftState(); p.bumpDay(); }}
                 branch={p.selectedBranch || undefined}
             />
 

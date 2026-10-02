@@ -137,7 +137,9 @@ export interface DayBranchBlock {
     expense: DayMoney;
     shiftRecon: DayCorrection;
     balanceFix: DayCorrection;
-    /** Списано с балансов клиентов за брони этого дня (по кабинету брони). */
+    /** Перевод между своими счетами (income — сколько перевели): не «пришло» и не «ушло». */
+    transfer: DayCorrection;
+    /** Списано с балансов клиентов за брони этого дня (по локации брони). */
     charges: { charged: number; refunded: number; net: number; bookings: number };
     shift: DayShift | null;
 }
@@ -151,13 +153,22 @@ export interface CashboxDaySummary {
     total: Omit<DayBranchBlock, 'branch' | 'shift'>;
     /** Корректировки балансов (не деньги): недельная скидка, правка баланса клиента. */
     adjustments: { income: number; expense: number; count: number };
+    /** Операции дня без филиала (кроме корректировок) — видны только во «Все». */
+    unassigned: { count: number; income: number; expense: number };
     /** Недельные скидки, начисленные в этот день (по понедельникам). */
     weeklyRebates: { amount: number; count: number };
     /** Клиенты с балансом ниже нуля на конец дня (сегодня — сейчас). */
     debtors: {
+        /** false — день раньше стартовых остатков ленты баланса (21.07.2026): данных нет. */
+        available: boolean;
+        /** С какого дня есть данные о долгах (ГГГГ-ММ-ДД). */
+        since: string | null;
         count: number;
         amount: number;
-        items: { userId: string; name: string; email: string; debt: number }[];
+        /** Из них сотрудники (admin / senior_admin / owner). */
+        staffCount: number;
+        staffAmount: number;
+        items: { userId: string; name: string; email: string; debt: number; staff: boolean }[];
         asOf: string;
     };
 }

@@ -23,7 +23,8 @@ function addDays(key: string, delta: number): string {
 
 /** «Сегодня, 2 октября» / «Вчера, 1 октября» / «ср, 30 сент.». */
 function dayLabel(key: string): string {
-    const rel = formatRelativeDay(key, { capitalize: true });
+    // «Сегодня» — по Тбилиси, а не по поясу браузера (иначе вне Грузии «Завтра»).
+    const rel = formatRelativeDay(key, { capitalize: true, timeZone: BATUMI_TZ });
     return rel === 'Сегодня' || rel === 'Вчера' ? `${rel}, ${formatDayMonth(key)}` : rel;
 }
 
@@ -42,10 +43,13 @@ const METHODS: { key: keyof Pick<DayMoney, 'cash' | 'cardTbc' | 'cardBog'>; labe
  * День — по Тбилиси, по умолчанию сегодня; филиал — фильтр кассы (пусто — все).
  */
 export function DaySummary({
-    branch, compact = false, clientPath,
+    branch, compact = false, clientPath, reloadKey = 0,
 }: {
     /** Филиал кассы; undefined — все филиалы. */
     branch?: string;
+    /** Меняется после записи/правки операции или смены — итоги перечитываются,
+     *  чтобы админ видел свою операцию и не внёс её второй раз. */
+    reloadKey?: number;
     /** Телефон: карточки одна под другой, скругления как у мобильных карточек. */
     compact?: boolean;
     /** Ссылка на карточку клиента (почта или id) — в списке должников. */
@@ -65,7 +69,7 @@ export function DaySummary({
             .then(r => { if (!cancelled) setResult({ key, data: r }); })
             .catch(() => { if (!cancelled) setResult({ key, failed: true }); });
         return () => { cancelled = true; };
-    }, [day, branch, key, attempt]);
+    }, [day, branch, key, attempt, reloadKey]);
     const retry = () => { setResult(null); setAttempt(n => n + 1); };
 
     const isToday = day === today;
@@ -113,6 +117,16 @@ export function DaySummary({
 
             {failed && (
                 <ErrorBar message="Не удалось загрузить итоги дня" onRetry={retry} />
+            )}
+
+            {shown && branch && shown.unassigned.count > 0 && (
+                <div role="note" data-day-summary-unassigned style={{
+                    padding: '10px 14px', background: STATUS.pending.bg, color: STATUS.pending.fg,
+                    borderRadius: compact ? 12 : RADIUS.grid, fontSize: 14, lineHeight: 1.45,
+                }}>
+                    Есть {ruCountWord(shown.unassigned.count, ['операция', 'операции', 'операций'])} без филиала
+                    за этот день — они видны только во «Все»
+                </div>
             )}
 
             {!shown ? (
@@ -201,10 +215,21 @@ function correctionNote(c: DayCorrection, what: string): string | null {
     return `${what} ${formatGel(c.net, { sign: true })} — в «пришло» и «ушло» не входит`;
 }
 
+/** «Переводы между счетами 500 ₾ — …» — сумма по приходной половине перевода. */
+function transferNote(c: DayCorrection | undefined): string | null {
+    if (!c || c.count === 0) return null;
+    return `Переводы между счетами ${formatGel(c.income || c.expense)} — в «пришло» и «ушло» не входят`;
+}
+
+/** Подсказка под «Списано с балансов» (ревизия 02.10): брони считаются по их
+ *  нынешней дате, поэтому перенос брони меняет итог того дня. */
+const CHARGES_SCHEDULE_HINT = 'по текущему расписанию: перенос брони меняет итог того дня';
+
 function BranchCard({ block, isToday, day, radius }: { block: DayBranchBlock; isToday: boolean; day: string; radius: number }) {
     const notes = [
         correctionNote(block.shiftRecon, 'Расхождение смены'),
         correctionNote(block.balanceFix, 'Корректировка остатка'),
+        transferNote(block.transfer),
     ].filter(Boolean) as string[];
     return (
         <Card title={block.branch || 'Без филиала'} radius={radius}>
@@ -224,7 +249,7 @@ function BranchCard({ block, isToday, day, radius }: { block: DayBranchBlock; is
             <Line
                 label="Списано с балансов клиентов"
                 value={formatGel(block.charges.net)}
-                sub={chargesSub(block.charges)}
+                sub={<>{chargesSub(block.charges)}<span style={{ display: 'block', marginTop: 2 }}>{CHARGES_SCHEDULE_HINT}</span></>}
             />
             {block.shift && <ShiftLine shift={block.shift} isToday={isToday} day={day} />}
         </Card>
@@ -291,13 +316,24 @@ function ShiftLine({ shift, isToday, day }: { shift: DayShift; isToday: boolean;
 function TotalCard({ total, radius }: { total: CashboxDaySummary['total']; radius: number }) {
     return (
         <Card title="Всего по филиалам" radius={radius}>
-            <Line label="Пришло за день" value={formatGel(total.income.total)} sub={<ByMethod money={total.income} />} />
+            <Line
+                label="Пришло за день"
+                value={formatGel(total.income.total)}
+                sub={<>
+                    <ByMethod money={total.income} />
+                    {transferNote(total.transfer) && <span style={{ display: 'block', marginTop: 2 }}>{transferNote(total.transfer)}</span>}
+                </>}
+            />
             <Line
                 label="Ушло"
                 value={total.expense.total > 0 ? formatGel(-total.expense.total) : formatGel(0)}
                 sub={total.expense.count > 0 ? <ByMethod money={total.expense} /> : 'Расходов не было'}
             />
-            <Line label="Списано с балансов клиентов" value={formatGel(total.charges.net)} sub={chargesSub(total.charges)} />
+            <Line
+                label="Списано с балансов клиентов"
+                value={formatGel(total.charges.net)}
+                sub={<>{chargesSub(total.charges)}<span style={{ display: 'block', marginTop: 2 }}>{CHARGES_SCHEDULE_HINT}</span></>}
+            />
         </Card>
     );
 }
@@ -308,32 +344,43 @@ function CommonCard({ data, radius, clientPath }: { data: CashboxDaySummary; rad
     const debtors = data.debtors;
     const list = all ? debtors.items : debtors.items.slice(0, 5);
     const adj = data.adjustments;
+    // До стартовых остатков ленты баланса (21.07.2026) долги не восстановить.
+    const noData = debtors.available === false;
+    const sinceLabel = debtors.since ? debtors.since.split('-').reverse().join('.') : '';
     return (
         <Card
             title="Должны на конец дня"
-            aside={<span className="num" style={{ fontSize: 16, fontWeight: 600, color: debtors.amount > 0 ? STATUS.danger.fg : STATUS.ok.fg, whiteSpace: 'nowrap' }}>
-                {debtors.amount > 0 ? formatGel(debtors.amount) : 'никто'}
-            </span>}
+            aside={noData ? undefined : (
+                <span className="num" style={{ fontSize: 16, fontWeight: 600, color: debtors.amount > 0 ? STATUS.danger.fg : STATUS.ok.fg, whiteSpace: 'nowrap' }}>
+                    {debtors.amount > 0 ? formatGel(debtors.amount) : 'никто'}
+                </span>
+            )}
             radius={radius}
         >
             <div style={{ fontSize: 12, color: COLOR.ink60, marginBottom: 6, lineHeight: 1.45 }}>
-                {debtors.count > 0
-                    ? `${ruCountWord(debtors.count, ['клиент', 'клиента', 'клиентов'])} с минусом на балансе`
-                    : 'Ни у кого нет минуса на балансе'}
-                {data.isToday ? ' — сейчас, день ещё идёт' : ''}
-                {' · общее по всем филиалам'}
+                {noData
+                    ? `Нет данных о долгах до ${sinceLabel}`
+                    : debtors.count > 0
+                        ? `${ruCountWord(debtors.count, ['клиент', 'клиента', 'клиентов'])}, ${formatGel(debtors.amount)}`
+                            + (debtors.staffCount > 0 ? ` · из них сотрудники: ${debtors.staffCount}, ${formatGel(debtors.staffAmount)}` : '')
+                        : 'Ни у кого нет минуса на балансе'}
+                {!noData && data.isToday ? ' — сейчас, день ещё идёт' : ''}
+                {!noData && ' · общее по всем филиалам'}
             </div>
             {list.length > 0 && (
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                     {list.map(d => (
                         <li key={d.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: `1px solid ${COLOR.ink08}`, fontSize: 14 }}>
-                            {clientPath ? (
-                                <Link to={clientPath(d.email || d.userId)} style={{ color: COLOR.ink, textDecoration: 'none', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {d.name}
-                                </Link>
-                            ) : (
-                                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-                            )}
+                            <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                                {clientPath ? (
+                                    <Link to={clientPath(d.email || d.userId)} style={{ color: COLOR.ink, textDecoration: 'none', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {d.name}
+                                    </Link>
+                                ) : (
+                                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                                )}
+                                {d.staff && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>сотрудник</span>}
+                            </span>
                             <span className="num" style={{ color: STATUS.danger.fg, whiteSpace: 'nowrap' }}>{formatGel(d.debt)}</span>
                         </li>
                     ))}
@@ -341,8 +388,13 @@ function CommonCard({ data, radius, clientPath }: { data: CashboxDaySummary; rad
             )}
             {debtors.items.length > 5 && (
                 <Button variant="quiet" size="compact" onClick={() => setAll(v => !v)} style={{ marginTop: 4 }}>
-                    {all ? 'Свернуть' : `Показать всех · ${debtors.count}`}
+                    {all ? 'Свернуть' : `Показать всех · ${debtors.items.length}`}
                 </Button>
+            )}
+            {all && debtors.items.length < debtors.count && (
+                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 4 }}>
+                    Показано {debtors.items.length} из {debtors.count} — остальные в списке клиентов
+                </div>
             )}
             {data.weeklyRebates.count > 0 && (
                 <Line

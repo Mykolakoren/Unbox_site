@@ -18,16 +18,20 @@
         запись для истории, денег в кассе нет);
       – category_id='cash_reconciliation' — «корректировка при закрытии смены»,
         показываем отдельной строкой «расхождение смены»;
-      – «[КОРРЕКЦИЯ …]» — корректировка остатка из меню кассы, тоже отдельно.
-    Пришло + расхождение смены + корректировка остатка = приходы журнала.
+      – «[КОРРЕКЦИЯ …]» — корректировка остатка из меню кассы, тоже отдельно;
+      – «Перевод: Карта BOG → Карта TBC» — перевод между своими счетами (две
+        строки: расход и приход), это не деньги клиентов — тоже отдельно.
+    Пришло + расхождение смены + корректировка остатка + переводы = приходы журнала.
   • «Ушло» — расходы по тем же счетам с теми же исключениями.
   • «Списано с балансов клиентов» — по ленте баланса (booking_charge и всё,
     что его правит: перенос, смена цены, допы, продление, откат) за брони ЭТОГО
-    дня; филиал — по кабинету брони. Возвраты за эти брони — отдельно.
+    дня; филиал — по локации брони (общее сопоставление analytics.CENTER_NAMES).
+    Возвраты за эти брони — отдельно.
   • «Смена» — открытия и закрытия за день: ожидалось / по факту / расхождение.
 Общее для всех филиалов (у клиента нет филиала):
   • недельные скидки, начисленные в этот день;
-  • «Должны на конец дня» — клиенты с балансом ниже нуля на конец дня.
+  • «Должны на конец дня» — клиенты с балансом ниже нуля на конец дня
+    (сотрудники — отдельной цифрой; до стартовых остатков ленты 21.07 — нет данных).
 """
 from __future__ import annotations
 
@@ -37,13 +41,14 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlmodel import Session, col, desc, select
+
+from app.core.permissions import ADMIN_ROLES
 
 from app.models.balance_ledger import BalanceLedger
 from app.models.booking import Booking
 from app.models.cashbox_transaction import CashboxTransaction
-from app.models.location import Location
 from app.models.shift_open_log import ShiftOpenLog
 from app.models.shift_report import ShiftReport
 from app.models.user import User
@@ -60,6 +65,13 @@ SHIFT_RECON_CATEGORY = "cash_reconciliation"
 # «Корректировка остатка» из меню кассы (/cashbox/balance-correction) —
 # пишется с настоящим счётом, отличаем по началу описания.
 BALANCE_FIX_PREFIX = "[КОРРЕКЦИЯ"
+# «Перевод между счетами» из окна новой операции (AddCashboxTransactionModal):
+# две строки «Перевод: Карта BOG → Карта TBC» — расход со счёта и приход на счёт,
+# без категории и без клиента. Других признаков у перевода нет.
+TRANSFER_PREFIX = "Перевод:"
+TRANSFER_ARROW = "→"
+# Части, которые есть в журнале, но не «пришло/ушло» (каждая — отдельной строкой).
+SIDE_PARTS = ("shift_recon", "balance_fix", "transfer")
 # Филиалы кассы (owner 2026-07-22). Остальные (Neo School, «без филиала»)
 # показываем, только если в этот день по ним что-то было.
 CASH_BRANCHES = ("Unbox One", "Unbox Uni")
@@ -73,7 +85,9 @@ REFUND_REASONS = frozenset({
 
 # Списание «при создании брони» пишется в ленту без номера брони (ref_id пустой).
 # Запись и бронь создаются одним запросом — узнаём бронь по клиенту и времени.
-UNLINKED_MATCH_SECONDS = 10
+# На проде (02.10) все 166 таких записей лежат в пределах 0,006 с от своей брони;
+# окно 3 с привязывает их так же, как 10 с, и меньше рискует чужой бронью.
+UNLINKED_MATCH_SECONDS = 3
 
 EPS = 0.005
 
@@ -130,14 +144,27 @@ def _r(x: float) -> float:
 
 # ── Касса ────────────────────────────────────────────────────────────────
 
+def is_transfer(tx: CashboxTransaction) -> bool:
+    """Половина «перевода между счетами»: описание «Перевод: … → …», без категории
+    и без клиента. Платёж клиента «Перевод от Марии …» (с категорией и клиентом)
+    переводом НЕ считается — это настоящий приход."""
+    d = tx.description or ""
+    return (
+        d.startswith(TRANSFER_PREFIX) and TRANSFER_ARROW in d and not tx.category_id
+        and not getattr(tx, "client_id", None) and not getattr(tx, "credited_user_id", None)
+    )
+
+
 def tx_kind(tx: CashboxTransaction) -> str:
-    """money | adjustment | shift_recon | balance_fix — куда операция идёт в итогах."""
+    """money | adjustment | shift_recon | balance_fix | transfer — куда операция идёт в итогах."""
     if (tx.payment_method or "") == NON_MONEY_METHOD:
         return "adjustment"
     if tx.category_id == SHIFT_RECON_CATEGORY:
         return "shift_recon"
     if (tx.description or "").startswith(BALANCE_FIX_PREFIX):
         return "balance_fix"
+    if is_transfer(tx):
+        return "transfer"
     return "money"
 
 
@@ -153,6 +180,8 @@ def _new_block(branch: Optional[str]) -> dict:
         # Уже есть в журнале, но не «пришло/ушло» — отдельными строками.
         "shift_recon": {"income": 0.0, "expense": 0.0, "net": 0.0, "count": 0},
         "balance_fix": {"income": 0.0, "expense": 0.0, "net": 0.0, "count": 0},
+        # Перевод между своими счетами: приходная половина — сколько перевели.
+        "transfer": {"income": 0.0, "expense": 0.0, "net": 0.0, "count": 0},
         # «Списано с балансов клиентов» за брони этого дня.
         "charges": {"charged": 0.0, "refunded": 0.0, "net": 0.0, "bookings": 0},
         "shift": None,
@@ -197,28 +226,41 @@ def _attach_unlinked(session: Session, day_bookings: list[Booking]) -> dict[str,
             BalanceLedger.created_at <= max(created) + gap,
         )
     ).all()
-    day_ids = {str(b.id) for b in day_bookings}
-    out: dict[str, list[BalanceLedger]] = defaultdict(list)
+    # Только записи, рядом с которыми есть бронь этого дня того же клиента.
+    near_rows = []
     for r in rows:
-        near = [b for b in mine.get(r.user_id, [])
-                if abs((b.created_at - r.created_at).total_seconds()) <= UNLINKED_MATCH_SECONDS]
-        if not near:
+        if not any(abs((b.created_at - r.created_at).total_seconds()) <= UNLINKED_MATCH_SECONDS
+                   for b in mine.get(r.user_id, [])):
             continue
         try:
-            uid = UUID(str(r.user_id))
+            near_rows.append((r, UUID(str(r.user_id))))
         except ValueError:
             continue
-        cands = session.exec(
-            select(Booking).where(
-                Booking.user_uuid == uid,
-                Booking.created_at >= r.created_at - gap,
-                Booking.created_at <= r.created_at + gap,
-            )
-        ).all()
+    if not near_rows:
+        return {}
+    # Все брони этих клиентов в окнах вокруг записей — ОДНИМ запросом.
+    cands = session.exec(
+        select(Booking).where(or_(*[
+            and_(Booking.user_uuid == uid,
+                 Booking.created_at >= r.created_at - gap,
+                 Booking.created_at <= r.created_at + gap)
+            for r, uid in near_rows
+        ]))
+    ).all()
+    by_user: dict[str, list[Booking]] = defaultdict(list)
+    for b in cands:
+        if b.created_at:
+            by_user[str(b.user_uuid)].append(b)
+    day_ids = {str(b.id) for b in day_bookings}
+    out: dict[str, list[BalanceLedger]] = defaultdict(list)
+    for r, uid in near_rows:
         best, best_key = None, None
-        for b in cands:
+        for b in by_user.get(str(uid), []):
+            dt = abs((b.created_at - r.created_at).total_seconds())
+            if dt > UNLINKED_MATCH_SECONDS:
+                continue
             price_miss = abs(abs(float(r.delta or 0)) - float(b.final_price or 0)) > 0.01
-            key = (price_miss, abs((b.created_at - r.created_at).total_seconds()))
+            key = (price_miss, dt)
             if best_key is None or key < best_key:
                 best, best_key = b, key
         if best is not None and str(best.id) in day_ids:
@@ -226,7 +268,15 @@ def _attach_unlinked(session: Session, day_bookings: list[Booking]) -> dict[str,
     return out
 
 
-def _booking_charges(session: Session, day: date, loc_names: dict[str, str]) -> dict[str, dict]:
+def branch_of_location(location_id: Optional[str]) -> str:
+    """Филиал кассы по локации брони — общее сопоставление бэкенда
+    (analytics.CENTER_NAMES), а не название локации в базе: переименование
+    локации не должно уводить «списано» в другую карточку."""
+    from app.api.v1.analytics import CENTER_NAMES
+    return CENTER_NAMES.get(location_id or "", location_id or "—")
+
+
+def _booking_charges(session: Session, day: date) -> dict[str, dict]:
     """Списано с балансов за брони дня — по филиалу брони."""
     d0 = datetime(day.year, day.month, day.day)
     bookings = session.exec(
@@ -249,8 +299,7 @@ def _booking_charges(session: Session, day: date, loc_names: dict[str, str]) -> 
     out: dict[str, dict] = {}
     for bid, rows in entries.items():
         b = by_id[bid]
-        branch = loc_names.get(b.location_id, b.location_id)
-        acc = out.setdefault(branch, {"charged": 0.0, "refunded": 0.0, "bookings": 0})
+        acc = out.setdefault(branch_of_location(b.location_id), {"charged": 0.0, "refunded": 0.0, "bookings": 0})
         charged = 0.0
         for r in rows:
             if r.reason in REFUND_REASONS:
@@ -327,14 +376,34 @@ def _shift_info(session: Session, branch: str, start: datetime, end: datetime) -
 
 # ── Должники ─────────────────────────────────────────────────────────────
 
-def debtors_at(session: Session, at_utc: datetime, limit: int = 200) -> dict:
+def debt_history_start(session: Session) -> Optional[datetime]:
+    """С какого момента лента баланса полная: последняя запись стартовых остатков
+    (reason='baseline', 21.07.2026). Раньше неё баланс на момент не восстановить."""
+    v = session.exec(
+        select(func.max(BalanceLedger.created_at)).where(BalanceLedger.reason == "baseline")
+    ).one()
+    if isinstance(v, str):  # SQLite в стороже может вернуть строку
+        v = datetime.fromisoformat(v)
+    return v
+
+
+def debtors_at(session: Session, at_utc: datetime, limit: int = 1000) -> dict:
     """Клиенты с балансом ниже нуля на момент at_utc (наивное UTC).
 
     Баланс на момент = текущий баланс − всё, что прошло по ленте после него
     (инвариант ленты: сумма движений = баланс). Для сегодняшнего дня это просто
     текущие балансы. Архивные профили не считаем — как «долг клиентов» в
     аналитике владельца (решение 2026-08-22: это закрытые и склеенные аккаунты).
+    Сотрудников (admin / senior_admin / owner) не прячем, а считаем отдельно:
+    «из них сотрудники». До стартовых остатков ленты данных нет (available=false).
     """
+    start = debt_history_start(session)
+    since = (start + TZ).date().isoformat() if start else None
+    if start is not None and at_utc < start:
+        return {
+            "available": False, "since": since, "count": 0, "amount": 0.0,
+            "staff_count": 0, "staff_amount": 0.0, "items": [], "as_of": _iso(at_utc),
+        }
     after = {
         uid: float(s or 0)
         for uid, s in session.exec(
@@ -344,16 +413,24 @@ def debtors_at(session: Session, at_utc: datetime, limit: int = 200) -> dict:
         ).all()
     }
     items = []
-    for uid, name, email, balance in session.exec(
-        select(User.id, User.name, User.email, User.balance).where(col(User.archived_at).is_(None))
+    for uid, name, email, balance, role in session.exec(
+        select(User.id, User.name, User.email, User.balance, User.role).where(col(User.archived_at).is_(None))
     ).all():
         bal = round(float(balance or 0) - after.get(str(uid), 0.0), 2)
         if bal < -EPS:
-            items.append({"user_id": str(uid), "name": name or email, "email": email, "debt": _r(-bal)})
+            items.append({
+                "user_id": str(uid), "name": name or email, "email": email, "debt": _r(-bal),
+                "staff": (role or "") in ADMIN_ROLES,
+            })
     items.sort(key=lambda x: (-x["debt"], (x["name"] or "").lower()))
+    staff = [x for x in items if x["staff"]]
     return {
+        "available": True,
+        "since": since,
         "count": len(items),
         "amount": _r(sum(x["debt"] for x in items)),
+        "staff_count": len(staff),
+        "staff_amount": _r(sum(x["debt"] for x in staff)),
         "items": items[:limit],
         "as_of": _iso(at_utc),
     }
@@ -367,11 +444,10 @@ def compute_day_summary(
     branch: Optional[str] = None,
     *,
     now_utc: Optional[datetime] = None,
-    debtors_limit: int = 200,
+    debtors_limit: int = 1000,
 ) -> dict:
     """Итоги дня по Тбилиси. branch=None — все филиалы (по филиалу и «всего»)."""
     start, end = day_bounds_utc(day)
-    loc_names = {loc.id: loc.name for loc in session.exec(select(Location)).all()}
 
     blocks: dict[Optional[str], dict] = {}
 
@@ -399,15 +475,29 @@ def compute_day_summary(
             adjustments["count"] += 1
             continue
         blk = block(tx.branch or None)
-        if kind in ("shift_recon", "balance_fix"):
+        if kind in SIDE_PARTS:
             part = blk[kind]
             part["income" if tx.type == "income" else "expense"] += amount
             part["count"] += 1
             continue
         _add_money(blk["income"] if tx.type == "income" else blk["expense"], tx.payment_method or "", amount)
 
+    # Операции дня без филиала (кроме корректировок): при выбранном филиале их
+    # не видно — экран подскажет, что они есть во «Все».
+    unassigned = {"count": 0, "income": 0.0, "expense": 0.0}
+    for tx in session.exec(
+        select(CashboxTransaction).where(
+            CashboxTransaction.date >= start, CashboxTransaction.date < end,
+            (col(CashboxTransaction.branch).is_(None)) | (CashboxTransaction.branch == ""),
+        )
+    ).all():
+        if tx_kind(tx) == "adjustment":
+            continue
+        unassigned["count"] += 1
+        unassigned["income" if tx.type == "income" else "expense"] += float(tx.amount or 0)
+
     # Списано с балансов за брони этого дня — по филиалу брони.
-    for name, ch in _booking_charges(session, day, loc_names).items():
+    for name, ch in _booking_charges(session, day).items():
         if branch and name != branch:
             continue
         acc = block(name)["charges"]
@@ -422,7 +512,7 @@ def compute_day_summary(
                 blk[side][k] = _r(blk[side][k])
                 total[side][k] += blk[side][k]
             total[side]["count"] += blk[side]["count"]
-        for part in ("shift_recon", "balance_fix"):
+        for part in SIDE_PARTS:
             p = blk[part]
             p["income"], p["expense"] = _r(p["income"]), _r(p["expense"])
             p["net"] = _r(p["income"] - p["expense"])
@@ -439,7 +529,7 @@ def compute_day_summary(
     for side in ("income", "expense"):
         for k in ("cash", "card_tbc", "card_bog", "total"):
             total[side][k] = _r(total[side][k])
-    for part in ("shift_recon", "balance_fix"):
+    for part in SIDE_PARTS:
         p = total[part]
         p["income"], p["expense"] = _r(p["income"]), _r(p["expense"])
         p["net"] = _r(p["income"] - p["expense"])
@@ -470,6 +560,11 @@ def compute_day_summary(
             "income": _r(adjustments["income"]),
             "expense": _r(adjustments["expense"]),
             "count": adjustments["count"],
+        },
+        "unassigned": {
+            "count": unassigned["count"],
+            "income": _r(unassigned["income"]),
+            "expense": _r(unassigned["expense"]),
         },
         "weekly_rebates": {"amount": _r(float(rebate_amount or 0)), "count": int(rebate_users or 0)},
         "debtors": debtors_at(session, min(end, now_utc or datetime.utcnow()), limit=debtors_limit),
@@ -502,7 +597,13 @@ def telegram_day_lines(summary: dict) -> list[str]:
             f"BOG <b>{inc['card_bog']:g}</b> ₾"
         )
     d = summary["debtors"]
-    lines.append(f"• Должны на конец дня: <b>{d['amount']:g}</b> ₾ · {d['count']} {_clients_word(d['count'])}")
+    if not d.get("available", True):
+        since = date.fromisoformat(d["since"]).strftime("%d.%m.%Y") if d.get("since") else ""
+        lines.append(f"• Должны на конец дня: нет данных до {since}")
+        return lines
+    staff = (f" · из них сотрудники: {d['staff_count']}, {d['staff_amount']:g} ₾"
+             if d.get("staff_count") else "")
+    lines.append(f"• Должны на конец дня: <b>{d['amount']:g}</b> ₾ · {d['count']} {_clients_word(d['count'])}{staff}")
     return lines
 
 

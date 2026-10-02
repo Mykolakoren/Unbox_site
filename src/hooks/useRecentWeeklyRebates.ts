@@ -2,6 +2,22 @@ import { useEffect, useState } from 'react';
 import { cashboxReportsApi } from '../api/cashbox';
 import { rebateIndex } from '../utils/weeklyRebateNote';
 
+// Один запрос на несколько экранов («Сегодня», список броней, шторка брони):
+// ответ живёт 5 минут. Сбой — без кэша (метка необязательная, попробуем снова).
+const TTL_MS = 5 * 60_000;
+let cache: { at: number; promise: Promise<Map<string, number>> } | null = null;
+
+function loadRebates(): Promise<Map<string, number>> {
+    const now = Date.now();
+    if (!cache || now - cache.at > TTL_MS) {
+        const promise = cashboxReportsApi.getRecentWeeklyRebates()
+            .then(r => rebateIndex(r?.items || []))
+            .catch(() => { cache = null; return new Map<string, number>(); });
+        cache = { at: now, promise };
+    }
+    return cache.promise;
+}
+
 /**
  * Недельные скидки, начисленные с последнего понедельника (по Тбилиси), —
  * для метки у клиента в «Сегодня»: «скидка за неделю +9 ₾ уже учтена в «к оплате»».
@@ -15,9 +31,7 @@ export function useRecentWeeklyRebates(enabled: boolean): Map<string, number> {
     useEffect(() => {
         if (!enabled) return;
         let cancelled = false;
-        cashboxReportsApi.getRecentWeeklyRebates()
-            .then(r => { if (!cancelled) setIdx(rebateIndex(r?.items || [])); })
-            .catch(() => { /* метка необязательная */ });
+        loadRebates().then(m => { if (!cancelled) setIdx(m); });
         return () => { cancelled = true; };
     }, [enabled]);
     return idx;
