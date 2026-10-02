@@ -13,7 +13,9 @@
     2  confirm_duplicate=true — записывается (и зачисляется на баланс).
     3  Способ оплаты НЕ учитывается (наличные → карта = дубль). Администратор тоже
        НЕ учитывается (решение: с телефона и с компьютера могут нажать двое).
-    4  Другая сумма / другой клиент / другая валюта / старше 3 минут — пишется молча.
+    4  Другая сумма / другой клиент / другая валюта — пишется молча. Старше 3 минут, но
+       в тот же день по Тбилиси — тот же 409 с другим текстом (02.10, см.
+       guard_duplicate_today_2026_10).
     5  Не затрагивает расходы, корректировки (adjustment) и приход без клиента.
     6  Один человек под UUID и под email — один клиент.
     7  Проверка идёт ПОСЛЕ замка по клиенту (pg advisory xact lock) — без гонки двух
@@ -129,6 +131,15 @@ def _age(s, tx_id, minutes):
     s.commit()
 
 
+def _age_at(s, tx_id, when):
+    """Поставить записи конкретное created_at (naive UTC)."""
+    from app.models.cashbox_transaction import CashboxTransaction
+    t = s.get(CashboxTransaction, tx_id)
+    t.created_at = when
+    s.add(t)
+    s.commit()
+
+
 def _setup():
     from sqlmodel import Session
     eng = _engine()
@@ -233,14 +244,27 @@ def test_expense_adjustment_and_no_client_not_checked():
 
 
 def test_window_is_three_minutes():
-    s, admin, c = _setup()
-    _st, first = _pay(s, admin, c, 45)
-    _age(s, first.id, 2)
-    assert _pay(s, admin, c, 45)[0] == "409", "через 2 минуты уже не дубль"
-    s2, admin2, c2 = _setup()
-    _st, first2 = _pay(s2, admin2, c2, 45)
-    _age(s2, first2.id, 4)
-    assert _pay(s2, admin2, c2, 45)[0] == "ok", "через 4 минуты всё ещё дубль"
+    """Окно «только что» — 3 минуты: до него в тексте «N назад», после — уже другое
+    (мягкое предупреждение «сегодня», см. guard_duplicate_today_2026_10). Время
+    «сейчас» фиксируем в полдень по Тбилиси, чтобы тест не зависел от полуночи."""
+    from app.api.v1.cashbox import transactions as t
+    real = t._server_now
+    t._server_now = lambda: datetime(2026, 7, 15, 8, 0, 0)  # 12:00 по Тбилиси
+    try:
+        s, admin, c = _setup()
+        _st, first = _pay(s, admin, c, 45)
+        _age_at(s, first.id, datetime(2026, 7, 15, 7, 58, 0))  # 2 минуты назад
+        st, d = _pay(s, admin, c, 45)
+        assert st == "409" and "минуты назад" in d["message"] and d["existing"]["window"] == "recent", \
+            "через 2 минуты уже не дубль"
+        s2, admin2, c2 = _setup()
+        _st, first2 = _pay(s2, admin2, c2, 45)
+        _age_at(s2, first2.id, datetime(2026, 7, 15, 7, 56, 0))  # 4 минуты назад
+        st, d = _pay(s2, admin2, c2, 45)
+        assert st == "409" and d["existing"]["window"] == "today" and "назад" not in d["message"], \
+            "через 4 минуты должно быть уже «сегодняшнее» предупреждение, не «N назад»"
+    finally:
+        t._server_now = real
 
 
 def test_deleted_first_payment_is_not_duplicate():

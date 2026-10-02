@@ -285,6 +285,8 @@ DUPLICATE_WINDOW = timedelta(minutes=3)
 # Администратора тоже не сравниваем: с телефона и с компьютера могут нажать
 # двое; лишний вопрос стоит одного нажатия, а двойной платёж — денег клиента.
 _METHOD_RU = {"cash": "наличные", "card_tbc": "карта TBC", "card_bog": "карта BOG"}
+# Для фразы «внесено 20 ₾ наличными» (творительный падеж).
+_METHOD_RU_BY = {"cash": "наличными", "card_tbc": "картой TBC", "card_bog": "картой BOG"}
 
 
 def _plural_ru(n: int, one: str, few: str, many: str) -> str:
@@ -416,10 +418,11 @@ def _duplicate_payment_error(
     time_local = (prev.created_at + timedelta(hours=4)).strftime("%H:%M")
     if window == "today":
         where = f" ({prev.branch})" if prev.branch else ""
+        method_by = _METHOD_RU_BY.get(prev.payment_method, prev.payment_method)
         who = f" (записал(а) {prev.admin_name})" if prev.admin_name else ""
         message = (
             f"Сегодня в {time_local}{where} этому клиенту уже внесено "
-            f"{amount_txt} {cur} ({method}){who}. "
+            f"{amount_txt} {cur} {method_by}{who}. "
             "Если это второй платёж, подтвердите ещё одну запись."
         )
     else:
