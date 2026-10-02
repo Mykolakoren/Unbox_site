@@ -273,8 +273,11 @@ def test_error_boundary_is_human():
     for needle in ("this.state.error?.message", "{stack}", "handleCopy}"):
         j = code.find(needle, code.find("render()"))
         assert j > i, f"{needle} показывается вне блока для админов"
-    # Unhandled chunk-reload recovery остаётся.
-    assert "unbox_chunk_retry_" in code and "failed to fetch dynamically imported module" in code
+    # Авто-перезагрузка при устаревшем чанке остаётся — теперь через общий хелпер
+    # (02.10, guard_stale_chunk_2026_10: узнаёт и Firefox, защита от цикла на всю вкладку).
+    assert "isChunkLoadError(error)" in code and "reloadOnceForStaleBundle()" in code
+    helper = _strip_comments(_read("src/utils/chunkRecovery.ts")).lower()
+    assert "failed to fetch dynamically imported module" in helper and "sessionstorage" in helper
 
 
 # ─────────────────────────────────────────────────────────────────────────
