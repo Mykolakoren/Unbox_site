@@ -10,7 +10,8 @@
    пересчитано 7 580 ₾, расхождение −20 ₾»
 
 Получатели — те же, что у ночного ревизора (scripts/money_audit.py):
-TELEGRAM_OWNER_CHAT_ID, а если он не задан — TELEGRAM_ADMIN_CHAT_ID.
+TELEGRAM_OWNER_CHAT_ID, а если он не задан — TELEGRAM_ADMIN_CHAT_ID. Чат
+выбирает telegram_service.send_owner_summary — здесь выбор не дублируем.
 
 Отправка никогда не роняет закрытие смены: всё в try/except, сбой — в лог.
 """
@@ -107,18 +108,14 @@ def _claim(branch: Optional[str], expected: float, actual: float) -> bool:
 
 
 def send_alert(text: str) -> bool:
-    """Отправить владельцу тем же путём, что и алерт ревизора. Не бросает."""
+    """Отправить владельцу (чат владельца, без него — чат админов). Не бросает."""
     try:
-        from app.core.config import settings
         from app.services.telegram import telegram_service
 
-        chat_id = settings.TELEGRAM_OWNER_CHAT_ID or settings.TELEGRAM_ADMIN_CHAT_ID
-        if not chat_id:
-            logger.info("[shift-alert] чат владельца не настроен — сообщение не отправлено")
-            return False
-        ok = bool(telegram_service.send_message(chat_id=str(chat_id), text=text))
+        ok = bool(telegram_service.send_owner_summary(text))
         if not ok:
-            logger.warning("[shift-alert] Telegram не принял сообщение о расхождении кассы")
+            logger.warning("[shift-alert] сообщение о расхождении кассы не доставлено "
+                           "(не задан чат или Telegram отказал)")
         return ok
     except Exception:  # noqa: BLE001
         logger.exception("[shift-alert] не смог отправить сообщение о расхождении кассы")

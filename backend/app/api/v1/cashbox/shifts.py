@@ -2,7 +2,7 @@
 import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlmodel import Session, select, func, col, desc
 from app.db.session import get_session
 from app.models.user import User
@@ -47,6 +47,43 @@ def _lifetime_cash(session: Session, branch: Optional[str]) -> float:
         inc_q = inc_q.where(CashboxTransaction.branch == branch)
         exp_q = exp_q.where(CashboxTransaction.branch == branch)
     return round(float(session.exec(inc_q).one()) - float(session.exec(exp_q).one()), 2)
+
+
+def _lock_shift_close(session: Session, branch: Optional[str]) -> None:
+    """Очередь закрытий смены одного филиала (pg advisory lock) — по образцу
+    _lock_client_for_payment в transactions.py.
+
+    Двойное нажатие «Закрыть смену» (или два устройства сразу) без неё: оба
+    запроса до commit видят одно и то же «ожидалось» и оба пишут корректировку —
+    расхождение вычитается из кассы дважды. С замком второй запрос ждёт, пока
+    первый запишет отчёт и корректировку (одним commit), и видит уже закрытую
+    смену: расхождение 0, второй корректировки нет. Замок транзакционный —
+    снимается сам на commit/rollback. В SQLite (тесты, dev) параллельных
+    писателей нет — замок не нужен.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+    # Ждём очередь не дольше 5 с, как приход по клиенту: зависший держатель
+    # замка не должен вешать запрос и занимать соединение пула.
+    session.execute(text("SET LOCAL lock_timeout = '5s'"))
+    try:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(7102, hashtext(:k))"),
+            {"k": f"shift-close:{branch or '*'}"},
+        )
+    except OperationalError as e:
+        # 55P03 = lock_not_available (вышло время ожидания замка).
+        if getattr(getattr(e, "orig", None), "pgcode", None) != "55P03":
+            raise
+        session.rollback()
+        raise HTTPException(
+            409,
+            "Смену этого филиала сейчас уже закрывают. Обновите страницу через минуту — "
+            "если смена закрыта, повторять не нужно.",
+        )
+    session.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
 
 
 @router.post("/shifts/open", response_model=ShiftOpenLogRead)
@@ -272,6 +309,10 @@ def end_shift(
     branch closes isolate to their own history via shift_reports.branch,
     and global closes skip branch-scoped rows entirely.
     """
+    # Сначала — очередь по филиалу (до чтения прошлой смены и «ожидалось»):
+    # второй одновременный запрос считает уже после записи первого.
+    _lock_shift_close(session, payload.branch)
+
     now = datetime.now()
     branch = payload.branch
 
@@ -334,9 +375,9 @@ def end_shift(
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",
     )
+    # Отчёт и корректировка — одним commit: замок очереди держится до конца
+    # записи обоих (раньше было два commit, и замок снялся бы после первого).
     session.add(report)
-    session.commit()
-    session.refresh(report)
 
     # Reconciliation entry: when actual ≠ expected, write a balancing
     # CashboxTransaction so the lifetime cash sum (the headline number on
@@ -369,7 +410,8 @@ def end_shift(
             shift_report_id=str(report.id),
         )
         session.add(recon)
-        session.commit()
+    session.commit()
+    session.refresh(report)
 
     # Владельцу — в Telegram, если |расхождение| больше порога (5 ₾, решение
     # 02.10): раньше корректировка выше писалась молча, и о недостаче в кассе
