@@ -209,11 +209,11 @@ def list_clients(
     now_utc = datetime.utcnow()
     for c in clients:
         c_dict = TherapistClientRead.model_validate(c).model_dump()
-        base = c.base_price or 0
         sessions_all = sessions_by_client.get(str(c.id), [])
 
         c_dict["sessionCount"] = len(sessions_all)
-        c_dict["totalCost"] = sum((s.price if s.price is not None else base) for s in sessions_all)
+        # Цена каждой сессии — в валюте САМОЙ сессии; в сумму по клиенту идёт в валюте клиента.
+        c_dict["totalCost"] = sum(sb.price_in(s, c, rates, c.currency) for s in sessions_all)
 
         # Last session date
         if sessions_all:

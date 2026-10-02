@@ -74,6 +74,16 @@ def session_currency(ts, client) -> str:
     return norm_currency(getattr(ts, "currency", None) or getattr(client, "currency", None))
 
 
+def price_in(ts, client, rates: Dict[str, float], currency: Optional[str] = None) -> float:
+    """Цена сессии в валюте `currency` (по умолчанию — в лари).
+
+    Цена лежит в валюте САМОЙ СЕССИИ (`ts.currency`, нет — валюта клиента), а не
+    в валюте клиента: сессия 100 ₾ у клиента с USDT — это 100 ₾, а не 100 USDT.
+    Любая сводка по ценам сессий («ожидалось», заработано) считает через эту функцию.
+    """
+    return convert(session_price(ts, client), session_currency(ts, client), currency or "GEL", rates)
+
+
 def paid_in(payments: Iterable, currency: str, rates: Dict[str, float]) -> float:
     """Сколько внесено по сессии, в валюте `currency`."""
     return round(sum(convert(p.amount, p.currency, currency, rates) for p in payments), 2)
