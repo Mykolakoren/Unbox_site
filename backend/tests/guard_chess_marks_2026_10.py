@@ -167,14 +167,14 @@ def test_regular_tile_three_branches():
     assert "kind === 'covered' ? COVERED_HINT" in tile, "у covered в плитке нет подробного title/aria-label"
     # Ветка paid по-прежнему с галочкой.
     paid = tile[tile.index("kind === 'paid' ? ("):]
-    assert "<Check" in paid and "оплачено" in paid, "ветка paid потеряла «✓ оплачено»"
+    assert "<Check" in paid and "списано с баланса" in paid, "ветка paid потеряла «✓ списано с баланса»"
     # Старого «любой due <= 0 → ✓» больше нет.
     assert "d && d.due > 0 ? (" not in tile, "осталась старая развилка due > 0 / иначе ✓"
 
 
 def test_covered_text_constants():
     code = _code(DUE)
-    assert "export const COVERED_SHORT = 'с баланса';" in code
+    assert "export const COVERED_SHORT = 'спишется с баланса';" in code
     assert ("export const COVERED_HINT = 'Покрыто балансом клиента: "
             "деньги спишутся с баланса за сутки до начала';") in code
 
@@ -185,8 +185,8 @@ def test_legend_items():
     code = _read(CHESS)
     legend = code[code.index("data-chess-legend"):code.index("{/* ── Панель брони")]
     assert "(!) к оплате 36 ₾ — взять с клиента" in legend, "в легенде нет «(!) к оплате … — взять с клиента»"
-    assert "оплачено — деньги уже списаны с баланса" in legend, "в легенде нет «оплачено — деньги уже списаны с баланса»"
-    assert "с баланса — деньги спишутся с баланса за сутки до начала, брать ничего не нужно" in legend, \
+    assert "списано с баланса — деньги уже списаны с баланса клиента" in legend, "в легенде нет «списано с баланса — …»"
+    assert "спишется с баланса — деньги спишутся за сутки до начала, брать ничего не нужно" in legend, \
         "в легенде нет пункта «с баланса …»"
     assert "<CircleDashed" in legend and "<Check" in legend and "<AlertCircle" in legend, \
         "в легенде нет значков (!), галочки и кружка (сами символы ✓ и ◌ в тексте не пишем — эмодзи-сторож)"
@@ -198,7 +198,7 @@ def test_due_badge_covered_not_checkmark():
     code = _code(BADGE)
     tail = code[code.index("if (!paid) return null;"):]
     assert "const covered = charged === false;" in tail, "DueBadge: covered не от charged === false"
-    assert "'покрыто балансом'" in tail, "DueBadge: нет подписи «покрыто балансом»"
+    assert "'спишется с баланса'" in tail, "DueBadge: нет подписи «спишется с баланса»"
     assert re.search(r"covered\s*\?\s*<CircleDashed[^>]*/>\s*:\s*<Check", tail), \
         "DueBadge: при covered рисуется не кружок (или галочка раньше кружка)"
     assert "covered ? 'ui-badge--muted' : 'ui-badge--ok'" in tail, "DueBadge: covered не нейтральный"
@@ -211,7 +211,7 @@ def test_other_screens_use_due_badge_with_charged():
         for m in re.finditer(r"<DueBadge\b[^>]*>", code):
             assert "charged=" in m.group(0), f"{rel}: DueBadge без charged — «покрыто балансом» превратится в «оплачено»"
         # Своих «✓ оплачено» рядом нет.
-        assert "'✓ оплачено'" not in code and "✓ оплачено" not in code, f"{rel}: свой «✓ оплачено» вместо DueBadge"
+        assert "'✓ оплачено'" not in code and "✓ оплачено" not in code and "✓ списано" not in code, f"{rel}: свой «✓ оплачено» вместо DueBadge"
 
 
 if __name__ == "__main__":

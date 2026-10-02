@@ -164,7 +164,7 @@ def test_chessboard_unpaid_is_danger_tone():
 def test_chessboard_legend_explains_money():
     src = _read(CHESS)
     leg = _between(src, "data-chess-legend", "</div>")
-    assert "к оплате" in leg and "оплачено" in leg, "легенда не объясняет «к оплате» / «оплачено»"
+    assert "к оплате" in leg and "списано с баланса" in leg, "легенда не объясняет «к оплате» / «списано с баланса»"
     assert "ui-badge--danger" in leg and "ui-badge--ok" in leg
 
 

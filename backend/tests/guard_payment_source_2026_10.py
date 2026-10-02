@@ -26,12 +26,12 @@ def test_hints_has_payment_source_line():
     assert "export function paymentSourceLine(" in src, "paymentSourceLine пропал"
     assert "const payLine = paymentSourceLine(booking, due);" in src, "строка «Оплата» не считается"
     assert '<span className="text-ink-60 shrink-0">Оплата</span>' in src, "строка «Оплата» не рисуется"
-    for text in ("Оплачено с баланса", "Списано часами абонемента", "Оплачено бонусным часом",
+    for text in ("Списано с баланса", "Списано часами абонемента", "Списано бонусным часом",
                  "Спишется с баланса за 24 ч до начала", "Штраф снят"):
         assert text in src, f"нет текста «{text}»"
     assert "method === 'service'" in src, "обслуживание не должно получать строку об оплате"
     assert "paymentSourceLine(booking, due)" in src, "строка об оплате не знает про долг клиента"
-    assert "клиент ещё не оплатил" in src, "списано в долг (баланс в минусе) не должно называться «Оплачено с баланса»"
+    assert "клиент ещё не оплатил" in src, "списано в долг (баланс в минусе) не должно называться «Оплачено»"
 
 
 def test_chessboard_does_not_duplicate_payment_row():

@@ -93,7 +93,7 @@ export function computeDueByBooking(
 export function dueLabel(info: DueInfo | undefined): string {
     if (!info) return '';
     const fmt = (n: number) => (Math.round(n * 100) / 100).toString().replace('.', ',');
-    if (info.due <= 0) return info.charged ? 'оплачено' : 'покрыто балансом';
+    if (info.due <= 0) return info.charged ? 'списано с баланса' : 'спишется с баланса';
     if (info.due < info.price) return `к оплате ${fmt(info.due)} ₾ из ${fmt(info.price)}`;
     return `к оплате ${fmt(info.due)} ₾`;
 }
@@ -117,5 +117,5 @@ export function dueMarkKind(info: DueInfo | undefined | null): DueMarkKind | nul
 }
 
 /** Подпись знака «с баланса» (в плитке — коротко) и подробный текст для title/aria-label. */
-export const COVERED_SHORT = 'с баланса';
+export const COVERED_SHORT = 'спишется с баланса';
 export const COVERED_HINT = 'Покрыто балансом клиента: деньги спишутся с баланса за сутки до начала';

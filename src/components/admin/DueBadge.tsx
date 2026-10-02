@@ -41,7 +41,7 @@ export interface DueBadgeProps {
 }
 
 export function DueBadge({
-    due, paid = false, charged, uncharged = false, paidLabel = 'оплачено', variant = 'badge', className,
+    due, paid = false, charged, uncharged = false, paidLabel = 'списано с баланса', variant = 'badge', className,
 }: DueBadgeProps) {
     const amount = Number(due ?? 0);
     if (due != null && amount > 0) {
@@ -71,7 +71,7 @@ export function DueBadge({
     // Ещё не списана, а взять нечего — покрыта плюсом на балансе: другой знак
     // (контурный кружок, нейтральный тон), не «✓» — денег за неё никто не вносил.
     const covered = charged === false;
-    const label = charged === false ? 'покрыто балансом' : paidLabel;
+    const label = charged === false ? 'спишется с баланса' : paidLabel;
     return (
         <span
             className={clsx('ui-badge', covered ? 'ui-badge--muted' : 'ui-badge--ok', variant === 'dot' && 'ui-badge--dot', className)}

@@ -40,11 +40,11 @@ export function paymentSourceLine(b: BookingHistoryItem, due?: DueInfo): string 
     const when = b.chargedAt ? formatDayMonth(parseUTC(b.chargedAt), { timeZone: BATUMI_TZ }) : '';
     const amount = b.chargeAmount != null ? ` · ${formatGel(b.chargeAmount)}` : '';
     if (method === 'subscription') return `Списано часами абонемента${when ? ` ${when}` : ''}`;
-    if (method === 'bonus') return `Оплачено бонусным часом${when ? ` ${when}` : ''}`;
+    if (method === 'bonus') return `Списано бонусным часом${when ? ` ${when}` : ''}`;
     // Бронь списана с баланса, но баланс в минусе (клиент должен): деньги НЕ получены.
     // 02.10: админ увидел «Оплачено с баланса» у брони Марии Кирдун, а клиент не платил.
     if (due && due.due > 0) return `Списано с баланса${when ? ` ${when}` : ''}${amount} · клиент ещё не оплатил`;
-    return `Оплачено с баланса${when ? ` ${when}` : ''}${amount}`;
+    return `Списано с баланса${when ? ` ${when}` : ''}${amount}`;
 }
 
 export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryItem; due?: DueInfo }) {

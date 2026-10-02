@@ -45,7 +45,9 @@ export const STATUS_DICTIONARY: Record<StatusKind, Record<string, StatusDef>> = 
     },
     // Оплата (booking.paymentStatus, оплата сессии CRM, долги)
     payment: {
-        paid:     { label: 'Оплачено', tone: 'ok', icon: 'check' },
+        // Админам «Оплачено» путало: статус paid = списано с баланса клиента (деньги могли и не быть внесены —
+        // баланс в минусе = долг). Решение владельца 02.10: для админа так и пишем.
+        paid:     { label: 'Оплачено', staffLabel: 'Списано с баланса', tone: 'ok', icon: 'check' },
         unpaid:   { label: 'Не оплачено', tone: 'danger', icon: 'alert' },
         debt:     { label: 'Долг', tone: 'danger', icon: 'alert' },
         partial:  { label: 'Оплачено частично', tone: 'pending', icon: 'minus' },

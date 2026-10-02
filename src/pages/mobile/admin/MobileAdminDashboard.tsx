@@ -277,7 +277,7 @@ export function MobileAdminDashboard() {
                     <SkeletonList count={4} label="Загружаем брони" cardHeight={56} />
                 ) : seg === 'due' ? (
                     owing.length === 0 ? (
-                        <EmptyState compact title="Сегодня никто не должен" hint="Все сегодняшние брони оплачены или идут по абонементу." />
+                        <EmptyState compact title="Сегодня никто не должен" hint="Все сегодняшние брони списаны с баланса или идут по абонементу." />
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {owingToday.map(c => renderOwing(c))}

@@ -291,7 +291,7 @@ def test_mobile_admin_cash_gated():
 
 def test_today_uncharged_and_covered_labels():
     badge = _code(COMP + "DueBadge.tsx")
-    assert "charged === false ? 'покрыто балансом' : paidLabel" in badge, \
+    assert "charged === false ? 'спишется с баланса' : paidLabel" in badge, \
         "не списанная бронь, покрытая плюсом баланса, снова «оплачено»"
     assert "ui-badge--pending" in badge and "statusLabel('payment', 'not_charged', 'staff')" in badge, \
         "нет плашки «не списана»"
@@ -407,7 +407,7 @@ def test_visual_polish_today_chess_team_users():
     assert "tableLayout: 'fixed'" in dash and "<colgroup>" in dash, "«Кто придёт»: колонка клиента снова узкая"
     chess = _code("src/components/admin/AdminChessboardView.tsx")
     assert "const roomy = (cell.colspan ?? 1) >= 4;" in chess
-    assert "{roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}" in chess, "«оплачено» снова в коротком блоке"
+    assert "{roomy ? 'списано с баланса' : wide ? null : formatGel(b.finalPrice)}" in chess, "подпись снова не в коротком блоке"
     assert "title={markLabel} aria-label={markLabel}" in chess, "у «✓» в коротком блоке нет подписи"
     mob = _code(MADMIN + "MobileAdminDashboard.tsx")
     assert "position: 'fixed'" not in mob, "«+» на «Сегодня» снова плавает поверх отметок оплаты"

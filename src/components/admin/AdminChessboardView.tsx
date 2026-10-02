@@ -1728,7 +1728,7 @@ export function AdminChessboardView() {
                                                             const roomy = (cell.colspan ?? 1) >= 4;
                                                             const markLabel = kind === 'owes' && d ? `к оплате ${formatGel(d.due)}`
                                                                 : kind === 'covered' ? COVERED_HINT
-                                                                : kind === 'paid' ? 'оплачено' : '';
+                                                                : kind === 'paid' ? 'списано с баланса' : '';
                                                             return (
                                                                 <div className="text-xs leading-tight truncate tabular-nums flex items-center gap-1">
                                                                     {wide && <span className="font-normal">{b.startTime}</span>}
@@ -1745,7 +1745,7 @@ export function AdminChessboardView() {
                                                                     ) : kind === 'paid' ? (
                                                                         <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]" title={markLabel} aria-label={markLabel}>
                                                                             <Check size={12} strokeWidth={3} className="shrink-0" aria-hidden="true" />
-                                                                            {roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}
+                                                                            {roomy ? 'списано с баланса' : wide ? null : formatGel(b.finalPrice)}
                                                                         </span>
                                                                     ) : (
                                                                         <span className="font-normal" title={b.paymentMethod === 'subscription' ? 'абонемент' : undefined}>
@@ -1877,8 +1877,8 @@ export function AdminChessboardView() {
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-ink pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-unbox-light" data-chess-legend>
                 {/* Деньги (В2) — первыми: это главный вопрос у стойки. */}
                 <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 36 ₾ — взять с клиента</span>
-                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено — деньги уже списаны с баланса</span>
-                <span className="ui-badge ui-badge--muted"><CircleDashed size={14} strokeWidth={2.5} aria-hidden="true" />с баланса — деньги спишутся с баланса за сутки до начала, брать ничего не нужно</span>
+                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />списано с баланса — деньги уже списаны с баланса клиента (если баланс в минусе, красным будет «к оплате»)</span>
+                <span className="ui-badge ui-badge--muted"><CircleDashed size={14} strokeWidth={2.5} aria-hidden="true" />спишется с баланса — деньги спишутся за сутки до начала, брать ничего не нужно</span>
                 <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
                 <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
                 <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
@@ -2195,7 +2195,7 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
     if (!info || !kind) return null;
     const label = kind === 'owes' ? `к оплате ${formatGel(info.due)}`
         : kind === 'covered' ? COVERED_HINT
-        : 'оплачено';
+        : 'списано с баланса';
     const icon = kind === 'owes'
         ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
         : kind === 'covered'
@@ -2225,7 +2225,7 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
             aria-label={label}
         >
             {icon}
-            <span className="num">{kind === 'owes' ? formatGel(info.due) : kind === 'covered' ? COVERED_SHORT : 'оплачено'}</span>
+            <span className="num">{kind === 'owes' ? formatGel(info.due) : kind === 'covered' ? COVERED_SHORT : 'списано с баланса'}</span>
         </span>
     );
 }
