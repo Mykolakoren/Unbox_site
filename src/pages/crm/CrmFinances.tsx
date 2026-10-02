@@ -116,7 +116,9 @@ export function CrmFinances() {
         const revByCur: Record<string, number> = {};
         payments.forEach(p => {
             const client = clientMap.get(p.clientId);
-            const cur = client?.currency || 'GEL';
+            // Валюта ПЛАТЕЖА, а не клиента (как в «Кассе» CrmSessions): платёж в USDT
+            // у клиента с гривнами иначе показывался бы как гривны.
+            const cur = (p.currency || client?.currency || 'GEL').toUpperCase();
             revByCur[cur] = (revByCur[cur] || 0) + p.amount;
         });
 

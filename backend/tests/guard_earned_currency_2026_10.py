@@ -291,6 +291,17 @@ console.log(JSON.stringify({ by, gel, only: earnedByCurrency([sess[0]] as any, (
     assert _near(out["gel"], 110 + 195 * 2.7), out["gel"]
 
 
+def test_front_finances_revenue_by_payment_currency():
+    """Страница «Финансы»: «Доход/получено» группирует платежи по валюте ПЛАТЕЖА
+    (47 платежей на 7215 раньше шли в валюте клиента: USDT-платёж у клиента с UAH
+    показывался как гривны)."""
+    code = (pathlib.Path(__file__).resolve().parents[2] / "src/pages/crm/CrmFinances.tsx").read_text(encoding="utf-8")
+    i = code.index("const revByCur")
+    block = code[i:i + 600]
+    assert "p.currency" in block, "«Финансы»: валюта платежа не используется для «получено»"
+    assert "const cur = client?.currency || 'GEL';" not in block, "«Финансы»: снова валюта клиента вместо валюты платежа"
+
+
 if __name__ == "__main__":
     fails = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
