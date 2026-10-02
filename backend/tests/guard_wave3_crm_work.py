@@ -49,7 +49,11 @@ SESS = "src/pages/crm/CrmSessions.tsx"
 # ДОЛГА (debtByCur → debtLabel): теперь остаток по сессии (цена − внесённое, в валюте
 # сессии), а не вся цена. «Заработано» (earnedByCur/earnedGel) и «Касса»
 # (revenueByCur/revenueGel — платежи месяца по дате платежа) не тронуты.
-STATS_FINGERPRINT = "91e96548c4415af96e50afc38af32c22eaf51321bb4c3172a9d8c76b30cf10bc"
+# 02.10 («Заработано» в валюте сессии, ревизор денег): обновлён ОСОЗНАННО. Изменилась ТОЛЬКО
+# валюта «Заработано»: суммы берутся через earnedByCurrency (session.currency, нет — валюта клиента),
+# а не по client.currency (сессия 100 ₾ у клиента с USDT раньше считалась как 100 USDT ≈ 269 ₾).
+# Долг и «Касса · с долгами» не тронуты. Поведение держит guard_earned_currency_2026_10.py.
+STATS_FINGERPRINT = "40481679279bfd88c660a9bc0e5260dcc8c5efd9093336d0a2320f0154bd3113"
 
 
 def _read(rel: str) -> str:
