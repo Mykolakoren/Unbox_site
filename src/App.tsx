@@ -265,6 +265,8 @@ function App() {
     <ConfirmDialogProvider>
       <Toaster position="top-center" richColors closeButton style={{ zIndex: Z.toast, fontFamily: FONT.sans }} />
       <CmdKProvider />
+      {/* Общая граница над всеми ленивыми маршрутами (в т.ч. /login): устаревший чанк после выкладки → автоперезагрузка. */}
+      <ModuleErrorBoundary moduleName="Сайт">
       <Suspense fallback={lazyFallback}>
       <Routes>
         {DevUiPage && <Route path="/dev/ui" element={<DevUiPage />} />}
@@ -444,6 +446,7 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      </ModuleErrorBoundary>
     </ConfirmDialogProvider>
     </MotionConfig>
   );
