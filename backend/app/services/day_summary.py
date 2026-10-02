@@ -292,7 +292,9 @@ def _shift_info(session: Session, branch: str, start: datetime, end: datetime) -
         .order_by(desc(ShiftReport.shift_end)).limit(1)
     ).first()
     is_open = last_open is not None and (last_close is None or last_close.shift_end < last_open.opened_at)
-    close = closes[-1] if closes else None
+    # Закрытие этого филиала важнее общего: у него свои «ожидалось / по факту».
+    own_closes = [c for c in closes if c.branch == branch]
+    close = own_closes[-1] if own_closes else (closes[-1] if closes else None)
     own = close is not None and close.branch == branch
 
     # Наличные по записям кассы филиала на конец дня — «должно быть в кассе».
@@ -431,8 +433,8 @@ def compute_day_summary(
         ch["net"] = _r(ch["charged"] - ch["refunded"])
         for k in ("charged", "refunded", "bookings"):
             total["charges"][k] += ch[k]
-        # Смена — у филиалов кассы (и у филиала, выбранного в фильтре).
-        if blk["branch"] and (blk["branch"] in CASH_BRANCHES or blk["branch"] == branch):
+        # Смена — только у филиалов кассы (у Neo School и «без филиала» смен нет).
+        if blk["branch"] in CASH_BRANCHES:
             blk["shift"] = _shift_info(session, blk["branch"], start, end)
     for side in ("income", "expense"):
         for k in ("cash", "card_tbc", "card_bog", "total"):

@@ -422,6 +422,14 @@ def test_shift_open_closed_none():
     s.commit()
     uni3 = _block(compute_day_summary(s, date(2026, 10, 2), now_utc=datetime(2026, 10, 2, 16, 0)), "Unbox Uni")["shift"]
     assert uni3["status"] == "closed" and uni3["closed_all_branches"] is True and uni3["expected"] is None, uni3
+    # Своё закрытие филиала в тот же день важнее более позднего общего — его цифры и показываем.
+    s.add(ShiftReport(expected_balance=600, actual_balance=598, discrepancy=-2, branch="Unbox One",
+                      shift_start=datetime(2026, 10, 1, 14, 6), shift_end=datetime(2026, 10, 2, 14, 0),
+                      admin_id="v", admin_name="Валентина"))
+    s.commit()
+    one3 = _block(compute_day_summary(s, date(2026, 10, 2), now_utc=datetime(2026, 10, 2, 16, 0)), "Unbox One")["shift"]
+    assert one3["status"] == "closed" and one3["closed_all_branches"] is False and one3["discrepancy"] == -2 \
+        and one3["closed_by"] == "Валентина", one3
 
 
 # ─── 6. Права ────────────────────────────────────────────────────────────
