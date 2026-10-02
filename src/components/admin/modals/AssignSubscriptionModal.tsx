@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, Ticket } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -6,28 +6,55 @@ import { SUBSCRIPTION_PLANS } from '../../../utils/data';
 import clsx from 'clsx';
 import { formatGel } from '../../../utils/format';
 import { ruCountWord } from '../../../utils/plural';
+import { CASH_BRANCHES } from '../../../utils/cashBranch';
 
 interface AssignSubscriptionModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => Promise<void> | void;
+    /** branch — филиал кассы, куда легли деньги; при оплате с баланса не нужен. */
+    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string) => Promise<void> | void;
     currentSubscriptionName?: string;
+    /** Филиал по последней брони клиента («Unbox Uni» / «Unbox One») — подставить при открытии. */
+    defaultBranch?: string;
+    /** Без филиала не продавать за наличные/карту: приход без филиала не попадает
+     *  в остаток ни Uni, ни One (так было 27.08 — 160 ₾ «в никуда»). */
+    requireBranch?: boolean;
 }
 
-export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSubscriptionName }: AssignSubscriptionModalProps) {
+export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSubscriptionName, defaultBranch, requireBranch = false }: AssignSubscriptionModalProps) {
     const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(null);
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog' | 'balance'>('cash');
     const [busy, setBusy] = useState(false);
+    const [branch, setBranch] = useState('');
+    // Подсветка «выберите филиал» — после попытки продать без него.
+    const [branchMissing, setBranchMissing] = useState(false);
+    const branchRef = useRef<HTMLSelectElement>(null);
+
+    // Филиал клиента известен — подставляем его (как «Пополнить» в карточке).
+    // Неизвестен — оставляем прошлый выбор, а без выбора продать за деньги нельзя.
+    useEffect(() => {
+        if (!isOpen) return;
+        setBranchMissing(false);
+        if (defaultBranch && (CASH_BRANCHES as readonly string[]).includes(defaultBranch)) setBranch(defaultBranch);
+    }, [isOpen, defaultBranch]);
 
     if (!isOpen) return null;
+
+    // Деньги в кассу (наличные/карта) — нужен филиал; с баланса касса не трогается.
+    const paysToCashbox = method !== 'balance';
 
     // Ждём ответа сервера и блокируем кнопку: продажа — это деньги в кассе,
     // двойной клик не должен провести её дважды (ревизия 29.09).
     const handleSubmit = async () => {
         if (selectedPlanIndex === null || busy) return;
+        if (requireBranch && paysToCashbox && !branch) {
+            setBranchMissing(true);
+            branchRef.current?.focus();
+            return;
+        }
         setBusy(true);
         try {
-            await onConfirm(selectedPlanIndex, method);
+            await onConfirm(selectedPlanIndex, method, paysToCashbox ? (branch || undefined) : undefined);
             onClose();
         } finally {
             setBusy(false);
@@ -119,6 +146,33 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                                 </button>
                             ))}
                         </div>
+                    </div>
+                )}
+
+                {selectedPlanIndex !== null && paysToCashbox && (
+                    <div className="mb-6">
+                        <label htmlFor="assign-sub-branch" className="block text-sm font-medium text-gray-700 mb-2">
+                            Филиал
+                        </label>
+                        <select
+                            id="assign-sub-branch"
+                            ref={branchRef}
+                            value={branch}
+                            onChange={e => { setBranch(e.target.value); setBranchMissing(false); }}
+                            aria-invalid={branchMissing || undefined}
+                            aria-describedby={branchMissing ? 'assign-sub-branch-error' : undefined}
+                            className={`w-full px-4 py-2.5 rounded-xl border focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm ${branchMissing
+                                ? 'border-[var(--status-danger-fg)] bg-[var(--status-danger-bg)]'
+                                : 'border-gray-200'}`}
+                        >
+                            <option value="">{requireBranch ? 'Выберите филиал' : 'Не указан'}</option>
+                            {CASH_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                        {branchMissing && (
+                            <p id="assign-sub-branch-error" role="alert" className="mt-1.5 text-xs font-medium text-[var(--status-danger-fg)]">
+                                Выберите филиал — иначе оплата абонемента не попадёт в остаток кассы
+                            </p>
+                        )}
                     </div>
                 )}
 

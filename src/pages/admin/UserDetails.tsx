@@ -325,7 +325,7 @@ export function AdminUserDetails() {
         }
     };
 
-    const handleAssignSubscription = async (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => {
+    const handleAssignSubscription = async (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string) => {
         // Продажа одной операцией на сервере (29.09): касса/баланс + списание за
         // абонемент + включение. Раньше при оплате наличными/картой в кассу и в
         // историю баланса не попадало ничего, а «с баланса» могло молча не списать.
@@ -336,6 +336,9 @@ export function AdminUserDetails() {
             const r = await usersApi.sellSubscription(user.id || user.email, {
                 planId: plan.id,
                 paymentMethod: methodMap[method],
+                // 02.10: филиал кассы — без него оплата наличными/картой не попадала
+                // в остаток ни Uni, ни One (27.08: 160 ₾ без филиала).
+                branch,
             });
             await useUserStore.getState().fetchUsers();
             toast.success(
@@ -488,6 +491,10 @@ export function AdminUserDetails() {
                 onClose={() => setIsAssignSubOpen(false)}
                 onConfirm={handleAssignSubscription}
                 currentSubscriptionName={user.subscription?.name}
+                // Филиал — как в «Пополнить»: по последней брони клиента; не
+                // определился — за наличные/карту без выбора не продаст.
+                defaultBranch={cashBranchOfLastBooking(userBookings)}
+                requireBranch
             />
             <EditCreditLimitModal
                 isOpen={isEditLimitOpen}

@@ -191,6 +191,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
         if (isSubscriptionSale) {
             if (!selectedPlan) { toast.error('Выберите тариф абонемента'); return; }
             if (!clientId) { toast.error('Выберите клиента — без клиента абонемент не включится'); return; }
+            // 02.10: оплата абонемента — деньги в кассу филиала; без филиала они не
+            // попадают в остаток ни Uni, ни One (27.08: 160 ₾ без филиала).
+            if (!branch) { toast.error('Выберите филиал — иначе оплата абонемента не попадёт в остаток кассы'); return; }
             const plan = SUBSCRIPTION_PLANS.find(pl => pl.id === selectedPlan);
             if (plan && value !== plan.price) {
                 const ok = await confirm({

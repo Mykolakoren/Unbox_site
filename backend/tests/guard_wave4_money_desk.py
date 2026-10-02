@@ -99,7 +99,11 @@ MONEY_FINGERPRINTS = [
     # Прежний отпечаток db9e87fe1f162a33 (до 01.10).
     (UD, "const handleAddFunds = async", "const handleUpdateCreditLimit", "f1e232a66d220245", "пополнение баланса из карточки"),
     (UD, "const handleUpdateCreditLimit = async", "const toggleFreeze", "82366847dc731d47", "кредитный лимит"),
-    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "406179f87bd4d36f", "продажа абонемента"),
+    # 02.10 (guard_money_controls_2026_10): handleAssignSubscription осознанно изменён — продажа
+    # абонемента из карточки передаёт филиал кассы (branch из окна: по последней брони клиента,
+    # иначе обязательный выбор). В теле запроса добавлено только поле branch.
+    # Прежний отпечаток 406179f87bd4d36f (до 02.10).
+    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "126a7197e9776c24", "продажа абонемента"),
     (UD, "const handleToSubscription = async", "// Excel #59", "883771eeb8c1df0e", "«На абонемент»"),
     (UD, "const handleTopup = async", "setTopupSaving(false);", "a1fb7859b68a87c9", "пополнение часов абонемента"),
     (CASH_API, "export const cashboxApi = {", "\n};", "d3cd209a7a4cf49c", "все тела cashboxApi.*"),
