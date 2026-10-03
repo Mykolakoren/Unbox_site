@@ -31,18 +31,20 @@
   7. отклонение горячей брони из Telegram не возвращало бонусные часы;
   8. личную скидку / тип цен / личную ставку менял любой админ через PATCH /users;
   9. одобрение бонусной брони: «Деньги списаны с баланса» → «Оплачено бонусными часами».
+Попутно (иначе правило «отмена возвращает ровно взятое» ломалось бы на соседних
+правках): смена формата тоже сохраняет допы в цене; сокращение брони по
+абонементу возвращает и денежную часть той же долей; перенос брони, ушедшей в
+деньги, не возвращает снятый доп дважды.
 
 Без сети и боевой базы: SQLite в памяти, время заморожено (пн 05.10.2026,
 10:00 по Тбилиси), Telegram и Google подменены.
 
     python3 backend/tests/guard_money_holes_2026_10.py
 """
-import contextlib
 import functools
 import os
 import sys
 from datetime import date, datetime as _dt, timedelta
-from uuid import uuid4
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
