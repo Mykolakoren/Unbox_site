@@ -4524,7 +4524,12 @@ def reschedule_booking(
                 wallet.credit(session, _drop_owner, dropped_money, reason="extras_refund",
                               description="Возврат за допы, недоступные в новом кабинете",
                               ref_type="booking", ref_id=str(booking.id), actor=current_user)
-                if (booking.payment_method or "").lower() != "subscription" and booking.charge_amount is not None:
+                # charge_amount — это ₾ там, где по нему считают возврат: денежная
+                # бронь и абонементная, ушедшая в деньги (hours_deducted = 0).
+                # У брони с часами там «снимок» (часы от крона) — не трогаем.
+                _money_row = (booking.payment_method or "").lower() != "subscription" \
+                    or float(booking.hours_deducted or 0) <= 0
+                if _money_row and booking.charge_amount is not None:
                     booking.charge_amount = round(float(booking.charge_amount) - dropped_money, 2)
 
     booking.date = new_date

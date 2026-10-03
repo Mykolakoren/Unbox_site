@@ -717,6 +717,29 @@ def test_6_reschedule_subscription_booking_dropping_sandbox_refunds_money_part()
 
 
 @_scenario
+def test_6_dropped_sandbox_on_money_subscription_row_not_refunded_twice():
+    """Бронь по абонементу ушла в деньги при одобрении (пауза): 20 + песочница 5 =
+    25 ₾. Перенос в кабинет без песочницы: +5 ₾ сейчас, charge_amount 20 →
+    отмена +20 ₾. Итого клиент при своих — песочница не вернулась дважды."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, u, u, start="16:00", extras=["sandbox"])
+    uu = s.get(User, u.id)
+    uu.subscription = P.update(uu.subscription, is_frozen=True, frozen_at=H.FakeDatetime.utcnow().isoformat())
+    s.add(uu)
+    s.commit()
+    b = _approve(s, admin, b)
+    assert (_bal(s, u), round(float(b.charge_amount), 2)) == (75.0, 25.0)
+    b = _reschedule(s, admin, b, start="16:00", resource="room_2")
+    assert (b.extras, round(float(b.charge_amount), 2), _bal(s, u)) == ([], 20.0, 80.0), \
+        (b.extras, b.charge_amount, _bal(s, u))
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"отмена: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
 def test_6_cash_paid_extras_are_not_charged_by_recompute():
     """Допы, оплаченные наличными (/add-extras cash), записаны в брони, но в цену
     не входят — пересчёт «часов подряд» не должен списать их ещё раз с баланса."""
