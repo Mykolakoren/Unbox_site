@@ -4365,36 +4365,7 @@ def reschedule_booking(
     booking_owner = None
     price_recalculated = False
 
-    # Допы брони (ревизия 03.10): движок цены про них не знает, поэтому пересчёт
-    # обязан вернуть их в цену сам — раньше перенос делал бронь 25 ₾ с
-    # песочницей 20 ₾ и возвращал 5 ₾. Сначала решаем, какие допы новый кабинет
-    # примет (кушетку в капсулу, песочницу туда, где её нет, — нельзя), и
-    # сколько ₾ допов реально «сидит» в цене (оплаченные наличными — не в ней).
-    from app.services.pricing import PricingService, booking_extras_money
-    extras_money = booking_extras_money(booking)
-    kept_extras: list[str] = list(booking.extras or [])
     dropped_extras: list[str] = []
-    if booking.extras and new_resource != booking.resource_id:
-        try:
-            from app.models.resource import Resource as _ResModel
-            new_res_obj = session.get(_ResModel, new_resource)
-            kept_extras = []
-            for eid in (booking.extras or []):
-                ok = True
-                if new_res_obj:
-                    if new_res_obj.type == "capsule" and eid != "coffee_meama":
-                        ok = False
-                    elif eid in ("sandbox", "projector", "couch") and eid not in (new_res_obj.services or []):
-                        ok = False
-                (kept_extras if ok else dropped_extras).append(eid)
-        except Exception as e:
-            logger.warning(f"[Reschedule] extras-filter failed: {e}")
-            kept_extras, dropped_extras = list(booking.extras or []), []
-    # Снятые допы уходят из цены (и деньги за них — назад), но не больше, чем
-    # их реально в цене.
-    dropped_money = round(min(PricingService.calculate_extras_price(dropped_extras), extras_money), 2)
-    kept_extras_money = round(extras_money - dropped_money, 2)
-    dropped_settled = False
 
     if room_changed or duration_changed or time_changed or date_changed:
         # Бронь со снятым штрафом: деньги по ней уже улажены (возвращены или
@@ -4444,115 +4415,19 @@ def reschedule_booking(
                 booking.id,
             )
 
-        # Пересчёт цены — только для balance/bonus. Абонемент релоцируется как
-        # есть: final_price / hours_deducted / applied_rule не трогаем.
-        if booking_owner and booking.payment_method != "subscription":
-            from app.services.pricing import PricingService
-
-            try:
-                h, m = map(int, data.new_start_time.split(":"))
-                new_start_dt = new_date.replace(hour=h, minute=m, second=0, microsecond=0)
-            except Exception:
-                new_start_dt = new_date
-
-            pricing_service = PricingService(session)
-            new_quote = pricing_service.calculate_price(
-                user=booking_owner,
-                resource_id=new_resource,
-                start_time=new_start_dt,
-                duration_minutes=new_duration,
-                format_type=booking.format,
-                # Ревизия 17.09: без exclude сама переносимая бронь попадала в
-                # «соседей» по СТАРОМУ времени — перенос 18:00→19:00 в том же
-                # кабинете стыковался встык со своим старым слотом и дарил
-                # скидку за 2 часа подряд. Как в trim/extend/split.
-                exclude_booking_id=str(booking.id),
-                # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ (subscription отсечён выше).
-                # Без ignore движок при свежекупленном абонементе вернул бы
-                # SUBSCRIPTION/0₾ — и родилась бы «нулёвка» balance+0 (сигнатура
-                # утечки 1630₾). Перевод на абонемент — только явной кнопкой.
-                ignore_subscription=True,
+        # Пересчёт цены под новый слот — общим помощником (тот же зовёт перенос
+        # серии «эту и следующие»): денежная бронь — движком, бронь по абонементу
+        # — разница пиковой надбавки, ушедшая в деньги — ценой деньгами; допы,
+        # которые новый кабинет не принимает, снимаются и возвращаются один раз.
+        if booking_owner:
+            _move = _reprice_for_move(
+                session, booking, booking_owner, new_resource=new_resource, new_date=new_date,
+                new_start_time=data.new_start_time, new_duration=new_duration, actor=current_user,
             )
-            # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту
-            # же долю — деньгами считаем только непокрытое (как при создании).
-            # Без этого old_price=0, а новая цена полная: клиент платил весь
-            # слот деньгами (сразу или кроном T-24ч), а бонус-час пропадал.
-            new_quote.final_price = _bonus_uncovered_price(
-                booking, new_quote.final_price, new_duration,
-            )
-            # Допы, которые едут с бронью, остаются в цене (снятые — уходят:
-            # их возврат идёт в разнице цены ниже, один раз).
-            new_quote.final_price = round(float(new_quote.final_price or 0) + kept_extras_money, 2)
-            dropped_settled = True
-
-            new_price = new_quote.final_price
-            price_diff = new_price - old_price
+            new_price = _move["new_price"]
+            price_diff = _move["price_diff"]
+            dropped_extras = _move["dropped_extras"]
             price_recalculated = True
-
-            # `pending` bookings haven't been charged yet — the T-24h cron will
-            # capture the (new) final_price in full. Touching the balance here
-            # would double-charge on a price increase (or hand a phantom refund
-            # on a decrease). For pending we just update final_price below and let
-            # the cron settle. All other statuses (paid, NULL=legacy-paid) keep the
-            # original immediate diff-settlement behavior.
-            if booking.payment_status != "pending":
-                if price_diff > 0:
-                    # Price increased — check funds and charge
-                    available_funds = booking_owner.balance + booking_owner.credit_limit
-                    if available_funds < price_diff:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Недостаточно средств для перерасчёта. "
-                            f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
-                        )
-                    wallet.debit(session, booking_owner, price_diff, reason="reschedule_diff",
-                                 description="Доплата при переносе (цена выросла)",
-                                 ref_type="booking", ref_id=str(booking.id), actor=current_user)
-                elif price_diff < 0:
-                    # Price decreased — refund the difference
-                    wallet.credit(session, booking_owner, abs(price_diff), reason="reschedule_diff",
-                                  description="Возврат при переносе (цена упала)",
-                                  ref_type="booking", ref_id=str(booking.id), actor=current_user)
-
-                # charge_amount — реально списанное — двигаем на дельту (как в
-                # /extend, /trim, /format). Раньше здесь не обновлялось → он
-                # расходился с final_price навсегда и портил будущие возвраты
-                # (waive, перевод на абонемент) и дашборд. Для pending не трогаем:
-                # там charge_amount ещё None, крон проставит полную новую цену.
-                booking.charge_amount = round(
-                    float(booking.charge_amount if booking.charge_amount is not None else old_price)
-                    + price_diff, 2
-                )
-
-            # Update booking price fields
-            booking.final_price = new_quote.final_price
-            booking.base_price = new_quote.base_price
-            booking.applied_rule = new_quote.applied_rule
-            booking.discount_amount = new_quote.discount_amount
-            booking.discount_percent = new_quote.discount_percent
-
-    # Допы, которые новый кабинет не принимает (кушетка в капсуле, песочница
-    # там, где её нет), снимаются с брони и возвращаются (владелец 2026-05-29).
-    # У денежной брони их возврат уже сидит в разнице цены выше (пересчёт без
-    # них) — второй раз не возвращаем (ревизия 03.10: было дважды, 25 ₾ →
-    # 15 ₾ и +10 ₾). Иначе (абонемент, бронь без пересчёта) — вычитаем из цены и
-    # возвращаем деньги, если бронь уже оплачена.
-    if dropped_extras:
-        booking.extras = kept_extras
-        if not dropped_settled and dropped_money >= 0.01:
-            booking.final_price = round(float(booking.final_price or 0) - dropped_money, 2)
-            _drop_owner = booking_owner or _resolve_booking_owner(session, booking)
-            if booking.payment_status == "paid" and _drop_owner:
-                wallet.credit(session, _drop_owner, dropped_money, reason="extras_refund",
-                              description="Возврат за допы, недоступные в новом кабинете",
-                              ref_type="booking", ref_id=str(booking.id), actor=current_user)
-                # charge_amount — это ₾ там, где по нему считают возврат: денежная
-                # бронь и абонементная, ушедшая в деньги (hours_deducted = 0).
-                # У брони с часами там «снимок» (часы от крона) — не трогаем.
-                _money_row = (booking.payment_method or "").lower() != "subscription" \
-                    or float(booking.hours_deducted or 0) <= 0
-                if _money_row and booking.charge_amount is not None:
-                    booking.charge_amount = round(float(booking.charge_amount) - dropped_money, 2)
 
     booking.date = new_date
     booking.start_time = data.new_start_time
@@ -4689,6 +4564,164 @@ def reschedule_booking(
             f"with new room {new_resource}: {dropped_extras}. Refunded user balance."
         )
     return booking
+
+
+def _move_funds_check(owner: User, extra: float) -> None:
+    """Доплата при переносе денежной брони — только если хватает баланса и лимита."""
+    available_funds = float(owner.balance or 0) + float(owner.credit_limit or 0)
+    if available_funds < extra:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Недостаточно средств для перерасчёта. "
+            f"Доплата: {extra}₾, доступно: {available_funds}₾.",
+        )
+
+
+def _reprice_for_move(
+    session: Session, booking: Booking, owner: Optional[User], *, new_resource: str, new_date: datetime,
+    new_start_time: str, new_duration: int, actor: Optional[User] = None,
+) -> dict:
+    """Цена брони под новый слот: перенос одной брони и «эту и следующие» в серии.
+
+    Ревизия 03.10: перенос не пересчитывал денежную часть брони по абонементу
+    (перенос 18:00 → 20:00 оставлял пик 0 ₾, обратный — 5 ₾), а перенос серии
+    двигал следующие встречи вообще без пересчёта (якорь 25 ₾ в пик, остальные
+    20 ₾). Теперь одно правило:
+      • денежная бронь (balance/bonus): движок на новый слот (без абонемента —
+        бронь денежная), бонусная — непокрытая доля, + допы, что едут с бронью;
+      • по абонементу с часами: часы едут как есть, денежная часть меняется на
+        разницу пиковой надбавки (старый слот → новый), минус снятые допы;
+      • по абонементу, ушедшая в деньги (hours_deducted = 0): цена деньгами на
+        новый слот, как запасной путь крона, по charge_amount;
+      • допы, которые новый кабинет не принимает, снимаются с брони и уходят
+        из цены ровно один раз (раньше — дважды: 25 ₾ → 15 ₾ и +10 ₾).
+    Оплаченная бронь: разница — через wallet с ref_id брони (у денежной — с
+    проверкой средств, 400 до любых движений). Не списанная (pending): только
+    цена, крон возьмёт новую. Waived и запреты переноса проверяет вызывающий.
+    Без владельца (служебная бронь) — только снятые допы. Не коммитит."""
+    from app.services.pricing import PricingService, booking_extras_money
+    old_price = round(float(booking.final_price or 0), 2)
+    method = (booking.payment_method or "balance").lower()
+    paid = (booking.payment_status or "paid") == "paid"
+    ref = str(booking.id)
+
+    extras_money = booking_extras_money(booking)
+    kept_extras: list = list(booking.extras or [])
+    dropped_extras: list = []
+    if booking.extras and new_resource != booking.resource_id:
+        from app.models.resource import Resource as _ResModel
+        new_res_obj = session.get(_ResModel, new_resource)
+        kept_extras = []
+        for eid in (booking.extras or []):
+            ok = True
+            if new_res_obj:
+                if new_res_obj.type == "capsule" and eid != "coffee_meama":
+                    ok = False
+                elif eid in ("sandbox", "projector", "couch") and eid not in (new_res_obj.services or []):
+                    ok = False
+            (kept_extras if ok else dropped_extras).append(eid)
+    dropped_money = round(min(PricingService.calculate_extras_price(dropped_extras), extras_money), 2)
+    kept_extras_money = round(extras_money - dropped_money, 2)
+
+    try:
+        _h, _m = map(int, new_start_time.split(":"))
+        new_start_dt = new_date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+    except Exception:
+        new_start_dt = new_date
+    try:
+        _oh, _om = map(int, (booking.start_time or "0:0").split(":"))
+        old_start_dt = booking.date.replace(hour=_oh, minute=_om, second=0, microsecond=0)
+    except Exception:
+        old_start_dt = booking.date
+    peak_delta = round(PricingService.subscription_peak_money(new_start_dt, new_duration)
+                       - PricingService.subscription_peak_money(old_start_dt, int(booking.duration or 0)), 2)
+
+    price_diff = 0.0
+    if owner is None:
+        new_price = round(max(0.0, old_price - dropped_money), 2)
+    elif method == "subscription" and not _subscription_money_row(booking):
+        new_price = round(max(0.0, old_price + peak_delta - dropped_money), 2)
+        price_diff = round(new_price - old_price, 2)
+        if paid and abs(price_diff) >= 0.01:
+            wallet.apply(session, owner, -price_diff, reason="move_peak_diff",
+                         description=("Перенос брони по абонементу: разница пиковой надбавки"
+                                      + (" и снятые допы" if dropped_money >= 0.01 else "")),
+                         ref_type="booking", ref_id=ref, actor=actor)
+    elif method == "subscription":
+        quote = PricingService(session).calculate_price(
+            user=owner, resource_id=new_resource, start_time=new_start_dt, duration_minutes=new_duration,
+            format_type=booking.format or "individual", exclude_booking_id=str(booking.id),
+            subscription_hours_cover=False,
+        )
+        new_cash = round(float(quote.final_price or 0) + kept_extras_money, 2)
+        old_cash = round(float(booking.charge_amount if booking.charge_amount is not None else old_price), 2)
+        price_diff = round(new_cash - old_cash, 2)
+        if price_diff > 0:
+            _move_funds_check(owner, price_diff)
+        if abs(price_diff) >= 0.01:
+            wallet.apply(session, owner, -price_diff, reason="move_cash_diff",
+                         description="Перенос брони по абонементу, оплаченной деньгами: разница цены",
+                         ref_type="booking", ref_id=ref, actor=actor)
+        booking.charge_amount = new_cash
+        new_price = round(max(0.0, old_price + peak_delta - dropped_money), 2)
+    else:
+        new_quote = PricingService(session).calculate_price(
+            user=owner,
+            resource_id=new_resource,
+            start_time=new_start_dt,
+            duration_minutes=new_duration,
+            format_type=booking.format,
+            # Ревизия 17.09: без exclude сама переносимая бронь попадала в
+            # «соседей» по СТАРОМУ времени — перенос 18:00→19:00 в том же
+            # кабинете стыковался встык со своим старым слотом и дарил
+            # скидку за 2 часа подряд. Как в trim/extend/split.
+            exclude_booking_id=str(booking.id),
+            # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ. Без ignore движок при
+            # свежекупленном абонементе вернул бы SUBSCRIPTION/0₾ — и родилась бы
+            # «нулёвка» balance+0 (сигнатура утечки 1630₾). Перевод на абонемент —
+            # только явной кнопкой.
+            ignore_subscription=True,
+        )
+        # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту же долю
+        # — деньгами считаем только непокрытое (как при создании). Допы, что
+        # едут с бронью, остаются в цене (снятые уходят — их возврат в разнице).
+        new_price = round(_bonus_uncovered_price(booking, new_quote.final_price, new_duration)
+                          + kept_extras_money, 2)
+        price_diff = round(new_price - old_price, 2)
+        # `pending` bookings haven't been charged yet — the T-24h cron will
+        # capture the (new) final_price in full. Touching the balance here would
+        # double-charge on a price increase (or hand a phantom refund on a
+        # decrease). Paid (and NULL=legacy-paid) settle the diff immediately.
+        if paid:
+            if price_diff > 0:
+                _move_funds_check(owner, price_diff)
+                wallet.debit(session, owner, price_diff, reason="reschedule_diff",
+                             description="Доплата при переносе (цена выросла)",
+                             ref_type="booking", ref_id=ref, actor=actor)
+            elif price_diff < 0:
+                wallet.credit(session, owner, abs(price_diff), reason="reschedule_diff",
+                              description="Возврат при переносе (цена упала)",
+                              ref_type="booking", ref_id=ref, actor=actor)
+            # charge_amount — реально списанное — двигаем на дельту (как в
+            # /extend, /trim, /format). Раньше здесь не обновлялось → он
+            # расходился с final_price навсегда и портил будущие возвраты
+            # (waive, перевод на абонемент) и дашборд. Для pending не трогаем:
+            # там charge_amount ещё None, крон проставит полную новую цену.
+            booking.charge_amount = round(
+                float(booking.charge_amount if booking.charge_amount is not None else old_price)
+                + price_diff, 2
+            )
+        # Update booking price fields
+        booking.base_price = new_quote.base_price
+        booking.applied_rule = new_quote.applied_rule
+        booking.discount_amount = new_quote.discount_amount
+        booking.discount_percent = new_quote.discount_percent
+
+    booking.final_price = new_price
+    if dropped_extras:
+        booking.extras = kept_extras
+    return {"old_price": old_price, "new_price": new_price, "price_diff": price_diff,
+            "dropped_extras": dropped_extras}
 
 
 # ─── Partial cancellation ("trim") — cut a sub-range out of a booking ─────────
@@ -5201,6 +5234,12 @@ def reschedule_booking_series(
                 "reason": "уже прошла",
             })
             continue
+        # Встреча со снятым штрафом: перенос поменял бы её цену, а деньги по ней
+        # уже улажены — как одиночный перенос (409), пропускаем.
+        if sib.payment_status == "waived":
+            skipped.append({"id": str(sib.id), "date": sib.date.isoformat(),
+                            "reason": "у брони снят штраф — перенесите её отдельно"})
+            continue
         # Встреча, оплаченная часами капсулы / «индивидуально», в помещение
         # другого вида не едет (см. _check_extra_pool_move) — пропускаем её.
         try:
@@ -5224,6 +5263,20 @@ def reschedule_booking_series(
                 "date": sib.date.isoformat(),
                 "reason": str(conflict) if conflict else "слот занят",
             })
+            continue
+
+        # Цена встречи под новый слот — тем же помощником, что у якоря (ревизия
+        # 03.10: раньше следующие встречи ехали без пересчёта — якорь в пике
+        # 25 ₾, остальные 20 ₾; у абонементной — пик 0 ₾ на всех). Не хватает
+        # денег на доплату — встречу пропускаем, админ решит вручную.
+        try:
+            _sib_price = _reprice_for_move(
+                session, sib, _resolve_booking_owner(session, sib), new_resource=new_resource,
+                new_date=sib.date, new_start_time=data.new_start_time, new_duration=int(sib.duration or 0),
+                actor=current_user,
+            )
+        except HTTPException as _pe:
+            skipped.append({"id": str(sib.id), "date": sib.date.isoformat(), "reason": _pe.detail})
             continue
 
         old_sib_resource = sib.resource_id
@@ -5264,6 +5317,9 @@ def reschedule_booking_series(
                 "old_resource": old_sib_resource,
                 "new_resource": new_resource,
                 "via": "reschedule-series",
+                "old_price": _sib_price["old_price"],
+                "new_price": _sib_price["new_price"],
+                "price_diff": _sib_price["price_diff"],
             },
         )
 

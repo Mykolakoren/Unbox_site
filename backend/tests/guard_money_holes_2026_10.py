@@ -1307,6 +1307,111 @@ def test_r2_3_price_modal_tells_truth():
     assert "Часы абонемента не меняются" in modal and "оплачена деньгами" in modal
 
 
+@_scenario
+def test_r2_4_reschedule_subscription_into_and_out_of_peak():
+    """S1: по абонементу 18:00 (денежная часть 0) → перенос на 20:00 (пик):
+    −5 ₾ сразу, цена 5 ₾. Обратно 21:00 → 15:00: +5 ₾, цена 0 ₾. Было: цена
+    не менялась — в пик бесплатно, из пика отмена возвращала 5 ₾ за слот без пика."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    a = _book(s, admin, u, start="18:00")
+    a = _reschedule(s, admin, a, start="20:00")
+    assert (float(a.final_price), _bal(s, u), _rem(s, u)) == (5.0, 95.0, 9.0), (a.final_price, _bal(s, u))
+    b = _book(s, admin, u, start="21:00", resource="room_2")
+    assert _bal(s, u) == 90.0
+    b = _reschedule(s, admin, b, start="15:00", resource="room_2")
+    assert (float(b.final_price), _bal(s, u)) == (0.0, 95.0), (b.final_price, _bal(s, u))
+    _cancel(s, admin, a)
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r2_4_reschedule_pending_subscription_changes_price_only():
+    """Заранее (pending) 18:00 → 20:00: сейчас денег не двигаем, цена 5 ₾ —
+    крон снимет 1 ч и 5 ₾ один раз."""
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, days=3, start="18:00")
+    b = _reschedule(s, admin, b, start="20:00", days=3)
+    assert (b.payment_status, float(b.final_price), _bal(s, u), _rem(s, u)) == ("pending", 5.0, 100.0, 10.0)
+    billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert (_bal(s, u), _rem(s, u)) == (95.0, 9.0)
+    _cancel(s, admin, s.get(Booking, b.id))
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+
+
+def _series(s, admin, u, *, method, start="18:00", days=3, occurrences=3):
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    out = routes.create_recurring_booking(
+        background_tasks=BackgroundTasks(), session=s, current_user=admin,
+        data=routes.RecurringBookingRequest(
+            resource_id="room_1", location_id="unbox_uni", start_time=start, duration=60, format="individual",
+            payment_method=method, first_date=H._day(days).strftime("%Y-%m-%d"), occurrences=occurrences,
+            target_user_id=str(u.id)))
+    s.commit()
+    return s.exec(select(Booking).where(Booking.recurring_group_id == out["recurring_group_id"])
+                  .order_by(Booking.date)).all()
+
+
+@_scenario
+def test_r2_4_series_reschedule_reprices_every_meeting():
+    """S15: серия ×3 по 18:00, «эту и следующие» на 20:00 (пик). Денежная: у
+    всех 25 ₾ (было: якорь 25, остальные 20). По абонементу: у всех 5 ₾ (было
+    0). Крон и отмена — ровно взятое."""
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.services import billing_defer
+    for method, sub, price in (("balance", None, 25.0), ("subscription", _sub("PRO_PLUS"), 5.0)):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, sub, balance=300.0)
+        rows = _series(s, admin, u, method=method)
+        out = routes.reschedule_booking_series(
+            booking_id=str(rows[0].id),
+            data=routes.RescheduleRequest(new_date=rows[0].date.strftime("%Y-%m-%d"), new_start_time="20:00"),
+            background_tasks=BackgroundTasks(), session=s, current_user=admin)
+        s.commit()
+        assert out["propagated"] == 2 and not out["skipped"], out
+        s.expire_all()
+        rows = [s.get(Booking, r.id) for r in rows]
+        assert [(r.start_time, float(r.final_price)) for r in rows] == [("20:00", price)] * 3, \
+            (method, [(r.start_time, r.final_price) for r in rows])
+        assert _bal(s, u) == 300.0, "pending-встречи не должны двигать деньги при переносе"
+        for r in rows:
+            billing_defer.settle_pending_charge(s, s.get(Booking, r.id))
+            s.commit()
+        assert _bal(s, u) == round(300.0 - 3 * price, 2), (method, _bal(s, u))
+        for r in rows:
+            _cancel(s, admin, s.get(Booking, r.id))
+        assert _bal(s, u) == 300.0, (method, _bal(s, u))
+        _ledger_ok(s, u, 300.0)
+
+
+@_scenario
+def test_r2_4_money_row_reschedule_reprices_cash():
+    """Бронь по абонементу, ушедшая в деньги (3 ч с 14:00: 54 + песочница 5 =
+    59 ₾), переносится на 19:00 (20–22 пик): цена деньгами на новый слот
+    (20 + 25·2 = 70 − 10 % = 63) + 5 = 68 ₾ — доплата 9 ₾; отмена → +68."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=3.0, used_hours=7.0))
+    b = _money_row(s, admin, u, minutes=180, extras=["sandbox"])
+    bal0 = _bal(s, u)
+    b = _reschedule(s, admin, b, start="19:00", days=3)
+    assert (round(float(b.charge_amount), 2), _bal(s, u)) == (68.0, round(bal0 - 9.0, 2)), \
+        (b.charge_amount, _bal(s, u), bal0)
+    _cancel(s, admin, b)
+    assert _bal(s, u) == round(bal0 + 59.0, 2)
+    _ledger_ok(s, u, 100.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
