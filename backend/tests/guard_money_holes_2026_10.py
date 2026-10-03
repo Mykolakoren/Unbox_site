@@ -1239,6 +1239,74 @@ def test_r2_2_money_row_cannot_be_resized_cancel_returns_all():
     assert (_bal(s, u), _rem(s, u)) == (round(bal0 + taken, 2), rem0)
 
 
+def _set_price(s, actor, b, price):
+    from app.api.v1.bookings import routes
+    out = H._call(routes.set_booking_price, booking_id=str(b.id),
+                  payload=routes.SetPriceRequest(new_price=price, reason="тест"), session=s, current_user=actor)
+    s.commit()
+    return out
+
+
+@_scenario
+def test_r2_3_price_on_subscription_moves_money_not_hours():
+    """S5: «Цена» у брони по абонементу 0 → 20 ₾. Было: деньги не двигались, а
+    отмена возвращала 20 ₾ из воздуха (баланс 120). Стало: часы не трогаем,
+    разница деньгами: −20 ₾ сейчас, отмена +20 ₾ и +1 ч. Снижение 5 → 0 ₾ —
+    +5 ₾ сразу."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    a = _book(s, admin, u, start="14:00")
+    assert not isinstance(_set_price(s, admin, a, 20.0), dict)
+    a = s.get(Booking, a.id)
+    assert (float(a.final_price), float(a.hours_deducted), _bal(s, u), _rem(s, u)) == (20.0, 1.0, 80.0, 9.0), \
+        (a.final_price, a.hours_deducted, _bal(s, u), _rem(s, u))
+    _cancel(s, admin, a)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"отмена: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+    p = _book(s, admin, u, start="20:00")
+    assert _bal(s, u) == 95.0
+    _set_price(s, admin, p, 0.0)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 9.0)
+    _cancel(s, admin, p)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r2_3_price_on_pending_subscription_cron_takes_it():
+    """Бронь по абонементу заранее: «Цена» 0 → 10 ₾ — сейчас без денег, крон
+    T-24ч снимает 1 ч и 10 ₾, отмена возвращает ровно это."""
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, days=3, start="14:00")
+    _set_price(s, admin, b, 10.0)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert (_bal(s, u), _rem(s, u)) == (90.0, 9.0)
+    _cancel(s, admin, s.get(Booking, b.id))
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+
+
+@_scenario
+def test_r2_3_price_on_money_row_refused():
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=2.0, used_hours=8.0))
+    b = _money_row(s, admin, u, minutes=120)
+    out = _set_price(s, admin, b, 1.0)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 409, out
+
+
+def test_r2_3_price_modal_tells_truth():
+    modal = _read("src/components/admin/BookingPriceModal.tsx")
+    assert "пересчитаются по новой цене" not in modal, "окно «Цена» снова обещает пересчёт часов"
+    assert "Часы абонемента не меняются" in modal and "оплачена деньгами" in modal
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

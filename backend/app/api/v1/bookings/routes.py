@@ -5706,10 +5706,12 @@ def set_booking_price(
       - `waived`  → 409. Cancelling the price-change makes more sense than
         re-introducing a charge after admin already waived it.
 
-    Subscription bookings can also be re-priced — we shift `hours_deducted`
-    by `new_price / base_hourly` proxy when the original was a sub row.
-    Practical: most admin price overrides are on cash bookings; subscription
-    overrides are rare and we keep them best-effort.
+    Бронь по абонементу (ревизия 03.10): часы не трогаем — «цена» такой брони
+    это её денежная часть (пик + допы, единое правило billing_defer), и у
+    оплаченной разница идёт деньгами, как у денежной брони. Раньше часы
+    масштабировались «по цене», а деньги не двигались: «Цена» 0 → 20 ₾ и
+    отмена возвращала 20 ₾ из воздуха. Бронь по абонементу, ушедшая в деньги
+    (hours_deducted = 0), — 409: её деньги в charge_amount, а не в final_price.
     """
     try:
         b_uuid = UUID(booking_id)
@@ -5731,6 +5733,9 @@ def set_booking_price(
             detail="У этой брони снят штраф — цену менять нельзя. Снимите waiver или создайте новую бронь.",
         )
 
+    if _subscription_money_row(booking):
+        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="цену у неё не поменять"))
+
     old_price = float(booking.final_price or 0)
     if abs(new_price - old_price) < 0.005:
         raise HTTPException(status_code=400, detail="Новая цена совпадает со старой")
@@ -5742,33 +5747,12 @@ def set_booking_price(
 
     settled_now = False
     if booking.payment_status == "paid" and booking_owner:
-        if method == "subscription":
-            # Subscription pricing — proxy via the resource's standard rate.
-            # If hours_deducted was set, scale it by the price ratio.
-            old_hours = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
-            new_hours = old_hours * (new_price / old_price) if old_price > 0 else old_hours
-            hours_delta = round(old_hours - new_hours, 4)
-            # Доп. пул масштабируется той же долей и возвращается в свой пул.
-            old_extra = subscription_pool.booking_extra(booking)
-            new_extra = round(old_extra * (new_hours / old_hours), 4) if old_hours > 0 else old_extra
-            extra_delta = round(old_extra - new_extra, 4)
-            if subscription_pool.hours_return_allowed(booking_owner.subscription, booking.date):
-                booking_owner.subscription = subscription_pool.credit_hours(
-                    booking_owner.subscription, hours_delta - extra_delta)
-                if extra_delta > 0:
-                    booking_owner.subscription = subscription_pool.credit_hours(
-                        booking_owner.subscription, extra_delta, extra=extra_delta,
-                        kind=_pool_kind(session, booking))
-                elif extra_delta < 0:
-                    booking_owner.subscription = subscription_pool.debit_hours(
-                        booking_owner.subscription, -extra_delta, extra=-extra_delta)
-            booking.hours_deducted = round(new_hours, 4)
-            subscription_pool.stamp_booking(booking, booking.hours_deducted, new_extra)
-        else:
-            # delta знаковая: >0 — возврат клиенту, <0 — доплата.
-            wallet.apply(session, booking_owner, delta, reason="price_change",
-                         description="Ручное изменение цены брони админом",
-                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
+        # delta знаковая: >0 — возврат клиенту, <0 — доплата. И у денежной брони,
+        # и у брони по абонементу (там это деньги пика/допов, часы не меняются).
+        wallet.apply(session, booking_owner, delta, reason="price_change",
+                     description=("Ручное изменение цены брони по абонементу (пик/допы, часы не меняются)"
+                                  if method == "subscription" else "Ручное изменение цены брони админом"),
+                     ref_type="booking", ref_id=str(booking.id), actor=current_user)
         booking.charge_amount = new_price
         settled_now = True
 
@@ -5806,7 +5790,8 @@ def set_booking_price(
 
     try:
         from app.services.telegram import telegram_service
-        method_label = "ч абонемента" if method == "subscription" else "₾"
+        # Цена брони — всегда деньги (у брони по абонементу — пик/допы).
+        method_label = "₾"
         delta_sign = "+" if delta > 0 else ""
         owner_label = (booking_owner.email or booking_owner.name) if booking_owner else "—"
         telegram_service.send_admin_event(
