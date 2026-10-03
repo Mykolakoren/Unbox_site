@@ -610,15 +610,27 @@ console.log(JSON.stringify(out));
 _PARITY_STATS = {}
 
 
+_PARITY_CACHE: dict = {}
+
+
 def _parity_run(count: int, edge: bool, seed: int):
+    key = (count, edge, seed)
+    if key not in _PARITY_CACHE:
+        _PARITY_CACHE[key] = _parity_run_uncached(count, edge, seed)
+    return _PARITY_CACHE[key]
+
+
+def _parity_run_uncached(count: int, edge: bool, seed: int):
     rng = random.Random(seed)
     cases = [_simulate(rng, i, edge) for i in range(count)]
+    wrng = random.Random(seed + 1)
     for c in cases:
-        # Окно админки — последние брони по дате (как ORDER BY date DESC LIMIT 5000):
-        # у каждого второго клиента «теряем» самые старые брони.
+        # Окно админки — последние брони по дате (ORDER BY date DESC LIMIT 5000):
+        # обрезаются самые СТАРЫЕ, будущие в окне всегда. У каждого второго
+        # клиента «теряем» брони раньше случайной даты в прошлом.
         if c["id"] % 2 == 0 and len(c["bookings"]) > 1:
-            keep = sorted(c["bookings"], key=lambda b: (b["date"], b["startTime"]), reverse=True)
-            c["window"] = [b["id"] for b in keep[: max(1, len(keep) // 2)]]
+            cutoff = (NOW_TBS - timedelta(days=wrng.randint(0, 12))).strftime("%Y-%m-%d")
+            c["window"] = [b["id"] for b in c["bookings"] if b["date"][:10] >= cutoff]
     payload = [{k: c[k] for k in ("id", "email", "balance", "bookings", "summary")} | {"window": c.get("window")}
                for c in cases]
     res = _node(_PARITY_JS, payload)
