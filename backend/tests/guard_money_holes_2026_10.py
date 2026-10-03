@@ -1793,6 +1793,62 @@ def test_r2_waived_booking_edits_refused():
     assert (_bal(s, u), _rem(s, u), _bal(s, v), _rem(s, v)) == (100.0, 10.0, 100.0, 10.0)
 
 
+def _format(s, actor, b, new_format):
+    from app.api.v1.bookings import routes
+    out = H._call(routes.change_booking_format, booking_id=str(b.id),
+                  payload=routes.ChangeFormatRequest(new_format=new_format), session=s, current_user=actor)
+    s.commit()
+    return out
+
+
+@_scenario
+def test_r3_1_format_change_keeps_paid_money_of_subscription_booking():
+    """S24a (Профи+): по абонементу 1 ч, «Цена» 0 → 30 ₾ (100 → 70), формат →
+    группа. Было: цена пересчитывалась движком в 0 — отмена возвращала 70 вместо
+    100. Стало: цена 30 ₾ остаётся (деньги брони от формата не зависят), часы на
+    месте; отмена → 100 ₾ / 42 ч."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("PRO_PLUS"))
+    b = _book(s, admin, u, start="14:00")
+    _set_price(s, admin, b, 30.0)
+    assert (_bal(s, u), _rem(s, u)) == (70.0, 41.0)
+    assert not isinstance(_format(s, admin, b, "group"), dict)
+    b = s.get(Booking, b.id)
+    assert (b.format, float(b.final_price), float(b.hours_deducted), _bal(s, u), _rem(s, u)) == \
+        ("group", 30.0, 1.0, 70.0, 41.0), (b.format, b.final_price, b.hours_deducted, _bal(s, u), _rem(s, u))
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 42.0), f"отмена: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r3_1_format_change_group_master_moves_hours_not_money():
+    """S27 (Групповой мастер): индивидуальная 1 ч из «4 ч индивидуально» (осталось
+    0,25), продление +30 мин — часов нет, деньгами 10 ₾. Формат → группа: тот же
+    1 ч переезжает в основной пул (доп. 0,25 → 1,25, основной 20 → 19), добавка
+    остаётся деньгами. Было: часы пересчитывались на 1,5 ч — добавка оплачивалась
+    второй раз часами, отмена давала 90 ₾ вместо 100."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("GROUP_MASTER", extra_hours_remaining=1.25, extra_hours_used=2.75))
+    b = _book(s, admin, u, start="14:00", fmt="individual")
+    b = _extend(s, admin, b, 30)
+    assert (float(b.final_price), _bal(s, u)) == (10.0, 90.0), (b.final_price, _bal(s, u))
+    assert not isinstance(_format(s, admin, b, "group"), dict)
+    b = s.get(Booking, b.id)
+    s.expire_all()
+    sub = s.get(User, u.id).subscription
+    assert (float(b.hours_deducted), float(b.final_price), _bal(s, u)) == (1.0, 10.0, 90.0)
+    assert (P.get_float(sub, "remaining_hours"), P.get_float(sub, "extra_hours_remaining")) == (19.0, 1.25)
+    _cancel(s, admin, b)
+    s.expire_all()
+    sub = s.get(User, u.id).subscription
+    assert (_bal(s, u), P.get_float(sub, "remaining_hours"), P.get_float(sub, "extra_hours_remaining")) == \
+        (100.0, 20.0, 1.25)
+    _ledger_ok(s, u, 100.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

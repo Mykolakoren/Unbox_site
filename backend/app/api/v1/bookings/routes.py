@@ -5670,99 +5670,99 @@ def change_booking_format(
     if not booking_owner:
         raise HTTPException(status_code=404, detail="Не найден владелец брони")
 
-    # Re-quote with the new format
-    from app.services.pricing import PricingService
-    try:
-        h, m = map(int, (booking.start_time or "00:00").split(":"))
-        start_dt = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
-    except Exception:
-        start_dt = booking.date
-
-    quote = PricingService(session).calculate_price(
-        user=booking_owner,
-        resource_id=booking.resource_id,
-        start_time=start_dt,
-        duration_minutes=booking.duration,
-        format_type=new_format,
-        # Аудит 2026-08-27: денежная бронь при смене формата остаётся денежной —
-        # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
-        ignore_subscription=(booking.payment_method or "").lower() != "subscription",
-    )
-    # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
-    # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
-    # клиент доплачивал весь слот, уже оплаченный бонус-часом.
-    quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
-    # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
-    # (ревизия 03.10, как «часы подряд» и перенос). Без этого смена формата
-    # выкидывала их из цены: у денежной брони клиенту возвращались деньги за доп,
-    # который остаётся в брони, а у абонементной, где допы уже сняты с баланса,
-    # отмена потом не возвращала их вовсе.
-    from app.services.pricing import booking_extras_money as _extras_money
-    quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
-
-    # Абонементная бронь остаётся абонементной только если часы покрывают её и в
-    # новом формате. Иначе (формат не входит в тариф, нет часов нужного пула —
-    # у Группового мастера индивидуальная бронь платится ТОЛЬКО «4 ч
-    # индивидуально») котировка вернула бы деньги: часы вернулись бы в пул,
-    # бронь стала бесплатной, а при отмене вернулись бы деньги, которых никто
-    # не брал (ревизия доп. пула 01.10). Честно отказываем.
-    if (booking.payment_method or "").lower() == "subscription" and quote.applied_rule != "SUBSCRIPTION":
-        raise HTTPException(
-            status_code=400,
-            detail="Абонемент не покрывает эту бронь в новом формате (формат не входит в тариф "
-                   "или не хватает часов нужного пула). Отмените бронь и создайте новую.",
-        )
-
+    _is_sub = (booking.payment_method or "").lower() == "subscription"
     old_price = float(booking.final_price or 0)
-    old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
-    new_price = float(quote.final_price)
-    new_hours = float(quote.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
-    delta_price = round(new_price - old_price, 2)
-    delta_hours = round(new_hours - old_hours, 4)
-
-    # Settle the difference only if the row was already paid. `pending`
-    # bookings get the new price stamped and the cron will charge the
-    # right amount when T-24h hits.
     settled_now = False
-    if booking.payment_status == "paid":
-        if (booking.payment_method or "").lower() == "subscription":
-            # Знаковая разница ПО КАЖДОМУ пулу: >0 — дописать часы, <0 — вернуть.
-            # Основной и доп. (капсула / «индивидуально» — у Группового мастера
-            # смена индивидуальный ↔ групповой переносит часы между пулами).
-            old_extra = subscription_pool.booking_extra(booking)
-            new_extra = float(quote.extra_hours_deducted or 0) if new_hours > 0 else 0.0
-            delta_extra = round(new_extra - old_extra, 4)
-            delta_main = round(delta_hours - delta_extra, 4)
-            if delta_main > 0:
-                booking_owner.subscription = subscription_pool.debit_hours(
-                    booking_owner.subscription, delta_main)
-            else:
-                booking_owner.subscription = subscription_pool.credit_hours(
-                    booking_owner.subscription, -delta_main)
-            if delta_extra > 0:
-                booking_owner.subscription = subscription_pool.debit_hours(
-                    booking_owner.subscription, delta_extra, extra=delta_extra)
-            elif delta_extra < 0:
-                booking_owner.subscription = subscription_pool.credit_hours(
-                    booking_owner.subscription, -delta_extra, extra=-delta_extra,
-                    kind=_pool_kind(session, booking))
-        else:
+
+    if _is_sub:
+        # Бронь по абонементу (ревизия 03.10): деньги брони — пиковая надбавка
+        # (плоские 5 ₾/ч, от формата не зависят), допы, ручная «Цена», деньги за
+        # продление — формат их не меняет, движком не пересчитываем (раньше
+        # пересчёт стирал уже заплаченное: «Цена» 30 ₾ → смена формата → цена 0,
+        # отмена возвращала 0). Часы — то же их число, только переезжают между
+        # пулами (у Группового мастера индивидуальная — «4 ч индивидуально»,
+        # группа — основной пул; раньше часы пересчитывались на всю длительность,
+        # и добавка, оплаченная деньгами, оплачивалась второй раз часами).
+        hours = float(booking.hours_deducted or 0)
+        _paid = (booking.payment_status or "paid") == "paid"
+        _old_extra = subscription_pool.booking_extra(booking)
+        # Пул «как будто часы этой брони вернули» — их же она и займёт в новом формате.
+        _pool = (subscription_pool.credit_hours(booking_owner.subscription, hours, extra=_old_extra,
+                                                kind=_pool_kind(session, booking))
+                 if _paid else booking_owner.subscription)
+        _new_extra = None
+        if hours > 0 and subscription_pool.is_active(_pool, datetime.utcnow()):
+            _new_extra = subscription_pool.plan_split(
+                _pool, hours, resource_type=_res_type(session, booking.resource_id), format_type=new_format,
+            )
+        # Абонементная бронь остаётся абонементной только если часы покрывают её и
+        # в новом формате (формат в тарифе, есть часы нужного пула). Иначе —
+        # честный отказ, как и раньше (ревизия доп. пула 01.10).
+        if _new_extra is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Абонемент не покрывает эту бронь в новом формате (формат не входит в тариф "
+                       "или не хватает часов нужного пула). Отмените бронь и создайте новую.",
+            )
+        if _paid:
+            booking_owner.subscription = subscription_pool.debit_hours(_pool, hours, extra=_new_extra)
+            settled_now = True
+        new_price = old_price
+        new_hours = hours
+        delta_price = 0.0
+        delta_hours = 0.0
+        booking.format = new_format
+        subscription_pool.stamp_booking(booking, hours, _new_extra)
+    else:
+        # Re-quote with the new format
+        from app.services.pricing import PricingService
+        try:
+            h, m = map(int, (booking.start_time or "00:00").split(":"))
+            start_dt = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = booking.date
+
+        quote = PricingService(session).calculate_price(
+            user=booking_owner,
+            resource_id=booking.resource_id,
+            start_time=start_dt,
+            duration_minutes=booking.duration,
+            format_type=new_format,
+            # Аудит 2026-08-27: денежная бронь при смене формата остаётся денежной —
+            # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
+            ignore_subscription=True,
+        )
+        # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
+        # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
+        # клиент доплачивал весь слот, уже оплаченный бонус-часом.
+        quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
+        # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
+        # (ревизия 03.10, как «часы подряд» и перенос).
+        from app.services.pricing import booking_extras_money as _extras_money
+        quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
+
+        new_price = float(quote.final_price)
+        new_hours = 0.0
+        delta_price = round(new_price - old_price, 2)
+        delta_hours = 0.0
+
+        # Settle the difference only if the row was already paid. `pending`
+        # bookings get the new price stamped and the cron will charge the
+        # right amount when T-24h hits.
+        if booking.payment_status == "paid":
             # delta_price знаковая: >0 — доплата, <0 — возврат.
             wallet.apply(session, booking_owner, -delta_price, reason="format_change",
                          description="Пересчёт при смене формата брони",
                          ref_type="booking", ref_id=str(booking.id), actor=current_user)
-        booking.charge_amount = new_price
-        settled_now = True
+            booking.charge_amount = new_price
+            settled_now = True
 
-    booking.format = new_format
-    booking.final_price = quote.final_price
-    booking.base_price = quote.base_price
-    booking.applied_rule = quote.applied_rule
-    booking.discount_amount = quote.discount_amount
-    booking.discount_percent = quote.discount_percent
-    if (booking.payment_method or "").lower() == "subscription":
-        booking.hours_deducted = quote.hours_deducted
-        subscription_pool.stamp_booking(booking, quote.hours_deducted, quote.extra_hours_deducted)
+        booking.format = new_format
+        booking.final_price = quote.final_price
+        booking.base_price = quote.base_price
+        booking.applied_rule = quote.applied_rule
+        booking.discount_amount = quote.discount_amount
+        booking.discount_percent = quote.discount_percent
 
     session.add(booking_owner)
     session.add(booking)
@@ -5800,8 +5800,9 @@ def change_booking_format(
     # Best-effort TG notification — both audiences (admin chat for audit,
     # owner so they see why their balance moved).
     try:
-        method_label = "ч абонемента" if (booking.payment_method or "").lower() == "subscription" else "₾"
-        delta_value = delta_hours if (booking.payment_method or "").lower() == "subscription" else delta_price
+        # Цена брони — деньги (у брони по абонементу — пик/допы; формат их не меняет).
+        method_label = "₾"
+        delta_value = delta_price
         delta_sign = "+" if delta_value > 0 else ""
         from app.services.telegram import telegram_service
         telegram_service.send_admin_event(
@@ -5820,8 +5821,11 @@ def change_booking_format(
                 chat_id=booking_owner.telegram_id,
                 text=(
                     f"🔄 <b>Изменён формат брони</b>\n\n"
-                    f"Новая цена: {new_price:g} {method_label}\n"
-                    f"С баланса {'списано' if delta_value > 0 else 'возвращено'}: {abs(delta_value):g} {method_label}"
+                    + (f"Оплата не изменилась: часы абонемента — {new_hours:g} ч"
+                       + (f", доплата {new_price:g} ₾." if new_price >= 0.01 else ".")
+                       if _is_sub else
+                       f"Новая цена: {new_price:g} {method_label}\n"
+                       f"С баланса {'списано' if delta_value > 0 else 'возвращено'}: {abs(delta_value):g} {method_label}")
                 ),
                 parse_mode="HTML",
             )
