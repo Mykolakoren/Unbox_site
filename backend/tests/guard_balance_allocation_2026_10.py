@@ -581,6 +581,9 @@ def _simulate(rng: random.Random, n: int, edge: bool):
     balance = round(sum(r.delta for r in rows), 2)
     res = allocate(rows, refs, balance=balance)
     assert res["consistent"], f"клиент {n}: раскладка не сошлась с лентой"
+    # Сводка считает без раскладки по строкам (detail=False) — партии и долги те же.
+    lite = allocate(rows, refs, balance=balance, detail=False)
+    assert lite["batches"] == res["batches"] and lite["debts"] == res["debts"], f"клиент {n}: сводка ≠ карточка"
     summary = {"userId": f"id-{n}", "email": email, "balance": balance, "consistent": True,
                "batches": res["batches"], "debts": res["debts"]}
     return {"id": n, "email": email, "balance": balance, "bookings": front, "summary": summary, "kinds": kinds}

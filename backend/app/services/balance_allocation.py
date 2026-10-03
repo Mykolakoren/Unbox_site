@@ -290,12 +290,15 @@ def allocate(
     rows: Iterable[Row],
     bookings: Optional[dict] = None,
     balance: Optional[float] = None,
+    detail: bool = True,
 ) -> dict:
     """Разложить ленту клиента: какие деньги за что заплатили.
 
     rows      — вся лента клиента (порядок любой);
     bookings  — id брони → BookingRef (для порядка и подписей);
-    balance   — текущий баланс клиента (для проверки consistent).
+    balance   — текущий баланс клиента (для проверки consistent);
+    detail    — False: только партии и долги (сводка по всем клиентам), без
+                раскладки по строкам ленты и броням — в разы быстрее.
     """
     bookings = bookings or {}
     rows = sorted(rows, key=lambda r: (r.at, str(r.id)))
@@ -370,7 +373,9 @@ def allocate(
                 take = min(amt, p.left)
                 p.left -= take
                 amt -= take
-                if gtype == "booking":
+                if not detail:
+                    pass
+                elif gtype == "booking":
                     info[str(rv.id)]["reversed"].append({**tgt_public(p.row), "amount": _g(take)})
                     info[str(p.row.id)]["reversedBy"].append({**src_public(rv), "amount": _g(take)})
                 else:
@@ -429,6 +434,8 @@ def allocate(
                 # Деньги уже лежали на балансе к моменту списания → «оплачено из»;
                 # пришли позже → «в долг, закрыто …». Остаток на начало — самый
                 # старый: плюс на начало оплачивает сразу, долг на начало закрывают.
+                if not detail:
+                    continue
                 if p.row.reason == "baseline":
                     credit_first = s.row.reason == "baseline"
                 else:
@@ -444,14 +451,15 @@ def allocate(
                     pb = per_booking.setdefault(d.booking_id, {"sources": [], "debt": 0})
                     pb["sources"].append(src)
             p.left = need
-            if need > 0:
+            if need > 0 and detail:
                 info[str(p.row.id)]["debtOpen"] = _g(need)
 
     # 3. Итоги: плюс на балансе (партии по порядку траты) и долги (от старых к новым).
     batches = []
     for s in supplies:
         if s.left > 0:
-            info[str(s.row.id)]["left"] = _g(info_left_cents(info[str(s.row.id)]) + s.left)
+            if detail:
+                info[str(s.row.id)]["left"] = _g(info_left_cents(info[str(s.row.id)]) + s.left)
             batches.append({**src_public(s.row), "amount": _g(s.left)})
     batches = _merge_by_row(batches)
 
@@ -476,7 +484,7 @@ def allocate(
 
     # Брони с деньгами: сколько списано (нетто), чем оплачено, сколько в долг.
     booking_rows: dict[str, dict] = {}
-    for d in demands:
+    for d in (demands if detail else []):
         if not d.booking_id:
             continue
         pb = per_booking.get(d.booking_id, {"sources": [], "debt": 0})
@@ -489,7 +497,7 @@ def allocate(
             "booking": booking_public(bookings.get(d.booking_id)),
         }
     # Бронь, списание которой целиком вернули, — тоже видна (нетто 0).
-    for (gtype, gid), grp in groups.items():
+    for (gtype, gid), grp in (groups.items() if detail else []):
         if gtype == "booking" and gid not in booking_rows:
             booking_rows[gid] = {
                 "bookingId": gid, "charged": 0.0, "debt": 0.0, "sources": [],
@@ -503,7 +511,7 @@ def allocate(
     bal = round(float(balance), 2) if balance is not None else ledger_sum
     consistent = abs(computed - bal) <= EPS and abs(computed - ledger_sum) <= EPS
 
-    for r in rows:
+    for r in (rows if detail else []):
         i = info[str(r.id)]
         i["spentOn"] = _merge_targets(i["spentOn"])
         i["paidFrom"] = _merge_sources(i["paidFrom"])
@@ -517,7 +525,7 @@ def allocate(
         "batches": batches,
         "debts": debts,
         "bookings": list(booking_rows.values()),
-        "rows": [info[str(r.id)] for r in rows],
+        "rows": [info[str(r.id)] for r in rows] if detail else [],
     }
 
 
@@ -682,9 +690,12 @@ def load_inputs(session, users: list) -> dict:
     by_uuid = {str(u.id): u for u in users}
     by_email = {(u.email or "").lower(): str(u.id) for u in users if u.email}
 
+    # Только нужные колонки (сводка зовётся на каждом изменении балансов в админке).
+    L = BalanceLedger
     ledger = session.exec(
-        select(BalanceLedger).where(BalanceLedger.user_id.in_(ids))
-        .order_by(BalanceLedger.created_at, BalanceLedger.id)
+        select(L.id, L.user_id, L.delta, L.reason, L.description, L.ref_type, L.ref_id, L.created_at)
+        .where(L.user_id.in_(ids))
+        .order_by(L.created_at, L.id)
     ).all()
 
     uuids = [u.id for u in users]
@@ -692,17 +703,28 @@ def load_inputs(session, users: list) -> dict:
     conds = [Booking.user_uuid.in_(uuids)]
     if emails:
         conds.append(Booking.user_id.in_(emails))
-    blist = session.exec(select(Booking).where(or_(*conds))).all()
+    blist = session.exec(
+        select(Booking.id, Booking.user_uuid, Booking.user_id, Booking.date, Booking.start_time, Booking.duration,
+               Booking.resource_id, Booking.status, Booking.payment_status, Booking.payment_method,
+               Booking.final_price, Booking.created_at)
+        .where(or_(*conds))
+    ).all()
     names = _resource_names(session, {b.resource_id for b in blist})
 
     tx_ids = {r.ref_id for r in ledger if (r.ref_type or "") == "cashbox_tx" and r.ref_id}
     methods: dict[str, str] = {}
     if tx_ids:
-        for tx in session.exec(select(CashboxTransaction).where(CashboxTransaction.id.in_(list(tx_ids)))).all():
-            methods[str(tx.id)] = tx.payment_method
+        for tx_id, method in session.exec(
+            select(CashboxTransaction.id, CashboxTransaction.payment_method)
+            .where(CashboxTransaction.id.in_(list(tx_ids)))
+        ).all():
+            methods[str(tx_id)] = method
     rebates_by_user: dict[str, list] = defaultdict(list)
     if any(r.reason == "weekly_rebate" for r in ledger):
-        for wr in session.exec(select(WeeklyRebate).where(WeeklyRebate.user_id.in_(uuids))).all():
+        for wr in session.exec(
+            select(WeeklyRebate.user_id, WeeklyRebate.amount, WeeklyRebate.created_at, WeeklyRebate.week_start)
+            .where(WeeklyRebate.user_id.in_(uuids))
+        ).all():
             rebates_by_user[str(wr.user_id)].append(wr)
 
     for uid in ids:
@@ -781,7 +803,7 @@ def summary(session, now_utc: Optional[datetime] = None) -> dict:
     clients = []
     for u in users:
         data = inputs[str(u.id)]
-        res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0))
+        res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0), detail=False)
         clients.append({
             "userId": str(u.id),
             "email": u.email,
