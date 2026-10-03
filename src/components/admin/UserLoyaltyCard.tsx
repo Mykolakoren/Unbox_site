@@ -156,17 +156,17 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                                             {user.personalDiscountPercent || 0}%
                                         </span>
                                         {canSetDiscount ? (
-                                        <button
-                                            onClick={() => {
-                                                setNewDiscount(user.personalDiscountPercent || 0);
-                                                setIsEditDiscount(true);
-                                            }}
-                                            className="p-1.5 rounded-full hover:bg-gray-100 text-ink-60 hover:text-unbox-dark transition-colors"
-                                            title="Изменить скидку"
-                                            aria-label="Изменить скидку"
-                                        >
-                                            <Pencil size={14} />
-                                        </button>
+                                            <button
+                                                onClick={() => {
+                                                    setNewDiscount(user.personalDiscountPercent || 0);
+                                                    setIsEditDiscount(true);
+                                                }}
+                                                className="p-1.5 rounded-full hover:bg-gray-100 text-ink-60 hover:text-unbox-dark transition-colors"
+                                                title="Изменить скидку"
+                                                aria-label="Изменить скидку"
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
                                         ) : (
                                             <span className="text-xs text-ink-60" title="Скидку меняет старший администратор или владелец">
                                                 меняет старший админ

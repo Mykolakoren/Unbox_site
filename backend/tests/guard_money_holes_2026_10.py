@@ -740,6 +740,60 @@ def test_6_dropped_sandbox_on_money_subscription_row_not_refunded_twice():
 
 
 @_scenario
+def test_6_format_change_keeps_sandbox_in_price():
+    """Смена формата (индивидуальный → групповой) не выкидывает допы из цены.
+    Денежная бронь 20 + 5 = 25 ₾ → группа 35 + 5 = 40 ₾ (доплата 15, а не 10 с
+    потерей песочницы). По абонементу Профи+: денежная часть 5 ₾ (песочница) снята
+    при создании — после смены формата цена брони так и 5 ₾, и отмена их вернёт
+    (раньше цена становилась 0 ₾, и клиент терял 5 ₾)."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", method="balance", extras=["sandbox"])
+    routes.change_booking_format(booking_id=str(b.id), payload=routes.ChangeFormatRequest(new_format="group"),
+                                 session=s, current_user=admin)
+    s.commit()
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), _bal(s, u)) == (40.0, 60.0), (b.final_price, _bal(s, u))
+    _cancel(s, admin, b)
+    assert _bal(s, u) == 100.0
+
+    v = _client(s, _sub("PRO_PLUS"))
+    c = _book(s, admin, v, start="16:00", extras=["sandbox"])
+    assert (_bal(s, v), _rem(s, v)) == (95.0, 41.0)
+    routes.change_booking_format(booking_id=str(c.id), payload=routes.ChangeFormatRequest(new_format="group"),
+                                 session=s, current_user=admin)
+    s.commit()
+    c = s.get(Booking, c.id)
+    assert (float(c.final_price), _bal(s, v), _rem(s, v)) == (5.0, 95.0, 41.0), (c.final_price, _bal(s, v), _rem(s, v))
+    _cancel(s, admin, c)
+    assert (_bal(s, v), _rem(s, v)) == (100.0, 42.0), f"отмена: {_bal(s, v)} ₾ / {_rem(s, v)} ч"
+    _ledger_ok(s, v, 100.0)
+
+
+@_scenario
+def test_shorten_subscription_peak_booking_returns_money_part():
+    """По абонементу 20:00–22:00: −2 ч и −10 ₾ пика. Сокращение на 1 ч: +1 ч и
+    +5 ₾ (цена брони 5 ₾); отмена — остальное. Было: при сокращении деньги не
+    возвращались — клиент терял 5 ₾."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, start="20:00", minutes=120)
+    assert (_bal(s, u), _rem(s, u), float(b.final_price)) == (90.0, 8.0, 10.0)
+    routes.shorten_booking(booking_id=str(b.id), payload=routes.ShortenRequest(remove_minutes=60),
+                           session=s, current_user=admin)
+    s.commit()
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), _bal(s, u), _rem(s, u)) == (5.0, 95.0, 9.0), (b.final_price, _bal(s, u), _rem(s, u))
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
 def test_6_cash_paid_extras_are_not_charged_by_recompute():
     """Допы, оплаченные наличными (/add-extras cash), записаны в брони, но в цену
     не входят — пересчёт «часов подряд» не должен списать их ещё раз с баланса."""

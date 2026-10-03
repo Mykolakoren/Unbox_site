@@ -5514,6 +5514,13 @@ def change_booking_format(
     # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
     # клиент доплачивал весь слот, уже оплаченный бонус-часом.
     quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
+    # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
+    # (ревизия 03.10, как «часы подряд» и перенос). Без этого смена формата
+    # выкидывала их из цены: у денежной брони клиенту возвращались деньги за доп,
+    # который остаётся в брони, а у абонементной, где допы уже сняты с баланса,
+    # отмена потом не возвращала их вовсе.
+    from app.services.pricing import booking_extras_money as _extras_money
+    quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
 
     # Абонементная бронь остаётся абонементной только если часы покрывают её и в
     # новом формате. Иначе (формат не входит в тариф, нет часов нужного пула —
@@ -6495,6 +6502,14 @@ def shorten_booking(
                     target_user.subscription = subscription_pool.credit_hours(
                         target_user.subscription, refund_hours, extra=refund_extra,
                         kind=_pool_kind(session, booking))
+                # Денежная часть брони по абонементу (пик/допы) снята с баланса
+                # вместе с часами (единое правило billing_defer) — цена брони
+                # падает той же долей, значит и деньги назад той же долей.
+                # Ревизия 03.10: раньше возвращались только часы, и отмена потом
+                # отдавала меньше, чем взяли.
+                wallet.credit(session, target_user, refund_price, reason="shorten_refund",
+                              description="Возврат пиковой надбавки/допов за сокращённое время брони по абонементу",
+                              ref_type="booking", ref_id=str(booking.id), actor=current_user)
             else:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
                               description="Возврат за сокращённое время брони",
