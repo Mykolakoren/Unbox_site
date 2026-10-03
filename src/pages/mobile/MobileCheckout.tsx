@@ -5,6 +5,7 @@ import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'dat
 import { Check, ChevronDown, Hourglass, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
+import { isFrozenSub, notifyIfPauseLifted } from '../../utils/pauseLiftNotice';
 import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
@@ -410,6 +411,7 @@ export function MobileCheckout() {
         }
         setSubmitting(true);
         try {
+            const wasFrozen = !state.bookingForUser && isFrozenSub(useUserStore.getState().currentUser);
             const result = await bookingsApi.createRecurringBooking({
                 resourceId: firstSlot.resourceId,
                 locationId: state.locationId || resource?.locationId || 'unbox_one',
@@ -425,6 +427,7 @@ export function MobileCheckout() {
                 skipConflicts: skipConflicts || undefined,
             });
             await Promise.all([fetchCurrentUser(), fetchBookings()]);
+            notifyIfPauseLifted(wasFrozen, useUserStore.getState().currentUser);
             useBookingStore.getState().reset();
             setSeriesConflicts(null);
             setConfirmed(true);
@@ -521,10 +524,12 @@ export function MobileCheckout() {
             // `pending_approval`, and the user needs to know the slot isn't
             // confirmed until an admin clicks approve.
             if (newBookings.length === 1) {
+                const wasFrozen = !(newBookings[0] as any).targetUserId && isFrozenSub(useUserStore.getState().currentUser);
                 const created = await bookingsApi.createBooking(newBookings[0] as any);
                 await Promise.all([fetchCurrentUser(), fetchBookings()]);
                 useBookingStore.getState().reset();
                 setConfirmed(true);
+                notifyIfPauseLifted(wasFrozen, useUserStore.getState().currentUser);
                 // Волна 2: экран подтверждения вместо уведомления (решение
                 // владельца). Статус — из ответа сервера на ЭТУ бронь:
                 // на одобрении — «Ждём подтверждения администратора».

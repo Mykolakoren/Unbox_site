@@ -2,12 +2,7 @@ import type { StateCreator } from 'zustand';
 import { toast } from 'sonner';
 import type { UserStore, BookingSlice, BookingHistoryItem } from '../types';
 import { bookingsApi } from '../../api/bookings';
-
-// 03.10 (решение владельца): бронь клиента, чей абонемент на паузе, снимает
-// паузу, если пошла часами. Мастер предупреждает заранее, но бронь создаётся и
-// из других мест (CRM, «Мои брони», телефон) — говорим клиенту по факту.
-const PAUSE_LIFTED_TOAST = 'Пауза абонемента снята — неиспользованные дни паузы сохранились';
-const isFrozenSub = (user: any): boolean => !!user?.subscription?.isFrozen;
+import { isFrozenSub, notifyIfPauseLifted } from '../../utils/pauseLiftNotice';
 
 // Номер последнего запуска fetchBookings и номер последнего ПРИМЕНЁННОГО
 // ответа. На старте App.tsx и экран зовут fetchBookings одновременно — без
@@ -128,7 +123,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             // Fetch updated user to reflect balance/subscription changes from backend
             await get().fetchCurrentUser();
-            if (wasFrozen && !isFrozenSub(get().currentUser)) toast.success(PAUSE_LIFTED_TOAST);
+            notifyIfPauseLifted(wasFrozen, get().currentUser);
 
             return newBooking;
 
@@ -172,7 +167,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             });
             // Refetch state so store matches server truth
             await get().fetchCurrentUser();
-            if (wasFrozen && !isFrozenSub(get().currentUser)) toast.success(PAUSE_LIFTED_TOAST);
+            notifyIfPauseLifted(wasFrozen, get().currentUser);
             const fetchAllBookings = (get() as any).fetchAllBookings;
             if (typeof fetchAllBookings === 'function') {
                 await fetchAllBookings();

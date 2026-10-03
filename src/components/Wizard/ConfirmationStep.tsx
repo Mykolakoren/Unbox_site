@@ -2,6 +2,7 @@ import { useBookingStore } from '../../store/bookingStore';
 import { calculatePrice } from '../../utils/pricing';
 import { getMyBookingsPath } from '../../utils/userPaths';
 import { useUserStore } from '../../store/userStore';
+import { isFrozenSub, notifyIfPauseLifted } from '../../utils/pauseLiftNotice';
 import { bookingsApi } from '../../api/bookings';
 import { PhoneInput } from '../ui/PhoneInput';
 import {
@@ -404,6 +405,7 @@ export function ConfirmationStep() {
                 const item = cartDetails[0];
                 const resource = RESOURCES.find(r => r.id === item.resourceId);
                 try {
+                    const wasFrozen = !state.bookingForUser && isFrozenSub(useUserStore.getState().currentUser);
                     const result = await bookingsApi.createRecurringBooking({
                         resourceId: item.resourceId,
                         locationId: state.locationId || resource?.locationId || 'unbox_one',
@@ -438,6 +440,7 @@ export function ConfirmationStep() {
                         fetchCurrentUser(),
                         useUserStore.getState().fetchBookings(),
                     ]).catch(() => {});
+                    notifyIfPauseLifted(wasFrozen, useUserStore.getState().currentUser);
                     setTimeout(() => {
                         navigate(getMyBookingsPath(currentUser), { state: { targetDate: new Date(state.date).toISOString() } });
                     }, 2000);

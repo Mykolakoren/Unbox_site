@@ -627,9 +627,18 @@ def test_review_followups_03_10():
             f"{path}: одобрение брони по абонементу снова пишет «Деньги списаны с баланса»"
     card = _read("src/components/SubscriptionCard.tsx")
     assert "status === 409" in card and "fetchCurrentUser()" in card, "карточка абонемента не обновляется после 409"
+    helper = _read("src/utils/pauseLiftNotice.ts")
+    assert "if (wasFrozen && after && !isFrozenSub(after))" in helper, \
+        "тост не должен срабатывать, когда 401 обнулил пользователя (after = null)"
     sl = _read("src/store/slices/createBookingSlice.ts")
-    assert sl.count("toast.success(PAUSE_LIFTED_TOAST)") == 2, "нет тоста о снятой паузе после брони"
+    assert sl.count("notifyIfPauseLifted(wasFrozen, get().currentUser)") == 2, "нет тоста о снятой паузе после брони"
     assert "!(bookingData as any).targetUserId && isFrozenSub(currentUser)" in sl, "тост — только для своей брони"
+    mc = _read("src/pages/mobile/MobileCheckout.tsx")
+    assert mc.count("notifyIfPauseLifted(wasFrozen, useUserStore.getState().currentUser)") == 2, \
+        "телефон: одиночная бронь и серия без тоста о снятой паузе"
+    cs = _read("src/components/Wizard/ConfirmationStep.tsx")
+    assert cs.count("notifyIfPauseLifted(wasFrozen, useUserStore.getState().currentUser)") == 1, \
+        "мастер на компьютере: серия без тоста о снятой паузе"
 
 
 ROUTES = "backend/app/api/v1/bookings/routes.py"
