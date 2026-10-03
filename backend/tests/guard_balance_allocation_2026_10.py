@@ -272,6 +272,8 @@ def test_unlinked_creation_rows_linked():
     assert [(d["bookingId"], d["amount"]) for d in res["debts"]] == [("H", 20.0)]
     r = _rows(res)
     assert [x["amount"] for x in r["r0"]["reversed"]] == [20.0], "откат не погасил своё списание"
+    assert r["r0"]["reversed"][0]["rowId"] == "c0", "откат погасил списание при подтверждении, а не при создании"
+    assert res["debts"][0]["rowIds"] == ["ap"] and r["ap"]["debtOpen"] == 20.0
     # Серия одним запросом: две брони по 20 ₾, у каждой своя строка — по дате.
     s1, s2 = B("S1", "2026-10-05", "10:00"), B("S2", "2026-10-12", "10:00")
     rs = [Row("a", t, -20, "booking_charge", "Оплата брони с баланса (серия 2026-10-12)", "booking", None),

@@ -355,10 +355,14 @@ def allocate(
         revs = [r for r in grp if (1 if r.delta > 0 else -1) != primary_sign]
         for p in prim:
             p.left = p.cents
-        # Возврат/отмена гасит СВОИ движения, начиная с последнего (LIFO).
+        # Возврат/отмена гасит СВОИ движения: последнее, сделанное ДО него (LIFO);
+        # если до него ничего не осталось — ближайшее после. Так откат горячей брони
+        # гасит списание при создании, а не списание при подтверждении.
         for rv in revs:
             amt = abs(_c(rv.delta))
-            for p in reversed(prim):
+            before = [p for p in prim if (p.row.at, str(p.row.id)) <= (rv.at, str(rv.id))]
+            after = [p for p in prim if (p.row.at, str(p.row.id)) > (rv.at, str(rv.id))]
+            for p in list(reversed(before)) + after:
                 if amt <= 0:
                     break
                 if p.left <= 0:
