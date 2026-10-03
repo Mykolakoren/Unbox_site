@@ -232,7 +232,8 @@ def source_detail(row: Row) -> Optional[str]:
 def debit_label(row: Row, booking: Optional[BookingRef]) -> str:
     """На что списано: бронь «05.10 14:00 Каб. 2» или само списание."""
     if row.booking_id:
-        return booking_label(booking, fallback=f"бронь (удалена) {_ddmm(_tbs(row.at))}")
+        # Брони нет среди броней клиента (удалена или числится на другом профиле).
+        return booking_label(booking, fallback=f"бронь не найдена (списание {_ddmm(_tbs(row.at))})")
     d = _ddmm(_tbs(row.at))
     r = row.reason or ""
     if r == "subscription_purchase":
