@@ -461,7 +461,9 @@ def test_4_series_immediate_peak_occurrence_charges_peak():
     rows = s.exec(select(Booking).where(Booking.user_uuid == u.id).order_by(Booking.date)).all()
     assert [b.payment_status for b in rows] == ["paid", "pending", "pending"]
     assert (_bal(s, u), _rem(s, u)) == (295.0, 41.0), f"серия: {_bal(s, u)} ₾ / {_rem(s, u)} ч, ждём 295 / 41"
-    routes.cancel_recurring_bookings(group_id=out["recurring_group_id"], from_booking_id=str(rows[0].id),
+    # id — объектом UUID: на SQLite session.get(Booking, str) падает (на Postgres
+    # строка адаптируется сама — так её шлёт FastAPI в бою).
+    routes.cancel_recurring_bookings(group_id=out["recurring_group_id"], from_booking_id=rows[0].id,
                                      refund_percent=1.0, reason=None, session=s, current_user=admin)
     s.commit()
     assert (_bal(s, u), _rem(s, u)) == (300.0, 42.0), f"отмена серии: {_bal(s, u)} ₾ / {_rem(s, u)} ч"

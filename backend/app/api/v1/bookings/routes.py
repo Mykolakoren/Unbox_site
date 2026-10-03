@@ -1604,6 +1604,11 @@ def create_booking(
             extras_price=extras_price,
         )
 
+        # id брони заранее: строки ленты баланса ссылаются на неё (ref_id) —
+        # по ним сторож и сверка видят, сколько взяли и вернули за ЭТУ бронь.
+        from uuid import uuid4 as _uuid4
+        _new_booking_id = _uuid4()
+
         if booking_in.payment_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
                 raise HTTPException(
@@ -1626,7 +1631,8 @@ def create_booking(
                         f"Пополните баланс перед бронированием.",
                     )
                 wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
-                             description="Оплата брони с баланса (при создании)", ref_type="booking")
+                             description="Оплата брони с баланса (при создании)", ref_type="booking",
+                             ref_id=str(_new_booking_id))
 
         booking_in.final_price = quote.final_price
         booking_in.base_price = quote.base_price
@@ -1645,13 +1651,21 @@ def create_booking(
             booking_in.charged_at = datetime.utcnow()
             booking_in.charge_amount = quote.final_price
 
-        # Peak hours subscription debt: deduct from balance (goes negative = debt)
-        # Only applies to legacy charge-now path; deferred path leaves it
-        # for the cron to handle alongside the main charge.
+        # Денежная часть брони по абонементу: пиковая надбавка + допы (= final_price,
+        # единое правило billing_defer.subscription_money_due). Снимаем с баланса
+        # (в минус = долг) ВМЕСТЕ с часами — только на немедленном пути; бронь
+        # заранее снимет крон T-24ч. Ревизия 03.10: раньше здесь снимался только
+        # пик (peak_debt), а допы оставались в цене — отмена «возвращала» их из
+        # воздуха (песочница 5 ₾ по абонементу: взяли 0, вернули 5).
         peak_debt = quote.subscription_peak_debt
-        if not defer_charge_single and peak_debt > 0 and booking_in.payment_method == "subscription":
-            wallet.debit(session, booking_owner, peak_debt, reason="booking_charge",
-                         description="Пиковая надбавка абонемента (при создании)", ref_type="booking")
+        from app.services.billing_defer import subscription_money_due
+        sub_money = (subscription_money_due(quote.final_price)
+                     if booking_in.payment_method == "subscription" else 0.0)
+        if not defer_charge_single and sub_money >= 0.01:
+            wallet.debit(session, booking_owner, sub_money, reason="booking_charge",
+                         description="Пиковая надбавка абонемента (при создании)" if sub_money <= peak_debt
+                         else "Пиковая надбавка/допы брони по абонементу (при создании)",
+                         ref_type="booking", ref_id=str(_new_booking_id))
 
         # ── Hot Booking Approval Gate ──
         # Approval threshold depends on the WEEKDAY of the booking start:
@@ -1684,7 +1698,8 @@ def create_booking(
             # Revert balance deduction that happened above
             if booking_in.payment_method != "subscription":
                 wallet.credit(session, booking_owner, quote.final_price, reason="booking_charge_revert",
-                              description="Откат списания — бронь ушла на подтверждение (hot)", ref_type="booking")
+                              description="Откат списания — бронь ушла на подтверждение (hot)", ref_type="booking",
+                              ref_id=str(_new_booking_id))
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
@@ -1692,14 +1707,15 @@ def create_booking(
                         booking_owner.subscription, quote.hours_deducted,
                         extra=quote.extra_hours_deducted,
                         kind=subscription_pool.kind_for_resource(_res_type(session, booking_in.resource_id)))
-                # Аудит 2026-08-27: пиковая надбавка — реальные ДЕНЬГИ, списанные
-                # выше (wallet.debit(peak_debt) на не-отложенном пути; hot всегда
+                # Аудит 2026-08-27: пиковая надбавка (и допы) — реальные ДЕНЬГИ,
+                # списанные выше (sub_money на не-отложенном пути; hot всегда
                 # не-отложенный). Часы откатили — откатываем и деньги, иначе
-                # «Отклонить» съедал 5₾/ч безвозвратно.
-                if peak_debt > 0:
-                    wallet.credit(session, booking_owner, peak_debt, reason="booking_charge_revert",
+                # «Отклонить» съедал 5₾/ч безвозвратно. Одобрение снимет их
+                # заново (charge_hot_booking_on_approval).
+                if sub_money >= 0.01:
+                    wallet.credit(session, booking_owner, sub_money, reason="booking_charge_revert",
                                   description="Откат пиковой надбавки — бронь ушла на подтверждение (hot)",
-                                  ref_type="booking")
+                                  ref_type="booking", ref_id=str(_new_booking_id))
 
             # The money was just handed back, so the row must stop claiming it
             # was paid. It used to keep payment_status="paid" + charge_amount
@@ -1723,6 +1739,7 @@ def create_booking(
         booking_data["created_by_id"] = str(current_user.id)
         booking_data["created_by_name"] = current_user.name or ""
 
+        booking_data["id"] = _new_booking_id
         booking = Booking(**booking_data)
         # Из какого пула абонемента часы (доп. / основной). Для брони заранее
         # (pending) — прикидка; точную раскладку пишет крон T-24ч.
@@ -2031,6 +2048,7 @@ def create_multi_slot_booking(
     deps.require_can_book(current_user)
 
     from app.services.pricing import PricingService, resolve_payment_method
+    from app.services.billing_defer import subscription_money_due
     from uuid import uuid4 as gen_uuid4
 
     if not data.slots:
@@ -2157,6 +2175,7 @@ def create_multi_slot_booking(
             bonus_left=_bonus_left,
         )
         _bonus_left = max(0.0, _bonus_left - slot_bonus_hours)
+        _slot_id = gen_uuid4()  # заранее — для ref_id строк ленты
 
         if slot_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -2180,6 +2199,15 @@ def create_multi_slot_booking(
                     )
                 booking_owner.subscription = new_sub = subscription_pool.debit_hours(
                     new_sub, hours_deducted, extra=quote.extra_hours_deducted)
+                # Денежная часть слота по абонементу (пиковая надбавка) — вместе
+                # с часами, как одиночная бронь (единое правило billing_defer).
+                # Ревизия 03.10: раньше немедленный слот корзины пик не снимал, а
+                # отмена его «возвращала».
+                _slot_money = subscription_money_due(quote.final_price)
+                if _slot_money >= 0.01:
+                    wallet.debit(session, booking_owner, _slot_money, reason="booking_charge",
+                                 description=f"Пиковая надбавка абонемента (корзина {s.date} {s.start_time})",
+                                 ref_type="booking", ref_id=str(_slot_id))
         else:  # balance (и bonus — остаток сверх бонусных часов)
             if not defer_charge_multi:
                 available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
@@ -2191,11 +2219,12 @@ def create_multi_slot_booking(
                     )
                 wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
                              description=f"Оплата брони с баланса (мульти-слот {s.date} {s.start_time})",
-                             ref_type="booking")
+                             ref_type="booking", ref_id=str(_slot_id))
 
         total_cost += quote.final_price
 
         booking = Booking(
+            id=_slot_id,
             resource_id=s.resource_id,
             location_id=s.location_id,
             date=d,
@@ -2534,6 +2563,7 @@ def create_recurring_booking(
     deps.require_can_book(current_user)
 
     from app.services.pricing import PricingService, resolve_payment_method
+    from app.services.billing_defer import subscription_money_due
     from uuid import uuid4 as gen_uuid4
 
     # Determine booking owner
@@ -2791,6 +2821,7 @@ def create_recurring_booking(
             bonus_left=_bonus_left,
         )
         _bonus_left = max(0.0, _bonus_left - occ_bonus_hours)
+        _occ_id = gen_uuid4()  # заранее — для ref_id строк ленты
 
         if occ_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -2800,6 +2831,15 @@ def create_recurring_booking(
             if not defer_charge and booking_owner.subscription:
                 booking_owner.subscription = subscription_pool.debit_hours(
                     booking_owner.subscription, quote.hours_deducted, extra=quote.extra_hours_deducted)
+                # Денежная часть встречи по абонементу (пиковая надбавка) — вместе
+                # с часами, как одиночная бронь (единое правило billing_defer).
+                # Ревизия 03.10: раньше первая (немедленная) встреча серии пик не
+                # снимала, а отмена его «возвращала».
+                _occ_money = subscription_money_due(quote.final_price)
+                if _occ_money >= 0.01:
+                    wallet.debit(session, booking_owner, _occ_money, reason="booking_charge",
+                                 description=f"Пиковая надбавка абонемента (серия {d.strftime('%Y-%m-%d')})",
+                                 ref_type="booking", ref_id=str(_occ_id))
         else:
             if not defer_charge:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -2810,11 +2850,12 @@ def create_recurring_booking(
                     )
                 wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
                              description=f"Оплата брони с баланса (серия {d.strftime('%Y-%m-%d')})",
-                             ref_type="booking")
+                             ref_type="booking", ref_id=str(_occ_id))
 
         session.add(booking_owner)
 
         booking = Booking(
+            id=_occ_id,
             resource_id=data.resource_id,
             location_id=data.location_id,
             date=d,

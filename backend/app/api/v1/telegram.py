@@ -1988,11 +1988,11 @@ def _handle_hot_booking_callback(
         # Ревизия 03.10: раньше бот считал своей копией логики — без пика и
         # без перепроверки часов.
         from app.api.v1.bookings.routes import (
-            charge_hot_booking_on_approval as _charge_on_approval,
+            charge_hot_booking_on_approval,
             hot_approval_client_text as _approval_text,
         )
         try:
-            paid_info = _charge_on_approval(session, booking, owner, actor=actor, via="Telegram")
+            paid_info = charge_hot_booking_on_approval(session, booking, owner, actor=actor, via="Telegram")
         except HTTPException as _e:
             session.rollback()
             _answer_callback(callback_id, str(_e.detail)[:190], show_alert=True)
