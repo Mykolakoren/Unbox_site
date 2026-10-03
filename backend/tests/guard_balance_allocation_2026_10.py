@@ -933,6 +933,172 @@ console.log(JSON.stringify({
     assert out["hints"][1].startswith("к оплате 11 ₾ из 20 — часть уже покрыта балансом")
 
 
+# ── Одно правило покрытия в трёх местах (ревью регрессий 03.10) ────────
+
+def _js_set(src: str, name: str) -> set:
+    m = re.search(rf"const {name} = new Set(?:<string>)?\(\[(.*?)\]\)", src, re.S)
+    assert m, f"не нашёл {name}"
+    out = set()
+    for tok in (t.strip() for t in m.group(1).split(",")):
+        if tok in ("undefined", "null"):
+            out.add(None)
+        elif tok:
+            out.add(tok.strip("'\""))
+    return out
+
+
+def test_coverage_rule_constants_match():
+    """Какие брони считаются в «к оплате» — одинаково на сервере (раскладка, покрытие
+    несписанных) и на фронте (computeDueByBooking и applyAllocation)."""
+    due = _read("src/utils/dueAmounts.ts")
+    alloc = _read("src/utils/balanceAllocation.ts")
+    statuses_front = _js_set(due, "DUE_STATUSES")
+    assert statuses_front == set(BA.DUE_STATUSES) == _js_set(alloc, "SHOWN_STATUSES"), \
+        (statuses_front, BA.DUE_STATUSES)
+    money_front = _js_set(due, "MONEY_METHODS")
+    assert "b.paymentMethod !== 'subscription'" in due, "фронт перестал брать абонемент с доплатой"
+    assert money_front | {"subscription"} == set(BA.MONEY_METHODS), (money_front, BA.MONEY_METHODS)
+    body = _code("src/utils/dueAmounts.ts")
+    assert "if (b.status === 'completed' && b.paymentStatus === 'pending') continue;" in body
+    assert "if (price <= 0 || b.paymentStatus === 'waived') continue;" in body
+    assert "b.paymentStatus !== 'pending' && b.status !== 'pending_approval'" in body
+    src = _read("backend/app/services/balance_allocation.py")
+    assert 'if status == "completed" and b.payment_status == "pending":' in src
+    assert 'if float(b.final_price or 0) <= 0 or b.payment_status == "waived":' in src
+    assert 'charged = b.payment_status != "pending" and status != "pending_approval"' in src
+
+
+def test_coverage_cross_run_server_front():
+    """Покрытие несписанных броней плюсом баланса: сервер (due_kind + project_coverage —
+    сводка «Покроет» в карточке) и фронт (computeDueByBooking + applyAllocation — значки)
+    на одних и тех же случайных бронях: те же брони, суммы и партии."""
+    rng = random.Random(20261006)
+    cases = []
+    for n in range(300):
+        credits = [R(f"c{n}-{k}", (NOW_UTC - timedelta(days=rng.randint(1, 20), minutes=k)).isoformat(),
+                     float(rng.choice([5, 9, 12.5, 20, 40])), rng.choice(["topup", "weekly_rebate", "correction"]))
+                   for k in range(rng.randint(1, 3))]
+        bal = round(sum(r.delta for r in credits), 2)
+        res = allocate(credits, {}, balance=bal)
+        refs, front, used = [], [], set()
+        for k in range(rng.randint(1, 7)):
+            while True:
+                start = (NOW_TBS + timedelta(hours=rng.randint(-72, 24 * 10))).replace(minute=rng.choice([0, 30]))
+                if start not in used:
+                    used.add(start)
+                    break
+            status = rng.choices(["confirmed", "pending_approval", "cancelled", "completed"], weights=[70, 12, 10, 8])[0]
+            pay = rng.choices(["pending", "paid", "waived", None], weights=[70, 15, 8, 7])[0]
+            method = rng.choice(["balance", "balance", "bonus", "subscription", "cash", "", None])
+            price = float(rng.choice([0, 5, 10, 17.5, 20]))
+            ref = BookingRef(id=f"b{n}-{k}", day=start.date(), start_time=start.strftime("%H:%M"), duration=60,
+                             status=status, payment_status=pay, payment_method=method, final_price=price)
+            refs.append(ref)
+            fstatus = "completed" if status == "confirmed" and start + timedelta(minutes=60) < NOW_TBS else status
+            front.append({"id": ref.id, "userId": f"x{n}@demo.ge", "date": start.strftime("%Y-%m-%dT00:00:00"),
+                          "startTime": ref.start_time, "duration": 60, "status": fstatus, "paymentStatus": pay,
+                          "paymentMethod": method, "finalPrice": price})
+        cov = BA.project_coverage(res["batches"], [b for b in refs if BA.due_kind(b, NOW_TBS) == "pending"])
+        cases.append({"email": f"x{n}@demo.ge", "balance": bal, "bookings": front,
+                      "summary": {"userId": f"x{n}", "email": f"x{n}@demo.ge", "balance": bal, "consistent": True,
+                                  "batches": res["batches"], "debts": []},
+                      "server": {c["bookingId"]: [c["due"], c["covered"], [x["amount"] for x in c["sources"]]] for c in cov}})
+    out = _node("""
+const res = [];
+for (const c of data) {
+  const balanceOf = uid => (uid === c.email ? c.balance : null);
+  const neu = m.applyAllocation(m.computeDueByBooking(c.bookings, balanceOf), c.bookings, m.indexAllocation([c.summary]), balanceOf);
+  const o = {};
+  for (const [k, v] of neu) if (!v.charged) o[k] = [v.due, (v.coveredBy || []).reduce((s, p) => s + p.amount, 0), (v.coveredBy || []).map(p => p.amount)];
+  res.push(o);
+}
+console.log(JSON.stringify(res));
+""", cases)
+    if out is None:
+        return
+    checked = 0
+    for c, front_cov in zip(cases, out):
+        assert set(front_cov) == set(c["server"]), (c["summary"]["userId"], sorted(front_cov), sorted(c["server"]))
+        for bid, (due, covered, parts) in c["server"].items():
+            f_due, f_cov, f_parts = front_cov[bid]
+            assert abs(f_due - due) < 0.006 and abs(f_cov - covered) < 0.006, (bid, (due, covered), (f_due, f_cov))
+            assert [round(x, 2) for x in f_parts] == [round(x, 2) for x in parts], (bid, parts, f_parts)
+            checked += 1
+    assert checked > 300, checked
+    _PARITY_STATS["coverage"] = (len(cases), checked)
+
+
+def test_hidden_debts_and_today_screens():
+    """«Долги по броням вне списка» (риск 1): долг старой брони вне окна не теряется —
+    hiddenDebts его отдаёт, «Сегодня» на компьютере и телефоне показывает (только если есть)."""
+    bk = {"O": B("O", "2026-08-03", price=20), "N": B("N", "2026-10-04", price=10)}
+    rows = [_charge("cO", "2026-08-02T06:00:00", 20, "O"), _charge("cN", "2026-10-03T06:00:00", 10, "N"),
+            R("k1", "2026-10-03T08:00:00", -5, "correction", ref_type="user")]
+    res = allocate(rows, bk, balance=-35)
+    summary = {"userId": "id-h", "email": "h@demo.ge", "balance": -35, "consistent": True,
+               "batches": res["batches"], "debts": res["debts"], "unlinked": []}
+    win = [{"id": "N", "userId": "h@demo.ge", "date": "2026-10-04T00:00:00", "startTime": "10:00", "status": "completed",
+            "paymentStatus": "paid", "paymentMethod": "balance", "finalPrice": 10}]
+    out = _node("""
+const balanceOf = uid => (uid === 'h@demo.ge' || uid === 'id-h' ? -35 : null);
+const idx = m.indexAllocation([data.summary]);
+const due = m.applyAllocation(m.computeDueByBooking(data.win, balanceOf), data.win, idx, balanceOf);
+const h = m.hiddenDebts(due, data.win, idx, balanceOf);
+const stale = m.hiddenDebts(due, data.win, idx, () => -10);
+console.log(JSON.stringify({ shown: due.get('N').due, hidden: h.map(x => [x.userId, x.amount, x.debts.map(d => d.label)]), stale }));
+""", {"win": win, "summary": summary})
+    if out is not None:
+        assert out["shown"] == 10, out
+        assert out["hidden"] == [["id-h", 25, ["корректировка 03.10", "03.08 10:00 Каб. 2"]]], out["hidden"]
+        assert out["stale"] == [], "устаревшая сводка (баланс другой) не должна давать долгов вне списка"
+    for rel in ("src/pages/admin/Dashboard.tsx", "src/pages/mobile/admin/MobileAdminDashboard.tsx"):
+        code = _code(rel)
+        assert "hiddenDebts(dueMap, bookings, allocIndex," in code, f"{rel}: нет «Долги по броням вне списка»"
+        assert "Долги по броням вне списка:" in code and "data-hidden-debts" in code
+        assert "hidden.length > 0 &&" in code, f"{rel}: блок показывается и без долгов"
+
+
+def test_summary_skips_broken_client():
+    """Один «битый» клиент не роняет сводку в 500: он пропускается (в лог), остальные —
+    в ответе; экран для пропущенного считает «к оплате» по-старому."""
+    s = _db()
+    d = _seed(s)
+    orig = BA._summary_entry
+    broken = str(d["debt"].id)
+
+    def boom(u, data, now):
+        if str(u.id) == broken:
+            raise ValueError("битые данные")
+        return orig(u, data, now)
+
+    BA._summary_entry = boom
+    BA.logger.disabled = True  # ожидаемая ошибка — без трассировки в выводе сторожа
+    try:
+        res = BA.summary(s)
+    finally:
+        BA._summary_entry = orig
+        BA.logger.disabled = False
+    assert [c["email"] for c in res["clients"]] == ["plus@demo.ge"], res["clients"]
+
+
+def test_ui_no_flicker_and_phone_wrap():
+    led = _code("src/components/admin/UserBalanceLedger.tsx")
+    assert "if (loading && !data) {" in led, "лента снова мигает скелетоном при каждом перечитывании"
+    assert "const allocOk = !!alloc && alloc.consistent" in led and "allocOk ? allocationHeadline(alloc) : null" in led
+    hook = _code("src/hooks/useBalanceAllocation.ts")
+    assert "stale: !current && !!prev," in hook, "раскладка клиента пропадает, пока грузится новая"
+    card = _code("src/pages/mobile/admin/MobileAdminUserCard.tsx")
+    assert "allocOk ? allocationHeadline(alloc) : null" in card
+    for rel in ("src/pages/mobile/admin/MobileAdminBookings.tsx", "src/pages/mobile/admin/MobileAdminDashboard.tsx",
+                "src/pages/mobile/admin/MobileAdminUserCard.tsx"):
+        for m_ in re.finditer(r"<DueBadge\b[^>]*>", _code(rel)):
+            assert "whitespace-normal" in m_.group(0) and "max-w-[124px]" in m_.group(0), \
+                f"{rel}: «к оплате N ₾ из M» на телефоне не переносится — сжимает имя клиента"
+    util = _code("src/utils/balanceAllocation.ts")
+    assert "export const PENALTY_DEBT_ON_ACTIVE_BOOKINGS = false;" in util, \
+        "долг за штраф: по умолчанию — на отменённой брони, пока владелец не решил иначе"
+
+
 # ── Экраны подключены, значки по новому правилу ─────────────────────────
 
 DUE_SCREENS = {
@@ -1007,6 +1173,8 @@ if __name__ == "__main__":
         if "penalty" in s:
             print(f"  штрафы без возврата: клиентов {s['penalty'][0]}, броней с другой суммой {s['penalty'][1]} "
                   f"(у {s['penalty'][2]} клиентов, все со штрафом, только «меньше»)")
+        if "coverage" in s:
+            print(f"  покрытие сервер↔фронт: клиентов {s['coverage'][0]}, несписанных броней сверено {s['coverage'][1]}, расхождений 0")
         if "window" in s:
             print(f"  окно 5000: клиентов с обрезанным списком {s['window'][0]}, у {s['window'][1]} прежний расчёт терял долг")
     print("СТОРОЖ оплачено скидкой 2026-10: OK" if not failures else f"СТОРОЖ оплачено скидкой 2026-10 УПАЛ ({failures}) — деплой НЕ выкатывать")
