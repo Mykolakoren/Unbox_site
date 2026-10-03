@@ -153,7 +153,10 @@ def booking_label(b: Optional[BookingRef], fallback: str = "бронь") -> str:
     if b is None:
         return fallback
     room = short_room(b.resource_name, b.resource_id)
-    return f"{_ddmm(b.day)} {b.start_time or '00:00'}" + (f" {room}" if room else "")
+    label = f"{_ddmm(b.day)} {b.start_time or '00:00'}" + (f" {room}" if room else "")
+    # Отменённая бронь со штрафом (списание не вернули) — долг есть, а в шахматке
+    # её нет: подписываем, чтобы не искали.
+    return f"{label}, отменена" if (b.status or "") == "cancelled" else label
 
 
 def booking_public(b: Optional[BookingRef]) -> Optional[dict]:
