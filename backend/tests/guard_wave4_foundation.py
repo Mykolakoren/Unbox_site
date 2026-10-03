@@ -411,7 +411,8 @@ console.log(JSON.stringify({{ debt96: out(-96), debt20: out(-20), plus30: out(30
     s = res["debt20"]
     assert s["f1"]["due"] == 20 and s["p2"]["due"] == 0 and s["p1"]["due"] == 0, s
     assert sum(v["due"] for v in s.values() if v["charged"]) == 20
-    assert res["label"] == "списано с баланса"
+    # 03.10 (решение владельца): списанная без долга — «оплачено» (было «списано с баланса»).
+    assert res["label"] == "оплачено"
     # Плюс на балансе покрывает ближайшую не списанную, прошедшие — 0.
     p = res["plus30"]
     assert p["f2"]["due"] == 30 and p["p1"]["due"] == 0 and p["f1"]["due"] == 0, p
