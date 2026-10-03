@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 
 from app.models.booking import Booking
 from app.models.user import User
-from app.services.pricing import PricingService
+from app.services.pricing import PricingService, booking_extras_money
 from app.services.timeline import timeline_service
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,13 @@ def recompute_chain_and_settle(
         )
 
         old_final = float(b.final_price or 0.0)
-        new_final = float(new_quote.final_price)
+        # Допы (песочница, проектор, кушетка, кофе) — не аренда: движок про них
+        # не знает, а они уже входят в цену брони. Ревизия 03.10: без этого бронь
+        # 25 ₾ с песочницей после пересчёта становилась 20 ₾ (и 5 ₾ уходили
+        # клиенту назад). Скидка «часов подряд» на допы не действует — как при
+        # создании (допы прибавляются поверх цены аренды). Допы, оплаченные на
+        # месте наличными, в цену не входят — их booking_extras_money не берёт.
+        new_final = round(float(new_quote.final_price) + booking_extras_money(b), 2)
         delta = round(new_final - old_final, 2)
         if abs(delta) < 0.01:
             continue

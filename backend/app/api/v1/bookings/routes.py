@@ -4343,6 +4343,37 @@ def reschedule_booking(
     booking_owner = None
     price_recalculated = False
 
+    # Допы брони (ревизия 03.10): движок цены про них не знает, поэтому пересчёт
+    # обязан вернуть их в цену сам — раньше перенос делал бронь 25 ₾ с
+    # песочницей 20 ₾ и возвращал 5 ₾. Сначала решаем, какие допы новый кабинет
+    # примет (кушетку в капсулу, песочницу туда, где её нет, — нельзя), и
+    # сколько ₾ допов реально «сидит» в цене (оплаченные наличными — не в ней).
+    from app.services.pricing import PricingService, booking_extras_money
+    extras_money = booking_extras_money(booking)
+    kept_extras: list[str] = list(booking.extras or [])
+    dropped_extras: list[str] = []
+    if booking.extras and new_resource != booking.resource_id:
+        try:
+            from app.models.resource import Resource as _ResModel
+            new_res_obj = session.get(_ResModel, new_resource)
+            kept_extras = []
+            for eid in (booking.extras or []):
+                ok = True
+                if new_res_obj:
+                    if new_res_obj.type == "capsule" and eid != "coffee_meama":
+                        ok = False
+                    elif eid in ("sandbox", "projector", "couch") and eid not in (new_res_obj.services or []):
+                        ok = False
+                (kept_extras if ok else dropped_extras).append(eid)
+        except Exception as e:
+            logger.warning(f"[Reschedule] extras-filter failed: {e}")
+            kept_extras, dropped_extras = list(booking.extras or []), []
+    # Снятые допы уходят из цены (и деньги за них — назад), но не больше, чем
+    # их реально в цене.
+    dropped_money = round(min(PricingService.calculate_extras_price(dropped_extras), extras_money), 2)
+    kept_extras_money = round(extras_money - dropped_money, 2)
+    dropped_settled = False
+
     if room_changed or duration_changed or time_changed or date_changed:
         # Бронь со снятым штрафом: деньги по ней уже улажены (возвращены или
         # не списывались), а final_price остался снимком «до waive». Пересчёт
@@ -4427,6 +4458,10 @@ def reschedule_booking(
             new_quote.final_price = _bonus_uncovered_price(
                 booking, new_quote.final_price, new_duration,
             )
+            # Допы, которые едут с бронью, остаются в цене (снятые — уходят:
+            # их возврат идёт в разнице цены ниже, один раз).
+            new_quote.final_price = round(float(new_quote.final_price or 0) + kept_extras_money, 2)
+            dropped_settled = True
 
             new_price = new_quote.final_price
             price_diff = new_price - old_price
@@ -4474,36 +4509,23 @@ def reschedule_booking(
             booking.discount_amount = new_quote.discount_amount
             booking.discount_percent = new_quote.discount_percent
 
-    # Drop extras the NEW room can't host — e.g. couch when moving from a
-    # cabinet to a capsule, sandbox when moving to a room without one.
-    # Refund the dropped extras price by re-adjusting balance, so the
-    # booking's stored final_price stays consistent. Owner 2026-05-29.
-    dropped_extras: list[str] = []
-    if booking.extras and room_changed:
-        try:
-            from app.models.resource import Resource as _ResModel
-            new_res_obj = session.get(_ResModel, new_resource)
-            kept: list[str] = []
-            for eid in (booking.extras or []):
-                ok = True
-                if new_res_obj:
-                    if new_res_obj.type == "capsule" and eid != "coffee_meama":
-                        ok = False
-                    elif eid in ("sandbox", "projector", "couch") and eid not in (new_res_obj.services or []):
-                        ok = False
-                (kept if ok else dropped_extras).append(eid)
-            if dropped_extras:
-                refund = PricingService.calculate_extras_price(dropped_extras)
-                booking.extras = kept
-                # Adjust price: subtract dropped-extras cost from final_price
-                booking.final_price = round(float(booking.final_price or 0) - refund, 2)
-                # Refund the same amount to user's balance if booking was paid
-                if booking.payment_status == "paid" and refund > 0 and booking_owner:
-                    wallet.credit(session, booking_owner, refund, reason="extras_refund",
-                                  description="Возврат за допы, недоступные в новом кабинете",
-                                  ref_type="booking", ref_id=str(booking.id), actor=current_user)
-        except Exception as e:
-            logger.warning(f"[Reschedule] extras-filter failed: {e}")
+    # Допы, которые новый кабинет не принимает (кушетка в капсуле, песочница
+    # там, где её нет), снимаются с брони и возвращаются (владелец 2026-05-29).
+    # У денежной брони их возврат уже сидит в разнице цены выше (пересчёт без
+    # них) — второй раз не возвращаем (ревизия 03.10: было дважды, 25 ₾ →
+    # 15 ₾ и +10 ₾). Иначе (абонемент, бронь без пересчёта) — вычитаем из цены и
+    # возвращаем деньги, если бронь уже оплачена.
+    if dropped_extras:
+        booking.extras = kept_extras
+        if not dropped_settled and dropped_money >= 0.01:
+            booking.final_price = round(float(booking.final_price or 0) - dropped_money, 2)
+            _drop_owner = booking_owner or _resolve_booking_owner(session, booking)
+            if booking.payment_status == "paid" and _drop_owner:
+                wallet.credit(session, _drop_owner, dropped_money, reason="extras_refund",
+                              description="Возврат за допы, недоступные в новом кабинете",
+                              ref_type="booking", ref_id=str(booking.id), actor=current_user)
+                if (booking.payment_method or "").lower() != "subscription" and booking.charge_amount is not None:
+                    booking.charge_amount = round(float(booking.charge_amount) - dropped_money, 2)
 
     booking.date = new_date
     booking.start_time = data.new_start_time
