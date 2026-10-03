@@ -76,11 +76,17 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     const balance = client?.balance ?? null;
     const debt = balance !== null && balance < 0 ? -balance : 0;
     const price = booking.finalPrice ?? 0;
-    const suggested = debt > 0 ? debt : (booking.paymentStatus === 'pending' ? price : 0);
+    // 03.10: ещё не списанная бронь, часть которой уже покрывает плюс на балансе
+    // (скидка за прошлую неделю, предоплата), — подставляем только разницу.
+    const partlyCovered = !!due && !due.charged && due.due > 0 && due.due < price;
+    const pendingAmount = partlyCovered ? due!.due : price;
+    const suggested = debt > 0 ? debt : (booking.paymentStatus === 'pending' ? pendingAmount : 0);
     const suggestedHint = debt > 0
         ? `Подставлен долг клиента: ${formatGel(debt)}`
         : booking.paymentStatus === 'pending' && price > 0
-            ? `Подставлена цена брони: ${formatGel(price)} (спишется с баланса за сутки до начала)`
+            ? (partlyCovered
+                ? `Подставлена разница: ${formatGel(pendingAmount)} из ${formatGel(price)} — остальное уже на балансе клиента (спишется за сутки до начала)`
+                : `Подставлена цена брони: ${formatGel(price)} (спишется с баланса за сутки до начала)`)
             : undefined;
 
     // Долга по этой брони нет («оплачено» / «покрыто балансом») — кнопка рядом с
