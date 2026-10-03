@@ -1493,6 +1493,124 @@ def test_r2_5_series_cancel_logs_share_for_waive():
     assert ok and status == "waived_pending"
 
 
+@_scenario
+def test_r2_6_trim_keeps_sandbox_in_first_remnant():
+    """S12: денежная 12:00–15:00 + песочница = 51 + 5 = 56 ₾. Вырезали 13–14:
+    остатки 20 + 5 (песочница — у первого) и 20 ₾, назад 11 ₾ (было 16 ₾ —
+    песочница уезжала в возврат, а сама оставалась в брони). S3: по абонементу
+    14:00–17:00 + песочница (5 ₾ снято): вырезка 16–17 → цена 5 ₾ остаётся, назад
+    только час."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=200.0)
+    b = _book(s, admin, u, start="12:00", minutes=180, method="balance", extras=["sandbox"])
+    assert (float(b.final_price), _bal(s, u)) == (56.0, 144.0)
+    _trim(s, admin, b, "13:00", "14:00")
+    rows = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda r: r.start_time)
+    assert [(r.start_time, float(r.final_price), r.extras) for r in rows] == \
+        [("12:00", 25.0, ["sandbox"]), ("14:00", 20.0, [])], [(r.start_time, r.final_price, r.extras) for r in rows]
+    assert _bal(s, u) == 155.0, _bal(s, u)
+    for r in rows:
+        _cancel(s, admin, r)
+    assert _bal(s, u) == 200.0
+    _ledger_ok(s, u, 200.0)
+
+    v = _client(s, _sub("WARM_START"))
+    c = _book(s, admin, v, start="14:00", minutes=180, extras=["sandbox"])
+    assert (_bal(s, v), _rem(s, v)) == (95.0, 7.0)
+    _trim(s, admin, c, "16:00", "17:00")
+    c = s.get(Booking, c.id)
+    assert (float(c.final_price), _bal(s, v), _rem(s, v)) == (5.0, 95.0, 8.0), (c.final_price, _bal(s, v), _rem(s, v))
+    _cancel(s, admin, c)
+    assert (_bal(s, v), _rem(s, v)) == (100.0, 10.0)
+
+
+@_scenario
+def test_r2_6_convert_to_subscription_keeps_sandbox_money():
+    """S4: денежная 14:00 + песочница = 25 ₾, клиент купил абонемент, «На
+    абонемент»: −1 ч, назад 20 ₾ (аренда), цена брони 5 ₾ (песочница). Было:
+    назад 25 ₾, цена 0 ₾ — песочница бесплатно. Отмена: +5 ₾ и +1 ч."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", method="balance", extras=["sandbox"])
+    uu = s.get(User, u.id)
+    uu.subscription = _sub("WARM_START")
+    s.add(uu)
+    s.commit()
+    routes.convert_booking_to_subscription(booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
+    b = s.get(Booking, b.id)
+    assert (b.payment_method, float(b.final_price), _bal(s, u), _rem(s, u)) == ("subscription", 5.0, 95.0, 9.0), \
+        (b.payment_method, b.final_price, _bal(s, u), _rem(s, u))
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r2_6_series_extension_does_not_copy_extras():
+    """S7: у шаблона серии песочница — продление серии её не копирует (цена новых
+    дат без допов: песочница ехала бы бесплатно каждую неделю)."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    rows = _series(s, admin, u, method="subscription", start="20:00", days=3, occurrences=2)
+    for r in rows:
+        r.extras = ["sandbox"]
+        s.add(r)
+    s.commit()
+    routes.extend_recurring_series(group_id=rows[0].recurring_group_id, payload={"add_occurrences": 2},
+                                   session=s, current_user=admin)
+    s.commit()
+    new = s.exec(select(Booking).where(Booking.recurring_group_id == rows[0].recurring_group_id)
+                 .order_by(Booking.date)).all()[2:]
+    assert [(r.extras, float(r.final_price)) for r in new] == [([], 5.0), ([], 5.0)], \
+        [(r.extras, r.final_price) for r in new]
+
+
+@_scenario
+def test_r2_6_extend_waived_refused():
+    """Продление брони со снятым штрафом: 409 (раньше денежная списывала доплату,
+    а отмена waived-брони её не возвращала)."""
+    from app.services.billing_defer import waive_charge
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", method="balance")
+    waive_charge(s, s.get(Booking, b.id), reason="тест", by_user=admin)
+    s.commit()
+    assert _bal(s, u) == 100.0
+    from app.api.v1.bookings import routes
+    out = H._call(routes.extend_booking, booking_id=str(b.id), payload=routes.ExtendRequest(extra_minutes=30),
+                  session=s, current_user=admin)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 409, out
+    assert _bal(s, u) == 100.0
+
+
+@_scenario
+def test_r2_6_peak_notice_only_when_charged():
+    """Уведомление «Доплата за пиковые часы … списана со счёта» — только если
+    доплату сняли сейчас: у горячей (ждёт админа) и у брони заранее — нет."""
+    from app.models.notification import Notification
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+
+    def notices():
+        s.expire_all()
+        return len(s.exec(select(Notification).where(Notification.recipient_id == str(u.id),
+                                                     Notification.type == "peak_hours_debt")).all())
+    _book(s, u, u, start="20:00")                 # горячая — ждёт одобрения
+    _book(s, admin, u, days=3, start="20:00")     # заранее — спишет крон
+    assert notices() == 0, "уведомление о списании, которого не было"
+    _book(s, admin, u, start="21:00", resource="room_2")  # сейчас и сразу списано
+    assert notices() == 1
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

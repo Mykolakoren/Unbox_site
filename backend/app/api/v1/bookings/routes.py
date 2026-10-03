@@ -1892,8 +1892,12 @@ def create_booking(
             except Exception:
                 logger.exception("[consecutive] recompute on create failed")
 
-        # Peak hours subscription debt notification
-        if peak_debt > 0 and booking_in.payment_method == "subscription":
+        # Peak hours subscription debt notification — только если доплату правда
+        # списали сейчас (ревизия 03.10): у горячей брони она откатывается до
+        # одобрения, у брони заранее её снимет крон за сутки — писать «списана со
+        # счёта» в этих случаях неправда.
+        if (peak_debt > 0 and booking_in.payment_method == "subscription"
+                and not defer_charge_single and booking.status == "confirmed"):
             try:
                 from app.models.notification import Notification
                 resource_name = booking_in.resource_id
@@ -3609,7 +3613,11 @@ def extend_recurring_series(
             charged_at=None,
             charge_amount=None,
             format=template.format,
-            extras=template.extras or [],
+            # Допы шаблона НЕ копируем (ревизия 03.10): цена новых дат считается
+            # движком без допов, и скопированная песочница ехала бесплатно на
+            # каждую неделю. Как create_recurring_booking — серия без допов;
+            # нужен доп на конкретную дату — /add-extras.
+            extras=[],
             user_id=template.user_id,
             user_uuid=template.user_uuid,
             crm_client_id=template.crm_client_id,
@@ -4898,15 +4906,29 @@ def trim_booking(
     # пропорциональная пиковая надбавка — как в сокращении (shorten_booking).
     if (booking.payment_method or "").lower() == "subscription":
         _orig_h = float(booking.hours_deducted if booking.hours_deducted is not None else (booking.duration / 60))
-        for _q, _dur in ((leftQuote, left), (rightQuote, right)):
+        for _q, _dur, _st in ((leftQuote, left, bStart), (rightQuote, right, cTo)):
             if _q is not None and _dur > 0 and _q.applied_rule != "SUBSCRIPTION":
                 _ratio = _dur / booking.duration
                 _q.applied_rule = "SUBSCRIPTION"
                 _q.hours_deducted = round(_orig_h * _ratio, 4)
                 _q.extra_hours_deducted = 0.0
-                _q.final_price = round(float(booking.final_price or 0) * _ratio, 2)
                 _q.discount_amount = 0.0
                 _q.discount_percent = 0
+            if _q is not None and _dur > 0:
+                # Денежная часть остатка — его пиковая надбавка, точно по времени
+                # (ревизия 03.10: раньше — доля цены, куда попадали и допы).
+                _q.final_price = PricingService.subscription_peak_money(
+                    booking.date.replace(hour=_st // 60, minute=_st % 60, second=0, microsecond=0), _dur)
+
+    # Допы (песочница, кофе…) остаются у брони — в цене первого остатка (той
+    # строки, что остаётся исходной бронью), как при разделении (split).
+    # Ревизия 03.10: раньше вырезка возвращала их деньги, а доп оставался в
+    # брони бесплатно.
+    from app.services.pricing import booking_extras_money
+    _extras_money = booking_extras_money(booking)
+    _kept_q = leftQuote if left > 0 else rightQuote
+    if _kept_q is not None and _extras_money >= 0.01:
+        _kept_q.final_price = round(float(_kept_q.final_price or 0) + _extras_money, 2)
 
     # ── Money ──
     pending = booking.payment_status == "pending"
@@ -6023,6 +6045,17 @@ def extend_booking(
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Продлить можно только подтверждённую бронь")
 
+    # Штраф снят (waived): деньги по брони улажены, а отмена waived-брони ничего
+    # не возвращает — продление списало бы деньги/часы, которые потом не
+    # вернуть (ревизия 03.10). Тот же гейт, что у «Цены», формата, сокращения
+    # и переноса.
+    if booking.payment_status == "waived":
+        raise HTTPException(
+            status_code=409,
+            detail="У этой брони снят штраф — продление поменяло бы оплату. "
+                   "Снимите waiver или создайте отдельную бронь на добавленное время.",
+        )
+
     if _is_past(booking):
         # 2026-06-30 owner: клиент часто занимается дольше заказанного. Админ
         # может добить время по ФАКТУ на СЕГОДНЯШНЕЙ броне, даже если её слот
@@ -6389,7 +6422,11 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         booking.charge_amount if booking.charge_amount is not None
         else (booking.final_price or 0)
     )
-    peak_left = round(float(quote.final_price or 0), 2)  # обычно 0, иногда пик
+    # peak_left — денежная часть, что остаётся у брони по абонементу: пиковая
+    # надбавка + допы. Ревизия 03.10: допы (песочница и т.п.) раньше уходили
+    # в возврат целиком, а доп оставался в брони бесплатно — их деньги остаются.
+    from app.services.pricing import booking_extras_money as _extras_money
+    peak_left = round(float(quote.final_price or 0) + _extras_money(booking), 2)
     refund = round(old_charge - peak_left, 2)
     refunded = 0.0
     if booking.payment_status not in ("pending", "waived") and refund > 0:
