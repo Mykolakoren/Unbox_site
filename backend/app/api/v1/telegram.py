@@ -1600,9 +1600,17 @@ def _book_step_confirm(
             duration_minutes=mins,
             format_type=fmt,
         )
-        # Абонемент на паузе (владелец 03.10): если бронь при снятой паузе
-        # пойдёт часами, бронь снимет паузу — показываем цену как после
-        # снятия. Примерка ничего не пишет (пул подставлен на время расчёта).
+    except Exception as e:
+        logger.error("[tg:book] price calc failed: %r", e, exc_info=True)
+        _answer_callback(callback_id, "Не удалось посчитать цену", show_alert=True)
+        return {"ok": True}
+
+    # Абонемент на паузе (владелец 03.10): если бронь при снятой паузе
+    # пойдёт часами, бронь снимет паузу — показываем цену как после
+    # снятия. Примерка ничего не пишет (пул подставлен на время расчёта).
+    # Свой try (ревизия 03.10): сбой примерки не должен давать «Не удалось
+    # посчитать цену» ВСЕМ клиентам бота — без неё предпросмотр как раньше.
+    try:
         from app.api.v1.bookings.routes import _pause_lift_trial, _pool_swapped
         pause_trial = _pause_lift_trial(session, pricing, user, "balance",
                                         [(resource.id, start_dt, mins, fmt)])
@@ -1616,9 +1624,11 @@ def _book_step_confirm(
                     format_type=fmt,
                 )
     except Exception as e:
-        logger.error("[tg:book] price calc failed: %r", e, exc_info=True)
-        _answer_callback(callback_id, "Не удалось посчитать цену", show_alert=True)
-        return {"ok": True}
+        logger.error("[tg:book] pause-lift trial failed, preview without it: %r", e, exc_info=True)
+        pause_trial = None
+        from sqlalchemy.exc import SQLAlchemyError
+        if isinstance(e, SQLAlchemyError):
+            session.rollback()  # шаг бота до этого ничего не пишет — откатывать нечего, кроме сбойной транзакции
 
     # Re-check availability defensively
     from app.services.booking import check_availability
@@ -2028,7 +2038,9 @@ def _handle_hot_booking_callback(
                             f"📅 {booking.date.strftime('%d.%m')} · {booking.start_time}\n"
                             f"📍 {(res.name if res else booking.resource_id)}"
                             f"{(' · ' + loc.name) if loc else ''}\n\n"
-                            f"Деньги списаны с баланса."
+                            # Ревизия 03.10: бронь по абонементу оплачена часами, а не балансом.
+                            + ("Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"
+                               else "Деньги списаны с баланса.")
                         ),
                         parse_mode="HTML",
                     )

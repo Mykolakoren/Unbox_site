@@ -257,7 +257,7 @@ def test_pause_30_days_booking_after_10_lifts_and_keeps_20():
     assert e.event_type == "subscription_freeze" and e.target_type == "user"
     assert (m["fact_days"], m["extended_days"], m["freeze_days_left"]) == (10.0, 10.0, 20.0), m
     assert (m["booking_date"], m["booking_time"], m["booking_resource"]) == ("2026-10-08", "12:00", "room_1"), m
-    assert e.description == ("Пауза снята: клиент забронировал 08.10 12:00, Кабинет 1. "
+    assert e.description == ("Пауза снята новой бронью: 08.10 12:00, Кабинет 1. "
                              "Срок +10 дн., осталось дней паузы 20"), e.description
     assert str(e.actor_id) == str(u.id) and e.actor_req_role == u.role, "актор — не тот, кто бронировал"
 
@@ -271,7 +271,7 @@ def test_pause_30_days_booking_after_10_lifts_and_keeps_20():
     # Клиенту — одно сообщение в Telegram, после коммита (фоновая задача).
     with _TgCapture() as tg:
         assert _run_pause_tasks(bt) == 1
-    assert tg.sent == [("777", "Ваш абонемент снова активен: пауза снята, потому что вы забронировали "
+    assert tg.sent == [("777", "Ваш абонемент снова активен: пауза снята, потому что на вас забронировано "
                                "08.10 12:00. Неиспользованные дни паузы (20) сохранились — их можно "
                                "взять позже через администратора.")], tg.sent
 
@@ -555,7 +555,7 @@ def test_bot_preview_and_confirm_mention_pause():
     finally:
         tgmod._edit, tgmod._answer_callback = saved
     assert "Бронь подтверждена" in edits[-1] and "Списано с абонемента." in edits[-1], edits[-1]
-    assert ("Ваш абонемент снова активен: пауза снята, потому что вы забронировали 07.10 12:00. "
+    assert ("Ваш абонемент снова активен: пауза снята, потому что на вас забронировано 07.10 12:00. "
             "Неиспользованные дни паузы (20) сохранились") in edits[-1], edits[-1]
     assert not _frozen(s, u) and len(_events(s, u)) == 1
     assert not tg.sent, "бот отправил второе сообщение вместо ответа в чате"
@@ -604,6 +604,32 @@ def test_admin_pause_button_explicit_action_no_silent_refreeze():
         and "toggleSubscriptionFreeze(user.email, days, action)" in ud, "карточка клиента не шлёт action"
     card = _read("src/components/SubscriptionCard.tsx")
     assert "sub.isFrozen ? 'unfreeze' : 'freeze'" in card, "SubscriptionCard не шлёт action"
+
+
+def test_review_followups_03_10():
+    """Доделки по ревизии 03.10.
+    1) Бот: примерка паузы в СВОЁМ try — её сбой не даёт «Не удалось посчитать
+       цену» всем клиентам; основной расчёт цены — отдельно и раньше.
+    2) Одобрение срочной брони по абонементу: клиенту «Списаны часы абонемента»,
+       а не «Деньги списаны с баланса» (сайт и Telegram).
+    3) Карточка абонемента после 409 подтягивает свежие данные.
+    4) После своей брони, снявшей паузу, — тост клиенту (одиночная и корзина)."""
+    tg = _read("backend/app/api/v1/telegram.py")
+    i = tg.index("def _book_step_confirm(")
+    body = tg[i:tg.index("\ndef ", i + 10)]
+    calc_fail = body.index("Не удалось посчитать цену")
+    trial = body.index("_pause_lift_trial(")
+    assert calc_fail < trial, "примерка паузы снова внутри try основного расчёта цены"
+    assert "pause-lift trial failed, preview without it" in body and "pause_trial = None" in body[trial:]
+    for path in ("backend/app/api/v1/bookings/routes.py", "backend/app/api/v1/telegram.py"):
+        src = _read(path)
+        assert '"Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"' in src, \
+            f"{path}: одобрение брони по абонементу снова пишет «Деньги списаны с баланса»"
+    card = _read("src/components/SubscriptionCard.tsx")
+    assert "status === 409" in card and "fetchCurrentUser()" in card, "карточка абонемента не обновляется после 409"
+    sl = _read("src/store/slices/createBookingSlice.ts")
+    assert sl.count("toast.success(PAUSE_LIFTED_TOAST)") == 2, "нет тоста о снятой паузе после брони"
+    assert "!(bookingData as any).targetUserId && isFrozenSub(currentUser)" in sl, "тост — только для своей брони"
 
 
 ROUTES = "backend/app/api/v1/bookings/routes.py"
@@ -692,10 +718,10 @@ def test_tg_message_text_and_no_crash():
     from app.api.v1.bookings import routes
     info = {"booking_when": "05.10 14:00", "freeze_days_left": 6.0}
     assert routes.pause_lift_client_text(info) == (
-        "Ваш абонемент снова активен: пауза снята, потому что вы забронировали 05.10 14:00. "
+        "Ваш абонемент снова активен: пауза снята, потому что на вас забронировано 05.10 14:00. "
         "Неиспользованные дни паузы (6) сохранились — их можно взять позже через администратора.")
     assert routes.pause_lift_client_text({"booking_when": "05.10 14:00", "freeze_days_left": 0}) == \
-        "Ваш абонемент снова активен: пауза снята, потому что вы забронировали 05.10 14:00."
+        "Ваш абонемент снова активен: пауза снята, потому что на вас забронировано 05.10 14:00."
     from app.services.telegram import telegram_service
     saved = telegram_service.send_message
 

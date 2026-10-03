@@ -1177,7 +1177,7 @@ def _lift_pause_for_booking(
         target_id=str(locked.id),
         target_type="user",
         event_type="subscription_freeze",
-        description=(f"Пауза снята: клиент забронировал {when}, {resource_name}. "
+        description=(f"Пауза снята новой бронью: {when}, {resource_name}. "
                      f"Срок +{_days_label(extend)} дн., осталось дней паузы {_days_label(days_left)}"),
         metadata={"action": "AutoUnfreezeOnBooking", **info},
         commit=False,
@@ -1188,7 +1188,7 @@ def _lift_pause_for_booking(
 
 def pause_lift_client_text(info: dict) -> str:
     """Сообщение клиенту о снятии паузы (Telegram)."""
-    text = (f"Ваш абонемент снова активен: пауза снята, потому что вы забронировали "
+    text = (f"Ваш абонемент снова активен: пауза снята, потому что на вас забронировано "
             f"{info.get('booking_when') or ''}.")
     try:
         left = float(info.get("freeze_days_left") or 0)
@@ -6717,7 +6717,9 @@ def approve_booking(
                         f"✅ <b>Срочная бронь подтверждена</b>\n\n"
                         f"📅 {_date_str} · {booking.start_time}\n"
                         f"📍 {_res_name}{_loc_line}\n\n"
-                        f"Деньги списаны с баланса."
+                        # Ревизия 03.10: бронь по абонементу оплачена часами, а не балансом.
+                        + ("Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"
+                           else "Деньги списаны с баланса.")
                     ),
                     parse_mode="HTML",
                 )

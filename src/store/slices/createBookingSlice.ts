@@ -3,6 +3,12 @@ import { toast } from 'sonner';
 import type { UserStore, BookingSlice, BookingHistoryItem } from '../types';
 import { bookingsApi } from '../../api/bookings';
 
+// 03.10 (решение владельца): бронь клиента, чей абонемент на паузе, снимает
+// паузу, если пошла часами. Мастер предупреждает заранее, но бронь создаётся и
+// из других мест (CRM, «Мои брони», телефон) — говорим клиенту по факту.
+const PAUSE_LIFTED_TOAST = 'Пауза абонемента снята — неиспользованные дни паузы сохранились';
+const isFrozenSub = (user: any): boolean => !!user?.subscription?.isFrozen;
+
 // Номер последнего запуска fetchBookings и номер последнего ПРИМЕНЁННОГО
 // ответа. На старте App.tsx и экран зовут fetchBookings одновременно — без
 // этого запоздавший старый ответ (например, упавший) перетирал свежий.
@@ -109,6 +115,8 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         const currentUser = state.currentUser;
         if (!currentUser) return null;
 
+        // Своя бронь (не «за клиента»): была ли пауза до брони.
+        const wasFrozen = !(bookingData as any).targetUserId && isFrozenSub(currentUser);
         try {
             const newBooking = await bookingsApi.createBooking({
                 ...bookingData,
@@ -120,6 +128,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             // Fetch updated user to reflect balance/subscription changes from backend
             await get().fetchCurrentUser();
+            if (wasFrozen && !isFrozenSub(get().currentUser)) toast.success(PAUSE_LIFTED_TOAST);
 
             return newBooking;
 
@@ -145,6 +154,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             return;
         }
         // Multi-slot batch path
+        const wasFrozen = !(bookingsData[0] as any).targetUserId && isFrozenSub(get().currentUser);
         try {
             const first = bookingsData[0] as any;
             await bookingsApi.createMultiSlotBooking({
@@ -162,6 +172,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             });
             // Refetch state so store matches server truth
             await get().fetchCurrentUser();
+            if (wasFrozen && !isFrozenSub(get().currentUser)) toast.success(PAUSE_LIFTED_TOAST);
             const fetchAllBookings = (get() as any).fetchAllBookings;
             if (typeof fetchAllBookings === 'function') {
                 await fetchAllBookings();

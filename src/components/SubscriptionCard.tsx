@@ -165,7 +165,11 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                             disabled={!canFreeze && !sub.isFrozen}
                             icon={<Snowflake size={16} aria-hidden="true" />}
                             onClick={() => toggleSubscriptionFreeze(user.email, undefined, sub.isFrozen ? 'unfreeze' : 'freeze')
-                                .catch((err: unknown) => toastApiError(err, 'Не удалось изменить заморозку'))}
+                                .catch((err: any) => {
+                                    toastApiError(err, 'Не удалось изменить заморозку');
+                                    // 409 — пауза уже в другом состоянии (её сняла бронь): подтянуть свежие данные.
+                                    if (err?.response?.status === 409) void useUserStore.getState().fetchCurrentUser();
+                                })}
                         >
                             {sub.isFrozen ? 'Снять паузу' : `Поставить на паузу на ${fmtFreezeDays(freeze.left)}`}
                         </Button>
