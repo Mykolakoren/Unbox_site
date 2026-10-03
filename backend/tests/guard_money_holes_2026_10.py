@@ -1977,6 +1977,42 @@ def test_r3_8_waive_client_text_after_cancel():
     assert "Вернули ещё" in texts[1], texts[1]
 
 
+@_scenario
+def test_r3_4_refusal_texts_point_to_real_actions():
+    """Тексты отказов ведут на существующее действие: админу — «Отмените её
+    (деньги вернутся полностью) и создайте новую»; клиенту меньше чем за сутки (сам
+    он бронь не отменит) — «Напишите администратору». Никаких «снимите waiver»."""
+    from app.api.v1.bookings import routes
+    src = _read("backend/app/api/v1/bookings/routes.py")
+    for bad in ("Снимите waiver", "восстановите оплату", "отмените снятие", "_MONEY_ROW_DETAIL"):
+        assert bad not in src, f"в отказах снова «{bad}»"
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=2.0, used_hours=8.0))
+    b1 = _book(s, u, u, start="16:00", minutes=60)
+    b2 = _book(s, u, u, start="17:00", minutes=90)
+    _approve(s, admin, b1)
+    b2 = _approve(s, admin, b2)  # часов нет → в деньги, сегодня (< 24 ч)
+    assert routes._subscription_money_row(b2)
+    out_admin = _shorten(s, admin, b2, 30)
+    s.rollback()
+    out_client = _shorten(s, s.get(User, u.id), b2, 30)
+    s.rollback()
+    assert out_admin.get("http") == out_client.get("http") == 409, (out_admin, out_client)
+    from fastapi import HTTPException
+
+    def _detail(actor):
+        try:
+            routes.shorten_booking(booking_id=str(b2.id), payload=routes.ShortenRequest(remove_minutes=30),
+                                   session=s, current_user=actor)
+        except HTTPException as e:
+            s.rollback()
+            return e.detail
+        raise AssertionError("сокращение брони в деньгах прошло")
+    assert "Отмените её (деньги вернутся полностью) и создайте новую." in _detail(admin)
+    assert _detail(s.get(User, u.id)).endswith("Напишите администратору.")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

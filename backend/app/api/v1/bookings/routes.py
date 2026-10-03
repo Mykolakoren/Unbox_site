@@ -695,10 +695,29 @@ def _extend_subscription_booking(session: Session, booking: Booking, owner: User
     return info
 
 
-_MONEY_ROW_DETAIL = (
-    "Бронь по абонементу ушла в деньги (часов абонемента не хватило) — {what}. "
-    "Отмените её (деньги вернутся полностью) и создайте новую."
-)
+def _refusal_next_step(booking: Booking, actor: Optional[User], *, money_back: bool) -> str:
+    """Что делать после отказа правки (ревизия 03.10: тексты «снимите waiver»
+    вели на несуществующее действие). Клиент меньше чем за сутки до начала бронь
+    сам не отменит — ему «напишите администратору»; иначе — отменить и создать
+    новую."""
+    if (actor is not None and actor.role not in ADMIN_ROLES and not _is_past(booking)
+            and _booking_hours_until_start(booking) < 24):
+        return "Напишите администратору."
+    return ("Отмените её (деньги вернутся полностью) и создайте новую." if money_back
+            else "Отмените бронь и создайте новую.")
+
+
+def _money_row_refusal(booking: Booking, actor: Optional[User], what: str) -> str:
+    """409 для брони по абонементу, ушедшей в деньги (см. _subscription_money_row)."""
+    return (f"Бронь по абонементу ушла в деньги (часов абонемента не хватило) — {what}. "
+            + _refusal_next_step(booking, actor, money_back=True))
+
+
+def _waived_refusal(booking: Booking, actor: Optional[User], what: str) -> str:
+    """409 для брони со снятым штрафом: оплата по ней уже улажена."""
+    return f"У брони снят штраф — {what}. " + _refusal_next_step(booking, actor, money_back=False)
+
+
 
 
 def _subscription_money_row(booking: Booking) -> bool:
@@ -4456,8 +4475,7 @@ def reschedule_booking(
         if booking.payment_status == "waived":
             raise HTTPException(
                 status_code=409,
-                detail="У этой брони снят штраф — перенос поменял бы цену. "
-                       "Снимите waiver или создайте новую бронь.",
+                detail=_waived_refusal(booking, current_user, "перенос поменял бы её цену"),
             )
         # Абонемент: смену ДЛИТЕЛЬНОСТИ блокируем — нужен пересчёт часов пула.
         # А перенос в другой КАБИНЕТ/время при той же длительности разрешаем:
@@ -4876,7 +4894,7 @@ def trim_booking(
             detail=_BONUS_RESIZE_DETAIL.format(what="часть времени из неё не вырезать"),
         )
     if _subscription_money_row(booking):
-        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="вырезать из неё часть нельзя"))
+        raise HTTPException(status_code=409, detail=_money_row_refusal(booking, current_user, "вырезать из неё часть нельзя"))
     # Штраф снят (waived): деньги и часы по брони уже улажены (возвращены или не
     # списывались) — вырезка вернула бы их второй раз (фаззер ревизии 03.10:
     # +1 ч и +5 ₾ из воздуха). Тот же гейт, что у сокращения, «Цены», формата,
@@ -4884,7 +4902,7 @@ def trim_booking(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="У брони снят штраф — вырезка поменяла бы оплату. Снимите waiver или отмените бронь.",
+            detail=_waived_refusal(booking, current_user, "вырезка поменяла бы оплату"),
         )
 
     # ── Past booking protection (same message as cancel) ──
@@ -5673,10 +5691,10 @@ def change_booking_format(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="Бронь со снятым штрафом нельзя переформатировать — отмените снятие или создайте новую бронь",
+            detail=_waived_refusal(booking, current_user, "формат у неё не поменять"),
         )
     if _subscription_money_row(booking):
-        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="сменить формат нельзя"))
+        raise HTTPException(status_code=409, detail=_money_row_refusal(booking, current_user, "сменить формат нельзя"))
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
@@ -5902,11 +5920,11 @@ def set_booking_price(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="У этой брони снят штраф — цену менять нельзя. Снимите waiver или создайте новую бронь.",
+            detail=_waived_refusal(booking, current_user, "цену у неё не поменять"),
         )
 
     if _subscription_money_row(booking):
-        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="цену у неё не поменять"))
+        raise HTTPException(status_code=409, detail=_money_row_refusal(booking, current_user, "цену у неё не поменять"))
 
     old_price = float(booking.final_price or 0)
     if abs(new_price - old_price) < 0.005:
@@ -6153,8 +6171,8 @@ def extend_booking(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="У этой брони снят штраф — продление поменяло бы оплату. "
-                   "Снимите waiver или создайте отдельную бронь на добавленное время.",
+            detail="У брони снят штраф — продление поменяло бы оплату. "
+                   "Забронируйте добавленное время отдельной бронью.",
         )
 
     if _is_past(booking):
@@ -6665,7 +6683,7 @@ def shorten_booking(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="У брони снят штраф — сначала восстановите оплату или создайте новую бронь",
+            detail=_waived_refusal(booking, current_user, "сократить её нельзя"),
         )
 
     # Бонусная бронь: пропорция ниже вернула бы деньги (которых нет), а
@@ -6676,7 +6694,7 @@ def shorten_booking(
             detail=_BONUS_RESIZE_DETAIL.format(what="сократить её не получится"),
         )
     if _subscription_money_row(booking):
-        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="сократить её нельзя"))
+        raise HTTPException(status_code=409, detail=_money_row_refusal(booking, current_user, "сократить её нельзя"))
 
     remove = int(payload.remove_minutes or 0)
     if remove < 30 or remove % 30 != 0:
@@ -6863,7 +6881,7 @@ def split_booking(
     if booking.payment_status == "waived":
         raise HTTPException(
             status_code=409,
-            detail="У брони снят штраф — сначала восстановите оплату",
+            detail=_waived_refusal(booking, current_user, "разделить её нельзя"),
         )
 
     parts = [int(p) for p in (payload.parts or [])]
