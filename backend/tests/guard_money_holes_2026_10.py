@@ -1611,6 +1611,134 @@ def test_r2_6_peak_notice_only_when_charged():
     assert notices() == 1
 
 
+@_scenario
+def test_rA_extend_pending_beyond_hours_goes_to_money():
+    """Второй ревизор, A: в пуле 1 ч, бронь заранее 1 ч + песочница (5 ₾),
+    «+30 мин» дважды. Было: часы брони росли до 2 ч, крон «всё или ничего» видел
+    нехватку и уводил в деньги ВСЮ бронь (41 ₾), час оставался в пуле. Стало:
+    добавка — деньгами в цене (2 × 9 ₾ по цене тарифа −10 %), часы брони 1 ч;
+    крон снимает 1 ч и 23 ₾ (5 + 18). Отмена — ровно назад."""
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=1.0, used_hours=9.0))
+    b = _book(s, admin, u, days=3, start="14:00", extras=["sandbox"])
+    b = _extend(s, admin, b, 30)
+    b = _extend(s, admin, b, 30)
+    assert (b.duration, float(b.hours_deducted), float(b.final_price), b.payment_status) == \
+        (120, 1.0, 23.0, "pending"), (b.duration, b.hours_deducted, b.final_price, b.payment_status)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 1.0)
+    ok, _ = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    b = s.get(Booking, b.id)
+    assert ok and float(b.hours_deducted) == 1.0, (ok, b.hours_deducted)
+    assert (_bal(s, u), _rem(s, u)) == (77.0, 0.0), f"крон: {_bal(s, u)} ₾ / {_rem(s, u)} ч, ждём 77 / 0"
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 1.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_rB_telegram_approve_recomputes_chain_like_site():
+    """Второй ревизор, B: две соседние горячие денежные брони по 20 ₾ (16:00 и
+    17:00) одобрены в Telegram — цепочка 2 ч, по 18 ₾, баланс 64 (как на сайте).
+    Было: бот не пересчитывал — 2 × 20 ₾."""
+    from app.api.v1 import telegram as tg
+    s = _db()
+    admin = _admin(s)
+    admin.telegram_id = "555"
+    s.add(admin)
+    s.commit()
+    u = _client(s, None)
+    b1 = _book(s, u, u, start="16:00", method="balance")
+    b2 = _book(s, u, u, start="17:00", method="balance")
+    for b in (b1, b2):
+        tg._handle_hot_booking_callback(s, "cb", 1, 2, 555, f"ba:{b.id}")
+        s.commit()
+    s.expire_all()
+    assert [float(s.get(Booking, b.id).final_price) for b in (b1, b2)] == [18.0, 18.0]
+    assert _bal(s, u) == 64.0, _bal(s, u)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_rC_price_and_gift_hour_keep_extras():
+    """Второй ревизор, C: «Цена» ниже стоимости допов — 400 (допы остаются в цене,
+    пока они в брони); выше — ок, допы по-прежнему отделимы. «Час в подарок» на
+    2 ч + песочница (36 + 5 = 41 ₾): минус час АРЕНДЫ 18 ₾ → 23 ₾ (было: минус
+    20,5 ₾ — «час» откусывал и половину песочницы)."""
+    from app.models.bonus import Bonus
+    from app.services.pricing import booking_extras_money
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", method="balance", extras=["sandbox"])
+    out = _set_price(s, admin, b, 3.0)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 400, out
+    assert not isinstance(_set_price(s, admin, b, 20.0), dict)
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), booking_extras_money(b), _bal(s, u)) == (20.0, 5.0, 80.0)
+    v = _client(s, _sub("WARM_START"))
+    c = _book(s, admin, v, start="14:00", resource="room_3", extras=["sandbox"])
+    out = _set_price(s, admin, c, 0.0)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 400, out
+
+    w = _client(s, None)
+    g = _book(s, admin, w, start="16:00", minutes=120, method="balance", extras=["sandbox"])
+    assert (float(g.final_price), _bal(s, w)) == (41.0, 59.0)
+    s.add(Bonus(user_id=str(w.id), type="free_hour", quantity=1.0, status="active",
+                expires_at=H.FakeDatetime.now() + timedelta(days=10)))
+    s.commit()
+    routes.apply_bonus_hour(booking_id=str(g.id), session=s, current_user=admin)
+    s.commit()
+    g = s.get(Booking, g.id)
+    assert (float(g.final_price), _bal(s, w)) == (23.0, 77.0), (g.final_price, _bal(s, w))
+    _ledger_ok(s, w, 100.0)
+
+
+@_scenario
+def test_rE_patch_user_discount_range():
+    """Второй ревизор, E: PATCH /users — скидка только 0–100 %, тип цен — из двух
+    (как в /users/{id}/discount)."""
+    s = _db()
+    senior = _admin(s, role="senior_admin")
+    u = _client(s, None)
+    for fields in ({"personal_discount_percent": 150}, {"personal_discount_percent": -5},
+                   {"pricing_system": "vip"}):
+        res = _patch_user(s, senior, u, **fields)
+        assert isinstance(res, tuple) and res[0] == 400, (fields, res)
+    assert _patch_user(s, senior, u, personal_discount_percent=100, pricing_system="personal") == 200
+
+
+def test_peak_money_grid_matches_engine():
+    """subscription_peak_money (продление, перенос, сокращение, вырезка) обязана
+    совпадать с пиковой надбавкой движка цен (subscription_peak_debt) на всей
+    сетке: старт каждые 15 мин, длительность каждые 30 мин (второй ревизор сверил
+    2304 комбинации)."""
+    from datetime import datetime as _real, timedelta as _td
+    from app.services.pricing import PricingService
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, sub=H._sub("PRO_PLUS", remaining_hours=500.0, total_hours=500.0), balance=0.0)
+        ps = PricingService(s)
+        day = _real(2026, 10, 7)
+        checked = bad = 0
+        for start_min in range(0, 24 * 60, 15):
+            for dur in range(30, 24 * 60 - start_min + 1, 30):
+                st = day + _td(minutes=start_min)
+                q = ps.calculate_price(user=u, resource_id="room_1", start_time=st, duration_minutes=dur,
+                                       format_type="individual")
+                if q.applied_rule != "SUBSCRIPTION":
+                    continue
+                checked += 1
+                if abs(round(float(q.subscription_peak_debt), 2) - PricingService.subscription_peak_money(st, dur)) > 0.001:
+                    bad += 1
+    assert checked >= 2000 and bad == 0, f"сверено {checked}, расхождений {bad}"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

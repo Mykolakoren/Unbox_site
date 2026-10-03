@@ -1999,6 +1999,9 @@ def _handle_hot_booking_callback(
             return {"ok": True}
         session.commit()
         session.refresh(booking)
+        # «Часы подряд» — как на сайте (ревизия 03.10: бот не пересчитывал).
+        from app.api.v1.bookings.routes import recompute_chain_after_approval
+        recompute_chain_after_approval(session, booking, actor)
 
         try:
             ev_id = _gcal.create_event(booking, user_name=actor_label)

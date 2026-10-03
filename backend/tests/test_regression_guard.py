@@ -463,15 +463,26 @@ def test_approve_recomputes_consecutive_chain():
     считает только `confirmed` — соседние часы друг друга не видят, и каждый
     получает свой тир. Александр Беляев (26.08.2026): 5 часов подряд в капсуле
     двумя бронями дали 15% и 10% вместо общих 20%."""
+    # Ревизия 03.10: пересчёт вынесен в общий помощник recompute_chain_after_approval
+    # — его зовут И сайт (/approve), И кнопка в Telegram (бот раньше не
+    # пересчитывал: две горячие по 20 ₾ оставались 2×20 вместо 2×18).
+    # Поведение проверяет guard_money_holes_2026_10.
     base = os.path.join(os.path.dirname(__file__), "..")
     src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
     i = src.find("def approve_booking")
     assert i != -1, "approve_booking не найден"
     j = src.find("class RejectBookingPayload", i)
     body = src[i:j if j != -1 else len(src)]
-    assert "recompute_user_chains_for_day" in body, (
+    assert "recompute_chain_after_approval(" in body, (
         "approve_booking не пересчитывает цепочку — смежные часы останутся "
         "с раздельными скидками вместо общей")
+    h = src.find("def recompute_chain_after_approval(")
+    assert h != -1 and "recompute_user_chains_for_day(" in src[h:src.find("\ndef ", h + 10)], \
+        "общий помощник одобрения не пересобирает цепочку"
+    tg = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
+    k = tg.find("def _handle_hot_booking_callback(")
+    assert "recompute_chain_after_approval(" in tg[k:tg.find("\ndef ", k + 10)], \
+        "одобрение в Telegram не пересчитывает «часы подряд»"
 
 
 def test_series_extension_stamps_payment_status():

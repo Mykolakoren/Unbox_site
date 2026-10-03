@@ -233,6 +233,18 @@ def update_user(
             status_code=403,
             detail="Нет права «Корректировка баланса» — попросите старшего администратора",
         )
+    # Границы — как у /users/{id}/discount (ревизия 03.10): скидка вне 0–100 %
+    # дала бы бесплатные или «отрицательные» брони; тип цен — только из двух.
+    if user_data.get("personal_discount_percent") is not None:
+        try:
+            _pct = int(user_data["personal_discount_percent"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Скидка должна быть целым числом от 0 до 100 %")
+        if not 0 <= _pct <= 100:
+            raise HTTPException(status_code=400, detail="Скидка должна быть от 0 до 100 %")
+        user_data["personal_discount_percent"] = _pct
+    if user_data.get("pricing_system") is not None and user_data["pricing_system"] not in ("standard", "personal"):
+        raise HTTPException(status_code=400, detail="Тип цен — «standard» или «personal»")
     _price_changes = _pricing_changes(user, user_data)
     if _price_changes and not deps.has_permission(current_user, "subscriptions.set_discount"):
         raise HTTPException(status_code=403, detail=PRICING_DENIED_DETAIL)

@@ -504,6 +504,35 @@ def charge_hot_booking_on_approval(
     return info
 
 
+def recompute_chain_after_approval(session: Session, booking: Booking, actor: Optional[User]) -> None:
+    """После одобрения горячей ДЕНЕЖНОЙ брони — пересобрать цепочку «часы
+    подряд» (Лиза, 2026-08-26). Срочная бронь создаётся как `pending_approval`,
+    а `_compute_block_hours` считает только `confirmed` — соседние часы друг
+    друга не видят, и каждый получает свой тир (Александр Беляев: 5 часов подряд
+    в капсуле двумя бронями дали 15 % и 10 % вместо общих 20 %).
+    Ревизия 03.10: раньше пересчитывал только сайт — две соседние горячие брони
+    по 20 ₾, одобренные в Telegram, оставались 2×20 вместо 2×18. Теперь сайт и
+    бот зовут этот помощник ПОСЛЕ коммита одобрения. Сбой пересчёта одобрение
+    не отменяет (откат только пересчёта)."""
+    if (booking.payment_method or "") != "balance" or booking.status != "confirmed":
+        return
+    try:
+        from app.services.consecutive_pricing import recompute_user_chains_for_day
+        _owner = _resolve_booking_owner(session, booking)
+        if _owner:
+            recompute_user_chains_for_day(
+                session, _owner, booking.resource_id, booking.date,
+                actor_id=(str(actor.id) if actor is not None else None),
+                actor_role=(getattr(actor, "role", None) or "system"),
+                reason="approve_booking",
+            )
+            session.commit()
+            session.refresh(booking)
+    except Exception:
+        session.rollback()
+        logger.exception("[consecutive] recompute on approve failed")
+
+
 def _gel(x: float) -> str:
     """5.0 → «5», 2.5 → «2,5» — для текстов клиенту."""
     return f"{round(float(x or 0), 2):g}".replace(".", ",")
@@ -606,10 +635,28 @@ def _extend_subscription_booking(session: Session, booking: Booking, owner: User
         return info
     if status == "pending":
         new_h = round((hrs_old if hrs_old > 0 else old_minutes / 60.0) + add_h, 4)
-        booking.hours_deducted = new_h
-        subscription_pool.stamp_booking(booking, new_h, old_extra)  # прикидка; крон разложит по живому пулу
-        booking.final_price = round(float(booking.final_price or 0) + peak_add, 2)
-        info.update(mode="deferred", hours=add_h)
+        # Крон T-24ч берёт часы брони по правилу «всё или ничего»: не хватит
+        # часов на всю бронь — вся бронь уйдёт в деньги. Поэтому добавку часами
+        # пишем, только если живой пул (с учётом часов самой брони) покрывает
+        # бронь вместе с добавкой. Иначе добавка сразу деньгами в цене брони, а
+        # часы брони не растут: крон снимет часы за покрытое и деньги по
+        # единому правилу (ревизия 03.10: в пуле 1 ч, бронь 1 ч + песочница,
+        # +30 мин дважды → крон списал 41 ₾ за всю бронь, час остался в пуле).
+        _covers = False
+        if subscription_pool.is_active(owner.subscription, datetime.utcnow()):
+            _covers = subscription_pool.plan_split(
+                owner.subscription, new_h,
+                resource_type=_res_type(session, booking.resource_id), format_type=booking.format,
+            ) is not None
+        if _covers:
+            booking.hours_deducted = new_h
+            subscription_pool.stamp_booking(booking, new_h, old_extra)  # прикидка; крон разложит по живому пулу
+            booking.final_price = round(float(booking.final_price or 0) + peak_add, 2)
+            info.update(mode="deferred", hours=add_h)
+        else:
+            _money = _extension_cash_price(session, booking, owner, start_dt, old_minutes, extra_minutes)
+            booking.final_price = round(float(booking.final_price or 0) + _money, 2)
+            info.update(mode="deferred_money", money=_money)
         return info
 
     ref = str(booking.id)
@@ -5834,6 +5881,18 @@ def set_booking_price(
     if abs(new_price - old_price) < 0.005:
         raise HTTPException(status_code=400, detail="Новая цена совпадает со старой")
 
+    # Допы остаются в цене, пока они в брони (ревизия 03.10): «Цена» ниже
+    # стоимости допов выкинула бы их из цены, а песочница/кофе остались бы в
+    # брони бесплатно. Не брать оплату совсем — «Снять штраф».
+    from app.services.pricing import booking_extras_money
+    _extras_money = booking_extras_money(booking)
+    if new_price < _extras_money - 0.005:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Цена брони не может быть ниже стоимости её допов ({_extras_money:g} ₾) — "
+                    f"допы остаются в брони. Чтобы не брать оплату совсем, используйте «Снять штраф»."),
+        )
+
     booking_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
 
     delta = round(old_price - new_price, 2)  # positive = refund, negative = debit
@@ -5852,6 +5911,11 @@ def set_booking_price(
 
     booking.final_price = new_price
     booking.applied_rule = "MANUAL_OVERRIDE"
+    # Аренда в цене денежной брони = base_price − discount_amount (по ним
+    # booking_extras_money отделяет допы при пересчётах): ручная цена меняет
+    # аренду, допы остаются — держим это равенство точным.
+    if method != "subscription" and booking.base_price is not None:
+        booking.discount_amount = round(float(booking.base_price) - (new_price - _extras_money), 2)
 
     if booking_owner:
         session.add(booking_owner)
@@ -5992,8 +6056,14 @@ def apply_bonus_hour(
             409, f"У клиента нет целого бесплатного часа (доступно: {_avail:g} ч)",
         )
 
-    # Стоимость одного часа в ТЕКУЩЕЙ цене (со скидками): 36₾/2ч → 18₾.
-    hour_cost = round(old_price * 60.0 / duration, 2)
+    # Стоимость одного часа в ТЕКУЩЕЙ цене АРЕНДЫ (со скидками): 36₾/2ч → 18₾.
+    # Допы (песочница, кофе) в подарок не входят — они остаются в цене целиком
+    # (ревизия 03.10: раньше «час» откусывал и долю допов).
+    from app.services.pricing import booking_extras_money
+    _rent = max(0.0, old_price - booking_extras_money(booking))
+    hour_cost = round(_rent * 60.0 / duration, 2)
+    if hour_cost < 0.01:
+        raise HTTPException(400, "Аренда в этой брони уже 0 ₾ — скидывать нечего (в цене только допы)")
     new_price = round(old_price - hour_cost, 2)
 
     from app.services.bonus_service import consume_free_hours
@@ -7151,27 +7221,9 @@ def approve_booking(
     except Exception:
         logger.warning("[hot-booking approve] client notify failed", exc_info=True)
 
-    # Пересчёт цепочки смежных часов ПОСЛЕ подтверждения (Лиза, 2026-08-26).
-    # Срочная бронь создаётся как `pending_approval`, а `_compute_block_hours`
-    # считает только `confirmed` — поэтому соседние часы друг друга не видят и
-    # каждый получает свой тир. Александр Беляев: 5 часов подряд в капсуле двумя
-    # бронями дали 15% и 10% вместо общих 20%. Подтверждение переводит бронь в
-    # `confirmed`, и вот тут цепочку надо собрать заново.
-    if booking.payment_method == "balance" and booking.status == "confirmed":
-        try:
-            from app.services.consecutive_pricing import recompute_user_chains_for_day
-            _owner = _resolve_booking_owner(session, booking)
-            if _owner:
-                recompute_user_chains_for_day(
-                    session, _owner, booking.resource_id, booking.date,
-                    actor_id=str(current_user.id), actor_role=current_user.role,
-                    reason="approve_booking",
-                )
-                session.commit()
-                session.refresh(booking)
-        except Exception:
-            session.rollback()
-            logger.exception("[consecutive] recompute on approve failed")
+    # Пересчёт «часов подряд» после подтверждения — общим помощником (его же
+    # зовёт кнопка в Telegram).
+    recompute_chain_after_approval(session, booking, current_user)
 
     return enrich_booking_status(booking)
 
