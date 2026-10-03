@@ -288,6 +288,25 @@ def test_admin_booking_for_client_lifts_pause_with_admin_as_actor():
 
 
 @_scenario
+def test_hot_booking_lifts_pause_at_creation_hours_on_approval():
+    """Горячая бронь клиента (≤12 ч) идёт одиночным путём: пауза снимается при
+    создании, бронь ждёт одобрения, часы списываются только при одобрении."""
+    from app.api.v1.bookings import routes
+    s = H._db()
+    admin = _admin(s)
+    u = _client(s, _paused_sub())
+    b = _book(s, u, u, days=0, start="16:00")  # пн 16:00, сейчас 10:00 — горячая
+    assert not isinstance(b, dict), b
+    assert (b.status, b.payment_method, b.payment_status) == ("pending_approval", "subscription", "pending"), \
+        (b.status, b.payment_method, b.payment_status)
+    assert not _frozen(s, u) and len(_events(s, u)) == 1
+    assert P.get_float(_pool(s, u), "remaining_hours") == 42.0, "часы ушли до одобрения"
+    routes.approve_booking(booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
+    assert P.get_float(_pool(s, u), "remaining_hours") == 41.0
+
+
+@_scenario
 def test_bonus_covering_booking_keeps_pause():
     """Бонус покрывает бронь целиком → бонус, пауза стоит."""
     from app.models.bonus import Bonus
