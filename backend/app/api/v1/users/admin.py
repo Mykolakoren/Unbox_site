@@ -233,6 +233,8 @@ def toggle_subscription_freeze(
     остаток бюджета. Снятие: срок абонемента +min(факт, выдано на эту паузу).
     payload (необязательно): {"days": N} — владелец / старший администратор
     могут дать паузу сверх бюджета (и при бюджете 0); админ — не больше остатка.
+    {"action": "freeze" | "unfreeze"} — что хочет экран; не совпало с базой — 409.
+    Без action — прежний переключатель.
     Правила — services/subscription_perks.py (там же автоснятие по сроку).
     """
     from app.services import subscription_perks
@@ -250,6 +252,23 @@ def toggle_subscription_freeze(
     # Both dialects again: the freeze flag was written snake-only, while the UI
     # reads isFrozen — so a frozen subscription still rendered as active.
     is_frozen = bool(subscription_pool.get(user.subscription, "is_frozen", False))
+    # 03.10: пауза снимается и сама — новой бронью клиента (bookings/routes.py).
+    # Кнопка в карточке — переключатель: если клиент только что снял паузу бронью,
+    # а у админа открыта старая карточка, «Снять паузу» молча ставила бы НОВУЮ
+    # паузу на весь остаток дней. Экран говорит, что хочет сделать; не совпало — 409.
+    want = (payload or {}).get("action")
+    if want not in (None, "", "freeze", "unfreeze"):
+        session.rollback()
+        raise HTTPException(status_code=400, detail="action: freeze или unfreeze")
+    if want == "unfreeze" and not is_frozen:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Пауза уже снята — например, клиент сам забронировал по абонементу. Карточка обновлена.",
+        )
+    if want == "freeze" and is_frozen:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Абонемент уже на паузе. Карточка обновлена.")
     days = (payload or {}).get("days")
     days = None if days in (None, "") else days
     override = current_user.role in ("owner", "senior_admin")

@@ -38,7 +38,7 @@ import { MergeAccountsModal } from '../../components/admin/modals/MergeAccountsM
 import { api } from '../../api/client';
 import { cashboxApi } from '../../api/cashbox';
 import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../utils/cashboxDuplicate';
-import { paymentErrorText } from '../../utils/errors';
+import { paymentErrorText, toastApiError } from '../../utils/errors';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { Sheet } from '../../components/ui/Sheet';
@@ -316,12 +316,16 @@ export function AdminUserDetails() {
         // Тост — только ПОСЛЕ ответа сервера. Раньше «Абонемент заморожен»
         // показывался мгновенно, даже когда сервер отвечал отказом
         // (повторная заморозка), — админ не понимал, почему ничего не меняется.
+        const action = user.subscription.isFrozen ? 'unfreeze' : 'freeze';
         try {
-            await useUserStore.getState().toggleSubscriptionFreeze(user.email, days);
+            await useUserStore.getState().toggleSubscriptionFreeze(user.email, days, action);
             setFreezeDaysInput('');
-            toast.success(user.subscription.isFrozen ? 'Абонемент разморожен' : 'Абонемент заморожен');
+            toast.success(action === 'unfreeze' ? 'Абонемент разморожен' : 'Абонемент заморожен');
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку');
+            // 409 — пауза уже в другом состоянии (её сняла бронь клиента): тост
+            // показал перехватчик, подтягиваем свежую карточку.
+            toastApiError(err, 'Не удалось изменить заморозку');
+            if (err?.response?.status === 409) void fetchUsers();
         }
     };
 

@@ -565,6 +565,47 @@ def test_bot_preview_and_confirm_mention_pause():
 # Исходники: кто зовёт помощника, а кто — нет
 # ─────────────────────────────────────────────────────────────────────────
 
+@_scenario
+def test_admin_pause_button_explicit_action_no_silent_refreeze():
+    """Кнопка паузы в карточке — переключатель. Клиент снял паузу бронью, а у
+    админа открыта старая карточка: «Снять паузу» не должна молча поставить
+    НОВУЮ паузу на весь остаток дней (03.10). Экран шлёт action — не совпало с
+    базой → 409, пауза не меняется. Без action — прежний переключатель."""
+    from fastapi import HTTPException
+    from app.api.v1.users.admin import toggle_subscription_freeze as toggle
+    s = H._db()
+    admin = _admin(s)
+    u = _client(s, _paused_sub())
+    _book(s, u, u)
+    assert not _frozen(s, u), "бронь клиента должна была снять паузу"
+    left = P.get(_pool(s, u), "freeze_days_left")
+
+    def _expect_409(action):
+        try:
+            toggle(user_id=str(u.id), payload={"action": action}, session=s, current_user=admin)
+        except HTTPException as e:
+            assert e.status_code == 409, e.status_code
+            return
+        raise AssertionError(f"action={action} по устаревшей карточке прошёл молча")
+
+    _expect_409("unfreeze")
+    assert not _frozen(s, u) and P.get(_pool(s, u), "freeze_days_left") == left, \
+        "после отказа пауза и остаток дней не должны меняться"
+    toggle(user_id=str(u.id), payload={"action": "freeze"}, session=s, current_user=admin)
+    assert _frozen(s, u), "явная постановка на паузу должна работать"
+    _expect_409("freeze")
+    toggle(user_id=str(u.id), payload=None, session=s, current_user=admin)
+    assert not _frozen(s, u), "без action — прежний переключатель"
+
+    users_ts = _read("src/api/users.ts")
+    assert "action?: 'freeze' | 'unfreeze'" in users_ts and "...(action ? { action } : {})" in users_ts
+    ud = _read("src/pages/admin/UserDetails.tsx")
+    assert "const action = user.subscription.isFrozen ? 'unfreeze' : 'freeze';" in ud \
+        and "toggleSubscriptionFreeze(user.email, days, action)" in ud, "карточка клиента не шлёт action"
+    card = _read("src/components/SubscriptionCard.tsx")
+    assert "sub.isFrozen ? 'unfreeze' : 'freeze'" in card, "SubscriptionCard не шлёт action"
+
+
 ROUTES = "backend/app/api/v1/bookings/routes.py"
 
 

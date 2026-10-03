@@ -84,8 +84,11 @@ export const usersApi = {
 
     /** days — только владелец / старший админ сверх бюджета тарифа (или меньше
      *  остатка); без days пауза ставится на весь остаток бюджета. */
-    toggleSubscriptionFreeze: async (id: string, days?: number) => {
-        const response = await api.post<User>(`/users/${id}/subscription/freeze`, days ? { days } : undefined);
+    toggleSubscriptionFreeze: async (id: string, days?: number, action?: 'freeze' | 'unfreeze') => {
+        // action (03.10): что хочет экран. Паузу может снять и бронь клиента — без
+        // action устаревшая карточка «Снять паузу» поставила бы паузу заново.
+        const body = { ...(days ? { days } : {}), ...(action ? { action } : {}) };
+        const response = await api.post<User>(`/users/${id}/subscription/freeze`, Object.keys(body).length ? body : undefined);
         return response.data;
     },
 

@@ -44,9 +44,9 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
         }
     },
 
-    toggleSubscriptionFreeze: async (userId, days) => {
+    toggleSubscriptionFreeze: async (userId, days, action) => {
         try {
-            const updatedUser = await usersApi.toggleSubscriptionFreeze(userId, days);
+            const updatedUser = await usersApi.toggleSubscriptionFreeze(userId, days, action);
             set((state) => ({
                 users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u),
                 currentUser: state.currentUser?.email === updatedUser.email ? updatedUser : state.currentUser

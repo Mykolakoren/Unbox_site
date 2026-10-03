@@ -1,5 +1,4 @@
 import type { FC } from 'react';
-import { toast } from 'sonner';
 import { useUserStore, type User } from '../store/userStore';
 import { Calendar, RefreshCcw, Snowflake, CheckCircle2, Send } from 'lucide-react';
 import { Button } from './ui/Button';
@@ -7,6 +6,7 @@ import { parseISO } from 'date-fns';
 import { formatDayMonth } from '../utils/format';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
 import { fmtFreezeDays, freezeBudget } from '../utils/subscription';
+import { toastApiError } from '../utils/errors';
 import { extraKindLabel, extraPool, extraPoolLabel } from '../utils/subscriptionHours';
 
 const ADMIN_TG = 'https://t.me/UnboxCenter';
@@ -164,8 +164,8 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                             block
                             disabled={!canFreeze && !sub.isFrozen}
                             icon={<Snowflake size={16} aria-hidden="true" />}
-                            onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
-                                toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
+                            onClick={() => toggleSubscriptionFreeze(user.email, undefined, sub.isFrozen ? 'unfreeze' : 'freeze')
+                                .catch((err: unknown) => toastApiError(err, 'Не удалось изменить заморозку'))}
                         >
                             {sub.isFrozen ? 'Снять паузу' : `Поставить на паузу на ${fmtFreezeDays(freeze.left)}`}
                         </Button>
