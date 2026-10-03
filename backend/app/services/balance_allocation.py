@@ -51,11 +51,14 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
+
+logger = logging.getLogger(__name__)
 
 TZ = timedelta(hours=4)  # Тбилиси, без летнего времени
 EPS = 0.005
@@ -770,9 +773,13 @@ def load_inputs(session, users: list) -> dict:
         out[uid] = {"rows": [], "bookings": {}, "all": [], "created": {}}
     for b in blist:
         uid = str(b.user_uuid) if b.user_uuid and str(b.user_uuid) in by_uuid else by_email.get((b.user_id or "").lower())
-        if not uid:
+        if not uid or not b.date:
             continue
-        ref = _booking_ref(b, names)
+        try:
+            ref = _booking_ref(b, names)
+        except Exception:  # noqa: BLE001 — битая бронь не роняет раскладку клиента
+            logger.warning("[balance-allocation] бронь %s пропущена: не разобрать дату", b.id)
+            continue
         out[uid]["bookings"][ref.id] = ref
         out[uid]["all"].append(ref)
         if b.created_at:
@@ -860,20 +867,27 @@ def summary(session, now_utc: Optional[datetime] = None) -> dict:
     now = _now_tbs(now_utc)
     clients = []
     for u in users:
-        data = inputs[str(u.id)]
-        res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0), detail=False)
-        clients.append({
-            "userId": str(u.id),
-            "email": u.email,
-            "balance": res["balance"],
-            "consistent": res["consistent"],
-            "ledgerSum": res["ledgerSum"],
-            "batches": [
-                {k: b[k] for k in ("rowId", "kind", "label", "detail", "date", "amount")}
-                for b in res["batches"]
-            ],
-            "debts": res["debts"],
-            # Только при минусе: при плюсе списанные брони и так «оплачено».
-            "unlinked": unlinked_charged(data["rows"], data["all"], now) if res["balance"] < 0 else [],
-        })
+        try:
+            clients.append(_summary_entry(u, inputs[str(u.id)], now))
+        except Exception:  # noqa: BLE001 — один клиент не роняет сводку для всех
+            logger.exception("[balance-allocation] клиент %s пропущен в сводке", u.id)
     return {"generatedAt": datetime.utcnow().isoformat(), "clients": clients}
+
+
+def _summary_entry(u, data: dict, now: datetime) -> dict:
+    """Строка сводки одного клиента (партии при плюсе, долги и брони без ленты при минусе)."""
+    res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0), detail=False)
+    return {
+        "userId": str(u.id),
+        "email": u.email,
+        "balance": res["balance"],
+        "consistent": res["consistent"],
+        "ledgerSum": res["ledgerSum"],
+        "batches": [
+            {k: b[k] for k in ("rowId", "kind", "label", "detail", "date", "amount")}
+            for b in res["batches"]
+        ],
+        "debts": res["debts"],
+        # Только при минусе: при плюсе списанные брони и так «оплачено».
+        "unlinked": unlinked_charged(data["rows"], data["all"], now) if res["balance"] < 0 else [],
+    }

@@ -231,7 +231,7 @@ export function MobileAdminUserCard() {
                                             {b.status === 'pending_approval' ? ' · ждёт одобрения' : ''}
                                         </div>
                                     </div>
-                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} />
+                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
                                 </div>
                             );
                         })}
@@ -313,8 +313,11 @@ function Collapsible({ title, badge, defaultOpen = false, children }: {
 function LedgerList({ userId, balance }: { userId: string; balance: number }) {
     const [data, setData] = useState<BalanceLedgerResponse | null>(null);
     const { data: alloc } = useClientAllocation(userId, balance);
-    const allocRows = useMemo(() => new Map((alloc?.consistent ? alloc.rows : []).map(r => [r.id, r])), [alloc]);
-    const headline = allocationHeadline(alloc);
+    // Раскладка — к той же ленте, что на экране (баланс совпадает), иначе не показываем.
+    const allocOk = !!alloc && alloc.consistent && !!data
+        && Math.round(Number(alloc.balance) * 100) === Math.round(Number(data.balance) * 100);
+    const allocRows = useMemo(() => new Map((allocOk ? alloc!.rows : []).map(r => [r.id, r])), [alloc, allocOk]);
+    const headline = allocOk ? allocationHeadline(alloc) : null;
     const [failed, setFailed] = useState(false);
     const [tick, setTick] = useState(0);
     useEffect(() => {

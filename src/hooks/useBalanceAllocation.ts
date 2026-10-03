@@ -118,7 +118,7 @@ export function useClientAllocation(
     userId: string | null | undefined,
     balance?: number | null,
     reloadKey: unknown = 0,
-): { data: ClientAllocation | null; failed: boolean; loading: boolean } {
+): { data: ClientAllocation | null; failed: boolean; loading: boolean; stale: boolean } {
     const balanceKey = balance === null || balance === undefined ? '' : Math.round(Number(balance) * 100);
     const key = userId ? `${userId}|${balanceKey}|${String(reloadKey)}` : '';
     // Ответ помечен своим ключом: сменился клиент/баланс — старый ответ не показываем
@@ -133,5 +133,13 @@ export function useClientAllocation(
         return () => { alive = false; };
     }, [userId, balanceKey, reloadKey]);
     const current = res && key && res.key === key ? res : null;
-    return { data: current?.data ?? null, failed: !!current && current.data === null, loading: !!key && !current };
+    // Пока грузится новый ответ — прежний того же клиента (без мигания). Экраны
+    // сверяют баланс раскладки со своим и устаревшее не выдают за свежее.
+    const prev = !current && res && userId && res.key.startsWith(`${userId}|`) ? res : null;
+    return {
+        data: current?.data ?? prev?.data ?? null,
+        failed: !!current && current.data === null,
+        loading: !!key && !current,
+        stale: !current && !!prev,
+    };
 }

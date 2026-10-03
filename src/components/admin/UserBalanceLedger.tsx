@@ -56,7 +56,9 @@ export function UserBalanceLedger({ userId, balance: storeBalance }: {
         return () => { alive = false; };
     }, [userId, reloadTick, balanceKey]);
 
-    if (loading) {
+    // Скелетон — только пока данных ещё нет; при перечитывании (оплата) прежняя
+    // лента остаётся на экране, без мигания.
+    if (loading && !data) {
         return (
             <div className="bg-white p-6 rounded-2xl border border-gray-200">
                 <SkeletonList count={3} cardHeight={56} label="Загружаем движения баланса" />
@@ -74,8 +76,11 @@ export function UserBalanceLedger({ userId, balance: storeBalance }: {
 
     const { entries, balance, ledgerSum, reconciles, truncated } = data;
     const diff = Math.round((ledgerSum - balance) * 100) / 100;
-    const allocRows = new Map((alloc && alloc.consistent ? alloc.rows : []).map(r => [r.id, r]));
-    const headline = allocationHeadline(alloc);
+    // Раскладка — к той же ленте, что на экране: её баланс совпадает с балансом
+    // ленты (иначе это ответ до оплаты — сводка «Долг …» висела бы после оплаты).
+    const allocOk = !!alloc && alloc.consistent && Math.round(Number(alloc.balance) * 100) === Math.round(Number(balance) * 100);
+    const allocRows = new Map((allocOk ? alloc!.rows : []).map(r => [r.id, r]));
+    const headline = allocOk ? allocationHeadline(alloc) : null;
 
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200">

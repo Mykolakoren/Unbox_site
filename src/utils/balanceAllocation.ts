@@ -155,6 +155,14 @@ export function indexAllocation(clients: ReadonlyArray<ClientAllocSummary> | nul
     return idx;
 }
 
+/**
+ * Вопрос владельцу (03.10): долг за штраф при поздней отмене (списание отменённой
+ * брони не вернули). false — долг остаётся на отменённой брони (видна в «Ещё долг»,
+ * в карточке и в «Долги по броням вне списка»); true — как было до 03.10: на
+ * ближайших (самых свежих) списанных бронях клиента. Переключение — одна строка.
+ */
+export const PENALTY_DEBT_ON_ACTIVE_BOOKINGS = false;
+
 /** Статусы, у которых экран рисует «к оплате» (как DUE_STATUSES в dueAmounts.ts). */
 const SHOWN_STATUSES = new Set<string>(['confirmed', 'pending_approval', 'completed']);
 
@@ -203,10 +211,23 @@ export function applyAllocation(
         // Долг не на бронях (списания не за бронь) + излишек сверх цены брони —
         // ниже ложится на списанные брони без строк ленты, самые свежие первыми.
         let loose = 0;
+        let penalty = 0;
         for (const d of entry.debts || []) {
-            if (d.bookingId) debtBy.set(d.bookingId, (debtBy.get(d.bookingId) || 0) + cents(d.amount));
+            if (PENALTY_DEBT_ON_ACTIVE_BOOKINGS && d.booking?.status === 'cancelled') penalty += cents(d.amount);
+            else if (d.bookingId) debtBy.set(d.bookingId, (debtBy.get(d.bookingId) || 0) + cents(d.amount));
             else loose += cents(d.amount);
         }
+        // Положить долг на брони, самые свежие первыми, не больше их цены (как прежний расчёт).
+        const spread = (pool: number, cands: BookingHistoryItem[]) => {
+            for (const b of [...cands].sort((a, b) => startKey(b).localeCompare(startKey(a)))) {
+                if (pool <= 0) break;
+                const info = out.get(b.id)!;
+                const take = Math.min(pool, cents(info.price) - cents(info.due));
+                if (take <= 0) continue;
+                pool -= take;
+                out.set(b.id, { ...info, due: (cents(info.due) + take) / 100 });
+            }
+        };
         // Списанные: долг — тот, что лента привязала к этой брони (не больше её цены).
         for (const b of list) {
             const info = base.get(b.id);
@@ -228,18 +249,9 @@ export function applyAllocation(
         // Иначе списанная в долг бронь получила бы «✓ оплачено» (ревью денег 03.10).
         if (loose > 0) {
             const unlinked = new Set((entry.unlinked || []).map(String));
-            const cands = list
-                .filter(b => { const i = base.get(b.id); return !!i && i.charged && unlinked.has(b.id) && !debtBy.has(b.id); })
-                .sort((a, b) => startKey(b).localeCompare(startKey(a)));
-            for (const b of cands) {
-                if (loose <= 0) break;
-                const info = out.get(b.id)!;
-                const take = Math.min(loose, cents(info.price) - cents(info.due));
-                if (take <= 0) continue;
-                loose -= take;
-                out.set(b.id, { ...info, due: (cents(info.due) + take) / 100 });
-            }
+            spread(loose, list.filter(b => { const i = base.get(b.id); return !!i && i.charged && unlinked.has(b.id) && !debtBy.has(b.id); }));
         }
+        if (penalty > 0) spread(penalty, list.filter(b => !!out.get(b.id)?.charged));
         // Несписанные: плюс баланса — по партиям, ближайшие брони первыми.
         const pending = list
             .filter(b => { const i = base.get(b.id); return !!i && !i.charged; })
@@ -274,6 +286,53 @@ export function debtsOutsideList(
 ): AllocDebt[] {
     if (!entry || !entry.consistent) return [];
     return (entry.debts || []).filter(d => !d.bookingId || !shownIds.has(d.bookingId));
+}
+
+/** Долг клиента, который не виден ни на одной брони загруженного списка. */
+export interface HiddenDebt {
+    userId: string;
+    email: string | null;
+    /** Сколько долга не видно на бронях списка, ₾. */
+    amount: number;
+    /** Из чего он: брони вне окна админки, отменённые со штрафом, списания не за бронь. */
+    debts: AllocDebt[];
+}
+
+/**
+ * «Долги по броням вне списка» (риск 1): у клиента с минусом долг по раскладке
+ * минус то, что уже показано «к оплате» на его списанных бронях в списке. Только
+ * свежие и сходящиеся сводки (как applyAllocation). Самые крупные — первыми.
+ */
+export function hiddenDebts(
+    dueMap: Map<string, DueInfo>,
+    bookings: ReadonlyArray<BookingHistoryItem>,
+    index: AllocationIndex | null | undefined,
+    balanceOf: (userId: string) => number | null,
+): HiddenDebt[] {
+    if (!index || index.size === 0) return [];
+    const shown = new Map<ClientAllocSummary, number>();
+    const ids = new Map<ClientAllocSummary, Set<string>>();
+    for (const b of bookings) {
+        const entry = b?.userId ? index.get(String(b.userId)) : undefined;
+        const info = entry ? dueMap.get(b.id) : undefined;
+        if (!entry || !info || !info.charged) continue;
+        shown.set(entry, (shown.get(entry) || 0) + cents(info.due));
+        if (!ids.has(entry)) ids.set(entry, new Set());
+        ids.get(entry)!.add(b.id);
+    }
+    const out: HiddenDebt[] = [];
+    for (const entry of new Set(index.values())) {
+        if (!entry.consistent || !(entry.balance < 0)) continue;
+        const bal = balanceOf(String(entry.email || '')) ?? balanceOf(String(entry.userId));
+        if (bal === null || cents(bal) !== cents(entry.balance)) continue;
+        const total = (entry.debts || []).reduce((s, d) => s + cents(d.amount), 0);
+        const hidden = total - (shown.get(entry) || 0);
+        if (hidden > 0) {
+            out.push({ userId: entry.userId, email: entry.email, amount: hidden / 100,
+                debts: debtsOutsideList(entry, ids.get(entry) || new Set()) });
+        }
+    }
+    return out.sort((a, b) => b.amount - a.amount);
 }
 
 // ── Тексты ───────────────────────────────────────────────────────────────

@@ -302,7 +302,7 @@ def test_today_uncharged_and_covered_labels():
     assert "not_charged: { label: 'Не списана', tone: 'pending'" in st
     # 03.10: + price — у частично покрытой брони «к оплате N ₾ из M» (решение владельца).
     for rel, needle in ((ADMIN + "Dashboard.tsx", "<DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="),
-                        (MADMIN + "MobileAdminDashboard.tsx", "<DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} />")):
+                        (MADMIN + "MobileAdminDashboard.tsx", "<DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className=")):
         assert needle in _code(rel), f"{rel}: «Сегодня» без «не списана / покрыто балансом»"
 
     res = _node_run(f"""
