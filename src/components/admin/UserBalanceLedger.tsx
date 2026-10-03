@@ -32,14 +32,19 @@ import { EmptyState } from '../ui/EmptyState';
  * Сверху — сводка: из чего плюс на балансе и что он покроет, или из чего долг.
  */
 
-export function UserBalanceLedger({ userId }: { userId: string }) {
+export function UserBalanceLedger({ userId, balance: storeBalance }: {
+    userId: string;
+    /** Баланс клиента из стора: поменялся (оплата, списание) — лента и раскладка перечитываются. */
+    balance?: number | null;
+}) {
     const [data, setData] = useState<BalanceLedgerResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [reloadTick, setReloadTick] = useState(0);
-    // Раскладка — тем же ключом, что лента: баланс из ответа ленты (после оплаты
-    // карточка перечитывает ленту — раскладка перечитается вместе с ней).
-    const { data: alloc } = useClientAllocation(data ? userId : null, data ? data.balance : null, reloadTick);
+    // Баланс из стора (после «Принять оплату» карточка перечитывает клиентов) —
+    // ключ и для ленты, и для раскладки: иначе над лентой висела бы старая сводка.
+    const balanceKey = storeBalance === null || storeBalance === undefined ? '' : Math.round(Number(storeBalance) * 100);
+    const { data: alloc } = useClientAllocation(data ? userId : null, data ? (storeBalance ?? data.balance) : null, reloadTick);
 
     useEffect(() => {
         let alive = true;
@@ -49,7 +54,7 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
             .catch(() => { if (alive) setError('Не удалось загрузить ленту'); })
             .finally(() => { if (alive) setLoading(false); });
         return () => { alive = false; };
-    }, [userId, reloadTick]);
+    }, [userId, reloadTick, balanceKey]);
 
     if (loading) {
         return (
@@ -100,7 +105,7 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                 Всё, что двигало депозит клиента: списания за брони, возвраты, скидки,
                 пополнения и правки. Баланс сейчас — <span className="num">{formatGel(balance)}</span>.
             </p>
-            {headline && (
+            {headline && entries.length > 0 && (
                 <p data-alloc-headline className="text-sm text-unbox-dark mb-5 leading-snug">{headline}</p>
             )}
 

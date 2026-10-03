@@ -27,6 +27,16 @@
   • Что не покрыто — долг, привязанный к брони (или к списанию). Новое
     начисление закрывает самые ранние долги, остальное — плюс на балансе.
   • Остаток на начало (baseline, 21.07) — деньги/долг ДО ленты: самые старые.
+  • Списания не за бронь (абонемент с баланса, корректировка, склейка, «часы
+    подряд») оплачиваются ПЕРВЫМИ, до броней. Иначе более новое такое списание
+    «забирало» долг у неоплаченных броней, и они получали «✓ оплачено» (ревью
+    денег 03.10). Так и в прежнем расчёте фронта: минус баланса — на бронях.
+  • Продажа абонемента с кассы — пара: пополнение «… — оплата абонемента» и
+    списание абонемента той же суммы одним действием. Абонемент оплачен ЭТОЙ
+    оплатой, старые деньги клиента остаются броням.
+  • unlinked_charged — списанные брони, о которых в ленте нет ни строки (части
+    после деления брони, брони склеенного профиля, брони до ленты): экран кладёт
+    на них долг не на бронях, самые свежие первыми, как прежний расчёт.
 
 Итог по клиенту всегда сходится: Σ партий на балансе − Σ долгов == сумма
 ленты. Если сумма ленты ≠ баланс клиента (баланс правили мимо кошелька) —
@@ -209,7 +219,10 @@ def source_label(row: Row) -> str:
             return f"пересчёт «часы подряд» {d}"
         return f"возврат {d}"
     if row.reason == "merge":
-        return f"перенос с другого профиля {d}"
+        # «Слияние баланса из …» — пришло с другого профиля; иначе это обнуление
+        # долга на профиле, который склеили в другой («Баланс перенесён на …»).
+        return f"перенос с другого профиля {d}" if "Слияние" in (row.description or "") \
+            else f"долг перенесён на другой профиль {d}"
     if row.reason == "subscription_purchase":
         return f"возврат за абонемент {d}"
     desc = (row.description or "").strip()
@@ -244,7 +257,8 @@ def debit_label(row: Row, booking: Optional[BookingRef]) -> str:
     if r == "baseline":
         return "долг на начало"
     if r == "merge":
-        return f"перенос на другой профиль {d}"
+        return f"долг с другого профиля {d}" if "Слияние" in (row.description or "") \
+            else f"перенос на другой профиль {d}"
     if r == "topup_reversal":
         return f"отмена пополнения {d}"
     if r == "topup_adjust":
@@ -328,12 +342,34 @@ def allocate(
             "booking": booking_public(b), "date": r.at.isoformat(),
         }
 
+    # 0. Продажа абонемента с кассы (subscription_sale): пополнение «… — оплата
+    #    абонемента» и списание абонемента той же суммы, одним действием (≤ 2 с).
+    #    Абонемент оплачен своей оплатой; кассовую проводку потом не правили.
+    per_tx: dict[str, int] = defaultdict(int)
+    for r in rows:
+        if (r.ref_type or "") == "cashbox_tx" and r.ref_id:
+            per_tx[str(r.ref_id)] += 1
+    paired: set[str] = set()
+    sale_tops = [r for r in rows if r.reason == "topup" and r.delta > 0
+                 and "оплата абонемента" in (r.description or "") and per_tx.get(str(r.ref_id), 0) == 1]
+    for sp in (r for r in rows if r.reason == "subscription_purchase" and r.delta < 0):
+        cand = [t for t in sale_tops if str(t.id) not in paired and _c(t.delta) == -_c(sp.delta)
+                and abs((t.at - sp.at).total_seconds()) <= 2]
+        if not cand:
+            continue
+        t = min(cand, key=lambda x: abs((x.at - sp.at).total_seconds()))
+        paired.update({str(t.id), str(sp.id)})
+        if detail:
+            amount = _g(abs(_c(sp.delta)))
+            info[str(t.id)]["spentOn"].append({**tgt_public(sp), "amount": amount, "closedDebt": False})
+            info[str(sp.id)]["paidFrom"].append({**src_public(t), "amount": amount})
+
     # 1. Группы «своих» движений: бронь (списания + её возвраты) и кассовая
     #    проводка (пополнение + её отмена/правка). Остальное — по одному.
     groups: dict[tuple, list[Row]] = defaultdict(list)
     singles: list[Row] = []
     for r in rows:
-        if abs(_c(r.delta)) == 0:
+        if abs(_c(r.delta)) == 0 or str(r.id) in paired:
             continue
         if r.booking_id:
             groups[("booking", str(r.booking_id))].append(r)
@@ -350,8 +386,9 @@ def allocate(
         supplies.append(_Supply(row=r, cents=cents, left=cents, order=order))
 
     def demand_key_for_row(r: Row) -> tuple:
-        k = _MIN_KEY if r.reason == "baseline" else _tbs(r.at)
-        return (k, 1, str(r.id))
+        # Не за бронь — раньше всех броней, между собой по времени (остаток на
+        # начало — самый первый). См. docstring: иначе ложное «✓ оплачено».
+        return (_MIN_KEY, 1, _MIN_KEY if r.reason == "baseline" else r.at, str(r.id))
 
     for (gtype, gid), grp in groups.items():
         primary_sign = -1 if gtype == "booking" else 1
@@ -678,7 +715,8 @@ def load_inputs(session, users: list) -> dict:
     Брони — ВСЕ брони клиента (а не только окно админки в 5000): долг брони
     вне окна не теряется.
     """
-    from sqlmodel import select, or_
+    from sqlalchemy import or_
+    from sqlmodel import select
     from app.models.balance_ledger import BalanceLedger
     from app.models.booking import Booking
     from app.models.cashbox_transaction import CashboxTransaction
@@ -769,6 +807,20 @@ def load_inputs(session, users: list) -> dict:
     return out
 
 
+# Брони старше — уже не в окне админки; список держим коротким.
+UNLINKED_LOOKBACK_DAYS = 120
+
+
+def unlinked_charged(rows: list, all_bookings: list, now_tbs: datetime) -> list[str]:
+    """Списанные брони (как их видит экран), о которых в ленте нет ни строки:
+    части после деления брони, брони склеенного профиля, брони до ленты, строка
+    «при создании», не нашедшая бронь. Экран кладёт на них долг не на бронях."""
+    linked = {str(r.booking_id) for r in rows if r.booking_id}
+    since = now_tbs - timedelta(days=UNLINKED_LOOKBACK_DAYS)
+    return [b.id for b in all_bookings
+            if b.id not in linked and b.start() >= since and due_kind(b, now_tbs) == "charged"]
+
+
 def _now_tbs(now_utc: Optional[datetime] = None) -> datetime:
     return (now_utc or datetime.utcnow()) + TZ
 
@@ -780,6 +832,7 @@ def client_allocation(session, user, now_utc: Optional[datetime] = None) -> dict
     now = _now_tbs(now_utc)
     pending = [b for b in data["all"] if due_kind(b, now) == "pending"]
     res["coverage"] = project_coverage(res["batches"], pending) if res["consistent"] else []
+    res["unlinked"] = unlinked_charged(data["rows"], data["all"], now)
     res["userId"] = str(user.id)
     res["email"] = user.email
     return res
@@ -793,14 +846,18 @@ def summary(session, now_utc: Optional[datetime] = None) -> dict:
     списаниям не за брони. Клиенты с нулём не нужны: у них всё списанное
     оплачено, а несписанное — целиком «к оплате».
     """
+    from sqlalchemy import or_
     from sqlmodel import select
     from app.models.user import User
 
-    users = [
-        u for u in session.exec(select(User).where(User.archived_at.is_(None))).all()  # type: ignore[union-attr]
-        if abs(float(u.balance or 0)) >= EPS
-    ]
+    users = session.exec(
+        select(User.id, User.email, User.balance).where(
+            User.archived_at.is_(None),  # type: ignore[union-attr]
+            or_(User.balance >= EPS, User.balance <= -EPS),
+        )
+    ).all()
     inputs = load_inputs(session, users)
+    now = _now_tbs(now_utc)
     clients = []
     for u in users:
         data = inputs[str(u.id)]
@@ -816,5 +873,7 @@ def summary(session, now_utc: Optional[datetime] = None) -> dict:
                 for b in res["batches"]
             ],
             "debts": res["debts"],
+            # Только при минусе: при плюсе списанные брони и так «оплачено».
+            "unlinked": unlinked_charged(data["rows"], data["all"], now) if res["balance"] < 0 else [],
         })
     return {"generatedAt": datetime.utcnow().isoformat(), "clients": clients}

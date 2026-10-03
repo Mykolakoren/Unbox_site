@@ -19,6 +19,9 @@ import type { BookingHistoryItem, User } from '../store/types';
 const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
 const SUMMARY_TTL_MS = 60_000;
 let summaryCache: { sig: string; at: number; promise: Promise<AllocationIndex | null> } | null = null;
+// Последняя полученная сводка — начальное значение для нового экрана (без мигания
+// значков, пока идёт запрос). Устаревших клиентов applyAllocation отсечёт по балансу.
+let lastIndex: AllocationIndex | null = null;
 
 /** Отпечаток ненулевых балансов — меняется после любой оплаты/списания. */
 export function balanceSignature(users: ReadonlyArray<Pick<User, 'id' | 'balance'>>): string {
@@ -47,7 +50,11 @@ function loadSummary(sig: string): Promise<AllocationIndex | null> {
         return summaryCache.promise;
     }
     const promise: Promise<AllocationIndex | null> = balanceAllocationApi.summary()
-        .then(r => indexAllocation(r?.clients))
+        .then(r => {
+            const idx = indexAllocation(r?.clients);
+            lastIndex = idx;
+            return idx;
+        })
         .catch(() => {
             if (summaryCache && summaryCache.promise === promise) summaryCache = null;
             return null;
@@ -67,15 +74,17 @@ export function useAllocationIndex(
     const usersSig = useMemo(() => balanceSignature(users), [users]);
     const bookingsSig = useMemo(() => bookingsSignature(bookings), [bookings]);
     const sig = `${usersSig}#${bookingsSig}`;
-    const [idx, setIdx] = useState<AllocationIndex | null>(null);
+    const [idx, setIdx] = useState<AllocationIndex | null>(() => lastIndex);
     useEffect(() => {
-        if (!enabled || users.length === 0) return;
+        // Ждём и клиентов, и брони: иначе первый запрос (брони ещё не пришли)
+        // сразу устаревает. Пауза склеивает подряд идущие обновления стора.
+        if (!enabled || users.length === 0 || bookings.length === 0) return;
         let cancelled = false;
         const t = window.setTimeout(() => {
             loadSummary(sig).then(i => { if (!cancelled && i) setIdx(i); });
-        }, 200);
+        }, 600);
         return () => { cancelled = true; window.clearTimeout(t); };
-    }, [enabled, sig, users.length]);
+    }, [enabled, sig, users.length, bookings.length]);
     return enabled ? idx : null;
 }
 
@@ -89,6 +98,9 @@ export function loadClientAllocation(userId: string, balanceKey: string | number
     const now = Date.now();
     const hit = clientCache.get(key);
     if (hit && now - hit.at < CLIENT_TTL_MS) return hit.promise;
+    // Вкладка у стойки живёт днями — старые ответы не копим.
+    for (const [k, v] of clientCache) if (now - v.at >= CLIENT_TTL_MS) clientCache.delete(k);
+    while (clientCache.size >= 20) clientCache.delete(clientCache.keys().next().value as string);
     const promise: Promise<ClientAllocation | null> = balanceAllocationApi.forClient(userId)
         .catch(() => {
             clientCache.delete(key);

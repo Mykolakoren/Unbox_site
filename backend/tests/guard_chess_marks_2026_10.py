@@ -192,8 +192,10 @@ def test_legend_items():
     code = _read(CHESS)
     legend = code[code.index("data-chess-legend"):code.index("{/* ── Панель брони")]
     assert "(!) к оплате 36 ₾ — взять с клиента" in legend, "в легенде нет «(!) к оплате … — взять с клиента»"
-    assert "(!) к оплате 11 ₾ из 20 — часть уже покрыта балансом" in legend, "в легенде нет частичного покрытия"
-    assert "оплачено — бронь покрыта деньгами клиента" in legend and "Списанная в долг — всегда «к оплате»" in legend
+    assert "(!) к оплате 11 ₾ из 20 — взять только разницу" in legend, "в легенде нет частичного покрытия"
+    assert "оплачено — бронь покрыта деньгами клиента, брать ничего не нужно" in legend
+    assert "Списанная в долг — всегда «к оплате»" in legend, "нет пояснения (title) про списанную в долг"
+    assert legend.count("whitespace-normal") >= 2, "длинные плашки легенды снова в одну строку — обрезаются"
     assert "спишется с баланса —" not in legend and "<CircleDashed" not in legend, "в легенде снова третий знак"
     assert "<Check" in legend and "<AlertCircle" in legend, \
         "в легенде нет значков (!) и галочки (сами символы ✓ в тексте не пишем — эмодзи-сторож)"

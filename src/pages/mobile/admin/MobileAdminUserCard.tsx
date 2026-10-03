@@ -324,7 +324,8 @@ function LedgerList({ userId, balance }: { userId: string; balance: number }) {
             .then(r => { if (alive) setData(r); })
             .catch(() => { if (alive) setFailed(true); });
         return () => { alive = false; };
-    }, [userId, tick]);
+        // balance — после пополнения лента перечитывается вместе с раскладкой.
+    }, [userId, tick, balance]);
 
     if (failed) return <ErrorBar message="Не удалось загрузить движения баланса" onRetry={() => setTick(t => t + 1)} />;
     if (!data) return <SkeletonList count={3} label="Загружаем движения баланса" cardHeight={52} />;

@@ -100,6 +100,11 @@ export interface ClientAllocSummary {
     batches: AllocSource[];
     /** Долги: по броням (в т.ч. вне окна админки) и по списаниям не за брони, от старых к новым. */
     debts: AllocDebt[];
+    /**
+     * Списанные брони, о которых в ленте нет ни строки (части после деления брони,
+     * брони склеенного профиля, брони до ленты). Долг не на бронях ложится на них.
+     */
+    unlinked?: string[];
 }
 
 export interface AllocSummaryResponse {
@@ -195,22 +200,44 @@ export function applyAllocation(
     }
     for (const [entry, list] of groups) {
         const debtBy = new Map<string, number>();
+        // Долг не на бронях (списания не за бронь) + излишек сверх цены брони —
+        // ниже ложится на списанные брони без строк ленты, самые свежие первыми.
+        let loose = 0;
         for (const d of entry.debts || []) {
             if (d.bookingId) debtBy.set(d.bookingId, (debtBy.get(d.bookingId) || 0) + cents(d.amount));
+            else loose += cents(d.amount);
         }
-        // Списанные: долг — тот, что лента привязала к этой брони.
+        // Списанные: долг — тот, что лента привязала к этой брони (не больше её цены).
         for (const b of list) {
             const info = base.get(b.id);
             const debt = debtBy.get(b.id) || 0;
             if (info && info.charged) {
-                const price = Math.max(cents(info.price), debt);
-                out.set(b.id, { ...info, due: debt / 100, price: price / 100 });
+                const due = Math.min(debt, cents(info.price));
+                loose += debt - due;
+                out.set(b.id, { ...info, due: due / 100 });
             } else if (!info && debt > 0 && SHOWN_STATUSES.has(b.status)
                 && !(b.status === 'completed' && b.paymentStatus === 'pending')) {
                 // Долг на брони, которую база не считала (абонемент ушёл в баланс:
                 // цена брони 0, а списаны деньги) — показываем на ней самой.
                 const price = Math.max(cents(Number(b.finalPrice || 0)), debt);
                 out.set(b.id, { due: debt / 100, price: price / 100, charged: true });
+            }
+        }
+        // Брони, о которых лента не знает (деление брони, склейка, брони до ленты):
+        // долг не на бронях — на них, самые свежие первыми (как прежний расчёт).
+        // Иначе списанная в долг бронь получила бы «✓ оплачено» (ревью денег 03.10).
+        if (loose > 0) {
+            const unlinked = new Set((entry.unlinked || []).map(String));
+            const cands = list
+                .filter(b => { const i = base.get(b.id); return !!i && i.charged && unlinked.has(b.id) && !debtBy.has(b.id); })
+                .sort((a, b) => startKey(b).localeCompare(startKey(a)));
+            for (const b of cands) {
+                if (loose <= 0) break;
+                const info = out.get(b.id)!;
+                const take = Math.min(loose, cents(info.price) - cents(info.due));
+                if (take <= 0) continue;
+                loose -= take;
+                out.set(b.id, { ...info, due: (cents(info.due) + take) / 100 });
             }
         }
         // Несписанные: плюс баланса — по партиям, ближайшие брони первыми.
@@ -281,6 +308,12 @@ function targetText(t: AllocTarget): string {
     return `${t.label} — ${money(t.amount)}`;
 }
 
+/** Первые 5 через «; », остальное — «и ещё N» (оплата на 30 броней не растягивает строку). */
+function listText<T>(items: ReadonlyArray<T>, fmt: (x: T) => string, sep = '; ', max = 5): string {
+    const shown = items.slice(0, max).map(fmt).join(sep);
+    return items.length > max ? `${shown}${sep}и ещё ${items.length - max}` : shown;
+}
+
 /**
  * Серая строка под строкой «Движений баланса».
  *   начисление: «ушло на: 05.10 14:00 Каб. 2 — 9 ₾; …» / «на балансе: 5 ₾»;
@@ -292,14 +325,14 @@ export function ledgerRowLine(info: AllocRowInfo | null | undefined): string | n
     const parts: string[] = [];
     if (info.delta > 0) {
         const rev = (info.reversed || []) as AllocTarget[];
-        if (rev.length) parts.push(`вернуло списание: ${rev.map(targetText).join('; ')}`);
+        if (rev.length) parts.push(`вернуло списание: ${listText(rev, targetText)}`);
         // Пополнение, которое потом отменили/уменьшили (удалили кассовую проводку).
         const cancelled = info.reversedBy || [];
         if (cancelled.length) parts.push(`отменено: ${cancelled.map(r => `${r.label} — ${money(r.amount)}`).join('; ')}`);
         const closed = (info.spentOn || []).filter(t => t.closedDebt);
         const spent = (info.spentOn || []).filter(t => !t.closedDebt);
-        if (closed.length) parts.push(`закрыло долг: ${closed.map(targetText).join('; ')}`);
-        if (spent.length) parts.push(`ушло на: ${spent.map(targetText).join('; ')}`);
+        if (closed.length) parts.push(`закрыло долг: ${listText(closed, targetText)}`);
+        if (spent.length) parts.push(`ушло на: ${listText(spent, targetText)}`);
         if (info.left > 0.004) parts.push(`на балансе: ${money(info.left)}`);
     } else if (info.delta < 0) {
         const total = Math.abs(info.delta);
@@ -334,15 +367,15 @@ export function allocationHeadline(a: ClientAllocation | null | undefined): stri
         let s = `На балансе ${money(plus)}: ${sourcesText(a.batches)}.`;
         const cover = (a.coverage || []).filter(c => c.covered > 0.004);
         if (cover.length) {
-            s += ` Покроет: ${cover.map(c => {
+            s += ` Покроет: ${listText(cover, c => {
                 const what = c.booking?.label || 'бронь';
                 return c.due > 0.004 ? `${what} (${money(c.covered)} из ${money(c.price)})` : `${what} (${money(c.covered)})`;
-            }).join(', ')}`;
+            }, ', ')}`;
         }
         return s;
     }
     if (minus > 0.004) {
-        return `Долг ${money(minus)}: ${(a.debts || []).map(d => `${d.bookingId ? 'бронь ' : ''}${d.label} (${money(d.amount)})`).join(', ')}`;
+        return `Долг ${money(minus)}: ${listText(a.debts || [], d => `${d.bookingId ? 'бронь ' : ''}${d.label} (${money(d.amount)})`, ', ')}`;
     }
     return 'Баланс 0 ₾: всё списанное оплачено';
 }

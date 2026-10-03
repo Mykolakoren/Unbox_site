@@ -490,10 +490,11 @@ NOW_UTC = datetime(2026, 10, 5, 6, 0)          # пн 05.10, 10:00 по Тбил
 NOW_TBS = NOW_UTC + TZ
 
 
-def _simulate(rng: random.Random, n: int, edge: bool):
+def _simulate(rng: random.Random, n: int, edge):
     """Один клиент. edge=False — обычные потоки (возврат при любой отмене списанной
-    брони, без списаний не за брони); edge=True — ещё штраф без возврата и
-    корректировки/абонемент с баланса."""
+    брони, без списаний не за брони); "nonbooking" — ещё списания не за бронь
+    (корректировка, абонемент с баланса, продажа абонемента с кассы парой, склейка
+    с долгом, «часы подряд»); "penalty" — ещё поздняя отмена без возврата (штраф)."""
     email = f"c{n}@demo.ge"
     rows: list[Row] = []
     refs: dict[str, BookingRef] = {}
@@ -546,7 +547,7 @@ def _simulate(rng: random.Random, n: int, edge: bool):
                 rows.append(Row(f"{bid}-c", charge_tbs - TZ, -price, "booking_charge", "списание с баланса (T-24ч)",
                                 "booking", bid, booking_id=bid))
             if cancel_at is not None:
-                if edge and rng.random() < 0.5:
+                if edge == "penalty" and rng.random() < 0.5:
                     kinds["penalty"] += 1  # поздняя отмена: деньги не вернули
                 else:
                     rows.append(Row(f"{bid}-rf", cancel_at - TZ, price, "booking_refund", "Возврат при отмене брони",
@@ -572,11 +573,23 @@ def _simulate(rng: random.Random, n: int, edge: bool):
         if rng.random() < 0.45:
             at = datetime(2026, 9, 21, 1, 0) + timedelta(days=7 * wk)
             rows.append(R(f"w{n}-{wk}", at.isoformat(), float(rng.choice([1.5, 4, 6, 9, 12, 18])), "weekly_rebate"))
-    if edge and rng.random() < 0.35:
-        kinds["non_booking"] += 1
-        at = NOW_UTC - timedelta(minutes=rng.randint(10, 60 * 24 * 14))
-        reason = rng.choice(["correction", "subscription_purchase"])
-        rows.append(R(f"k{n}", at.isoformat(), -float(rng.choice([10, 15, 70])), reason, ref_type="user"))
+    if edge == "nonbooking":
+        for j in range(rng.randint(1, 3)):
+            kinds["non_booking"] += 1
+            at = NOW_UTC - timedelta(minutes=rng.randint(10, 60 * 24 * 14))
+            kind = rng.choice(["correction", "subscription_purchase", "sale", "merge", "consecutive_recompute"])
+            amt = float(rng.choice([2, 10, 15, 70, 350]))
+            if kind == "sale":
+                # Продажа абонемента с кассы: пополнение и списание одним действием.
+                rows.append(R(f"s{n}-{j}", at.isoformat(), amt, "topup", ref_type="cashbox_tx", ref_id=f"tx-s{n}-{j}",
+                              description="Пополнение через кассу (cash) — оплата абонемента «Профи+»"))
+                rows.append(R(f"p{n}-{j}", (at + timedelta(milliseconds=4)).isoformat(), -amt, "subscription_purchase",
+                              ref_type="user", description="Оплата абонемента «Профи+»"))
+            elif kind == "merge":
+                rows.append(R(f"k{n}-{j}", at.isoformat(), -amt, "merge", ref_type="user",
+                              description="Слияние баланса из old@demo.ge"))
+            else:
+                rows.append(R(f"k{n}-{j}", at.isoformat(), -amt, kind, ref_type="user"))
     link_unlinked(rows, created)
     balance = round(sum(r.delta for r in rows), 2)
     res = allocate(rows, refs, balance=balance)
@@ -585,7 +598,8 @@ def _simulate(rng: random.Random, n: int, edge: bool):
     lite = allocate(rows, refs, balance=balance, detail=False)
     assert lite["batches"] == res["batches"] and lite["debts"] == res["debts"], f"клиент {n}: сводка ≠ карточка"
     summary = {"userId": f"id-{n}", "email": email, "balance": balance, "consistent": True,
-               "batches": res["batches"], "debts": res["debts"]}
+               "batches": res["batches"], "debts": res["debts"],
+               "unlinked": BA.unlinked_charged(rows, list(refs.values()), NOW_TBS) if balance < 0 else []}
     return {"id": n, "email": email, "balance": balance, "bookings": front, "summary": summary, "kinds": kinds}
 
 
@@ -668,11 +682,34 @@ def test_parity_front_old_vs_new_random():
     assert checked > 1500 and covered_checks > 50, (checked, covered_checks)
 
 
-def test_parity_edge_flows_totals_hold():
-    """Штраф без возврата и списания не за брони: долг клиента целиком на месте —
-    Σ «к оплате» по списанным броням + долги вне списка == минус баланса; покрытие
-    несписанных — как раньше. Сколько броней получили другую сумму — считаем."""
-    cases, res = _parity_run(400, edge=True, seed=20261004)
+def test_parity_non_booking_debits_exact():
+    """Списания не за бронь (корректировка, абонемент с баланса, продажа абонемента с
+    кассы, склейка с долгом, «часы подряд»): «к оплате» по КАЖДОЙ брони — как прежний
+    расчёт (ревью денег 03.10: новое такое списание не «забирает» долг у броней —
+    иначе брони в долг получали «✓ оплачено»). 400 клиентов, расхождений 0."""
+    cases, res = _parity_run(400, edge="nonbooking", seed=20261005)
+    if res is None:
+        return
+    checked = mism = with_debits = 0
+    bad = []
+    for c, r in zip(cases, res):
+        with_debits += bool(c["kinds"]["non_booking"])
+        for bid, o in r["old"].items():
+            n = r["neu"][bid]
+            checked += 1
+            if abs(n["due"] - o["due"]) > 0.005:
+                mism += 1
+                bad.append((c["id"], bid, o["due"], n["due"]))
+    _PARITY_STATS["nonbooking"] = (len(cases), checked, mism, with_debits)
+    assert mism == 0, f"списание не за бронь сдвинуло «к оплате»: {mism} из {checked}: {bad[:3]}"
+
+
+def test_parity_penalty_flows_totals_hold():
+    """Поздняя отмена без возврата (штраф): долг остаётся на отменённой брони (её в
+    шахматке нет — видна в «Ещё долг» и в карточке), у остальных броней «к оплате»
+    может стать только МЕНЬШЕ и только у клиентов со штрафом. Долг клиента целиком на
+    месте: Σ «к оплате» по списанным броням + долги вне списка == минус баланса."""
+    cases, res = _parity_run(400, edge="penalty", seed=20261004)
     if res is None:
         return
     moved = clients_moved = 0
@@ -689,8 +726,102 @@ def test_parity_edge_flows_totals_hold():
         moved += len(diff)
         clients_moved += bool(diff)
         if diff:
-            assert c["kinds"]["penalty"] or c["kinds"]["non_booking"], f"клиент {c['id']}: сумма сдвинулась без причины"
-    _PARITY_STATS["edge"] = (len(cases), moved, clients_moved)
+            assert c["kinds"]["penalty"], f"клиент {c['id']}: сумма сдвинулась без штрафа"
+            assert all(r["neu"][b]["due"] <= r["old"][b]["due"] + 0.005 for b in diff), \
+                f"клиент {c['id']}: у брони стало БОЛЬШЕ «к оплате»"
+    _PARITY_STATS["penalty"] = (len(cases), moved, clients_moved)
+
+
+def test_review_scenarios_no_false_paid():
+    """Сценарии ревью денег 03.10 — бронь в долг не получает «✓ оплачено»:
+    продажа абонемента с кассы при долге; корректировка после броней; деление брони
+    (вторая часть без строк ленты); склейка (брони с другого профиля, долг одной
+    строкой); «часы подряд» (возврат на клиента, «к оплате» не больше цены брони)."""
+    cases = {}
+
+    def fb(i, email, day, t, price, pay="paid", status="completed"):
+        return {"id": i, "userId": email, "date": f"{day}T00:00:00", "startTime": t, "duration": 60, "status": status,
+                "paymentStatus": pay, "paymentMethod": "balance", "finalPrice": price}
+
+    def case(name, rows, refs, front, balance, expect):
+        res = allocate(rows, refs, balance=balance)
+        assert res["consistent"], name
+        email = front[0]["userId"]
+        cases[name] = {"email": email, "balance": balance, "bookings": front, "expect": expect,
+                       "summary": {"userId": "id-" + name, "email": email, "balance": balance, "consistent": True,
+                                   "batches": res["batches"], "debts": res["debts"],
+                                   "unlinked": BA.unlinked_charged(rows, list(refs.values()), NOW_TBS)}}
+
+    # 1. Три неоплаченные брони, потом продажа абонемента с кассы (+350 / −350).
+    e = "sale@demo.ge"
+    refs = {f"b{i}": B(f"b{i}", f"2026-10-0{i}", "10:00") for i in (1, 2, 3)}
+    rows = [_charge(f"c{i}", f"2026-09-3{0}T06:00:00" if i == 1 else f"2026-10-0{i - 1}T06:00:00", 20, f"b{i}")
+            for i in (1, 2, 3)]
+    rows += [R("ts", "2026-10-04T08:00:00", 350, "topup", ref_type="cashbox_tx", ref_id="txs",
+               description="Пополнение через кассу (cash) — оплата абонемента «Профи+»"),
+             R("ps", "2026-10-04T08:00:00.004000", -350, "subscription_purchase", ref_type="user",
+               description="Оплата абонемента «Профи+»")]
+    case("sale", rows, refs, [fb(f"b{i}", e, f"2026-10-0{i}", "10:00", 20) for i in (1, 2, 3)], -60,
+         {"b1": 20, "b2": 20, "b3": 20})
+    # 2. Корректировка −10 после броней: b1 оплачена, b2 в долг.
+    e = "corr@demo.ge"
+    refs = {"b1": B("b1", "2026-10-01"), "b2": B("b2", "2026-10-02")}
+    rows = [_topup("t1", "2026-09-29T08:00:00", 20), _charge("c1", "2026-09-30T06:00:00", 20, "b1"),
+            _charge("c2", "2026-10-01T06:00:00", 20, "b2"),
+            R("k1", "2026-10-04T08:00:00", -10, "correction", ref_type="user")]
+    case("correction", rows, refs, [fb("b1", e, "2026-10-01", "10:00", 20), fb("b2", e, "2026-10-02", "10:00", 20)],
+         -30, {"b1": 10, "b2": 20})
+    # 3. Деление брони: X (2 ч, 40 ₾) списана в долг, потом разделена на X 20 + Y 20 (у Y строк нет).
+    e = "split@demo.ge"
+    refs = {"X": B("X", "2026-10-02", "10:00", price=20), "Y": B("Y", "2026-10-02", "11:00", price=20)}
+    rows = [_charge("cx", "2026-10-01T06:00:00", 40, "X")]
+    case("split", rows, refs, [fb("X", e, "2026-10-02", "10:00", 20), fb("Y", e, "2026-10-02", "11:00", 20)], -40,
+         {"X": 20, "Y": 20})
+    # 4. Склейка: долг 50 ₾ приехал одной строкой, брони с другого профиля — без строк ленты.
+    e = "merge@demo.ge"
+    refs = {"T1": B("T1", "2026-09-20", price=20), "T2": B("T2", "2026-09-25", price=30)}
+    rows = [R("m1", "2026-10-01T08:00:00", -50, "merge", ref_type="user", description="Слияние баланса из old@demo.ge")]
+    case("merge", rows, refs, [fb("T1", e, "2026-09-20", "10:00", 20), fb("T2", e, "2026-09-25", "10:00", 30)], -50,
+         {"T1": 20, "T2": 30})
+    # 5. «Часы подряд»: A и B по 18 ₾ после пересчёта, возврат +2 ₾ пишется на клиента.
+    e = "chain@demo.ge"
+    refs = {"A": B("A", "2026-10-02", "10:00", price=18), "B": B("B", "2026-10-02", "11:00", price=18)}
+    rows = [_charge("ca", "2026-10-01T06:00:00", 20, "A"), _charge("cb", "2026-10-01T07:00:00", 18, "B"),
+            R("cr", "2026-10-01T07:00:01", 2, "consecutive_recompute", ref_type="user")]
+    case("chain", rows, refs, [fb("A", e, "2026-10-02", "10:00", 18), fb("B", e, "2026-10-02", "11:00", 18)], -36,
+         {"A": 18, "B": 18})
+    out = _node("""
+const res = {};
+for (const [name, c] of Object.entries(data)) {
+  const balanceOf = uid => (uid === c.email ? c.balance : null);
+  const old = m.computeDueByBooking(c.bookings, balanceOf);
+  const neu = m.applyAllocation(old, c.bookings, m.indexAllocation([c.summary]), balanceOf);
+  res[name] = { old: Object.fromEntries([...old].map(([k, v]) => [k, v.due])),
+                neu: Object.fromEntries([...neu].map(([k, v]) => [k, [v.due, v.price]])) };
+}
+console.log(JSON.stringify(res));
+""", cases)
+    if out is None:
+        return
+    for name, c in cases.items():
+        got = {k: v[0] for k, v in out[name]["neu"].items()}
+        assert got == c["expect"], f"{name}: «к оплате» {got}, ждали {c['expect']} (прежний расчёт {out[name]['old']})"
+        assert got == out[name]["old"], f"{name}: разошлось с прежним расчётом {out[name]['old']}"
+        for k, (due, price) in out[name]["neu"].items():
+            assert due <= price + 0.005, f"{name}/{k}: к оплате {due} больше цены {price}"
+    # Подписи: склейка на принимающем профиле — «долг с другого профиля»; продажа — пара.
+    r_sale = _rows(allocate(
+        [R("ts", "2026-10-04T08:00:00", 350, "topup", ref_type="cashbox_tx", ref_id="txs",
+           description="Пополнение через кассу (cash) — оплата абонемента «Профи+»"),
+         R("ps", "2026-10-04T08:00:00.004000", -350, "subscription_purchase", ref_type="user",
+           description="Оплата абонемента «Профи+»")], {}, balance=0))
+    assert _amounts(r_sale["ps"]["paidFrom"]) == [("оплата 04.10", 350.0)], r_sale["ps"]
+    assert [t["label"] for t in r_sale["ts"]["spentOn"]] == ["абонемент «Профи+»"]
+    r_merge = _rows(allocate([R("m1", "2026-10-01T08:00:00", -50, "merge", description="Слияние баланса из old@demo.ge")],
+                             {}, balance=-50))
+    assert BA.debit_label(Row("m1", datetime(2026, 10, 1, 8), -50, "merge", "Слияние баланса из old@demo.ge"), None) \
+        == "долг с другого профиля 01.10"
+    assert r_merge["m1"]["debtOpen"] == 50.0
 
 
 def test_risk1_window_does_not_lose_debt():
@@ -841,6 +972,9 @@ def test_badges_new_rule_no_covered_sign():
     legend = _read("src/components/admin/AdminChessboardView.tsx")
     legend = legend[legend.index("data-chess-legend"):legend.index("{/* ── Панель брони")]
     assert "(!) к оплате 11 ₾ из 20" in legend and "оплачено — бронь покрыта деньгами клиента" in legend
+    led = _code("src/components/admin/UserBalanceLedger.tsx")
+    assert "}, [userId, reloadTick, balanceKey]);" in led, "после «Принять оплату» лента и сводка над ней не перечитываются"
+    assert "balance={user.balance}" in _read("src/pages/admin/UserDetails.tsx")
     assert "спишется с баланса —" not in legend
     due = _code("src/utils/dueAmounts.ts")
     assert "export type DueMarkKind = 'owes' | 'paid';" in due
@@ -867,9 +1001,12 @@ if __name__ == "__main__":
         if "strict" in s:
             print(f"  паритет: клиентов {s['strict'][0]}, броней сверено {s['strict'][1]}, расхождений {s['strict'][2]}, "
                   f"частично/полностью покрытых несписанных {s['strict'][3]}")
-        if "edge" in s:
-            print(f"  штрафы/списания не за брони: клиентов {s['edge'][0]}, броней с другой суммой {s['edge'][1]} "
-                  f"(у {s['edge'][2]} клиентов — все объяснены штрафом или списанием не за бронь)")
+        if "nonbooking" in s:
+            print(f"  списания не за бронь: клиентов {s['nonbooking'][0]} (со списаниями {s['nonbooking'][3]}), "
+                  f"броней сверено {s['nonbooking'][1]}, расхождений {s['nonbooking'][2]}")
+        if "penalty" in s:
+            print(f"  штрафы без возврата: клиентов {s['penalty'][0]}, броней с другой суммой {s['penalty'][1]} "
+                  f"(у {s['penalty'][2]} клиентов, все со штрафом, только «меньше»)")
         if "window" in s:
             print(f"  окно 5000: клиентов с обрезанным списком {s['window'][0]}, у {s['window'][1]} прежний расчёт терял долг")
     print("СТОРОЖ оплачено скидкой 2026-10: OK" if not failures else f"СТОРОЖ оплачено скидкой 2026-10 УПАЛ ({failures}) — деплой НЕ выкатывать")

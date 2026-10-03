@@ -343,7 +343,7 @@ function GridHouseToday({
                                 <col style={{ width: 124 }} />
                                 <col />
                                 <col style={{ width: 150 }} />
-                                <col style={{ width: 200 }} />
+                                <col style={{ width: 168 }} />
                             </colgroup>
                             <thead>
                                 <tr style={{ background: GH.ink5 }}>
@@ -409,8 +409,9 @@ function GridHouseToday({
                                             <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
                                             </td>
-                                            <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} />
+                                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                                                {/* «к оплате 11 ₾ из 20» может перенестись — колонка прежней ширины, имени клиента не тесно. */}
+                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="whitespace-normal h-auto py-1" />
                                             </td>
                                         </tr>
                                     );
