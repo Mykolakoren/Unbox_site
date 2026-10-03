@@ -172,6 +172,7 @@ def test_regular_tile_three_branches():
         "в плитке снова «◌ спишется с баланса»"
     assert "const markLabel = dueHint(d);" in tile, "у знака в плитке нет подробного title/aria-label"
     assert "roomy && partial ? ` из ${formatGel(d.price)}` : ''" in tile, "частично покрытая без «из M»"
+    assert "{roomy && !partial ? 'к оплате ' : ''}" in tile, "у частично покрытой в плитке снова длинная подпись"
     paid = tile[tile.index("kind === 'paid' ? ("):]
     assert "<Check" in paid and "'оплачено'" in paid, "ветка paid потеряла «✓ оплачено»"
     assert "d && d.due > 0 ? (" not in tile, "осталась старая развилка due > 0 / иначе ✓"

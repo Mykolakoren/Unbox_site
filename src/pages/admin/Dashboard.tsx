@@ -343,7 +343,7 @@ function GridHouseToday({
                                 <col style={{ width: 124 }} />
                                 <col />
                                 <col style={{ width: 150 }} />
-                                <col style={{ width: 168 }} />
+                                <col style={{ width: 200 }} />
                             </colgroup>
                             <thead>
                                 <tr style={{ background: GH.ink5 }}>

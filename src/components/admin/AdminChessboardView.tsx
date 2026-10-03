@@ -1754,7 +1754,7 @@ export function AdminChessboardView() {
                                                                     {kind === 'owes' && d ? (
                                                                         <span className="font-semibold inline-flex items-center gap-0.5" title={markLabel} aria-label={markLabel}>
                                                                             <AlertCircle size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
-                                                                            {roomy ? 'к оплате ' : ''}{formatGel(d.due)}{roomy && partial ? ` из ${formatGel(d.price)}` : ''}
+                                                                            {roomy && !partial ? 'к оплате ' : ''}{formatGel(d.due)}{roomy && partial ? ` из ${formatGel(d.price)}` : ''}
                                                                         </span>
                                                                     ) : kind === 'paid' ? (
                                                                         <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]" title={markLabel} aria-label={markLabel}>

@@ -61,7 +61,7 @@ export function DueBadge({
                     : <AlertCircle size={14} strokeWidth={2.25} aria-hidden="true" />}
                 <span>
                     к оплате <span className="num">{formatGel(amount)}</span>
-                    {partial && <> из <span className="num">{formatGel(of)}</span></>}
+                    {partial && <> из <span className="num">{formatGel(of).replace(/\s₾$/, '')}</span></>}
                 </span>
             </span>
         );

@@ -144,7 +144,8 @@ def test_chessboard_due_mark_on_every_booking():
     assert "<CellDueMark info={dueMap.get(b.id)} corner />" in d, "у 30-минутной брони нет значка в углу"
     # Сумма «к оплате» — на любой брони ≥ 1 ч; слово «к оплате» — от 2 ч (roomy):
     # в 1,5 ч оно обрезалось (доработка 01.10, guard_wave4_polish).
-    assert "{roomy ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
+    # 03.10: у частично покрытой брони в плитке — «11 ₾ из 20 ₾» (без слова, чтобы не обрезалось).
+    assert "{roomy && !partial ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
     helper = _between(src, "function CellDueMark(", "function LegendItem(")
     assert "aria-label={label}" in helper and "title={label}" in helper, "значок в углу без подписи"
     # 03.10 (решение владельца «оплачено скидкой»): подпись знака — dueHint
