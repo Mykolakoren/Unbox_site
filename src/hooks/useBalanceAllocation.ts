@@ -107,18 +107,19 @@ export function useClientAllocation(
     balance?: number | null,
     reloadKey: unknown = 0,
 ): { data: ClientAllocation | null; failed: boolean; loading: boolean } {
-    const [state, setState] = useState<{ data: ClientAllocation | null; failed: boolean; loading: boolean }>(
-        { data: null, failed: false, loading: !!userId },
-    );
     const balanceKey = balance === null || balance === undefined ? '' : Math.round(Number(balance) * 100);
+    const key = userId ? `${userId}|${balanceKey}|${String(reloadKey)}` : '';
+    // Ответ помечен своим ключом: сменился клиент/баланс — старый ответ не показываем
+    // (без setState прямо в эффекте — правило react-hooks/set-state-in-effect).
+    const [res, setRes] = useState<{ key: string; data: ClientAllocation | null } | null>(null);
     useEffect(() => {
-        if (!userId) { setState({ data: null, failed: false, loading: false }); return; }
+        if (!userId) return;
         let alive = true;
-        setState(s => ({ ...s, loading: true }));
         loadClientAllocation(userId, `${balanceKey}|${String(reloadKey)}`).then(d => {
-            if (alive) setState({ data: d, failed: d === null, loading: false });
+            if (alive) setRes({ key: `${userId}|${balanceKey}|${String(reloadKey)}`, data: d });
         });
         return () => { alive = false; };
     }, [userId, balanceKey, reloadKey]);
-    return state;
+    const current = res && key && res.key === key ? res : null;
+    return { data: current?.data ?? null, failed: !!current && current.data === null, loading: !!key && !current };
 }

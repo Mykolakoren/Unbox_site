@@ -154,8 +154,9 @@ export function indexAllocation(clients: ReadonlyArray<ClientAllocSummary> | nul
 const SHOWN_STATUSES = new Set<string>(['confirmed', 'pending_approval', 'completed']);
 
 function startKey(b: BookingHistoryItem): string {
-    const raw: any = b.date;
-    const d = typeof raw === 'string' ? raw.slice(0, 10) : new Date(raw).toISOString().slice(0, 10);
+    // Как startKey в dueAmounts.ts: naive-строка из базы — первые 10 символов.
+    const raw: unknown = b.date;
+    const d = typeof raw === 'string' ? raw.slice(0, 10) : new Date(raw as number | Date).toISOString().slice(0, 10);
     return `${d} ${b.startTime || '00:00'}`;
 }
 
