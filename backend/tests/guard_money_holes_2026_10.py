@@ -1118,6 +1118,127 @@ def test_rule_helper_documented_and_used():
         assert "subscription_money_due(" in _body(routes, fn), f"{fn}: денежная часть брони по абонементу не списывается"
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Ревизия денег №2 (ревизор, 03.10 вечер): соседние дыры
+# ═════════════════════════════════════════════════════════════════════════
+
+def _shorten(s, actor, b, minutes=60, side="end"):
+    from app.api.v1.bookings import routes
+    out = H._call(routes.shorten_booking, booking_id=str(b.id),
+                  payload=routes.ShortenRequest(remove_minutes=minutes, side=side), session=s, current_user=actor)
+    s.commit()
+    return out
+
+
+def _trim(s, actor, b, remove_from, remove_to):
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    out = H._call(routes.trim_booking, booking_id=str(b.id),
+                  data=routes.TrimRequest(remove_from=remove_from, remove_to=remove_to),
+                  background_tasks=BackgroundTasks(), session=s, current_user=actor)
+    s.commit()
+    return out
+
+
+def _money_row(s, admin, u, *, minutes=120, extras=None):
+    """Бронь по абонементу, ушедшая в деньги: заранее (через 3 дня), а к кронy
+    T-24ч часы съела другая бронь → крон списал деньги, hours_deducted = 0."""
+    from app.services import billing_defer
+    b = _book(s, admin, u, days=3, start="14:00", minutes=minutes, extras=extras)
+    _book(s, admin, u, days=0, start="14:00", minutes=120, resource="room_2")
+    ok, _ = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok
+    b = s.get(Booking, b.id)
+    assert (b.payment_method, b.payment_status, float(b.hours_deducted or 0)) == ("subscription", "paid", 0.0)
+    return b
+
+
+@_scenario
+def test_r2_1_shorten_subscription_without_peak_returns_hours():
+    """S2: Тёплый, бронь 2 ч без пика и допов (10 → 8 ч). Сокращение на 1 ч → 9 ч,
+    отмена → 10 ч. Было: часы возвращались только вместе с деньгами — тут денег
+    0, и час пропадал (8 → 8, после отмены 9)."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, start="14:00", minutes=120)
+    assert _rem(s, u) == 8.0
+    assert not isinstance(_shorten(s, admin, b), dict)
+    b = s.get(Booking, b.id)
+    assert (b.duration, float(b.hours_deducted), _rem(s, u), _bal(s, u)) == (60, 1.0, 9.0, 100.0), \
+        (b.duration, b.hours_deducted, _rem(s, u), _bal(s, u))
+    _cancel(s, admin, b)
+    assert (_rem(s, u), _used(s, u), _bal(s, u)) == (10.0, 0.0, 100.0)
+
+
+@_scenario
+def test_r2_1_shorten_subscription_peak_exact_by_side():
+    """19:00–21:00 по абонементу: пик 20–21 → денежная часть 5 ₾. Сокращение с
+    конца отрезает пиковый час → назад 5 ₾ и 1 ч; с начала — непиковый 19–20 →
+    денег назад 0, только час (пропорция давала по 2,5 ₾ в обе стороны)."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("PRO_PLUS"))
+    a = _book(s, admin, u, start="19:00", minutes=120)
+    b = _book(s, admin, u, start="19:00", minutes=120, resource="room_2")
+    assert (_bal(s, u), _rem(s, u)) == (90.0, 38.0)
+    _shorten(s, admin, a, side="end")
+    _shorten(s, admin, b, side="start")
+    a, b = s.get(Booking, a.id), s.get(Booking, b.id)
+    assert (float(a.final_price), float(b.final_price), b.start_time) == (0.0, 5.0, "20:00"), \
+        (a.final_price, b.final_price, b.start_time)
+    assert (_bal(s, u), _rem(s, u)) == (95.0, 40.0), (_bal(s, u), _rem(s, u))
+    _cancel(s, admin, a)
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 42.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r2_1_shorten_balance_keeps_sandbox():
+    """Денежная бронь 2 ч + песочница: 36 + 5 = 41 ₾. Сокращение на 1 ч: аренда
+    пропорцией 36 → 18, песочница остаётся → 23 ₾, назад 18 ₾ (было 20,5)."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", minutes=120, method="balance", extras=["sandbox"])
+    assert (float(b.final_price), _bal(s, u)) == (41.0, 59.0)
+    _shorten(s, admin, b)
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), float(b.charge_amount), _bal(s, u)) == (23.0, 23.0, 77.0), \
+        (b.final_price, b.charge_amount, _bal(s, u))
+    _cancel(s, admin, b)
+    assert _bal(s, u) == 100.0
+
+
+@_scenario
+def test_r2_2_money_row_cannot_be_resized_cancel_returns_all():
+    """S10/S11: бронь по абонементу ушла в деньги (3 ч: 60 ₾ − 10 % тарифа = 54 +
+    песочница 5 = 59 ₾). Сокращение, вырезка, смена формата — понятный 409
+    (раньше: сокращение отдавало долю от final_price 5 ₾ и затирало
+    charge_amount — клиент терял десятки ₾; вырезка дарила фантомный час).
+    Отмена возвращает ровно 59 ₾."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=3.0, used_hours=7.0))
+    b = _money_row(s, admin, u, minutes=180, extras=["sandbox"])
+    taken = round(float(b.charge_amount), 2)
+    assert taken == 59.0, taken
+    bal0, rem0 = _bal(s, u), _rem(s, u)
+    for out in (_shorten(s, admin, b),
+                _trim(s, admin, b, "15:00", "16:00"),
+                H._call(routes.change_booking_format, booking_id=str(b.id),
+                        payload=routes.ChangeFormatRequest(new_format="group"), session=s, current_user=admin)):
+        s.rollback()
+        assert isinstance(out, dict) and out.get("http") == 409, out
+    b = s.get(Booking, b.id)
+    assert (b.duration, round(float(b.charge_amount), 2), _bal(s, u), _rem(s, u)) == (180, taken, bal0, rem0)
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (round(bal0 + taken, 2), rem0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

@@ -646,6 +646,28 @@ def _extend_subscription_booking(session: Session, booking: Booking, owner: User
     return info
 
 
+_MONEY_ROW_DETAIL = (
+    "Бронь по абонементу ушла в деньги (часов абонемента не хватило) — {what}. "
+    "Отмените её (деньги вернутся полностью) и создайте новую."
+)
+
+
+def _subscription_money_row(booking: Booking) -> bool:
+    """Бронь по абонементу, оплаченная ДЕНЬГАМИ: часов не хватило в кроне T-24ч
+    или при одобрении (hours_deducted = 0, в charge_amount — снятые ₾).
+
+    Ревизия 03.10: её цену нельзя «резать долей». Деньги за неё — одна цена
+    движка за весь слот (скидка тарифа, пик, допы), а final_price у неё —
+    прежняя денежная часть абонемента. Сокращение, вырезка, смена формата и
+    «Цена» считали от final_price и затирали charge_amount: клиент терял до 36 ₾
+    (S10), а вырезка дарила фантомный час (S11). Такие брони редки (часов не
+    хватило за сутки до начала) — честный отказ надёжнее пересчёта долями:
+    отмена вернёт ровно charge_amount, новая бронь посчитается заново."""
+    return ((booking.payment_method or "").lower() == "subscription"
+            and (booking.payment_status or "paid") == "paid"
+            and float(booking.hours_deducted or 0) <= 0)
+
+
 def _refund_booking_to_owner(
     session: Session, booking: Booking, owner: User, refund_percent: float = 1.0
 ) -> dict:
@@ -4733,6 +4755,8 @@ def trim_booking(
             status_code=400,
             detail=_BONUS_RESIZE_DETAIL.format(what="часть времени из неё не вырезать"),
         )
+    if _subscription_money_row(booking):
+        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="вырезать из неё часть нельзя"))
 
     # ── Past booking protection (same message as cancel) ──
     if _is_past(booking) and current_user.role not in ("senior_admin", "owner"):
@@ -5483,6 +5507,8 @@ def change_booking_format(
             status_code=409,
             detail="Бронь со снятым штрафом нельзя переформатировать — отмените снятие или создайте новую бронь",
         )
+    if _subscription_money_row(booking):
+        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="сменить формат нельзя"))
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
@@ -6439,6 +6465,8 @@ def shorten_booking(
             status_code=400,
             detail=_BONUS_RESIZE_DETAIL.format(what="сократить её не получится"),
         )
+    if _subscription_money_row(booking):
+        raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="сократить её нельзя"))
 
     remove = int(payload.remove_minutes or 0)
     if remove < 30 or remove % 30 != 0:
@@ -6469,13 +6497,31 @@ def shorten_booking(
         except Exception:
             raise HTTPException(status_code=400, detail="Не удалось пересчитать время начала")
 
-    # Пропорциональный возврат части цены. PricingService умеет считать
-    # точную цену для нового слота, но это перезапустит discount/peak
-    # логику и в краевых случаях даст странный результат (например, при
-    # сокращении с конца «потеряется» peak-час и base уменьшится больше
-    # чем на пропорциональную долю). Простая пропорция стабильнее.
-    if old_duration > 0:
-        new_price = round(old_price * (new_duration / old_duration), 2)
+    # Денежная бронь: пропорциональный возврат части цены аренды. PricingService
+    # умеет считать точную цену для нового слота, но это перезапустит
+    # discount/peak логику и в краевых случаях даст странный результат
+    # (например, при сокращении с конца «потеряется» peak-час и base уменьшится
+    # больше чем на пропорциональную долю). Простая пропорция стабильнее.
+    # Ревизия 03.10: допы (песочница, кофе) в пропорцию не входят — они остаются
+    # у брони целиком (как при «часах подряд», переносе и разделении).
+    # Бронь по абонементу: её деньги — пиковая надбавка (+ допы), считаем точно:
+    # минус пик отрезанного времени, допы остаются.
+    from app.services.pricing import PricingService, booking_extras_money
+    _is_sub = (booking.payment_method or "").lower() == "subscription"
+    if _is_sub:
+        try:
+            _oh, _om = map(int, (booking.start_time or "0:0").split(":"))
+            _old_start = booking.date.replace(hour=_oh, minute=_om, second=0, microsecond=0)
+            _nh, _nm = map(int, (new_start_time or "0:0").split(":"))
+            _new_start = booking.date.replace(hour=_nh, minute=_nm, second=0, microsecond=0)
+            new_price = round(max(0.0, old_price
+                                  - PricingService.subscription_peak_money(_old_start, old_duration)
+                                  + PricingService.subscription_peak_money(_new_start, new_duration)), 2)
+        except Exception:
+            new_price = old_price
+    elif old_duration > 0:
+        _extras_money = booking_extras_money(booking)
+        new_price = round(max(0.0, old_price - _extras_money) * (new_duration / old_duration) + _extras_money, 2)
     else:
         new_price = old_price
     refund_price = round(old_price - new_price, 2)
@@ -6492,27 +6538,27 @@ def shorten_booking(
     # Применяем возврат только если деньги уже списаны. Для pending —
     # cron возьмёт правильную сумму при T-24h.
     settled_now = booking.payment_status == "paid"
-    if settled_now and refund_price > 0:
+    if settled_now and (refund_price >= 0.01 or refund_hours > 0):
         target_user = session.get(User, booking.user_uuid) if booking.user_uuid else None
         if not target_user and booking.user_id:
             target_user = session.exec(select(User).where(User.email == booking.user_id)).first()
         if target_user:
-            if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
-                if subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
-                    target_user.subscription = subscription_pool.credit_hours(
-                        target_user.subscription, refund_hours, extra=refund_extra,
-                        kind=_pool_kind(session, booking))
-                # Денежная часть брони по абонементу (пик/допы) снята с баланса
-                # вместе с часами (единое правило billing_defer) — цена брони
-                # падает той же долей, значит и деньги назад той же долей.
-                # Ревизия 03.10: раньше возвращались только часы, и отмена потом
-                # отдавала меньше, чем взяли.
+            # Часы — отдельно от денег (ревизия 03.10): раньше возврат часов
+            # стоял внутри «если вернулись деньги», и бронь без пика и допов при
+            # сокращении часы не возвращала вовсе (Тёплый 2 ч → 1 ч: остаток 8
+            # вместо 9, после отмены 9 вместо 10).
+            if _is_sub and refund_hours > 0 and \
+                    subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
+                target_user.subscription = subscription_pool.credit_hours(
+                    target_user.subscription, refund_hours, extra=refund_extra,
+                    kind=_pool_kind(session, booking))
+            # Деньги: у брони по абонементу — пиковая надбавка отрезанного
+            # времени (снята с баланса вместе с часами, единое правило
+            # billing_defer), у денежной — доля цены аренды.
+            if refund_price >= 0.01:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
-                              description="Возврат пиковой надбавки/допов за сокращённое время брони по абонементу",
-                              ref_type="booking", ref_id=str(booking.id), actor=current_user)
-            else:
-                wallet.credit(session, target_user, refund_price, reason="shorten_refund",
-                              description="Возврат за сокращённое время брони",
+                              description=("Возврат пиковой надбавки за сокращённое время брони по абонементу"
+                                           if _is_sub else "Возврат за сокращённое время брони"),
                               ref_type="booking", ref_id=str(booking.id), actor=current_user)
             session.add(target_user)
 
