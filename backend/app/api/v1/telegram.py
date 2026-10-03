@@ -1980,36 +1980,23 @@ def _handle_hot_booking_callback(
             return {"ok": True}
 
         owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
-        if owner:
-            if (booking.payment_method or "").lower() == "subscription":
-                if owner.subscription:
-                    # Как /approve: часы — по живому пулу, доп. пул первым.
-                    from app.api.v1.bookings.routes import _debit_approved_subscription_hours
-                    try:
-                        _debit_approved_subscription_hours(session, owner, booking)
-                    except HTTPException as _e:
-                        session.rollback()
-                        _answer_callback(callback_id, str(_e.detail)[:190], show_alert=True)
-                        return {"ok": True}
-                session.add(owner)
-            else:
-                from app.services import wallet as _wallet
-                _wallet.debit(session, owner, float(booking.final_price or 0),
-                              reason="booking_charge", description="Бронь через Telegram-бот",
-                              ref_type="booking", ref_id=str(booking.id))
-
-        booking.status = "confirmed"
-        # Деньги/часы только что сняты выше — помечаем бронь оплаченной.
-        # БЕЗ этого крон T-24ч видел бронь как confirmed+pending и списывал
-        # ВТОРОЙ раз (горячая бронь по определению внутри окна 24ч).
-        # Реальный случай: Алёна Ловиц 13.08 — бот снял 20₾ в 06:50,
-        # крон снял ещё 20₾ в 07:00. В веб-approve (bookings/routes.py)
-        # эта пометка есть — здесь её забыли.
-        booking.payment_status = "paid"
-        booking.charged_at = datetime.utcnow()
-        booking.charge_amount = float(booking.final_price or 0)
-        booking.updated_at = datetime.utcnow()
-        session.add(booking)
+        # Списание — ОБЩИМ помощником с сайтом (/approve): часы по живому пулу
+        # (доп. пул первым) + денежная часть брони по абонементу (пик/допы),
+        # при нехватке часов / неактивном абонементе — деньгами, как крон.
+        # Он же ставит confirmed + payment_status="paid" — иначе крон T-24ч
+        # списал бы второй раз (Алёна Ловиц 13.08: бот 20 ₾ + крон 20 ₾).
+        # Ревизия 03.10: раньше бот считал своей копией логики — без пика и
+        # без перепроверки часов.
+        from app.api.v1.bookings.routes import (
+            charge_hot_booking_on_approval as _charge_on_approval,
+            hot_approval_client_text as _approval_text,
+        )
+        try:
+            paid_info = _charge_on_approval(session, booking, owner, actor=actor, via="Telegram")
+        except HTTPException as _e:
+            session.rollback()
+            _answer_callback(callback_id, str(_e.detail)[:190], show_alert=True)
+            return {"ok": True}
         session.commit()
         session.refresh(booking)
 
@@ -2031,17 +2018,12 @@ def _handle_hot_booking_callback(
             loc = session.get(_Loc, res.location_id) if res and res.location_id else None
             if owner and owner.telegram_id:
                 try:
+                    # Текст — общий с сайтом (часы / бонусные часы / деньги —
+                    # что реально списано).
                     telegram_service._send_message(
                         chat_id=owner.telegram_id,
-                        text=(
-                            f"✅ <b>Срочная бронь подтверждена</b>\n\n"
-                            f"📅 {booking.date.strftime('%d.%m')} · {booking.start_time}\n"
-                            f"📍 {(res.name if res else booking.resource_id)}"
-                            f"{(' · ' + loc.name) if loc else ''}\n\n"
-                            # Ревизия 03.10: бронь по абонементу оплачена часами, а не балансом.
-                            + ("Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"
-                               else "Деньги списаны с баланса.")
-                        ),
+                        text=_approval_text(booking, (res.name if res else booking.resource_id),
+                                            (loc.name if loc else None), paid_info),
                         parse_mode="HTML",
                     )
                 except Exception:
@@ -2182,13 +2164,20 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     actor_label = (actor.name or actor.email) if actor else "админ (TG-чат)"
     actor_email = actor.email if actor else "tg-group"
 
-    booking = session.get(_Booking, b_uuid)
+    # Под замком строки, как одобрение: два отклонения подряд не вернут бонус дважды.
+    booking = session.exec(
+        select(_Booking).where(_Booking.id == b_uuid).with_for_update()
+    ).first()
     if not booking or booking.status != "pending_approval":
         if chat_id:
             _send(chat_id, "Бронь уже обработана.", parse_mode="HTML")
         return True
 
     reason = (message.get("text") or "").strip() or "Слот недоступен"
+    # Одно поведение с сайтом (/reject): бонусные часы, потраченные при
+    # создании горячей брони, возвращаются (ревизия 03.10 — бот не возвращал).
+    from app.api.v1.bookings.routes import release_rejected_hot_booking
+    release_rejected_hot_booking(session, booking)
     booking.status = "cancelled"
     booking.cancellation_reason = (
         f"Отклонено админом ({actor_label}): {reason}"

@@ -421,30 +421,137 @@ def _check_extra_pool_move(session: Session, booking: Booking, new_resource_id: 
         )
 
 
-def _debit_approved_subscription_hours(session: Session, owner: User, booking: Booking) -> None:
-    """Подтверждение горячей брони (сайт /approve и кнопка в Telegram): снять
-    часы абонемента. Раскладка доп./основной — по живому пулу (с момента
-    создания брони часы капсулы могли уйти на другую бронь); доп. пул первым.
-    Как и раньше, покрытие основным пулом здесь не перепроверяется (остаток не
-    ниже 0). Исключение — формат, которого в основном пуле нет вовсе (индивидуальная
-    бронь Группового мастера): если «4 ч индивидуально» уже разобрали другие
-    брони, основной (групповой) пул её не оплачивает — 409, бронь остаётся на
-    согласовании (ревизия доп. пула 01.10)."""
-    hrs = float(booking.hours_deducted or 0)
-    extra = subscription_pool.live_extra(
-        owner.subscription, hrs, resource_type=_res_type(session, booking.resource_id),
-        format_type=booking.format,
+def charge_hot_booking_on_approval(
+    session: Session, booking: Booking, owner: Optional[User], actor: Optional[User] = None,
+    via: str = "сайт",
+) -> dict:
+    """Одобрение горячей брони (сайт /approve и кнопка в Telegram) — ОДНО правило
+    списания для обоих каналов, как у крона T-24ч (billing_defer.settle_pending_charge).
+
+    Горячая бронь при создании ничего не держит: часы и деньги откатываются, пока
+    бронь ждёт админа. Здесь снимаем всё по живому состоянию клиента:
+      • по абонементу, абонемент действует и часы покрывают бронь (доп. пул
+        первым, раскладка по живому пулу) → часы + денежная часть брони (пик +
+        допы = final_price, единое правило billing_defer.subscription_money_due);
+      • по абонементу, но часов не хватает / формат не в основном пуле / абонемент
+        не действует (пауза, срок) → как запасной путь крона: бронь целиком
+        деньгами по цене на момент одобрения (+ допы), hours_deducted = 0, отмена
+        вернёт деньги (ревизия 03.10: раньше остаток просто обнулялся и бронь
+        выходила бесплатной, а Групповому мастеру без «4 ч индивидуально» — 409);
+      • баланс / бонус → final_price с баланса (у бонусной это остаток сверх
+        бонусных часов — сами часы потрачены при создании).
+    Кредитный лимит не проверяем — как и раньше при одобрении (слот уже обещан).
+    Ставит confirmed + paid + charged_at + charge_amount. Не коммитит.
+    Возвращает {"method", "hours", "money", "fallback"} — для текста клиенту.
+    Без владельца (старые брони) — как раньше: ничего не списываем."""
+    from app.services.billing_defer import subscription_cash_price, subscription_money_due
+    method = (booking.payment_method or "balance").lower()
+    info = {"method": method, "hours": 0.0, "money": 0.0, "fallback": False}
+    ref = str(booking.id)
+    charge_snapshot = float(booking.final_price or 0)
+    if owner is not None:
+        if method == "subscription":
+            hrs = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
+            split = None
+            if hrs > 0 and subscription_pool.is_active(owner.subscription, datetime.utcnow()):
+                split = subscription_pool.plan_split(
+                    owner.subscription, hrs,
+                    resource_type=_res_type(session, booking.resource_id), format_type=booking.format,
+                )
+            if split is not None:
+                owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs, extra=split)
+                booking.hours_deducted = hrs
+                subscription_pool.stamp_booking(booking, hrs, split)
+                money = subscription_money_due(booking.final_price)
+                if money >= 0.01:
+                    wallet.debit(session, owner, money, reason="booking_charge",
+                                 description=f"Пиковая надбавка/допы брони по абонементу — подтверждение срочной брони ({via})",
+                                 ref_type="booking", ref_id=ref, actor=actor)
+                info.update(hours=hrs, money=money)
+            else:
+                try:
+                    cash = subscription_cash_price(session, owner, booking)
+                except Exception as e:  # noqa: BLE001 — честный отказ, а не бесплатная бронь
+                    logger.error("[approve] booking %s: цена деньгами не посчиталась: %r", booking.id, e)
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Часов абонемента не хватает, а цену деньгами посчитать не удалось. "
+                               "Отклоните бронь или попробуйте позже.",
+                    )
+                wallet.debit(session, owner, cash, reason="booking_charge",
+                             description=f"Часов абонемента не хватило → бронь деньгами — подтверждение срочной брони ({via})",
+                             ref_type="booking", ref_id=ref, actor=actor)
+                booking.hours_deducted = 0
+                subscription_pool.stamp_booking(booking, 0, 0)
+                charge_snapshot = cash
+                info.update(money=cash, fallback=True)
+        else:
+            money = round(float(booking.final_price or 0), 2)
+            wallet.debit(session, owner, money, reason="booking_charge",
+                         description=f"Списание при подтверждении срочной брони ({via})",
+                         ref_type="booking", ref_id=ref, actor=actor)
+            info.update(money=money, hours=float(booking.hours_deducted or 0) if method == "bonus" else 0.0)
+        session.add(owner)
+    booking.status = "confirmed"
+    # Деньги/часы только что сняты — помечаем бронь оплаченной. Без этого крон
+    # T-24ч видел бы confirmed+pending (горячая бронь по определению внутри окна
+    # 24 ч) и списывал ВТОРОЙ раз (Алёна Ловиц 13.08: бот 20 ₾ + крон 20 ₾).
+    booking.payment_status = "paid"
+    booking.charged_at = datetime.utcnow()
+    booking.charge_amount = round(charge_snapshot, 2)
+    booking.updated_at = datetime.now()
+    session.add(booking)
+    return info
+
+
+def _gel(x: float) -> str:
+    """5.0 → «5», 2.5 → «2,5» — для текстов клиенту."""
+    return f"{round(float(x or 0), 2):g}".replace(".", ",")
+
+
+def hot_approval_paid_line(booking: Booking, info: Optional[dict] = None) -> str:
+    """Строка «чем оплачено» в сообщении клиенту об одобрении срочной брони
+    (сайт и Telegram — одна функция). Ревизия 03.10: бронь по абонементу
+    оплачена часами, бонусная — бонусными часами, а не «деньгами с баланса»."""
+    info = info or {}
+    method = (booking.payment_method or "").lower()
+    money = float(info.get("money", booking.final_price or 0) or 0)
+    if info.get("fallback"):
+        return f"Часов абонемента не хватило — бронь оплачена с баланса: {_gel(money)} ₾."
+    base = ("Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"
+            else "Оплачено бонусными часами." if method == "bonus"
+            else "Деньги списаны с баланса.")
+    if money >= 0.01 and method == "subscription":
+        return f"Списаны часы абонемента, доплата {_gel(money)} ₾ (пик/допы) — с баланса."
+    if money >= 0.01 and method == "bonus":
+        return "Оплачено бонусными часами, остаток списан с баланса."
+    return base
+
+
+def hot_approval_client_text(booking: Booking, res_name: str, loc_name: Optional[str],
+                             info: Optional[dict] = None) -> str:
+    """Сообщение клиенту «Срочная бронь подтверждена» — общее для сайта и бота."""
+    date_str = booking.date.strftime("%d.%m") if booking.date else "—"
+    loc_line = f" · {loc_name}" if loc_name else ""
+    return (
+        f"✅ <b>Срочная бронь подтверждена</b>\n\n"
+        f"📅 {date_str} · {booking.start_time}\n"
+        f"📍 {res_name}{loc_line}\n\n"
+        + hot_approval_paid_line(booking, info)
     )
-    included = subscription_pool.get(owner.subscription, "included_formats", ["individual"]) or ["individual"]
-    if hrs > 0 and extra < hrs - 0.01 and (booking.format or "individual") not in included:
-        raise HTTPException(
-            status_code=409,
-            detail="Часы абонемента не покрывают эту бронь (формат не входит в основной пул, "
-                   "а часов нужного пула уже нет). Отклоните её или попросите клиента оплатить деньгами.",
-        )
-    owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs, extra=extra)
-    if hrs > 0:
-        subscription_pool.stamp_booking(booking, hrs, extra)
+
+
+def release_rejected_hot_booking(session: Session, booking: Booking) -> dict:
+    """Отклонение горячей брони (сайт /reject и ответ с причиной в Telegram) —
+    одно поведение. Деньги и часы абонемента гейт откатил ещё при создании, а
+    бонусные часы тратятся при СОЗДАНИИ и гейтом не откатываются — их надо
+    вернуть. _refund_booking_to_owner при payment_status='pending' вернёт только
+    бонус (денег не брали). Раньше бот этого не делал — бонусный час клиента
+    пропадал (ревизия 03.10). Статус и причину ставит вызывающий. Не коммитит."""
+    owner = _resolve_booking_owner(session, booking)
+    if owner is None:
+        return {}
+    return _refund_booking_to_owner(session, booking, owner, 1.0)
 
 
 def _refund_booking_to_owner(
@@ -526,7 +633,10 @@ def _refund_booking_to_owner(
         # (у абонементной брони final_price == subscription_peak_debt), списанные
         # при создании или кроном T-24ч. Возврат часов её не покрывал — клиент
         # терял 5₾/ч при любой отмене пиковой абонементной брони.
-        _peak = round(float(booking.final_price or 0) * refund_percent, 2)
+        # Единое правило (billing_defer): деньги брони с часами = final_price,
+        # их снял тот же путь, что и часы.
+        from app.services.billing_defer import subscription_money_taken
+        _peak = round(subscription_money_taken(booking) * refund_percent, 2)
         if _peak >= 0.01:
             wallet.credit(session, owner, _peak, reason="booking_refund",
                           description="Возврат пиковой надбавки абонемента",
@@ -6658,29 +6768,11 @@ def approve_booking(
     if not is_available:
         raise HTTPException(status_code=400, detail=f"Слот уже занят: {reason}")
 
-    # Deduct payment now
+    # Списание — общим помощником (то же делает кнопка в Telegram): часы и
+    # денежная часть брони по абонементу, при нехватке часов — деньгами как
+    # крон; статус confirmed + paid ставит он же (иначе крон спишет второй раз).
     b_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
-    if b_owner:
-        if booking.payment_method == "subscription":
-            if b_owner.subscription:
-                _debit_approved_subscription_hours(session, b_owner, booking)
-        else:
-            wallet.debit(session, b_owner, float(booking.final_price or 0), reason="booking_charge",
-                         description="Списание при подтверждении брони (approve)",
-                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
-        session.add(b_owner)
-
-    booking.status = "confirmed"
-    # We just took the money — say so on the row. The hot gate leaves the
-    # booking `pending` (it hands the charge back), and once status flips to
-    # `confirmed` the charge-due cron picks up every confirmed+pending booking
-    # inside T-24h — a hot booking is inside that window by definition, so
-    # leaving it `pending` here would have the cron charge it a second time.
-    booking.payment_status = "paid"
-    booking.charged_at = datetime.utcnow()
-    booking.charge_amount = booking.final_price
-    booking.updated_at = datetime.now()
-    session.add(booking)
+    _paid_info = charge_hot_booking_on_approval(session, booking, b_owner, actor=current_user, via="сайт")
     session.commit()
     session.refresh(booking)
 
@@ -6710,17 +6802,11 @@ def approve_booking(
 
         if b_owner and b_owner.telegram_id:
             try:
-                _loc_line = f" · {_loc_name}" if _loc_name else ""
+                # Текст — общий с Telegram-одобрением (ревизия 03.10: часы /
+                # бонусные часы / деньги — что реально списано).
                 telegram_service._send_message(  # type: ignore[attr-defined]
                     chat_id=b_owner.telegram_id,
-                    text=(
-                        f"✅ <b>Срочная бронь подтверждена</b>\n\n"
-                        f"📅 {_date_str} · {booking.start_time}\n"
-                        f"📍 {_res_name}{_loc_line}\n\n"
-                        # Ревизия 03.10: бронь по абонементу оплачена часами, а не балансом.
-                        + ("Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"
-                           else "Деньги списаны с баланса.")
-                    ),
+                    text=hot_approval_client_text(booking, _res_name, _loc_name, _paid_info),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -6795,7 +6881,11 @@ def reject_booking(
     except ValueError:
         raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
-    booking = session.get(Booking, b_uuid)
+    # Под замком строки, как approve: два «Отклонить» подряд (сайт + Telegram)
+    # иначе оба вернули бы бонусные часы.
+    booking = session.exec(
+        select(Booking).where(Booking.id == b_uuid).with_for_update()
+    ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "pending_approval":
@@ -6803,14 +6893,10 @@ def reject_booking(
 
     admin_reason = (payload.reason if payload and payload.reason else "").strip()
 
-    # Вернуть бонусный час, если бронь оплачивалась бонусом. Hot-gate при создании
-    # откатывает деньги/часы абонемента, но бонусный пул НЕ трогает, а reject
-    # раньше вообще ничего не возвращал → бонусный час клиента терялся навсегда.
-    # _refund_booking_to_owner при payment_status='pending' вернёт ТОЛЬКО бонус
-    # (деньги уже откачены гейтом); для balance/subscription — no-op.
-    _reject_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
-    if _reject_owner:
-        _refund_booking_to_owner(session, booking, _reject_owner, 1.0)
+    # Вернуть бонусный час, если бронь оплачивалась бонусом (hot-gate откатывает
+    # деньги/часы абонемента, но не бонус). Общий помощник с Telegram-отклонением
+    # (ревизия 03.10: бот раньше бонус не возвращал).
+    release_rejected_hot_booking(session, booking)
 
     booking.status = "cancelled"
     booking.cancellation_reason = (
