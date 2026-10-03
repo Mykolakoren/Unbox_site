@@ -288,7 +288,10 @@ def test_1_hot_subscription_extras_and_peak_via_telegram_approve():
     b = s.get(Booking, b.id)
     assert (b.status, b.payment_status) == ("confirmed", "paid"), (b.status, b.payment_status)
     assert (_bal(s, u), _rem(s, u)) == (90.0, 9.0), f"TG-одобрение: {_bal(s, u)} ₾ / {_rem(s, u)} ч, ждём 90 / 9"
-    _cancel(s, admin, b)
+    from app.services import billing_defer
+    ok, _ = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    assert not ok and (_bal(s, u), _rem(s, u)) == (90.0, 9.0), "крон списал второй раз после одобрения в Telegram"
+    _cancel(s, admin, s.get(Booking, b.id))
     assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"отмена: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
     _ledger_ok(s, u, 100.0)
 

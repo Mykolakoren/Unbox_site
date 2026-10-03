@@ -753,10 +753,15 @@ def test_chain_pricing_uses_hours_cover_flag_not_ignore_subscription():
 
 
 @_scenario
-def test_approve_group_master_individual_without_extra_hours_is_refused():
+def test_approve_group_master_individual_without_extra_hours_goes_to_money():
     """Горячая индивидуальная бронь Группового мастера: к подтверждению «4 ч
-    индивидуально» уже разобрали — основной (групповой) пул её не оплачивает."""
-    from fastapi import HTTPException
+    индивидуально» уже разобрали — основной (групповой) пул её не оплачивает.
+
+    Было (01.10): одобрение отказывало 409, бронь висела на согласовании.
+    Ревизия денег 03.10 (п.2, «как крон»): одобрение перепроверяет часы и, если
+    их нет, проводит бронь ДЕНЬГАМИ по цене на момент одобрения — ровно как крон
+    T-24ч для такой же брони заранее: индивидуальный формат тарифом не покрыт →
+    обычная цена 20 ₾, hours_deducted = 0, пулы не тронуты; отмена вернёт 20 ₾."""
     from app.api.v1.bookings import routes
     s = H._db()
     admin = _admin_user(s)
@@ -770,15 +775,18 @@ def test_approve_group_master_individual_without_extra_hours_is_refused():
     s.get(User, u.id).subscription = P.update(s.get(User, u.id).subscription, extra_hours_remaining=0.0,
                                               extra_hours_used=4.0)
     s.commit()
-    try:
-        routes.approve_booking(booking_id=str(b.id), session=s, current_user=admin)
-        raise AssertionError("бронь подтверждена за часы группового пула")
-    except HTTPException as e:
-        s.rollback()
-        assert e.status_code == 409, e.status_code
+    routes.approve_booking(booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
     snap = _snap(s, u)
-    assert snap["main"] == 20.0 and snap["used"] == 0.0, snap
-    assert s.get(Booking, b.id).status == "pending_approval"
+    assert snap["main"] == 20.0 and snap["used"] == 0.0 and snap["xrem"] == 0.0, snap
+    assert snap["balance"] == 480.0, f"баланс {snap['balance']}, ждём 500 − 20"
+    b = s.get(Booking, b.id)
+    assert (b.status, b.payment_status, float(b.hours_deducted or 0), float(b.charge_amount)) == \
+        ("confirmed", "paid", 0.0, 20.0), (b.status, b.payment_status, b.hours_deducted, b.charge_amount)
+    assert b.hours_pool is None, b.hours_pool
+    _cancel(s, admin, b)
+    snap = _snap(s, u)
+    assert snap["balance"] == 500.0 and snap["main"] == 20.0 and snap["xrem"] == 0.0, snap
 
 
 @_scenario

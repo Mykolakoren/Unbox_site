@@ -621,10 +621,14 @@ def test_review_followups_03_10():
     trial = body.index("_pause_lift_trial(")
     assert calc_fail < trial, "примерка паузы снова внутри try основного расчёта цены"
     assert "pause-lift trial failed, preview without it" in body and "pause_trial = None" in body[trial:]
-    for path in ("backend/app/api/v1/bookings/routes.py", "backend/app/api/v1/telegram.py"):
-        src = _read(path)
-        assert '"Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"' in src, \
-            f"{path}: одобрение брони по абонементу снова пишет «Деньги списаны с баланса»"
+    # Ревизия денег 03.10: текст одобрения — одна функция для сайта и бота
+    # (hot_approval_paid_line в routes.py; бот зовёт hot_approval_client_text).
+    src = _read("backend/app/api/v1/bookings/routes.py")
+    assert '"Списаны часы абонемента." if (booking.payment_method or "").lower() == "subscription"' in src, \
+        "routes.py: одобрение брони по абонементу снова пишет «Деньги списаны с баланса»"
+    tg_src = _read("backend/app/api/v1/telegram.py")
+    assert "hot_approval_client_text" in tg_src and "Деньги списаны с баланса." not in tg_src, \
+        "telegram.py: одобрение пишет клиенту своим текстом, а не общим с сайтом"
     card = _read("src/components/SubscriptionCard.tsx")
     assert "status === 409" in card and "fetchCurrentUser()" in card, "карточка абонемента не обновляется после 409"
     helper = _read("src/utils/pauseLiftNotice.ts")

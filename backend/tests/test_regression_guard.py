@@ -310,14 +310,22 @@ def test_cron_charges_subscription_peak_surcharge():
 def test_reject_refunds_bonus_hour():
     """reject_booking (отклонение горячей брони) должен вернуть бонусный час —
     hot-gate его не откатывает, а reject раньше вообще ничего не возвращал."""
+    # Ревизия 03.10: возврат вынесен в общий помощник release_rejected_hot_booking —
+    # его зовут И сайт (/reject), И Telegram (бот раньше бонус не возвращал).
+    # Поведение (бонусный час вернулся) проверяет guard_money_holes_2026_10.
     base = os.path.join(os.path.dirname(__file__), "..")
     src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
     i = src.find("def reject_booking")
     assert i != -1, "reject_booking не найден"
     j = src.find("\ndef ", i + 10)
     body = src[i:j if j != -1 else len(src)]
-    assert "_refund_booking_to_owner" in body, (
-        "reject_booking не возвращает бонусный час (нет вызова _refund_booking_to_owner)")
+    assert "release_rejected_hot_booking(" in body, (
+        "reject_booking не возвращает бонусный час (нет вызова release_rejected_hot_booking)")
+    h = src.find("def release_rejected_hot_booking(")
+    assert h != -1, "нет общего помощника отклонения горячей брони"
+    helper = src[h:src.find("\ndef ", h + 10)]
+    assert "_refund_booking_to_owner(" in helper, (
+        "помощник отклонения не возвращает бонусный час (нет _refund_booking_to_owner)")
 
 
 def test_recurring_recomputes_consecutive_chain():
@@ -360,13 +368,23 @@ def test_tg_approve_marks_booking_paid():
     payment_status='paid' сразу после списания. Иначе крон T-24ч видит бронь
     как confirmed+pending и списывает второй раз (кейс Алёны Ловиц 13.08:
     бот снял 20₾ в 06:50, крон снял ещё 20₾ в 07:00)."""
+    # Ревизия 03.10: бот больше не держит свою копию списания — он зовёт тот же
+    # charge_hot_booking_on_approval, что и сайт (/approve), а помощник сам ставит
+    # payment_status='paid'. Поведение (бот одобрил → крон второй раз не
+    # списывает) проверяет guard_money_holes_2026_10.
     base = os.path.join(os.path.dirname(__file__), "..")
-    src = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
-    i = src.find('description="Бронь через Telegram-бот"')
-    assert i != -1, "не найдено списание в tg-approve"
-    tail = src[i:i + 1500]
-    assert 'payment_status = "paid"' in tail, (
-        "tg-approve не помечает бронь оплаченной — крон спишет второй раз")
+    tg = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
+    i = tg.find("def _handle_hot_booking_callback(")
+    assert i != -1, "нет обработчика кнопок горячей брони"
+    body = tg[i:tg.find("\ndef ", i + 10)]
+    assert "charge_hot_booking_on_approval(" in body, (
+        "tg-approve списывает своей логикой, а не общим помощником с сайтом")
+    routes = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    h = routes.find("def charge_hot_booking_on_approval(")
+    assert h != -1, "нет общего помощника одобрения"
+    helper = routes[h:routes.find("\ndef ", h + 10)]
+    assert 'booking.payment_status = "paid"' in helper, (
+        "одобрение не помечает бронь оплаченной — крон спишет второй раз")
 
 
 def test_admin_user_update_routes_balance_through_wallet():
