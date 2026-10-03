@@ -311,7 +311,14 @@ def waive_booking_charge(
     if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin only")
 
-    booking = session.get(Booking, booking_id)
+    # Под замком строки — как отмена, вырезка и одобрение (ревизия 03.10):
+    # двойной клик «Снять штраф» иначе вернул бы деньги/часы дважды — второй
+    # запрос ждёт коммита первого и видит уже 'waived'.
+    from sqlmodel import select as _select
+    booking = session.exec(
+        _select(Booking).where(Booking.id == booking_id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -334,6 +341,7 @@ def waive_booking_charge(
     # is no longer behind the chat.
     _money_back = round(float(_returned.get("money", 0) or 0), 2)
     _hours_back = round(float(_returned.get("hours", 0) or 0), 4)
+    _bonus_back = round(float(_returned.get("bonus_hours", 0) or 0), 4)
     try:
         amount = float(booking.charge_amount or booking.final_price or 0)
         timeline_service.log_event(
@@ -364,7 +372,18 @@ def waive_booking_charge(
             _parts.append(f"{_money_back:g} ₾")
         if _hours_back > 0:
             _parts.append(f"{_hours_back:g} ч абонемента")
+        if _bonus_back > 0:
+            _parts.append(f"{_bonus_back:g} бонусн. ч")
+        _after_cancel = bool(_returned.get("cancelled"))
         returned_label = " и ".join(_parts) if _parts else "ничего (всё уже вернула отмена)"
+        # Текст клиенту (ревизия 03.10): после отмены — «вернули ещё …» или
+        # «уже вернули при отмене», а не «вернули: ничего».
+        if status != "waived_paid_refunded":
+            client_line = "Оплата за бронь не будет списана."
+        elif _parts:
+            client_line = ("Вернули ещё " if _after_cancel else "Вернули: ") + " и ".join(_parts) + "."
+        else:
+            client_line = "Деньги и часы по этой брони вам уже вернули при отмене."
         owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
         owner_label = (owner.email or owner.name) if owner else "—"
         telegram_service.send_admin_event(
@@ -383,8 +402,7 @@ def waive_booking_charge(
                 chat_id=owner.telegram_id,
                 text=(
                     f"✅ <b>Штраф за бронь снят</b>\n\n"
-                    + (f"Вернули: {returned_label}.\n\n" if status == "waived_paid_refunded"
-                       else "Оплата за бронь не будет списана.\n\n")
+                    + f"{client_line}\n\n"
                     + f"Причина: {reason.strip()}"
                 ),
                 parse_mode="HTML",

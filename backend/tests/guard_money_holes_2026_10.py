@@ -1430,7 +1430,7 @@ def _waive(s, admin, b):
     ok, status = waive_charge(s, s.get(Booking, b.id), reason="тест", by_user=admin, result=res)
     s.commit()
     assert ok, status
-    return res
+    return {"money": res["money"], "hours": res["hours"]}
 
 
 @_scenario
@@ -1899,6 +1899,82 @@ def test_r3_11_legacy_hours_row_is_hours_not_money():
     assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"старая часовая: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
     _cancel(s, admin, money)
     assert (_bal(s, u), _rem(s, u)) == (118.0, 10.0), f"в деньгах: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+
+
+@_scenario
+def test_r3_2_waive_returns_bonus_hours():
+    """Бонусная бронь, отмена 100 / 50 / 0 %, потом «Снять штраф» — бонусный
+    час у клиента целиком (1 ч). Было: waive бонус-часы не возвращал (после
+    отмены 0 % — 0, после 50 % — 0,5). Неотменённая бонусная: waive вернул час,
+    и последующая отмена второй раз его не вернёт."""
+    from app.services.billing_defer import waive_charge
+    for pct in (1.0, 0.5, 0.0):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None)
+        _bonus(s, u, 1.0)
+        b = _book(s, admin, u, start="14:00", method="balance")
+        assert b.payment_method == "bonus" and _free_hours(s, u) == 0.0
+        _cancel(s, admin, b, refund_percent=pct)
+        ok, _ = waive_charge(s, s.get(Booking, b.id), reason="прощаем", by_user=admin)
+        s.commit()
+        assert ok and _free_hours(s, u) == 1.0, f"отмена {pct}: бонус-часов {_free_hours(s, u)}"
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    _bonus(s, u, 1.0)
+    b = _book(s, admin, u, start="14:00", method="balance")
+    waive_charge(s, s.get(Booking, b.id), reason="прощаем", by_user=admin)
+    s.commit()
+    assert _free_hours(s, u) == 1.0
+    _cancel(s, admin, s.get(Booking, b.id))
+    assert _free_hours(s, u) == 1.0, "отмена waived-брони вернула бонус второй раз"
+
+
+@_scenario
+def test_r3_3_waive_endpoint_locks_and_second_click_is_refused():
+    """«Снять штраф» под замком строки (как отмена/вырезка/одобрение): второй
+    клик ждёт первого и получает 409 «уже снят», денег второй раз не будет."""
+    from fastapi import HTTPException
+    from app.api.v1 import billing
+    src = _read("backend/app/api/v1/billing.py")
+    body = src[src.index("def waive_booking_charge("):]
+    body = body[:body.index("\n@router.") if "\n@router." in body else len(body)]
+    assert ".with_for_update()" in body and "session.get(Booking, booking_id)" not in body
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None)
+    b = _book(s, admin, u, start="14:00", method="balance")
+    billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+    assert _bal(s, u) == 100.0
+    try:
+        billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+        raise AssertionError("второй клик прошёл")
+    except HTTPException as e:
+        assert e.status_code == 409, e.status_code
+    assert _bal(s, u) == 100.0
+
+
+@_scenario
+def test_r3_8_waive_client_text_after_cancel():
+    """Текст клиенту: после полной отмены — «Деньги и часы по этой брони вам уже
+    вернули при отмене» (было «Вернули: ничего (всё уже вернула отмена)»); после
+    частичной — «Вернули ещё …»."""
+    from app.api.v1 import billing
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"), tg="777")
+    with _Offline() as off:
+        a = _book(s, admin, u, start="20:00", extras=["sandbox"])
+        _cancel(s, admin, a)
+        billing.waive_booking_charge(booking_id=a.id, payload={"reason": "тест"}, session=s, current_user=admin)
+        b = _book(s, admin, u, start="20:00", resource="room_2", extras=[])
+        _cancel(s, admin, b, refund_percent=0.5)
+        billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+        texts = [t for chat, t in off.sent if chat == "777" and "Штраф за бронь снят" in t]
+    assert len(texts) == 2, off.sent
+    assert "уже вернули при отмене" in texts[0] and "ничего" not in texts[0], texts[0]
+    assert "Вернули ещё" in texts[1], texts[1]
 
 
 if __name__ == "__main__":

@@ -490,6 +490,19 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
         )
     elif hours_back > 0:
         hours_back = 0.0  # неделя недельного пакета прошла — часы сгорели
+    # Бонусная бронь: бонус-часы потрачены при создании — снятие штрафа
+    # возвращает их ту долю, что ещё у брони (после отмены 0 % — все, после 50 %
+    # — половину). Ревизия 03.10: раньше waive их не возвращал вовсе. Бронь
+    # больше не держит бонус-часов — иначе отмена waived-брони вернула бы их
+    # второй раз.
+    bonus_back = 0.0
+    if method == "bonus" and float(b.hours_deducted or 0) > 0:
+        bonus_back = round(float(b.hours_deducted) * (1.0 - share_returned), 4)
+        if bonus_back > 0:
+            from app.services.bonus_service import refund_free_hours
+            refund_free_hours(session, user.id, bonus_back, reason="Снятие штрафа за бронь")
+        b.hours_deducted = 0.0
+        subscription_pool.stamp_booking(b, 0, 0)
     if money_back >= 0.01:
         # Аудит 2026-08-27: у абонементной брони это пиковая надбавка/допы —
         # деньги, снятые отдельно от часов; у денежной — сама цена.
@@ -498,7 +511,8 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
                                    else "снятие штрафа (waive) — возврат на баланс"),
                       ref_type="booking", ref_id=str(b.id), actor=by_user)
     if result is not None:
-        result.update(money=money_back, hours=hours_back)
+        result.update(money=money_back, hours=hours_back, bonus_hours=bonus_back,
+                      cancelled=(b.status == "cancelled"))
 
     b.payment_status = "waived"
     b.waiver_reason = reason.strip()
