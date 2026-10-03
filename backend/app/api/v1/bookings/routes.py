@@ -4863,6 +4863,15 @@ def trim_booking(
         )
     if _subscription_money_row(booking):
         raise HTTPException(status_code=409, detail=_MONEY_ROW_DETAIL.format(what="вырезать из неё часть нельзя"))
+    # Штраф снят (waived): деньги и часы по брони уже улажены (возвращены или не
+    # списывались) — вырезка вернула бы их второй раз (фаззер ревизии 03.10:
+    # +1 ч и +5 ₾ из воздуха). Тот же гейт, что у сокращения, «Цены», формата,
+    # переноса и продления.
+    if booking.payment_status == "waived":
+        raise HTTPException(
+            status_code=409,
+            detail="У брони снят штраф — вырезка поменяла бы оплату. Снимите waiver или отмените бронь.",
+        )
 
     # ── Past booking protection (same message as cancel) ──
     if _is_past(booking) and current_user.role not in ("senior_admin", "owner"):
@@ -6378,6 +6387,15 @@ def add_booking_extras(
     price = round(float(PricingService.calculate_extras_price(ids)), 2)
     method = (payload.payment_method or "cash").lower()
 
+    # Штраф снят (waived): доп «с баланса» списался бы, а отмена waived-брони
+    # ничего не возвращает — деньги клиента пропали бы (ревизия 03.10). Оплата
+    # допа на месте (наличные/карта) — можно: это отдельная проводка в кассу.
+    if method == "balance" and price > 0 and booking.payment_status == "waived":
+        raise HTTPException(
+            status_code=409,
+            detail="У брони снят штраф — доп с баланса не списать. Примите оплату допа на месте (наличные/карта).",
+        )
+
     # Допы всегда фиксируем в составе брони — для персонала (подготовить кабинет)
     # и для TG/чека. Это НЕ влияет на пересчёт цены (extras прибавляются к
     # котировке только при создании; recompute/rebate их не трогают).
@@ -6442,6 +6460,10 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
 
     if booking.payment_method == "subscription":
         raise ValueError("Бронь уже списана с абонемента")
+    # Штраф снят (waived): перевод снял бы часы, а отмена waived-брони их не
+    # вернёт (ревизия 03.10).
+    if booking.payment_status == "waived":
+        raise ValueError("У брони снят штраф — на абонемент её не перевести")
     # Бонусная бронь: денег к возврату нет (0 ₾), а перекраска стёрла бы запись
     # о потраченном бонус-часе — клиент потерял бы его И часы абонемента за тот
     # же слот.

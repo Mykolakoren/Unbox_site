@@ -1751,6 +1751,48 @@ def test_peak_money_grid_matches_engine():
     assert checked >= 2000 and bad == 0, f"сверено {checked}, расхождений {bad}"
 
 
+@_scenario
+def test_r2_waived_booking_edits_refused():
+    """Фаззер ревизии 03.10: у брони со снятым штрафом вырезка возвращала часы и
+    пик второй раз (+1 ч и +5 ₾ из воздуха), доп «с баланса» и «На абонемент»
+    снимали деньги/часы, которые отмена waived-брони уже не вернёт. Теперь —
+    409 / понятный отказ; доп за наличные — можно."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, start="19:00", minutes=180)
+    assert (_bal(s, u), _rem(s, u)) == (90.0, 7.0)
+    _waive(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    out = _trim(s, admin, b, "20:00", "21:00")
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 409, out
+    out = H._call(routes.add_booking_extras, booking_id=str(b.id),
+                  payload=routes.AddExtrasRequest(extras=["coffee_meama"], payment_method="balance"),
+                  session=s, current_user=admin)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 409, out
+    assert not isinstance(H._call(routes.add_booking_extras, booking_id=str(b.id),
+                                  payload=routes.AddExtrasRequest(extras=["coffee_meama"], payment_method="cash"),
+                                  session=s, current_user=admin), dict)
+    s.commit()
+    v = _client(s, None)
+    c = _book(s, admin, v, start="14:00", method="balance", resource="room_2")
+    _waive(s, admin, c)
+    uu = s.get(User, v.id)
+    uu.subscription = _sub("WARM_START")
+    s.add(uu)
+    s.commit()
+    out = H._call(routes.convert_booking_to_subscription, booking_id=str(c.id), session=s, current_user=admin)
+    s.rollback()
+    assert isinstance(out, dict) and out.get("http") == 400, out
+    assert (_bal(s, u), _rem(s, u), _bal(s, v), _rem(s, v)) == (100.0, 10.0, 100.0, 10.0)
+    _cancel(s, admin, b)
+    _cancel(s, admin, c)
+    assert (_bal(s, u), _rem(s, u), _bal(s, v), _rem(s, v)) == (100.0, 10.0, 100.0, 10.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
