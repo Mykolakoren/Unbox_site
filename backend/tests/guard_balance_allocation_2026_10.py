@@ -753,6 +753,10 @@ def test_texts_in_node():
     bk["X"] = B("X", "2026-10-06", "14:00")
     res = allocate(rows, bk, balance=-20)
     rows_by = _rows(res)
+    undo = _rows(allocate([_topup("t9", "2026-09-20T08:00:00", 50, tx="tx9"),
+                           R("x9", "2026-09-20T09:00:00", -50, "topup_reversal", ref_type="cashbox_tx", ref_id="tx9")],
+                          {}, balance=0))
+    rows_by.update(undo)
     plus = allocate([R("wr", "2026-10-05T01:00:00", 9, "weekly_rebate"), _topup("t1", "2026-09-30T08:00:00", 11)],
                     {}, balance=20)
     plus["coverage"] = project_coverage(plus["batches"], [B("P", "2026-10-07", "14:00", price=20)])
@@ -763,6 +767,7 @@ const covered = mk(0, 20, false, [{ rowId: 'wr', kind: 'weekly_rebate', label: '
                                  { rowId: 't1', kind: 'topup', label: 'оплата 30.09', amount: 11 }]);
 console.log(JSON.stringify({
   cM: m.ledgerRowLine(r.cM), cX: m.ledgerRowLine(r.cX), wr: m.ledgerRowLine(r.wr), t0: m.ledgerRowLine(r.t0),
+  t9: m.ledgerRowLine(r.t9), x9: m.ledgerRowLine(r.x9),
   headDebt: m.allocationHeadline(data.debt), headPlus: m.allocationHeadline(data.plus),
   payCovered: m.allocationPayLine(covered, null),
   payCharged: m.allocationPayLine(mk(0, 20, true), { sources: [{ label: 'оплата 30.09', amount: 20 }] }),
@@ -781,6 +786,8 @@ console.log(JSON.stringify({
     assert out["cX"] == "в долг 20 ₾ — ещё не оплачено", out["cX"]
     assert out["wr"] == "закрыло долг: 05.10 10:00 Каб. 2 — 9 ₾", out["wr"]
     assert out["t0"] == "ушло на: 05.10 10:00 Каб. 2 — 11 ₾", out["t0"]
+    assert out["t9"] == "отменено: отмена пополнения 20.09 — 50 ₾", out["t9"]
+    assert out["x9"] == "отменило: оплата 20.09 — 50 ₾", out["x9"]
     assert out["headDebt"] == "Долг 20 ₾: бронь 06.10 14:00 Каб. 2 (20 ₾)", out["headDebt"]
     assert out["headPlus"] == ("На балансе 20 ₾: оплата 30.09 11 ₾ + скидка за неделю 9 ₾. "
                                "Покроет: 07.10 14:00 Каб. 2 (20 ₾)"), out["headPlus"]

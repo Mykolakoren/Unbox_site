@@ -292,6 +292,9 @@ export function ledgerRowLine(info: AllocRowInfo | null | undefined): string | n
     if (info.delta > 0) {
         const rev = (info.reversed || []) as AllocTarget[];
         if (rev.length) parts.push(`вернуло списание: ${rev.map(targetText).join('; ')}`);
+        // Пополнение, которое потом отменили/уменьшили (удалили кассовую проводку).
+        const cancelled = info.reversedBy || [];
+        if (cancelled.length) parts.push(`отменено: ${cancelled.map(r => `${r.label} — ${money(r.amount)}`).join('; ')}`);
         const closed = (info.spentOn || []).filter(t => t.closedDebt);
         const spent = (info.spentOn || []).filter(t => !t.closedDebt);
         if (closed.length) parts.push(`закрыло долг: ${closed.map(targetText).join('; ')}`);
@@ -299,6 +302,9 @@ export function ledgerRowLine(info: AllocRowInfo | null | undefined): string | n
         if (info.left > 0.004) parts.push(`на балансе: ${money(info.left)}`);
     } else if (info.delta < 0) {
         const total = Math.abs(info.delta);
+        // Отмена/правка кассовой проводки гасит своё пополнение.
+        const undone = (info.reversed || []) as AllocSource[];
+        if (undone.length) parts.push(`отменило: ${undone.map(s => `${s.label} — ${money(s.amount)}`).join('; ')}`);
         const revBy = info.reversedBy || [];
         const revSum = revBy.reduce((s, r) => s + (r.amount || 0), 0);
         if (revBy.length) {
