@@ -554,6 +554,98 @@ def release_rejected_hot_booking(session: Session, booking: Booking) -> dict:
     return _refund_booking_to_owner(session, booking, owner, 1.0)
 
 
+def _extension_cash_price(session: Session, booking: Booking, owner: User, start_dt: datetime,
+                          old_minutes: int, extra_minutes: int) -> float:
+    """Цена добавки к брони ДЕНЬГАМИ: котировка новой длительности минус старой,
+    движком (скидка тарифа остаётся, покрытие часами выключено — как запасной
+    путь крона billing_defer.subscription_cash_price)."""
+    from app.services.pricing import PricingService
+    ps = PricingService(session)
+    args = dict(user=owner, resource_id=booking.resource_id, start_time=start_dt,
+                format_type=booking.format or "individual", exclude_booking_id=str(booking.id),
+                subscription_hours_cover=False)
+    old_q = ps.calculate_price(duration_minutes=old_minutes, **args)
+    new_q = ps.calculate_price(duration_minutes=old_minutes + extra_minutes, **args)
+    return round(max(0.0, float(new_q.final_price or 0) - float(old_q.final_price or 0)), 2)
+
+
+def _extend_subscription_booking(session: Session, booking: Booking, owner: User, extra_minutes: int,
+                                 actor: Optional[User] = None) -> dict:
+    """Продление брони ПО АБОНЕМЕНТУ (+30 мин и т.п.) — ревизия 03.10.
+
+    Раньше часы за добавленное время не снимались вовсе («известный пробел»), а
+    доплата считалась пропорцией от цены брони. Теперь — по тем же правилам,
+    что и сама бронь (единое правило денег — billing_defer):
+      • pending (заранее, ещё ничего не списано): только hours_deducted и
+        денежная часть за пиковые слоты добавки — крон T-24ч снимет всё ОДИН раз;
+      • paid, бронь оплачена часами: часы за добавку снимаются сразу (доп. пул
+        первым, как при создании) + пиковая надбавка добавки; часов нет /
+        абонемент не действует → добавка деньгами по движку (как запасной путь
+        крона), часы брони не трогаем;
+      • paid, бронь уже ушла в деньги (hours_deducted = 0): добавка деньгами,
+        charge_amount растёт — отмена вернёт всё;
+      • waived (штраф снят): ничего не списываем — бронь целиком прощена.
+    Всё снятое ложится в final_price (часы — в hours_deducted), поэтому отмена
+    возвращает ровно взятое. Длительность брони ставит вызывающий. Не коммитит."""
+    from app.services.pricing import PricingService
+    old_minutes = int(booking.duration or 0)
+    add_h = round(extra_minutes / 60.0, 4)
+    try:
+        _h, _m = map(int, (booking.start_time or "0:0").split(":"))
+        start_dt = booking.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+    except Exception:
+        start_dt = booking.date
+    peak_add = PricingService.subscription_peak_money(start_dt + timedelta(minutes=old_minutes), extra_minutes)
+    hrs_old = float(booking.hours_deducted or 0)
+    old_extra = subscription_pool.booking_extra(booking)
+    status = booking.payment_status or "paid"
+    info = {"mode": "", "hours": 0.0, "money": 0.0}
+
+    if status == "waived":
+        info["mode"] = "waived"
+        return info
+    if status == "pending":
+        new_h = round((hrs_old if hrs_old > 0 else old_minutes / 60.0) + add_h, 4)
+        booking.hours_deducted = new_h
+        subscription_pool.stamp_booking(booking, new_h, old_extra)  # прикидка; крон разложит по живому пулу
+        booking.final_price = round(float(booking.final_price or 0) + peak_add, 2)
+        info.update(mode="deferred", hours=add_h)
+        return info
+
+    ref = str(booking.id)
+    if hrs_old > 0:
+        split = None
+        if subscription_pool.is_active(owner.subscription, datetime.utcnow()):
+            split = subscription_pool.plan_split(
+                owner.subscription, add_h,
+                resource_type=_res_type(session, booking.resource_id), format_type=booking.format,
+            )
+        if split is not None:
+            owner.subscription = subscription_pool.debit_hours(owner.subscription, add_h, extra=split)
+            new_h = round(hrs_old + add_h, 4)
+            booking.hours_deducted = new_h
+            subscription_pool.stamp_booking(booking, new_h, round(old_extra + split, 4))
+            money = peak_add
+            info.update(mode="hours", hours=add_h)
+            desc = "Продление брони по абонементу: пиковая надбавка за добавленное время"
+        else:
+            money = _extension_cash_price(session, booking, owner, start_dt, old_minutes, extra_minutes)
+            info["mode"] = "money"
+            desc = "Продление брони по абонементу: часов нет → добавленное время деньгами"
+    else:
+        money = _extension_cash_price(session, booking, owner, start_dt, old_minutes, extra_minutes)
+        info["mode"] = "money"
+        desc = "Продление брони (оплачена деньгами): добавленное время"
+        booking.charge_amount = round(float(booking.charge_amount or 0) + money, 2)
+    if money >= 0.01:
+        wallet.debit(session, owner, money, reason="extend_charge", description=desc,
+                     ref_type="booking", ref_id=ref, actor=actor)
+    booking.final_price = round(float(booking.final_price or 0) + money, 2)
+    info["money"] = money
+    session.add(owner)
+    return info
+
+
 def _refund_booking_to_owner(
     session: Session, booking: Booking, owner: User, refund_percent: float = 1.0
 ) -> dict:
@@ -5888,16 +5980,20 @@ def extend_booking(
     except Exception:
         _start_dt = booking.date
 
-    # Абонементные брони через движок НЕ гоняем: если в плане осталось меньше
-    # часов, чем новая длительность, котировка соскочит с абонемента на деньги
-    # и продление на полчаса внезапно спишет с депозита полную стоимость всей
-    # брони. Для них остаётся прежнее поведение (обычно доплата 0).
-    # ⚠️ Известный отдельный пробел: продление абонементной брони не списывает
-    # добавленные часы с плана. Чинить отдельно, с владельцем.
+    # Абонементные брони через денежный движок НЕ гоняем (котировка соскочила бы
+    # с абонемента на деньги и списала полную стоимость брони). Ревизия 03.10:
+    # «известный пробел» закрыт — часы за добавку снимает
+    # _extend_subscription_booking (pending — только hours_deducted, крон снимет
+    # один раз; нет часов — добавка деньгами, как запасной путь крона).
     _is_subscription = (booking.payment_method or "").lower() == "subscription"
 
     new_quote = None
-    if target_user is not None and not _is_subscription:
+    sub_extension = None
+    if target_user is not None and _is_subscription:
+        sub_extension = _extend_subscription_booking(session, booking, target_user, extra, actor=current_user)
+        extra_price = 0.0  # часы/деньги уже разнесены помощником (и final_price тоже)
+        logger.info("[extend] subscription booking %s +%s мин: %s", booking.id, extra, sub_extension)
+    elif target_user is not None and not _is_subscription:
         _quote_args = dict(
             user=target_user,
             resource_id=booking.resource_id,
@@ -5925,7 +6021,7 @@ def extend_booking(
             )
             extra_price = 0.0
     elif booking.final_price and booking.duration > 0:
-        # Абонемент / бронь без найденного владельца — прежняя пропорция.
+        # Бронь без найденного владельца (служебная/старая) — прежняя пропорция.
         extra_price = round(booking.final_price / booking.duration * extra, 2)
     else:
         extra_price = 0
