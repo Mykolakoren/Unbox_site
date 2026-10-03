@@ -114,6 +114,63 @@ def _resource_type(session: Session, resource_id: Optional[str]) -> Optional[str
     return getattr(r, "type", None) if r else None
 
 
+# ── Деньги абонементной брони: ЕДИНОЕ ПРАВИЛО (ревизия 03.10) ────────────────
+# У брони по абонементу две части:
+#   * часы — hours_deducted (из них extra_hours_deducted — доп. пул);
+#   * деньги — final_price: пиковая надбавка (5 ₾/ч), допы (песочница, кофе…) и
+#     деньги за продление, на которое часов не хватило.
+# Пока бронь оплачена часами (hours_deducted > 0), деньги = final_price, и КАЖДЫЙ
+# путь списания снимает их с баланса В ТОТ ЖЕ МОМЕНТ, что и часы: создание ≤24 ч,
+# крон T-24ч, одобрение горячей брони, корзина, серия, продление. Поэтому отмена
+# и снятие штрафа возвращают часы → в пул, final_price → на баланс — ровно то,
+# что взяли (subscription_money_taken).
+# Если часов не хватило / абонемент не действует — бронь целиком деньгами
+# (subscription_cash_price): hours_deducted = 0, charge_amount = снятые ₾, возврат
+# — по charge_amount.
+# charge_amount у брони С ЧАСАМИ для денег не читается: исторически там два
+# «диалекта» — крон пишет часы, немедленный путь писал ₾. Старые брони так и
+# лежат, и их возврат этим правилом не меняется (final_price, как и раньше).
+
+def subscription_money_due(final_price) -> float:
+    """Сколько ₾ снять с баланса вместе с часами абонемента: вся денежная часть
+    брони (пик + допы) — её final_price. Отрицательной не бывает."""
+    try:
+        return round(max(0.0, float(final_price or 0)), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def subscription_money_taken(b: Booking) -> float:
+    """Сколько ₾ реально снято за денежную часть абонементной брони, оплаченной
+    часами (см. правило выше) — столько и возвращают отмена и снятие штрафа."""
+    return subscription_money_due(b.final_price)
+
+
+def subscription_cash_price(session: Session, user: User, b: Booking) -> float:
+    """Цена абонементной брони ДЕНЬГАМИ — когда часов не хватило или абонемент не
+    действует (запасной путь крона T-24ч и одобрения горячей брони).
+
+    Аренда — движком на момент списания (скидка тарифа SUBSCRIPTION_DISCOUNT
+    остаётся, покрытие часами выключено — иначе при «почти хватает» часов
+    котировка вернула бы 0 ₾ и комната ушла бы бесплатно) + допы, уже входящие в
+    цену брони (раньше выпадали: песочница при нехватке часов была бесплатной).
+    Бросает исключение, если цену посчитать нельзя — вызывающий решает, что делать
+    (крон оставляет бронь pending и шлёт алерт, одобрение отказывает)."""
+    from app.services.pricing import PricingService, booking_extras_money
+    hrs = float(b.hours_deducted or (b.duration or 0) / 60.0)
+    start_dt = booking_start_dt_tbilisi(b) or b.date
+    breakdown = PricingService(session).calculate_price(
+        user=user,
+        resource_id=b.resource_id,
+        start_time=start_dt,
+        duration_minutes=int(b.duration or round(hrs * 60)),
+        format_type=(b.format or "individual"),
+        exclude_booking_id=str(b.id) if b.id else None,
+        subscription_hours_cover=False,
+    )
+    return round(float(breakdown.final_price or 0) + booking_extras_money(b), 2)
+
+
 def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     """Apply the deferred charge to a `pending` booking.
 
@@ -197,8 +254,11 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             # её отдельно (routes ~975), а отложенный (крон) раньше не списывал —
             # Unbox недополучал ~5₾/ч на пиковых абонементных бронях, забронированных
             # заранее (>24ч). Списываем с баланса тут, как немедленный путь.
-            if amount > 0:
-                wallet.debit(session, user, amount, reason="booking_charge",
+            # Ревизия 03.10: та же денежная часть (пик + допы), что снимают все
+            # остальные пути — subscription_money_due.
+            _money = subscription_money_due(b.final_price)
+            if _money >= 0.01:
+                wallet.debit(session, user, _money, reason="booking_charge",
                              description="пиковая надбавка абонемента (T-24ч)",
                              ref_type="booking", ref_id=str(b.id))
         else:
@@ -208,18 +268,10 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             # на момент списания, а не сохранённый `final_price` — у
             # абонементной брони он ≈0 (стоимость была в часах), из-за чего
             # истёкший абонемент давал бесплатную комнату.
-            cash_amount = amount
+            # Ревизия 03.10: общая функция с одобрением горячей брони; допы,
+            # входящие в цену брони, больше не выпадают.
             try:
-                from app.services.pricing import PricingService
-                start_dt = booking_start_dt_tbilisi(b) or b.date
-                breakdown = PricingService(session).calculate_price(
-                    user=user,
-                    resource_id=b.resource_id,
-                    start_time=start_dt,
-                    duration_minutes=int(b.duration or round(hrs * 60)),
-                    format_type=(b.format or "individual"),
-                )
-                cash_amount = round(float(breakdown.final_price or 0), 2)
+                cash_amount = subscription_cash_price(session, user, b)
             except Exception as e:
                 # Аудит 2026-08-27: раньше здесь был фолбэк «спишем сохранённый
                 # final_price» — у броней абонементных серий он 0₾, и падение
@@ -342,7 +394,7 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
             )
         # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
         # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
-        _peak = float(b.final_price or 0)
+        _peak = subscription_money_taken(b)
         if _peak >= 0.01:
             wallet.credit(session, user, _peak, reason="booking_refund",
                           description="снятие штрафа (waive) — возврат пиковой надбавки",

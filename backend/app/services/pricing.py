@@ -244,6 +244,20 @@ class PricingService:
                 return True
         return False
 
+    @classmethod
+    def subscription_peak_money(cls, start_time: datetime, duration_minutes: int) -> float:
+        """Пиковая надбавка брони ПО АБОНЕМЕНТУ за отрезок [start, start+minutes):
+        5 ₾ за каждый пиковый час (шаг 30 мин) — ровно как `_apply_subscription`
+        считает subscription_peak_debt. Нужна там, где котировку целиком звать
+        нельзя: продление (+30 мин) и «сколько из цены брони — допы»."""
+        sub_surcharge = float(cls.PRICING_CONFIG["peak_hours"]["subscription_surcharge_gel"])
+        start_total = start_time.hour * 60 + start_time.minute
+        slots = 0
+        for m in range(start_total, start_total + int(duration_minutes or 0), 30):
+            if cls._is_peak_time(f"{(m // 60) % 24:02d}:{m % 60:02d}"):
+                slots += 1
+        return round(slots / 2.0 * sub_surcharge, 2)
+
     def calculate_price(
         self,
         user: Optional[User],
@@ -684,3 +698,49 @@ class PricingService:
         return False
 
     # Removed _apply_hot_booking as it is now integrated into calculate_price logic
+
+
+def booking_extras_money(booking) -> float:
+    """Сколько ₾ из final_price брони — допы (песочница, проектор, кушетка, кофе).
+
+    Ревизия 03.10 («25 ₾ с песочницей становится 20 ₾»): допы прибавляются к
+    цене при создании брони (и в /add-extras с оплатой балансом), а движок цены
+    (calculate_price) про них не знает. Любой пересчёт — «часы подряд», перенос,
+    запасной путь абонемента (часов не хватило → деньгами) — обязан вернуть их
+    в цену сам, иначе доп уходит бесплатно.
+
+    Берём цену допов из реестра (EXTRAS_PRICES), но не больше, чем реально
+    «сидит» в final_price сверх аренды: доп, оплаченный на месте наличными
+    (/add-extras cash), в брони записан, а в цену НЕ входит — пересчёт не должен
+    списать его второй раз с баланса. Аренда в цене:
+      * абонементная бронь — пиковая надбавка за её время (5 ₾/ч), часы — в пуле;
+      * денежная — base_price − discount_amount (тот же расчёт движка, что лёг в
+        бронь при создании/пересчёте);
+      * бонусная — то же, умноженное на непокрытую бонусом долю (бонус покрывает
+        и аренду, и допы — см. bookings/routes._resolve_with_bonus).
+    Старая бронь без base_price — допы из реестра, не больше цены брони.
+    """
+    listed = round(float(PricingService.calculate_extras_price(list(getattr(booking, "extras", None) or []))), 2)
+    final = round(float(getattr(booking, "final_price", 0) or 0), 2)
+    if listed <= 0 or final <= 0:
+        return 0.0
+    method = (getattr(booking, "payment_method", None) or "balance").lower()
+    cap = listed
+    if method == "subscription":
+        try:
+            h, m = map(int, (booking.start_time or "0:0").split(":")[:2])
+            start = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+            room = PricingService.subscription_peak_money(start, int(booking.duration or 0))
+        except Exception:
+            room = 0.0
+    elif getattr(booking, "base_price", None) is None:
+        return round(min(listed, final), 2)
+    else:
+        room = max(0.0, float(booking.base_price or 0) - float(getattr(booking, "discount_amount", 0) or 0))
+        if method == "bonus":
+            hrs = float(booking.duration or 0) / 60.0
+            covered = min(max(0.0, float(getattr(booking, "hours_deducted", 0) or 0)), hrs)
+            share = (hrs - covered) / hrs if hrs > 0 else 1.0
+            room *= share
+            cap = listed * share
+    return round(min(cap, max(0.0, final - room)), 2)
