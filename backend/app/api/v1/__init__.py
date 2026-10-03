@@ -52,3 +52,6 @@ safe_include(api_router, "app.api.v1.billing", "/billing", ["billing"])
 safe_include(api_router, "app.api.v1.maintenance", "/maintenance-blocks", ["maintenance"])
 safe_include(api_router, "app.api.v1.posts", "/posts", ["posts"])
 safe_include(api_router, "app.api.v1.analytics", "/analytics", ["analytics"])
+# Куда ушли деньги клиента (03.10): /users/{id}/balance-allocation и
+# /balance-allocation/summary — пути целиком в самом роутере.
+safe_include(api_router, "app.api.v1.balance_allocation", "", ["balance-allocation"])
