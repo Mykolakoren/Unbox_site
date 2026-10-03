@@ -176,6 +176,37 @@ def _pricing_change_reason(changes: dict) -> str:
     return "Настройки клиента: " + "; ".join(parts)
 
 
+def _validate_pricing_fields(data: dict) -> None:
+    """Границы — как у /users/{id}/discount (ревизия 03.10): скидка вне 0–100 %
+    дала бы бесплатные или «отрицательные» брони; тип цен — только из двух."""
+    if data.get("personal_discount_percent") is not None:
+        try:
+            pct = int(data["personal_discount_percent"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Скидка должна быть целым числом от 0 до 100 %")
+        if not 0 <= pct <= 100:
+            raise HTTPException(status_code=400, detail="Скидка должна быть от 0 до 100 %")
+        data["personal_discount_percent"] = pct
+    if data.get("pricing_system") is not None and data["pricing_system"] not in ("standard", "personal"):
+        raise HTTPException(status_code=400, detail="Тип цен — «standard» или «personal»")
+
+
+def _record_pricing_change(user: User, changes: dict, old_percent: int, actor: User) -> None:
+    """История скидки — как у /users/{id}/discount: та же запись, тот же экран."""
+    from sqlalchemy.orm.attributes import flag_modified
+    history = list(user.discount_history) if user.discount_history else []
+    history.insert(0, {
+        "id": f"log-{int(datetime.now().timestamp())}-{uuid4().hex[:6]}",
+        "date": datetime.now().isoformat(),
+        "oldValue": old_percent,
+        "newValue": int(user.personal_discount_percent or 0),
+        "reason": _pricing_change_reason(changes),
+        "adminName": actor.name,
+    })
+    user.discount_history = history
+    flag_modified(user, "discount_history")
+
+
 @router.patch("/{user_id}", response_model=UserRead)
 def update_user(
     *,
@@ -233,18 +264,9 @@ def update_user(
             status_code=403,
             detail="Нет права «Корректировка баланса» — попросите старшего администратора",
         )
-    # Границы — как у /users/{id}/discount (ревизия 03.10): скидка вне 0–100 %
-    # дала бы бесплатные или «отрицательные» брони; тип цен — только из двух.
-    if user_data.get("personal_discount_percent") is not None:
-        try:
-            _pct = int(user_data["personal_discount_percent"])
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="Скидка должна быть целым числом от 0 до 100 %")
-        if not 0 <= _pct <= 100:
-            raise HTTPException(status_code=400, detail="Скидка должна быть от 0 до 100 %")
-        user_data["personal_discount_percent"] = _pct
-    if user_data.get("pricing_system") is not None and user_data["pricing_system"] not in ("standard", "personal"):
-        raise HTTPException(status_code=400, detail="Тип цен — «standard» или «personal»")
+    # Цены клиента (скидка, тип цен, личная ставка) — только с правом и в
+    # границах, с записью в историю (ревизия 03.10, см. _pricing_changes).
+    _validate_pricing_fields(user_data)
     _price_changes = _pricing_changes(user, user_data)
     if _price_changes and not deps.has_permission(current_user, "subscriptions.set_discount"):
         raise HTTPException(status_code=403, detail=PRICING_DENIED_DETAIL)
@@ -252,20 +274,7 @@ def update_user(
     for key, value in user_data.items():
         setattr(user, key, value)
     if _price_changes:
-        # История — как у /users/{id}/discount: та же запись, тот же экран.
-        _reason = _pricing_change_reason(_price_changes)
-        _history = list(user.discount_history) if user.discount_history else []
-        _history.insert(0, {
-            "id": f"log-{int(datetime.now().timestamp())}-{uuid4().hex[:6]}",
-            "date": datetime.now().isoformat(),
-            "oldValue": _old_percent,
-            "newValue": int(user.personal_discount_percent or 0),
-            "reason": _reason,
-            "adminName": current_user.name,
-        })
-        user.discount_history = _history
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(user, "discount_history")
+        _record_pricing_change(user, _price_changes, _old_percent, current_user)
     if _new_balance is not None:
         from app.services import wallet as _wallet
         _wallet.set_balance(

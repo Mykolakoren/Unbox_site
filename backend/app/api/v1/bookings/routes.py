@@ -4704,8 +4704,10 @@ def _reprice_for_move(
         old_start_dt = booking.date.replace(hour=_oh, minute=_om, second=0, microsecond=0)
     except Exception:
         old_start_dt = booking.date
-    peak_delta = round(PricingService.subscription_peak_money(new_start_dt, new_duration)
-                       - PricingService.subscription_peak_money(old_start_dt, int(booking.duration or 0)), 2)
+    peak_delta = 0.0
+    if method == "subscription":
+        peak_delta = round(PricingService.subscription_peak_money(new_start_dt, new_duration)
+                           - PricingService.subscription_peak_money(old_start_dt, int(booking.duration or 0)), 2)
 
     price_diff = 0.0
     if owner is None:

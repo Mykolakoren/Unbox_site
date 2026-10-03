@@ -345,8 +345,8 @@
   "A": {
    "balance": 47.5,
    "pool": {
-    "remaining_hours": 17.0,
-    "used_hours": 6.0,
+    "remaining_hours": 18.0,
+    "used_hours": 5.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },
@@ -430,8 +430,8 @@
   "A": {
    "balance": 47.5,
    "pool": {
-    "remaining_hours": 17.0,
-    "used_hours": 6.0,
+    "remaining_hours": 18.0,
+    "used_hours": 5.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },
@@ -527,8 +527,8 @@
   "A": {
    "balance": 47.5,
    "pool": {
-    "remaining_hours": 17.0,
-    "used_hours": 6.0,
+    "remaining_hours": 18.0,
+    "used_hours": 5.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },
@@ -622,10 +622,10 @@
  },
  "11_price": {
   "A": {
-   "balance": 47.5,
+   "balance": 37.5,
    "pool": {
-    "remaining_hours": 17.0,
-    "used_hours": 6.0,
+    "remaining_hours": 18.0,
+    "used_hours": 5.0,
     "total_hours": 20.0,
     "bonus_hours": 3.0
    },

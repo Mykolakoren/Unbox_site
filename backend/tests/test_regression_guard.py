@@ -916,7 +916,10 @@ def test_reschedule_recomputes_price_on_time_change():
     assert "room_changed or duration_changed or time_changed or date_changed" in body
     assert "без владельца (служебная)" in body, \
         "перенос служебной брони (уборка) снова падает 400"
-    assert "if booking_owner and booking.payment_method" in body
+    # Ревизия денег 03.10: пересчёт цены — общим помощником _reprice_for_move
+    # (его же зовёт перенос серии «эту и следующие»), и только при владельце.
+    assert "if booking_owner:" in body and "_reprice_for_move(" in body
+    assert 'ignore_subscription=True' in body, "денежная бронь при переносе снова котируется с абонементом"
     # Ревизия денег 17.09: три обязательных условия нового пересчёта.
     assert 'booking.payment_status == "waived"' in body, \
         "перенос waived-брони снова двигает деньги от стухшей цены"
@@ -1025,8 +1028,10 @@ def test_weekly_package_rollover():
     assert wr.count('"weekly_package"') >= 2, "пакет снова получает недельную скидку за объём"
     root = pathlib.Path(__file__).parent.parent
     routes = (root / "app/api/v1/bookings/routes.py").read_text()
-    assert routes.count("hours_return_allowed(") >= 4, \
-        "отмена/обрезка/цена/сокращение брони прошлой недели пакета снова вернёт часы в новый пул"
+    # Ревизия денег 03.10: «Цена» больше не двигает часы абонемента (только
+    # деньги), поэтому мест возврата часов три: отмена, вырезка, сокращение.
+    assert routes.count("hours_return_allowed(") >= 3, \
+        "отмена/обрезка/сокращение брони прошлой недели пакета снова вернёт часы в новый пул"
     assert "hours_return_allowed(" in (root / "app/services/billing_defer.py").read_text()
     assert ".with_for_update()" in src and "session.commit()" in src, "двойной запуск снова спишет пакет дважды"
     from app.services import subscription_pool as sp

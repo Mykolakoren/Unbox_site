@@ -407,16 +407,16 @@ def test_shorten_trim_split_format_price_return_to_own_pool():
     assert back["xrem"] == 1.0 and back["main"] == 4.0 and back["used"] == 0.0 and back["xused"] == 0.0, back
     _check_pool(s, u)
     # Сокращение 2 ч брони на 1 ч: инвариант пулов держится, лишнего не вернули.
-    # (Известный отдельный пробел, НЕ чиню: shorten_booking возвращает часы
-    # абонементной брони только когда вернулись деньги — у брони без пиковой
-    # надбавки часы при сокращении не возвращаются совсем. Сумма по броням тут
-    # поэтому не сверяется.)
+    # Ревизия денег 03.10: пробел «shorten возвращает часы только вместе с
+    # деньгами» закрыт — у брони без пика отрезанный час возвращается, поэтому
+    # сумма по броням теперь сверяется (половина доп. часа — в доп. пул).
     b2 = _book(s, admin, u, days=0, start="12:00", minutes=120)
     out = H._call(routes.shorten_booking, booking_id=str(b2.id), payload=routes.ShortenRequest(remove_minutes=60),
                   session=s, current_user=admin)
     s.commit()
     assert not (isinstance(out, dict) and "http" in out), out
-    _check_pool(s, u, sums=False)
+    _check_pool(s, u)
+    assert _snap(s, u)["main"] == 3.5 and _snap(s, u)["xrem"] == 0.5, _snap(s, u)
     b2 = s.get(Booking, b2.id)
     assert P.booking_extra(b2) <= b2.hours_deducted + 1e-6, "доп. часов в брони больше всех её часов"
 
