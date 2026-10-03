@@ -347,16 +347,64 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) -> Tuple[bool, str]:
+def booking_refunded_money(session: Session, b: Booking) -> float:
+    """Сколько ₾ по брони уже вернули клиенту при отмене (лента баланса, ref_id
+    брони, reason='booking_refund'). Возвраты при отмене всегда пишутся с ref_id
+    — и у старых броней тоже, поэтому «уже возвращено» по ленте надёжно."""
+    from app.models.balance_ledger import BalanceLedger
+    rows = session.exec(
+        select(BalanceLedger).where(
+            BalanceLedger.ref_type == "booking",
+            BalanceLedger.ref_id == str(b.id),
+            BalanceLedger.reason == "booking_refund",
+        )
+    ).all()
+    return round(sum(float(r.delta) for r in rows if float(r.delta) > 0), 2)
+
+
+def _cancel_refund_share(session: Session, b: Booking, money_base: float, refunded: float) -> float:
+    """Какую долю брони вернула отмена (1.0 — всё, 0.0 — штраф 100 %).
+
+    Отмена возвращает часы и деньги ОДНОЙ долей, поэтому если у брони есть
+    деньги — доля точно по ленте. Нет денег (бронь по абонементу без пика и
+    допов) — доля из события отмены в ленте событий брони (refund_percent пишут
+    отмена брони, отмена серии и переаренда). Ничего не нашли — считаем, что
+    вернули всё: второй раз часы не вернём."""
+    if money_base >= 0.01:
+        return max(0.0, min(1.0, refunded / money_base))
+    try:
+        from app.models.timeline import TimelineEvent
+        ev = session.exec(
+            select(TimelineEvent)
+            .where(TimelineEvent.target_id == str(b.id),
+                   TimelineEvent.event_type.in_(("booking_cancelled", "booking_auto_cancelled_re_rent")))
+            .order_by(TimelineEvent.timestamp.desc())
+        ).first()
+        if ev is not None:
+            pct = (ev.metadata_dump or {}).get("refund_percent")
+            if pct is not None:
+                return max(0.0, min(1.0, float(pct)))
+    except Exception:
+        logger.warning("[waive] booking %s: доля возврата при отмене не прочиталась", b.id, exc_info=True)
+    return 1.0
+
+
+def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
+                 result: Optional[dict] = None) -> Tuple[bool, str]:
     """Admin: cancel the charge.
 
     `pending` → status moves to `waived`, no money touched (cron will skip).
-    `paid`    → refund the captured `charge_amount` (or `final_price` as
-                fallback for legacy rows missing the snapshot), then mark
-                `waived`. Subscription refunds go back to remaining_hours.
+    `paid`    → вернуть то, что бронь ЕЩЁ держит, и пометить `waived`.
 
-    `waived` rows can still be cancelled with no refund — the slot itself
-    is still confirmed until cancel.
+    Ревизия 03.10: снятие штрафа после отмены возвращало всё второй раз (бронь
+    20 ₾ отменили со 100 % возвратом, потом waive — ещё +20 ₾). Теперь:
+      деньги = взято (единое правило: у брони с часами — final_price, у денежной
+               и ушедшей в деньги — charge_amount) − уже возвращено отменой
+               (лента, ref_id брони);
+      часы   = hours_deducted × (1 − доля, которую вернула отмена).
+    Штраф после отмены с 0 % возврата так и снимается целиком (прощение штрафа);
+    у неотменённой брони «уже возвращено» = 0 — как раньше.
+    `result` (необязательно) — сюда кладём, сколько вернули (₾ и ч) для текста.
     """
     if not reason or not reason.strip():
         return False, "reason_required"
@@ -370,6 +418,8 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
         b.waived_at = datetime.utcnow()
         b.waived_by = by_user.id
         session.add(b)
+        if result is not None:
+            result.update(money=0.0, hours=0.0)
         return True, "waived_pending"
 
     # paid (or NULL == legacy paid)
@@ -378,31 +428,36 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
         return False, "user_missing"
 
     method = (b.payment_method or "balance").lower()
-    amount = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
-
-    # §5#12: возвращаем то, что РЕАЛЬНО списали. Абонементная бронь, у которой
-    # часы фактически списаны (hours_deducted>0) → возврат часов. Если же она
-    # ушла в баланс-долг (истёкший абонемент, settle пометил hours_deducted=0)
-    # → возврат ДЕНЕГ, иначе вернули бы фантомные часы в пул + не отдали деньги.
-    hours_actually_used = float(b.hours_deducted or 0)
-    if method == "subscription" and hours_actually_used > 0:
-        if subscription_pool.hours_return_allowed(user.subscription, b.date):
-            # Часы — ровно в тот пул, откуда сняты (доп. / основной).
-            user.subscription = subscription_pool.credit_hours(
-                user.subscription, hours_actually_used, extra=subscription_pool.booking_extra(b),
-                kind=subscription_pool.kind_for_resource(_resource_type(session, b.resource_id)),
-            )
-        # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
-        # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
-        _peak = subscription_money_taken(b)
-        if _peak >= 0.01:
-            wallet.credit(session, user, _peak, reason="booking_refund",
-                          description="снятие штрафа (waive) — возврат пиковой надбавки",
-                          ref_type="booking", ref_id=str(b.id), actor=by_user)
+    # §5#12: часы — только у абонементной брони, где они реально списаны
+    # (hours_deducted>0); ушедшая в баланс-долг (hours_deducted=0) — деньгами.
+    hours_used = float(b.hours_deducted or 0) if method == "subscription" else 0.0
+    if hours_used > 0:
+        money_base = subscription_money_taken(b)
     else:
-        wallet.credit(session, user, amount, reason="booking_refund",
-                      description="снятие штрафа (waive) — возврат на баланс",
+        money_base = round(float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0)), 2)
+    refunded = booking_refunded_money(session, b)
+    money_back = round(max(0.0, money_base - refunded), 2)
+    share_returned = _cancel_refund_share(session, b, money_base, refunded) if b.status == "cancelled" else 0.0
+    hours_back = round(hours_used * (1.0 - share_returned), 4)
+    extra_back = round(subscription_pool.booking_extra(b) * (1.0 - share_returned), 4)
+
+    if hours_back > 0 and subscription_pool.hours_return_allowed(user.subscription, b.date):
+        # Часы — ровно в тот пул, откуда сняты (доп. / основной).
+        user.subscription = subscription_pool.credit_hours(
+            user.subscription, hours_back, extra=extra_back,
+            kind=subscription_pool.kind_for_resource(_resource_type(session, b.resource_id)),
+        )
+    elif hours_back > 0:
+        hours_back = 0.0  # неделя недельного пакета прошла — часы сгорели
+    if money_back >= 0.01:
+        # Аудит 2026-08-27: у абонементной брони это пиковая надбавка/допы —
+        # деньги, снятые отдельно от часов; у денежной — сама цена.
+        wallet.credit(session, user, money_back, reason="booking_refund",
+                      description=("снятие штрафа (waive) — возврат пиковой надбавки" if hours_used > 0
+                                   else "снятие штрафа (waive) — возврат на баланс"),
                       ref_type="booking", ref_id=str(b.id), actor=by_user)
+    if result is not None:
+        result.update(money=money_back, hours=hours_back)
 
     b.payment_status = "waived"
     b.waiver_reason = reason.strip()

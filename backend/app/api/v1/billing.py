@@ -316,7 +316,9 @@ def waive_booking_charge(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     reason = (payload or {}).get("reason", "")
-    ok, status = waive_charge(session, booking, reason=reason, by_user=current_user)
+    # Сколько реально вернули (ревизия 03.10: после отмены — только остаток).
+    _returned: dict = {}
+    ok, status = waive_charge(session, booking, reason=reason, by_user=current_user, result=_returned)
     if not ok:
         if status == "reason_required":
             raise HTTPException(status_code=400, detail="Укажите причину снятия штрафа")
@@ -330,6 +332,8 @@ def waive_booking_charge(
     # Timeline entry for the booking — visible to the owner and admins in
     # the booking-detail event feed. Mirrors what we send to TG so the UI
     # is no longer behind the chat.
+    _money_back = round(float(_returned.get("money", 0) or 0), 2)
+    _hours_back = round(float(_returned.get("hours", 0) or 0), 4)
     try:
         amount = float(booking.charge_amount or booking.final_price or 0)
         timeline_service.log_event(
@@ -343,6 +347,8 @@ def waive_booking_charge(
             metadata={
                 "scenario": status,
                 "amount": amount,
+                "returned_money": _money_back,
+                "returned_hours": _hours_back,
                 "payment_method": booking.payment_method,
                 "previous_status": ("paid" if status == "waived_paid_refunded" else "pending"),
             },
@@ -352,11 +358,13 @@ def waive_booking_charge(
 
     # Admin TG alert + best-effort user notification.
     try:
-        amount = float(booking.charge_amount or booking.final_price or 0)
-        method_label = (
-            "ч абонемента" if (booking.payment_method or "").lower() == "subscription"
-            else "₾"
-        )
+        # Что реально вернули (₾ и/или ч): после отмены брони — только остаток.
+        _parts = []
+        if _money_back >= 0.01:
+            _parts.append(f"{_money_back:g} ₾")
+        if _hours_back > 0:
+            _parts.append(f"{_hours_back:g} ч абонемента")
+        returned_label = " и ".join(_parts) if _parts else "ничего (всё уже вернула отмена)"
         owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
         owner_label = (owner.email or owner.name) if owner else "—"
         telegram_service.send_admin_event(
@@ -364,7 +372,7 @@ def waive_booking_charge(
             fields={
                 "Бронь": str(booking.id),
                 "Клиент": owner_label,
-                "Сумма": f"{amount:g} {method_label}",
+                "Вернули": returned_label if status == "waived_paid_refunded" else "не списывалось",
                 "Причина": reason.strip(),
                 "Кто снял": current_user.email or current_user.name or "admin",
                 "Сценарий": status,  # waived_pending or waived_paid_refunded
@@ -375,9 +383,9 @@ def waive_booking_charge(
                 chat_id=owner.telegram_id,
                 text=(
                     f"✅ <b>Штраф за бронь снят</b>\n\n"
-                    f"Сумма {amount:g} {method_label} "
-                    f"{'возвращена на баланс' if status == 'waived_paid_refunded' else 'не будет списана'}.\n\n"
-                    f"Причина: {reason.strip()}"
+                    + (f"Вернули: {returned_label}.\n\n" if status == "waived_paid_refunded"
+                       else "Оплата за бронь не будет списана.\n\n")
+                    + f"Причина: {reason.strip()}"
                 ),
                 parse_mode="HTML",
             )

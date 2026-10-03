@@ -3894,8 +3894,24 @@ def cancel_recurring_bookings(
         # Refund via shared helper (handles balance + subscription). При штрафе
         # 0% — как в одиночной отмене — ничего не возвращаем.
         booking_owner = _resolve_booking_owner(session, b)
+        _series_refund_meta: dict = {}
         if booking_owner and applied_refund > 0:
-            _refund_booking_to_owner(session, b, booking_owner, refund_percent=applied_refund)
+            _series_refund_meta = _refund_booking_to_owner(session, b, booking_owner, refund_percent=applied_refund) or {}
+        # Событие отмены по КАЖДОЙ брони (ревизия 03.10): доля возврата нужна
+        # снятию штрафа после отмены — иначе у брони по абонементу без денег
+        # (без пика и допов) не понять, сколько часов уже вернули.
+        timeline_service.log_event(
+            session=session,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_id=str(b.id),
+            target_type="booking",
+            event_type="booking_cancelled",
+            description=f"Отмена серии: возврат {int(round(applied_refund * 100))}%",
+            metadata={"refund_percent": applied_refund, "via": "series", "group_id": group_id,
+                      **{k: v for k, v in _series_refund_meta.items() if k != "refund_percent"}},
+            commit=False,
+        )
 
         # GCal delete
         if b.gcal_event_id:

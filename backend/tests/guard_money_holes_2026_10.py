@@ -1412,6 +1412,87 @@ def test_r2_4_money_row_reschedule_reprices_cash():
     _ledger_ok(s, u, 100.0)
 
 
+def _waive(s, admin, b):
+    from app.services.billing_defer import waive_charge
+    res: dict = {}
+    ok, status = waive_charge(s, s.get(Booking, b.id), reason="тест", by_user=admin, result=res)
+    s.commit()
+    assert ok, status
+    return res
+
+
+@_scenario
+def test_r2_5_waive_after_full_cancel_returns_nothing():
+    """S16/S18: отмена со 100 % уже всё вернула — снятие штрафа после неё не
+    возвращает второй раз. Было: по абонементу 20:00 + песочница (10 ₾ + 1 ч):
+    после отмены 100 ₾ / 10 ч, после waive 110 ₾ / 11 ч; денежная 20 ₾: 120 ₾."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, start="20:00", extras=["sandbox"])
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    assert _waive(s, admin, b) == {"money": 0.0, "hours": 0.0}
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"waive после отмены: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+    v = _client(s, None)
+    c = _book(s, admin, v, start="14:00", method="balance")
+    _cancel(s, admin, c)
+    _waive(s, admin, c)
+    assert _bal(s, v) == 100.0, f"денежная: {_bal(s, v)}"
+    _ledger_ok(s, u, 100.0)
+    _ledger_ok(s, v, 100.0)
+
+
+@_scenario
+def test_r2_5_waive_after_penalty_cancel_forgives_rest():
+    """Задуманный путь «простить штраф»: отмена с 0 % (денежная 20 ₾: 80 ₾), потом
+    waive → 100 ₾ (S9). По абонементу без денег (только час), отмена 0 % → waive
+    возвращает час (доля — из события отмены). Отмена 50 % брони 20:00 + песочница
+    (10 ₾ + 1 ч): 5 ₾ и 0,5 ч сразу, waive — остальные 5 ₾ и 0,5 ч."""
+    s = _db()
+    admin = _admin(s)
+    v = _client(s, None)
+    c = _book(s, admin, v, start="14:00", method="balance")
+    _cancel(s, admin, c, refund_percent=0.0)
+    assert _bal(s, v) == 80.0
+    assert _waive(s, admin, c)["money"] == 20.0 and _bal(s, v) == 100.0
+
+    u = _client(s, _sub("WARM_START"))
+    h = _book(s, admin, u, start="14:00")
+    _cancel(s, admin, h, refund_percent=0.0)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 9.0)
+    assert _waive(s, admin, h) == {"money": 0.0, "hours": 1.0}
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+
+    p = _book(s, admin, u, start="20:00", extras=["sandbox"])
+    _cancel(s, admin, p, refund_percent=0.5)
+    assert (_bal(s, u), _rem(s, u)) == (95.0, 9.5)
+    assert _waive(s, admin, p) == {"money": 5.0, "hours": 0.5}
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+    _ledger_ok(s, u, 100.0)
+
+
+@_scenario
+def test_r2_5_series_cancel_logs_share_for_waive():
+    """Отмена серии со штрафом 0 % пишет событие по каждой брони — waive потом
+    возвращает часы встречи, у которой нет денег (раньше доля была неизвестна)."""
+    from app.api.v1.bookings import routes
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("PRO_PLUS"), balance=300.0)
+    rows = _series(s, admin, u, method="subscription", start="14:00", days=0, occurrences=2)
+    assert [r.payment_status for r in rows] == ["paid", "pending"]
+    routes.cancel_recurring_bookings(group_id=rows[0].recurring_group_id, from_booking_id=rows[0].id,
+                                     refund_percent=0.0, reason="штраф", session=s, current_user=admin)
+    s.commit()
+    assert _rem(s, u) == 41.0, "штраф 0 %: час первой встречи удержан"
+    assert _waive(s, admin, rows[0]) == {"money": 0.0, "hours": 1.0}
+    assert _rem(s, u) == 42.0
+    ok, status = billing_defer.waive_charge(s, s.get(Booking, rows[1].id), reason="тест", by_user=admin)
+    assert ok and status == "waived_pending"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
