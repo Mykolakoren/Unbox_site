@@ -1,7 +1,7 @@
 """Users — admin management endpoints (list, update, freeze, discount, etc.)."""
 from typing import Any, List, Optional
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlmodel import Session, select
 from pydantic import BaseModel
@@ -121,6 +121,61 @@ def unarchive_user(
 
 # ── Update user (Admin) ──────────────────────────────────────────────────────
 
+# ── Цены клиента: только с правом «Установка скидки напрямую» ────────────────
+# Ревизия 03.10: личную скидку и тип цен админ менял в обход права через общий
+# PATCH /users/{id} (модалка «Роль, скидка и тип цен»), хотя отдельный
+# /users/{id}/discount право проверял. Личная ставка за час живёт в
+# crm_data['personal_hourly_rate'] (pricing.py) — её тоже можно было прислать
+# в crm_data. Теперь все три — только с subscriptions.set_discount (по
+# умолчанию у старшего администратора и владельца) и с записью в историю.
+PRICING_DENIED_DETAIL = (
+    "Менять персональную скидку, тип цен и личную ставку может только старший "
+    "администратор или владелец (право «Установка скидки напрямую»)."
+)
+_PRICING_SYSTEM_LABEL = {"personal": "персональный", "standard": "стандарт"}
+
+
+def _hourly_rate(value) -> Optional[float]:
+    """Личная ставка как число (>0) или None — как её читает pricing.py."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def _pricing_changes(user: User, data: dict) -> dict:
+    """Что из цен клиента меняет этот PATCH: {поле: (было, стало)}."""
+    changes: dict = {}
+    if "pricing_system" in data and (data["pricing_system"] or "standard") != (user.pricing_system or "standard"):
+        changes["pricing_system"] = (user.pricing_system or "standard", data["pricing_system"] or "standard")
+    if "personal_discount_percent" in data and \
+            int(data["personal_discount_percent"] or 0) != int(user.personal_discount_percent or 0):
+        changes["personal_discount_percent"] = (int(user.personal_discount_percent or 0),
+                                                int(data["personal_discount_percent"] or 0))
+    if "crm_data" in data:
+        old_rate = _hourly_rate((user.crm_data or {}).get("personal_hourly_rate"))
+        new_rate = _hourly_rate((data["crm_data"] or {}).get("personal_hourly_rate"))
+        if old_rate != new_rate:
+            changes["personal_hourly_rate"] = (old_rate, new_rate)
+    return changes
+
+
+def _pricing_change_reason(changes: dict) -> str:
+    parts = []
+    if "personal_discount_percent" in changes:
+        o, n = changes["personal_discount_percent"]
+        parts.append(f"скидка {o}% → {n}%")
+    if "pricing_system" in changes:
+        o, n = changes["pricing_system"]
+        parts.append(f"тип цен: {_PRICING_SYSTEM_LABEL.get(o, o)} → {_PRICING_SYSTEM_LABEL.get(n, n)}")
+    if "personal_hourly_rate" in changes:
+        o, n = changes["personal_hourly_rate"]
+        fmt = lambda v: "нет" if v is None else f"{v:g} ₾/ч"  # noqa: E731
+        parts.append(f"личная ставка: {fmt(o)} → {fmt(n)}")
+    return "Настройки клиента: " + "; ".join(parts)
+
+
 @router.patch("/{user_id}", response_model=UserRead)
 def update_user(
     *,
@@ -178,8 +233,27 @@ def update_user(
             status_code=403,
             detail="Нет права «Корректировка баланса» — попросите старшего администратора",
         )
+    _price_changes = _pricing_changes(user, user_data)
+    if _price_changes and not deps.has_permission(current_user, "subscriptions.set_discount"):
+        raise HTTPException(status_code=403, detail=PRICING_DENIED_DETAIL)
+    _old_percent = int(user.personal_discount_percent or 0)
     for key, value in user_data.items():
         setattr(user, key, value)
+    if _price_changes:
+        # История — как у /users/{id}/discount: та же запись, тот же экран.
+        _reason = _pricing_change_reason(_price_changes)
+        _history = list(user.discount_history) if user.discount_history else []
+        _history.insert(0, {
+            "id": f"log-{int(datetime.now().timestamp())}-{uuid4().hex[:6]}",
+            "date": datetime.now().isoformat(),
+            "oldValue": _old_percent,
+            "newValue": int(user.personal_discount_percent or 0),
+            "reason": _reason,
+            "adminName": current_user.name,
+        })
+        user.discount_history = _history
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(user, "discount_history")
     if _new_balance is not None:
         from app.services import wallet as _wallet
         _wallet.set_balance(
@@ -200,6 +274,18 @@ def update_user(
 
     # --- AUDIT LOGGING ---
     from app.services.timeline import timeline_service
+
+    if _price_changes:
+        timeline_service.log_event(
+            session=session,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_id=str(user.id),
+            target_type="user",
+            event_type="discount_change",
+            description=_pricing_change_reason(_price_changes),
+            metadata={k: {"old": o, "new": n} for k, (o, n) in _price_changes.items()},
+        )
 
     if user_in.role is not None and user_in.role != current_role_db:
         timeline_service.log_event(

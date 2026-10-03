@@ -4,6 +4,7 @@ import { useUserStore } from '../../store/userStore';
 import clsx from 'clsx';
 import { formatDayMonth } from '../../utils/format';
 import type { BookingHistoryItem } from '../../store/types';
+import { hasPermission } from '../../utils/permissions';
 
 
 
@@ -16,7 +17,10 @@ interface UserLoyaltyCardProps {
 }
 
 export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyaltyCardProps) {
-    const { users, bookings: storeBookings, updatePersonalDiscount } = useUserStore();
+    const { users, bookings: storeBookings, updatePersonalDiscount, currentUser } = useUserStore();
+    // Ревизия 03.10: менять личную скидку — только с правом «Установка скидки
+    // напрямую» (сервер без него отвечает 403); без права карандаш не показываем.
+    const canSetDiscount = hasPermission(currentUser, 'subscriptions.set_discount');
     const user = users.find(u => u.email === email);
     const [isEditDiscount, setIsEditDiscount] = useState(false);
     const [newDiscount, setNewDiscount] = useState(0);
@@ -151,6 +155,7 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                                         <span className={clsx("font-bold text-lg", user.personalDiscountPercent ? "text-unbox-green" : "text-ink-60")}>
                                             {user.personalDiscountPercent || 0}%
                                         </span>
+                                        {canSetDiscount ? (
                                         <button
                                             onClick={() => {
                                                 setNewDiscount(user.personalDiscountPercent || 0);
@@ -162,6 +167,11 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                                         >
                                             <Pencil size={14} />
                                         </button>
+                                        ) : (
+                                            <span className="text-xs text-ink-60" title="Скидку меняет старший администратор или владелец">
+                                                меняет старший админ
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </div>

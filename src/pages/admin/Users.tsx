@@ -12,6 +12,7 @@ import { formatGel } from '../../utils/format';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { STATUS } from '../../design/tokens';
+import { hasPermission } from '../../utils/permissions';
 
 export function AdminUsers() {
         const { users, updateUserById, fetchUsers } = useUserStore();
@@ -667,6 +668,11 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
         return [];
     })();
 
+    // Скидку и тип цен меняет только тот, у кого право «Установка скидки
+    // напрямую» (по умолчанию старший админ и владелец) — сервер без него
+    // отвечает 403 (ревизия 03.10). Без права поля видны, но неактивны.
+    const canSetDiscount = hasPermission(currentUser, 'subscriptions.set_discount');
+
     // Local state for all editable fields
     const [localRole, setLocalRole] = useState(user.role || 'user');
     const [localPricingSystem, setLocalPricingSystem] = useState(user.pricingSystem);
@@ -676,8 +682,10 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
         const updates: Partial<User> = {};
 
         if (localRole !== user.role) updates.role = localRole;
-        if (localPricingSystem !== user.pricingSystem) updates.pricingSystem = localPricingSystem;
-        if (localDiscount !== user.personalDiscountPercent) updates.personalDiscountPercent = localDiscount;
+        if (canSetDiscount) {
+            if (localPricingSystem !== user.pricingSystem) updates.pricingSystem = localPricingSystem;
+            if (localDiscount !== user.personalDiscountPercent) updates.personalDiscountPercent = localDiscount;
+        }
 
         if (Object.keys(updates).length > 0) {
             await onUpdate(user.id, updates);
@@ -733,17 +741,27 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                     )}
 
                     {/* Pricing System Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-unbox-light/30 rounded-lg border border-unbox-light">
+                    <div className={clsx(
+                        "flex items-center justify-between p-3 bg-unbox-light/30 rounded-lg border border-unbox-light",
+                        !canSetDiscount && "opacity-60",
+                    )}>
                         <div>
                             <div className="font-medium text-sm text-unbox-dark">Персональное ценообразование</div>
-                            <div className="text-xs text-ink-60">Отключает стандартные скидки</div>
+                            <div className="text-xs text-ink-60">
+                                {canSetDiscount
+                                    ? 'Отключает стандартные скидки'
+                                    : 'Скидку и тип цен меняет старший администратор или владелец'}
+                            </div>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
+                        <label className={clsx("relative inline-flex items-center", canSetDiscount ? "cursor-pointer" : "cursor-not-allowed")}>
                             <input
                                 type="checkbox"
                                 className="sr-only peer"
                                 checked={localPricingSystem === 'personal'}
+                                disabled={!canSetDiscount}
+                                aria-label="Персональное ценообразование"
                                 onChange={() => {
+                                    if (!canSetDiscount) return;
                                     setLocalPricingSystem(localPricingSystem === 'personal' ? 'standard' : 'personal');
                                 }}
                             />
@@ -762,11 +780,12 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                                 min="0"
                                 max="100"
                                 value={localDiscount}
+                                disabled={!canSetDiscount}
                                 onChange={(e) => {
                                     const val = parseInt(e.target.value);
                                     if (!isNaN(val)) setLocalDiscount(val);
                                 }}
-                                className="w-full p-2 border border-unbox-light rounded-lg focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                className="w-full p-2 border border-unbox-light rounded-lg focus:outline-none focus:ring-2 focus:ring-unbox-green disabled:opacity-60 disabled:cursor-not-allowed"
                             />
                         </div>
                     )}
