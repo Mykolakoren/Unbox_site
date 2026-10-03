@@ -14,8 +14,10 @@ import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { isPeakTime } from '../../utils/pricing';
-import type { BookingHistoryItem } from '../../store/types';
+import type { BookingHistoryItem, Subscription } from '../../store/types';
 import type { Format } from '../../types';
+import { subscriptionHours } from '../../utils/paymentPriority';
+import { resourceKind } from '../../utils/subscriptionHours';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { BookingMoneyHints } from './BookingMoneyHints';
@@ -2410,6 +2412,20 @@ function AdminQuickBookingModal({
         format(addMinutes(slot.date, 90 * 24 * 60), 'yyyy-MM-dd'),
     );
     const dateStr = format(slot.date, 'yyyy-MM-dd');
+    // Абонемент клиента на паузе (владелец 03.10): если бронь пойдёт его
+    // часами, сервер снимет паузу. Предупреждаем админа, когда часов,
+    // формата и срока хватает (бонусы тут не видны — поэтому «если»).
+    const pauseHint = useMemo(() => {
+        const sub = (selectedUser as { subscription?: Subscription } | null)?.subscription;
+        if (!sub?.isFrozen) return null;
+        const h = subscriptionHours(sub, {
+            format: bookingFormat as Format, bookingDate: slot.date, bookings: [],
+            resourceKind: resourceKind(slot.resId), liftPause: true,
+        });
+        return h.ok && h.remaining >= duration / 60 - 0.01
+            ? 'Абонемент клиента на паузе — если бронь пойдёт часами абонемента, пауза снимется, неиспользованные дни паузы сохранятся.'
+            : null;
+    }, [selectedUser, bookingFormat, slot.date, slot.resId, duration]);
 
     /** Compute the actual occurrence count to send to the backend. In
      *  "count" mode it's just the input value; in "until" mode we walk
@@ -2598,6 +2614,10 @@ function AdminQuickBookingModal({
                         </div>
                     )}
                 </div>
+
+                {pauseHint && (
+                    <p role="status" className="text-xs text-[var(--status-info-fg)] m-0">{pauseHint}</p>
+                )}
 
                 <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
                     <div className="flex justify-between">

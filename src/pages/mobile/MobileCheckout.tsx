@@ -10,8 +10,8 @@ import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
-    subscriptionHours, subscriptionHoursLabel, type PayMethod,
+    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, PAUSE_LIFT_NOTE, pauseLiftNote, paymentPlan,
+    resolveFinalMethod as resolvePayMethod, subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 import { cartResourceKind } from '../../utils/subscriptionHours';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
@@ -231,6 +231,8 @@ export function MobileCheckout() {
         ownerEmail: effectiveUser?.email,
         // Часы капсулы / «4 ч индивидуально» идут первыми (см. subscriptionHours.ts).
         resourceKind: cartResourceKind(cartItems.map(i => i.resourceId)),
+        // Новая бронь снимает паузу абонемента, если пойдёт его часами (владелец 03.10).
+        liftPause: true,
     }), [effectiveUser, state.format, state.date, bookings, cartItems]);
     // Серию бонусом явно не оплачиваем: сервер сам потратит бонус на первые
     // даты, если его хватит на встречу целиком (это видно в «примерке» серии).
@@ -376,6 +378,8 @@ export function MobileCheckout() {
     // Что реально спишется — для итога, подписи и кнопки (G4-01: кнопка всегда
     // писала «Забронировать · 45 ₾», даже когда платили часами).
     const payMethod = resolveFinalMethod();
+    // Абонемент на паузе, а бронь пойдёт его часами — пауза снимется (владелец 03.10).
+    const pauseNote = pauseLiftNote(plan, payMethod, isSeries);
     const extrasTotal = priced.items.reduce((s, i) => s + i.price.extrasPrice, 0);
     const peakTotal = priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0);
     // При абонементе деньгами идут только пиковая надбавка и допуслуги.
@@ -782,6 +786,11 @@ export function MobileCheckout() {
                                 {payChoices > 1 ? 'Изменить' : 'Подробнее'}
                             </span>
                         </button>
+                        {pauseNote && (
+                            <div role="status" style={{ marginTop: 6, fontSize: TEXT.small, lineHeight: 1.45, color: STATUS.info.fg }}>
+                                {pauseNote}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1163,7 +1172,7 @@ export function MobileCheckout() {
                                 ? `${fmtHours(totalBonusHours)} бесплатно`
                                 : plan.bonusPartial
                                     ? `${fmtHours(plan.bonusCovered)} бесплатно + ${bonusMoneyText(plan, formatGel)} с баланса`
-                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${subHours.active ? ' — при абонементе только на бронь целиком' : ''}`}
+                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${plan.sub.active ? ' — при абонементе только на бронь целиком' : ''}`}
                             disabled={!plan.bonusCovers && !plan.bonusPartial}
                             active={payMethod === 'bonus'}
                             onClick={() => pickPay('bonus')}
@@ -1175,7 +1184,9 @@ export function MobileCheckout() {
                             sub={!subHours.ok
                                 ? subHours.reason
                                 : plan.subCovers
-                                    ? subscriptionHoursLabel(subHours)
+                                    ? (subHours.paused
+                                        ? `${subscriptionHoursLabel(subHours)}. ${PAUSE_LIFT_NOTE}`
+                                        : subscriptionHoursLabel(subHours))
                                     : `${subscriptionHoursLabel(subHours)}, нужно ${fmtHours(totalDurationHours)}`}
                             disabled={!plan.subCovers}
                             active={payMethod === 'subscription'}

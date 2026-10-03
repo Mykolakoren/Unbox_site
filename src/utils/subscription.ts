@@ -107,6 +107,37 @@ export function freezeBudget(sub: FreezeLike | null | undefined): { total: numbe
   return { total, used, left };
 }
 
+// ── Пауза снимается новой бронью (владелец 03.10) ─────────────────────────
+// Зеркало backend subscription_perks.end_freeze: при снятии паузы срок
+// абонемента продлевается — новая пауза (с frozenDaysGranted) на min(факт,
+// выдано), старая (до 01.10) на весь факт. Если и с продлением срок уже вышел,
+// бронь паузу не снимет (сервер: is_active после end_freeze).
+
+interface PauseLike extends SubLike {
+  frozenAt?: string | null;
+  frozenDaysGranted?: number | null;
+}
+
+/** Срок абонемента, если снять паузу сейчас. null — срока нет. */
+export function expiryAfterPauseLift(sub: PauseLike | null | undefined, now: Date = new Date()): Date | null {
+  if (!sub?.expiryDate) return null;
+  const expiry = parseUTC(sub.expiryDate);
+  if (isNaN(expiry.getTime())) return null;
+  if (!sub.isFrozen) return expiry;
+  const at = sub.frozenAt ? parseUTC(sub.frozenAt) : null;
+  const factDays = at && !isNaN(at.getTime()) ? Math.max(0, (now.getTime() - at.getTime()) / 86400000) : 0;
+  const granted = num(sub.frozenDaysGranted);
+  const extendDays = granted !== null ? Math.min(factDays, granted) : factDays;
+  return new Date(expiry.getTime() + extendDays * 86400000);
+}
+
+/** На паузе, и даже с продлением срок уже вышел — бронь паузу не снимет. */
+export function pauseLiftExpired(sub: PauseLike | null | undefined, now: Date = new Date()): boolean {
+  if (!sub?.isFrozen || sub.flexible) return false;
+  const exp = expiryAfterPauseLift(sub, now);
+  return !!exp && now.getTime() > exp.getTime();
+}
+
 /** «7 дней», «2,5 дня» — дни паузы. */
 export function fmtFreezeDays(days: number): string {
   const d = Math.round((days || 0) * 10) / 10;

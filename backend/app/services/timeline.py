@@ -19,10 +19,15 @@ class TimelineService:
         target_type: str,
         event_type: str,
         description: str,
-        metadata: dict = {}
+        metadata: dict = {},
+        commit: bool = True,
     ) -> TimelineEvent:
         """
         Create a timeline entry.
+
+        commit=False — только добавить запись в сессию: она уйдёт в базу ОДНИМ
+        коммитом с изменением, которое описывает (снятие паузы новой бронью,
+        владелец 03.10: бронь не создалась — откатятся и снятие, и запись).
         """
         # Nearly every caller passes `str(user.id)` although the column is a
         # UUID. psycopg2 adapts that silently, so it went unnoticed; any other
@@ -53,6 +58,8 @@ class TimelineService:
             timestamp=datetime.now()
         )
         session.add(event)
+        if not commit:
+            return event
         session.commit()
         session.refresh(event)
         return event

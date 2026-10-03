@@ -1249,9 +1249,10 @@ export function AdminUserDetails() {
                                                                 {sub.isFrozen && (
                                                                     <div className={clsx('text-xs font-medium inline-flex items-start gap-1', over ? 'text-[color:var(--status-pending-fg)]' : 'text-[color:var(--status-info-fg)]')}>
                                                                         {over && <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />}
+                                                                        {/* Владелец 03.10: бронь часами абонемента сама снимает паузу. */}
                                                                         {over
-                                                                            ? `Пауза закончилась ${safeFormat(sub.frozenUntil, 'd.MM')}, но не снята — брони идут с баланса, а не часами`
-                                                                            : `На паузе до ${safeFormat(sub.frozenUntil, 'd.MM')} — брони идут с баланса`}
+                                                                            ? `Пауза закончилась ${safeFormat(sub.frozenUntil, 'd.MM')}, но не снята — бронь часами абонемента снимет её сама`
+                                                                            : `На паузе до ${safeFormat(sub.frozenUntil, 'd.MM')} — бронь часами абонемента снимет паузу, остаток дней сохранится`}
                                                                     </div>
                                                                 )}
                                                                 {used ? (

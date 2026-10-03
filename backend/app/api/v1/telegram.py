@@ -1589,6 +1589,7 @@ def _book_step_confirm(
     start_dt = datetime.combine(d_obj, datetime.min.time()).replace(hour=start_h, minute=start_m)
 
     # Compute price preview via PricingService — same as the site
+    pause_trial = None
     try:
         from app.services.pricing import PricingService
         pricing = PricingService(session)
@@ -1599,6 +1600,21 @@ def _book_step_confirm(
             duration_minutes=mins,
             format_type=fmt,
         )
+        # Абонемент на паузе (владелец 03.10): если бронь при снятой паузе
+        # пойдёт часами, бронь снимет паузу — показываем цену как после
+        # снятия. Примерка ничего не пишет (пул подставлен на время расчёта).
+        from app.api.v1.bookings.routes import _pause_lift_trial, _pool_swapped
+        pause_trial = _pause_lift_trial(session, pricing, user, "balance",
+                                        [(resource.id, start_dt, mins, fmt)])
+        if pause_trial:
+            with _pool_swapped(session, user, pause_trial[0]):
+                quote = pricing.calculate_price(
+                    user=user,
+                    resource_id=resource.id,
+                    start_time=start_dt,
+                    duration_minutes=mins,
+                    format_type=fmt,
+                )
     except Exception as e:
         logger.error("[tg:book] price calc failed: %r", e, exc_info=True)
         _answer_callback(callback_id, "Не удалось посчитать цену", show_alert=True)
@@ -1643,6 +1659,9 @@ def _book_step_confirm(
             lines.append(f"  из них {quote.extra_hours_deducted:g} ч — часы {_kind}")
         if quote.subscription_peak_debt > 0:
             lines.append(f"⚡ Доплата за пик-часы: {quote.subscription_peak_debt:g} ₾")
+        if pause_trial:
+            lines.append("⏸ Абонемент на паузе — после брони пауза снимется, "
+                         "неиспользованные дни паузы сохранятся.")
         pay_method = "subscription"
     else:
         lines.append(f"💰 К оплате: <b>{quote.final_price:g} ₾</b>")
@@ -1730,7 +1749,7 @@ def _book_do_confirm(
     # directly as a Python call — bypasses HTTP but reuses all business rules
     # (pricing, race-safe locking, gcal sync, notifications, hot-booking gate, etc.).
     from fastapi import BackgroundTasks
-    from app.api.v1.bookings.routes import create_booking
+    from app.api.v1.bookings.routes import PAUSE_LIFT_INFO_KEY, create_booking, pause_lift_client_text
 
     booking_in = BookingCreate(
         resource_id=resource.id,
@@ -1744,6 +1763,9 @@ def _book_do_confirm(
         final_price=0.0,  # server computes
     )
 
+    # Сведения о снятии паузы абонемента этой бронью (владелец 03.10) кладёт
+    # create_booking в session.info — только после успешного коммита.
+    session.info.pop(PAUSE_LIFT_INFO_KEY, None)
     try:
         result = create_booking(
             session=session,
@@ -1752,17 +1774,22 @@ def _book_do_confirm(
             background_tasks=BackgroundTasks(),
         )
     except HTTPException as e:
+        # Бронь не создалась — ничего из её расчёта (в т.ч. снятие паузы) не
+        # должно попасть в базу.
+        session.rollback()
         logger.info("[tg:book] create_booking rejected: %s", e.detail)
         _edit(chat_id, message_id,
               f"❌ Не удалось создать бронь:\n\n{escape(str(e.detail))}\n\n/book — попробовать ещё раз.")
         _answer_callback(callback_id, "")
         return {"ok": True}
     except Exception as e:
+        session.rollback()
         logger.error("[tg:book] create_booking crashed: %r", e, exc_info=True)
         _edit(chat_id, message_id,
               "❌ Системная ошибка при создании брони. Попробуйте через сайт: https://unbox.com.ge")
         _answer_callback(callback_id, "", show_alert=False)
         return {"ok": True}
+    pause_lift = session.info.pop(PAUSE_LIFT_INFO_KEY, None)
 
     # Success
     final_price = getattr(result, "final_price", None)
@@ -1787,6 +1814,10 @@ def _book_do_confirm(
             footer = "Списано с абонемента."
         else:
             footer = f"Списано с баланса: {final_price:g} ₾" if final_price is not None else ""
+    # Пауза абонемента снята этой бронью (владелец 03.10) — говорим здесь же:
+    # бот вызывает create_booking напрямую, его фоновые сообщения не уходят.
+    if pause_lift:
+        footer = f"{footer}\n\n{escape(pause_lift_client_text(pause_lift))}".strip()
 
     _edit(
         chat_id, message_id,

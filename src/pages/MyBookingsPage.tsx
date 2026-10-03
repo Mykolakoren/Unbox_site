@@ -49,7 +49,7 @@ import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatSt
 import { ruCountWord } from '../utils/plural';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
 import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
-import { subscriptionHours } from '../utils/paymentPriority';
+import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
@@ -3332,6 +3332,8 @@ function CrmQuickBookingModal({
         bookings,
         ownerEmail: currentUser?.email,
         resourceKind: resourceKind(slot.resId),
+        // Новая бронь снимает паузу абонемента, если пойдёт его часами (владелец 03.10).
+        liftPause: true,
     }), [currentUser, chosenFormat, slot.date, slot.resId, bookings]);
     const enoughHoursOnSub = hasSubscription && subHours.ok && subHours.remaining >= hoursForSub - 0.01;
 
@@ -3654,9 +3656,14 @@ function CrmQuickBookingModal({
                             <div className="text-xs text-ink-60 mt-0.5">
                                 {enoughHoursOnSub
                                     ? `Осталось ${currentUser?.subscription?.remainingHours ?? 0} ч · спишется ${hoursForSub} ч`
-                                    : `Недостаточно часов (нужно ${hoursForSub} ч, осталось ${currentUser?.subscription?.remainingHours ?? 0} ч)`
+                                    : subHours.ok
+                                        ? `Недостаточно часов (нужно ${hoursForSub} ч, осталось ${currentUser?.subscription?.remainingHours ?? 0} ч)`
+                                        : subHours.reason
                                 }
                             </div>
+                            {enoughHoursOnSub && subHours.paused && (
+                                <div className="text-xs text-[var(--status-info-fg)] mt-0.5">{PAUSE_LIFT_NOTE}</div>
+                            )}
                         </div>
                     </label>
                 )}

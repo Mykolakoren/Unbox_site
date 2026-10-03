@@ -147,9 +147,10 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
 
             {sub.isFrozen && frozenUntil && (
                 <div className={`mt-3 px-3 py-2 text-small font-medium ${pauseOver ? 'text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]' : 'text-[var(--status-info-fg)] bg-[var(--status-info-bg)]'}`}>
+                    {/* Владелец 03.10: бронь часами абонемента сама снимает паузу. */}
                     {pauseOver
-                        ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Пока абонемент на паузе, брони оплачиваются с баланса.`
-                        : `На паузе до ${frozenUntilLabel}. Пока абонемент на паузе, часы не списываются — брони оплачиваются с баланса.`}
+                        ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Бронь часами абонемента снимет её сама — неиспользованные дни паузы сохранятся.`
+                        : `На паузе до ${frozenUntilLabel}. Если забронируете часами абонемента, пауза снимется сама — неиспользованные дни паузы сохранятся.`}
                 </div>
             )}
 

@@ -1,4 +1,6 @@
 """Bookings — all booking endpoints: list, create, cancel, reschedule, re-rent, link-client."""
+import contextlib
+import copy
 import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
@@ -996,6 +998,235 @@ _BONUS_RESIZE_DETAIL = (
 )
 
 
+# ─── Пауза абонемента снимается новой бронью (владелец 03.10) ────────────────
+# «Если стоит на паузе, а клиент делает бронь, то пауза снимается, но дни
+# неизрасходованной паузы остаются и могут быть использованы в рамках этого
+# абонемента». Снимаем, ТОЛЬКО если бронь при снятой паузе пошла бы часами
+# абонемента — по тем же правилам, что всегда (бонус → абонемент → баланс).
+# Пауза остаётся, если бронь всё равно оплатил бы бонус целиком, формат не
+# входит в тариф, часов не хватает на всю бронь, срок вышел или выбран другой
+# способ. Снятие — обычное subscription_perks.end_freeze (как кнопка «Снять
+# паузу»): срок +min(факт, выдано на паузу), у старой паузы (до 01.10) — +факт;
+# неизрасходованные дни остаются в бюджете паузы.
+#
+# Зовут: одиночная бронь (сайт, Telegram-бот, горячая), корзина, серия,
+# продление серии. НЕ зовут: перенос, продление брони (+30 мин), «На абонемент»,
+# «Закрыть кабинет», отмена. Сторож — guard_pause_lift_on_booking_2026_10.py.
+
+# Слот брони для примерки: (кабинет, начало по Тбилиси, минуты, формат).
+_PauseSlot = tuple
+
+# Ключ в session.info: сведения о снятии паузы последней созданной бронью —
+# Telegram-бот (он зовёт create_booking напрямую) говорит о снятии в своём ответе.
+PAUSE_LIFT_INFO_KEY = "pause_lift_on_booking"
+
+
+def _slot_start(day: datetime, hhmm: Optional[str]) -> datetime:
+    """Начало слота: день брони (полночь по Тбилиси) + «ЧЧ:ММ»."""
+    try:
+        h, m = map(int, (hhmm or "").split(":"))
+        return day.replace(hour=h, minute=m, second=0, microsecond=0)
+    except Exception:
+        return day
+
+
+@contextlib.contextmanager
+def _pool_swapped(session: Session, owner: User, sub: dict):
+    """Подставить владельцу пул ТОЛЬКО на время расчёта цены («примерка»).
+
+    Движок цен читает owner.subscription, поэтому примерку считаем на нём же.
+    Без autoflush — подменённый пул не уйдёт в базу даже при запросах внутри;
+    настоящий пул возвращаем в finally (он равен прежнему — UPDATE не будет)."""
+    real = owner.subscription
+    with session.no_autoflush:
+        owner.subscription = sub
+        try:
+            yield
+        finally:
+            owner.subscription = real
+
+
+def _pause_lift_trial(
+    session: Session,
+    pricing_service,
+    owner: User,
+    requested: Optional[str],
+    slots: List[_PauseSlot],
+    *,
+    bonus_left: Optional[float] = None,
+    extras_price: float = 0.0,
+    now: Optional[datetime] = None,
+) -> Optional[tuple]:
+    """«Примерка»: пошла бы бронь часами абонемента, если снять паузу сейчас?
+
+    Возвращает (пул после снятия паузы, номер первого слота, который ушёл бы в
+    часы) или None — пауза остаётся. Ничего не пишет: паузу снимаем на КОПИИ
+    пула (copy.deepcopy → end_freeze) и считаем тем же движком, что и создание
+    брони (calculate_price + _resolve_with_bonus без траты бонусов). Бонус
+    «тратим» по слотам локально — как цикл корзины и серии."""
+    sub = getattr(owner, "subscription", None)
+    if not slots or not sub or not subscription_pool.get(sub, "is_frozen", False):
+        return None
+    from app.services import subscription_perks
+    now = now or datetime.utcnow()
+    try:
+        trial, _fact, _ext = subscription_perks.end_freeze(copy.deepcopy(sub), now)
+    except subscription_perks.FreezeError:
+        return None
+    # Срок вышел и с продлением на паузу — абонемент всё равно не платит.
+    if not subscription_pool.is_active(trial, now):
+        return None
+    try:
+        if bonus_left is None:
+            from app.services.bonus_service import available_free_hours
+            bonus_left = available_free_hours(session, owner.id)
+        left = max(0.0, float(bonus_left or 0))
+        with _pool_swapped(session, owner, trial):
+            for i, (resource_id, start_dt, minutes, fmt) in enumerate(slots):
+                quote = pricing_service.calculate_price(
+                    user=owner, resource_id=resource_id, start_time=start_dt,
+                    duration_minutes=minutes, format_type=fmt,
+                )
+                quote.final_price = round(float(quote.final_price or 0) + float(extras_price or 0), 2)
+                method, quote, covered = _resolve_with_bonus(
+                    session, pricing_service, owner, requested, quote,
+                    resource_id=resource_id, start_dt=start_dt, duration_minutes=minutes,
+                    format_type=fmt, bonus_left=left, extras_price=extras_price, consume=False,
+                )
+                left = max(0.0, left - covered)
+                if method == "subscription" and quote.applied_rule == "SUBSCRIPTION":
+                    return trial, i
+    except Exception:
+        # Примерка не должна ронять бронь: при сбое пауза просто остаётся.
+        logger.warning("[pause-lift] примерка не удалась — пауза остаётся", exc_info=True)
+    return None
+
+
+def _days_label(value: Any) -> str:
+    """Дни паузы для текста: 10 → «10», 2.5 → «2,5» (как fmtFreezeDays на сайте)."""
+    try:
+        return f"{round(max(0.0, float(value or 0)), 1):g}".replace(".", ",")
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _lift_pause_for_booking(
+    session: Session,
+    pricing_service,
+    owner: Optional[User],
+    actor: Optional[User],
+    requested: Optional[str],
+    slots: List[_PauseSlot],
+    *,
+    bonus_left: Optional[float] = None,
+    extras_price: float = 0.0,
+) -> Optional[dict]:
+    """Новая бронь снимает паузу абонемента, если сама пойдёт часами
+    (владелец 03.10). Звать ДО расчёта цены брони и один раз на запрос
+    (корзина и серия — до цикла). Возвращает сведения о снятии или None.
+
+    Не коммитит: пул и событие уходят в базу ОДНИМ коммитом с бронью — любой
+    отказ ниже (слот занят, не хватает денег) откатит и снятие, пауза
+    останется."""
+    if owner is None or not slots:
+        return None
+    if not subscription_pool.get(getattr(owner, "subscription", None), "is_frozen", False):
+        return None
+    from app.services import subscription_perks
+    # Строка клиента под замком: не столкнуться с кроном (снятие паузы по сроку)
+    # и с администратором («Снять паузу») в ту же секунду. populate_existing —
+    # пул перечитываем из базы, а не из кэша сессии.
+    locked = session.exec(
+        select(User).where(User.id == owner.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
+    if not subscription_pool.get(locked.subscription, "is_frozen", False):
+        return None  # паузу уже сняли (крон / администратор) — дальше обычный расчёт
+    now = datetime.utcnow()
+    hit = _pause_lift_trial(session, pricing_service, locked, requested, slots,
+                            bonus_left=bonus_left, extras_price=extras_price, now=now)
+    if hit is None:
+        return None
+    new_sub, fact, extend = subscription_perks.end_freeze(locked.subscription, now)
+    locked.subscription = new_sub
+    session.add(locked)
+
+    resource_id, start_dt = slots[hit[1]][0], slots[hit[1]][1]
+    from app.models.resource import Resource as _PauseRes
+    _res = session.get(_PauseRes, resource_id)
+    resource_name = (_res.name if _res else None) or resource_id
+    when = start_dt.strftime("%d.%m %H:%M")
+    days_left = subscription_pool.get(new_sub, "freeze_days_left")
+    info = {
+        "user_id": str(locked.id),
+        "fact_days": fact,
+        "extended_days": extend,
+        "freeze_days_left": days_left,
+        "expiry_date": subscription_pool.get(new_sub, "expiry_date"),
+        "booking_date": start_dt.strftime("%Y-%m-%d"),
+        "booking_time": start_dt.strftime("%H:%M"),
+        "booking_when": when,
+        "booking_resource": resource_id,
+        "booking_resource_name": resource_name,
+        "slots": len(slots),
+    }
+    timeline_service.log_event(
+        session=session,
+        actor_id=(actor.id if actor is not None else None),
+        actor_role=(getattr(actor, "role", None) or "system"),
+        target_id=str(locked.id),
+        target_type="user",
+        event_type="subscription_freeze",
+        description=(f"Пауза снята: клиент забронировал {when}, {resource_name}. "
+                     f"Срок +{_days_label(extend)} дн., осталось дней паузы {_days_label(days_left)}"),
+        metadata={"action": "AutoUnfreezeOnBooking", **info},
+        commit=False,
+    )
+    logger.info("[pause-lift] пауза снята бронью: user=%s %s срок +%s дн.", locked.id, when, extend)
+    return info
+
+
+def pause_lift_client_text(info: dict) -> str:
+    """Сообщение клиенту о снятии паузы (Telegram)."""
+    text = (f"Ваш абонемент снова активен: пауза снята, потому что вы забронировали "
+            f"{info.get('booking_when') or ''}.")
+    try:
+        left = float(info.get("freeze_days_left") or 0)
+    except (TypeError, ValueError):
+        left = 0.0
+    if left >= 0.05:
+        text += (f" Неиспользованные дни паузы ({_days_label(left)}) сохранились — "
+                 f"их можно взять позже через администратора.")
+    return text
+
+
+def _send_pause_lift_tg(chat_id: str, text: str) -> None:
+    """Сбой Telegram не должен ломать бронь."""
+    try:
+        telegram_service.send_message(chat_id, text)
+    except Exception:
+        logger.warning("[pause-lift] сообщение клиенту не ушло", exc_info=True)
+
+
+def _notify_pause_lifted(owner: Optional[User], info: Optional[dict],
+                         background_tasks: Optional[BackgroundTasks] = None) -> None:
+    """Сказать клиенту в Telegram, что пауза снята. Звать ПОСЛЕ коммита брони.
+    Есть фоновые задачи — отправка после ответа; нет — сразу (без исключений)."""
+    if not info or owner is None:
+        return
+    try:
+        chat_id = getattr(owner, "telegram_id", None)
+    except Exception:
+        chat_id = None
+    if not chat_id:
+        return
+    text = pause_lift_client_text(info)
+    if background_tasks is not None:
+        background_tasks.add_task(_send_pause_lift_tg, str(chat_id), text)
+    else:
+        _send_pause_lift_tg(str(chat_id), text)
+
+
 # ─── Create booking ──────────────────────────────────────────────────────────
 
 @router.post("/", response_model=BookingRead)
@@ -1194,6 +1425,14 @@ def create_booking(
             start_dt = booking_in.date
 
         pricing_service = PricingService(session)
+        # Пауза абонемента (владелец 03.10): если эта бронь при снятой паузе
+        # пошла бы часами — сначала снимаем паузу (под замком, без коммита),
+        # дальше цена и способ оплаты считаются как обычно.
+        _pause_lift = _lift_pause_for_booking(
+            session, pricing_service, booking_owner, current_user, booking_in.payment_method,
+            [(booking_in.resource_id, start_dt, booking_in.duration, booking_in.format)],
+            extras_price=PricingService.calculate_extras_price(list(booking_in.extras or [])),
+        )
         quote = pricing_service.calculate_price(
             user=booking_owner,
             resource_id=booking_in.resource_id,
@@ -1383,6 +1622,12 @@ def create_booking(
         session.add(booking)
         session.commit()
         session.refresh(booking)
+
+        # Пауза снята этой бронью — сказать клиенту (после коммита, в фоне).
+        # Боту (он зовёт create_booking напрямую) — через session.info.
+        if _pause_lift:
+            session.info[PAUSE_LIFT_INFO_KEY] = _pause_lift
+            _notify_pause_lifted(booking_owner, _pause_lift, background_tasks)
 
         # Consecutive-hours discount: if this booking joins or forms a
         # 0-gap chain on the same (user, resource, day), recompute every
@@ -1762,6 +2007,14 @@ def create_multi_slot_booking(
     from app.services.bonus_service import available_free_hours
     _bonus_left = available_free_hours(session, booking_owner.id)
 
+    # Пауза абонемента (владелец 03.10): один раз до цикла — если хотя бы один
+    # слот при снятой паузе пошёл бы часами. Дальше обычный расчёт по слотам.
+    _pause_lift = _lift_pause_for_booking(
+        session, pricing_service, booking_owner, current_user, data.payment_method,
+        [(s.resource_id, _slot_start(d, s.start_time), s.duration, s.format) for s, d in parsed_slots],
+        bonus_left=_bonus_left,
+    )
+
     for s, d in parsed_slots:
         try:
             h, m = map(int, s.start_time.split(":"))
@@ -1874,6 +2127,8 @@ def create_multi_slot_booking(
     session.commit()
     for b in created_bookings:
         session.refresh(b)
+    # Пауза снята этой корзиной — сказать клиенту (после коммита; сбой TG не страшен).
+    _notify_pause_lifted(booking_owner, _pause_lift)
 
     # Excel #24 + R33 — Google Calendar sync for the whole batch.
     # Same try/except policy as single-booking create: a GCal failure must
@@ -1994,6 +2249,8 @@ def create_multi_slot_booking(
         "total_cost": total_cost,
         "gcal_synced": gcal_synced,
         "gcal_failed": gcal_failed,
+        # Пауза абонемента снята этой корзиной (владелец 03.10).
+        "pause_lifted": bool(_pause_lift),
     }
 
 
@@ -2081,54 +2338,64 @@ def quote_recurring_booking(
     # как это сделает создание серии (бонус → абонемент → баланс).
     from app.services.bonus_service import available_free_hours
     _bonus_left = available_free_hours(session, booking_owner.id)
-    for d in dates:
-        try:
-            h, m = map(int, data.start_time.split(":"))
-            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
-        except Exception:
-            start_dt = d
-        quote = pricing_service.calculate_price(
-            user=booking_owner,
-            resource_id=data.resource_id,
-            start_time=start_dt,
-            duration_minutes=data.duration,
-            format_type=data.format,
-        )
-        occ_method, quote, occ_bonus = _resolve_with_bonus(
-            session, pricing_service, booking_owner, data.payment_method, quote,
-            resource_id=data.resource_id,
-            start_dt=start_dt,
-            duration_minutes=data.duration,
-            format_type=data.format,
-            bonus_left=_bonus_left,
-            consume=False,
-        )
-        _bonus_left = max(0.0, _bonus_left - occ_bonus)
-        total_bonus_hours += occ_bonus
-        if occ_method == "subscription" and quote.applied_rule != "SUBSCRIPTION":
-            # Создание на такой дате упало бы 400 — честно помечаем и считаем
-            # деньгами (так поведёт себя клиент, переключив способ оплаты).
-            warnings.append(d.strftime("%Y-%m-%d"))
-            occ_method = "balance"
-        if occ_method == "subscription":
-            # Часы — с абонемента; final_price у SUBSCRIPTION-котировки — это
-            # ДЕНЬГИ пиковой надбавки (может быть 0), их тоже показываем.
-            hours = float(quote.hours_deducted or 0)
-            amount = float(quote.final_price or 0)
-        else:
-            hours = 0.0
-            amount = float(quote.final_price or 0)
-        total_hours += hours
-        total_money += amount
-        items.append({
-            "date": d.strftime("%Y-%m-%d"),
-            "method": occ_method,
-            "amount": round(amount, 2),
-            "hours": hours,
-            # Из hours — часы доп. пула (капсула / «индивидуально»), прикидка.
-            "extra_hours": float(quote.extra_hours_deducted or 0) if occ_method == "subscription" else 0.0,
-            "bonus_hours": occ_bonus,
-        })
+    # Пауза абонемента (владелец 03.10): создание серии снимет паузу, если
+    # хотя бы одна дата пошла бы часами — примерка показывает ровно это
+    # (пул после снятия подставлен только на время расчёта, ничего не пишем).
+    _pause_trial = _pause_lift_trial(
+        session, pricing_service, booking_owner, data.payment_method,
+        [(data.resource_id, _slot_start(d, data.start_time), data.duration, data.format) for d in dates],
+        bonus_left=_bonus_left,
+    )
+    with (_pool_swapped(session, booking_owner, _pause_trial[0]) if _pause_trial
+          else contextlib.nullcontext()):
+        for d in dates:
+            try:
+                h, m = map(int, data.start_time.split(":"))
+                start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+            except Exception:
+                start_dt = d
+            quote = pricing_service.calculate_price(
+                user=booking_owner,
+                resource_id=data.resource_id,
+                start_time=start_dt,
+                duration_minutes=data.duration,
+                format_type=data.format,
+            )
+            occ_method, quote, occ_bonus = _resolve_with_bonus(
+                session, pricing_service, booking_owner, data.payment_method, quote,
+                resource_id=data.resource_id,
+                start_dt=start_dt,
+                duration_minutes=data.duration,
+                format_type=data.format,
+                bonus_left=_bonus_left,
+                consume=False,
+            )
+            _bonus_left = max(0.0, _bonus_left - occ_bonus)
+            total_bonus_hours += occ_bonus
+            if occ_method == "subscription" and quote.applied_rule != "SUBSCRIPTION":
+                # Создание на такой дате упало бы 400 — честно помечаем и считаем
+                # деньгами (так поведёт себя клиент, переключив способ оплаты).
+                warnings.append(d.strftime("%Y-%m-%d"))
+                occ_method = "balance"
+            if occ_method == "subscription":
+                # Часы — с абонемента; final_price у SUBSCRIPTION-котировки — это
+                # ДЕНЬГИ пиковой надбавки (может быть 0), их тоже показываем.
+                hours = float(quote.hours_deducted or 0)
+                amount = float(quote.final_price or 0)
+            else:
+                hours = 0.0
+                amount = float(quote.final_price or 0)
+            total_hours += hours
+            total_money += amount
+            items.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "method": occ_method,
+                "amount": round(amount, 2),
+                "hours": hours,
+                # Из hours — часы доп. пула (капсула / «индивидуально»), прикидка.
+                "extra_hours": float(quote.extra_hours_deducted or 0) if occ_method == "subscription" else 0.0,
+                "bonus_hours": occ_bonus,
+            })
 
     return {
         "ok": True,
@@ -2138,6 +2405,8 @@ def quote_recurring_booking(
         "total_hours": round(total_hours, 2),
         "total_bonus_hours": round(total_bonus_hours, 2),
         "subscription_short_dates": warnings,
+        # Абонемент на паузе, и серия снимет паузу (владелец 03.10).
+        "pause_lift": bool(_pause_trial),
     }
 
 
@@ -2364,6 +2633,14 @@ def create_recurring_booking(
     # целиком (порядок оплаты владельца 29.09: бонус → абонемент → баланс).
     from app.services.bonus_service import available_free_hours
     _bonus_left = available_free_hours(session, booking_owner.id)
+
+    # Пауза абонемента (владелец 03.10): один раз до цикла — если хотя бы одна
+    # дата серии при снятой паузе пошла бы часами. Дальше обычный расчёт.
+    _pause_lift = _lift_pause_for_booking(
+        session, PricingService(session), booking_owner, current_user, data.payment_method,
+        [(data.resource_id, _slot_start(d, data.start_time), data.duration, data.format) for d in create_dates],
+        bonus_left=_bonus_left,
+    )
 
     # Iterate over only the dates we actually need to create.
     for d in create_dates:
@@ -2605,6 +2882,8 @@ def create_recurring_booking(
         created_bookings.append(str(booking.id))
 
     session.commit()
+    # Пауза снята этой серией — сказать клиенту (после коммита, в фоне).
+    _notify_pause_lifted(booking_owner, _pause_lift, background_tasks)
 
     # Сигнал специалисту о датах, где пуш в календарь встретил «почти дубль»
     # и не стал создавать второе событие (Этап 1 календарного плана).
@@ -2694,6 +2973,8 @@ def create_recurring_booking(
         # Даты, которые пропустили как занятые (только при skip_conflicts=True) —
         # клиент показывает их человеку, чтобы он знал, чего в серии нет.
         "skipped": skipped_dates,
+        # Пауза абонемента снята этой серией (владелец 03.10).
+        "pause_lifted": bool(_pause_lift),
     }
 
 
@@ -2985,6 +3266,15 @@ def extend_recurring_series(
     if booking_owner is not None:
         from app.services.bonus_service import available_free_hours
         _ext_bonus_left = available_free_hours(session, booking_owner.id)
+    # Пауза абонемента (владелец 03.10): продление серии — это новые брони.
+    # Один раз до цикла: если хотя бы одна новая дата при снятой паузе пошла
+    # бы часами — снимаем паузу; дальше обычный пересчёт по датам.
+    _pause_lift = _lift_pause_for_booking(
+        session, _ext_ps, booking_owner, current_user, _ext_requested,
+        [(template.resource_id, _slot_start(d, template.start_time), template.duration,
+          template.format or "individual") for d in new_dates],
+        bonus_left=_ext_bonus_left,
+    )
     for d in new_dates:
         _q = None
         if booking_owner is not None:
@@ -3169,6 +3459,8 @@ def extend_recurring_series(
         ))
 
     session.commit()
+    # Пауза снята продлением — сказать клиенту (после коммита; сбой TG не страшен).
+    _notify_pause_lifted(booking_owner, _pause_lift)
 
     return {
         "ok": True,
@@ -3176,6 +3468,8 @@ def extend_recurring_series(
         "total_cost": round(total_cost, 2),
         "recurring_group_id": group_id,
         "skipped": skipped,
+        # Пауза абонемента снята продлением (владелец 03.10).
+        "pause_lifted": bool(_pause_lift),
     }
 
 

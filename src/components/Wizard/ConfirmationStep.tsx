@@ -34,8 +34,8 @@ import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
-    subscriptionHours, subscriptionHoursLabel, type PayMethod,
+    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, pauseLiftNote, paymentPlan,
+    resolveFinalMethod, subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 import { cartResourceKind } from '../../utils/subscriptionHours';
 
@@ -289,7 +289,10 @@ export function ConfirmationStep() {
         // Часы капсулы / «4 ч индивидуально» идут первыми — если корзина целиком
         // капсула или целиком кабинеты (смешанную сервер разложит по слотам сам).
         resourceKind: cartResourceKind(cartDetails.map(i => i.resourceId)),
-    }), [effectiveUser, state.format, state.date, bookings, state.editBookingId, cartDetails]);
+        // Новая бронь снимает паузу абонемента, если пойдёт его часами
+        // (владелец 03.10); перенос паузу не трогает.
+        liftPause: !isRescheduling,
+    }), [effectiveUser, state.format, state.date, bookings, state.editBookingId, cartDetails, isRescheduling]);
     const plan = useMemo(
         () => paymentPlan({
             hours: totalBookingHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: totalPrice,
@@ -304,6 +307,8 @@ export function ConfirmationStep() {
     const isBonusEligible = plan.bonusCovers || plan.bonusPartial;
     // Что реально уйдёт на сервер (и что обещают подписи и кнопка).
     const payMethod: PayMethod = resolveFinalMethod(state.paymentMethod, plan, isSeries);
+    // Абонемент на паузе, а бронь пойдёт его часами — пауза снимется (владелец 03.10).
+    const pauseNote = pauseLiftNote(plan, payMethod, isSeries);
     const peakTotal = cartDetails.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0);
     const extrasTotal = cartDetails.reduce((s, i) => s + i.price.extrasPrice, 0);
     // При абонементе деньгами идут только пиковая надбавка и допуслуги.
@@ -1074,7 +1079,7 @@ export function ConfirmationStep() {
                                     )}
                                     {!isBonusEligible && (
                                         <span className="text-ink ml-1">
-                                            (нужно {fmtHours(totalBookingHours)}{subHours.active ? ' — при абонементе бонус идёт только на бронь целиком' : ''})
+                                            (нужно {fmtHours(totalBookingHours)}{plan.sub.active ? ' — при абонементе бонус идёт только на бронь целиком' : ''})
                                         </span>
                                     )}
                                 </div>
@@ -1118,6 +1123,9 @@ export function ConfirmationStep() {
                                     {subHours.ok ? subscriptionHoursLabel(subHours) : subHours.reason}
                                     {subHours.ok && !isSubscriptionEligible && <span className="text-ink ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
                                 </div>
+                            )}
+                            {pauseNote && (
+                                <div className="ml-7 text-xs text-[var(--status-info-fg)] mt-1">{pauseNote}</div>
                             )}
                             {/* Часть остатка уже обещана будущим броням — честно
                                 говорим, что при нехватке часов крон за сутки до

@@ -31,6 +31,10 @@ export interface Subscription {
     expiryDate: string; // ISO string
     isFrozen: boolean;
     frozenUntil?: string; // ISO string
+    /** Когда поставлена текущая пауза (ISO, UTC) и сколько дней на неё выдано
+     *  (нет — старая пауза до 01.10). Нужны, чтобы посчитать срок после снятия. */
+    frozenAt?: string | null;
+    frozenDaysGranted?: number | null;
     freezeCount: number;
     includedFormats?: Format[];
     /** Особые условия: без срока (subscription_pool.is_flexible). */

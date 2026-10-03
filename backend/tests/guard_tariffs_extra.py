@@ -453,15 +453,25 @@ def test_renewal_carries_extra_pool_and_never_loses_hours():
 
 @_scenario
 def test_expired_or_frozen_subscription_does_not_cover_with_extra():
-    """Истёк срок / пауза — часы капсулы тоже не работают (гейт is_active общий)."""
+    """Истёк срок / пауза — часы капсулы тоже не работают (гейт is_active общий).
+
+    Пауза (владелец 03.10): гейт в движке цен тот же, но НОВАЯ бронь, которую
+    часы покрыли бы, сначала снимает паузу и идёт часами капсулы — подробно в
+    guard_pause_lift_on_booking_2026_10.py."""
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.models.booking import BookingCreate
+    from app.services.pricing import PricingService
     s = H._db()
     admin = _admin_user(s)
     past = (H.FakeDatetime.utcnow() - timedelta(days=1)).isoformat()
     for day, over in enumerate(({"expiry_date": past}, {"is_frozen": True})):
         u = H._user(s, sub=_sub_with("PRO_PLUS", **over), balance=500.0)
-        from fastapi import BackgroundTasks
-        from app.api.v1.bookings import routes
-        from app.models.booking import BookingCreate
+        # Движок цен: ни истёкший, ни замороженный пул часами не платит.
+        q = PricingService(s).calculate_price(
+            user=s.get(User, u.id), resource_id="cap_1", start_time=H._day(day).replace(hour=15),
+            duration_minutes=60, format_type="individual")
+        assert q.applied_rule != "SUBSCRIPTION" and q.final_price > 0, (over, q.applied_rule)
         out = H._call(routes.create_booking, session=s, booking_in=BookingCreate(
             resource_id="cap_1", location_id="unbox_uni", date=H._day(day), start_time="15:00", duration=60,
             format="individual", payment_method="balance", target_user_id=str(u.id)),
@@ -469,9 +479,15 @@ def test_expired_or_frozen_subscription_does_not_cover_with_extra():
         s.commit()
         assert not isinstance(out, dict), out
         b = s.get(Booking, out.id)
-        assert b.payment_method == "balance" and b.final_price > 0, (over, b.payment_method, b.final_price)
         snap = _snap(s, u)
-        assert snap["xrem"] == 10.0 and snap["main"] == 42.0, snap  # пулы нетронуты
+        if "expiry_date" in over:
+            assert b.payment_method == "balance" and b.final_price > 0, (over, b.payment_method, b.final_price)
+            assert snap["xrem"] == 10.0 and snap["main"] == 42.0, snap  # пулы нетронуты
+        else:
+            # Пауза снята бронью → час капсулы (бронь заранее — спишет крон T-24ч).
+            assert b.payment_method == "subscription" and b.hours_pool == "extra", (b.payment_method, b.hours_pool)
+            assert not P.get(s.get(User, u.id).subscription, "is_frozen", False), "бронь не сняла паузу"
+            assert snap["balance"] == 500.0 and snap["main"] == 42.0, snap
 
 
 @_scenario

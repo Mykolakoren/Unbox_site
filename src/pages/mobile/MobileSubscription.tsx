@@ -173,7 +173,8 @@ export function MobileSubscription() {
                                     <Snowflake size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
                                     <span>
                                         {sub.frozenUntil ? `Заморожен до ${formatDayMonth(sub.frozenUntil)}. ` : 'Абонемент заморожен. '}
-                                        Часы и срок не тратятся.
+                                        Часы и срок не тратятся. Если забронируете часами абонемента,
+                                        {' '}пауза снимется сама — неиспользованные дни паузы сохранятся.
                                     </span>
                                 </div>
                             )}

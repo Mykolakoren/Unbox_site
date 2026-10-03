@@ -15,11 +15,16 @@
  * или абонемент покрывают бронь, деньги с баланса он не возьмёт. Поэтому
  * экран не должен обещать «Спишется 45 ₾ с баланса», когда уйдут часы.
  *
+ * Абонемент на паузе (владелец 03.10): новая бронь, которую он покроет, снимает
+ * паузу (неиспользованные дни паузы сохраняются) — сервер bookings/routes
+ * `_lift_pause_for_booking`. Мастер новой брони передаёт `liftPause` и видит
+ * такой абонемент покрывающим, с подписью PAUSE_LIFT_NOTE.
+ *
  * Один источник правды для мобильного оформления и десктопного мастера.
  */
 import type { BookingHistoryItem, Subscription } from '../store/types';
 import type { Format } from '../types';
-import { subscriptionLifecycle } from './subscription';
+import { pauseLiftExpired, subscriptionLifecycle } from './subscription';
 import { extraAvailable, extraKindLabel, extraPool, type ResourceKind } from './subscriptionHours';
 
 export type PayMethod = 'balance' | 'subscription' | 'bonus';
@@ -74,6 +79,9 @@ export interface SubscriptionHours {
     extra: number;
     /** Название доп. пула для подписи: «Капсула» / «Индивидуально». */
     extraLabel?: string;
+    /** Абонемент сейчас на паузе, а остаток посчитан как после её снятия
+     *  (только с `liftPause`): бронь, которую он покроет, снимет паузу. */
+    paused?: boolean;
 }
 
 /**
@@ -121,13 +129,23 @@ export function subscriptionHours(
         /** Капсула или кабинет (utils/subscriptionHours.cartResourceKind). Не
          *  задан / корзина смешанная — доп. пул не учитываем, как и сервер. */
         resourceKind?: ResourceKind;
+        /** Новая бронь (не перенос): абонемент на паузе считаем как после её
+         *  снятия — бронь, которую он покроет, снимет паузу (владелец 03.10). */
+        liftPause?: boolean;
     },
 ): SubscriptionHours {
     const empty = { remaining: 0, pool: 0, reserved: 0, free: 0, extra: 0 };
     if (!sub) return { ok: false, active: false, reason: 'Нет абонемента', ...empty };
     const life = subscriptionLifecycle(sub as any, opts.now);
-    if (life === 'frozen') return { ok: false, active: false, reason: 'Абонемент заморожен', ...empty };
+    // На паузе: «действует» он станет, только если бронь снимет паузу — это
+    // решает paymentPlan (покрывает ли он бронь). Пока — не действует.
+    const paused = life === 'frozen' && !!opts.liftPause;
+    if (life === 'frozen' && !paused) return { ok: false, active: false, reason: 'Абонемент заморожен', ...empty };
+    if (paused && pauseLiftExpired(sub, opts.now)) {
+        return { ok: false, active: false, reason: 'Абонемент на паузе, а срок действия уже закончился', ...empty };
+    }
     if (life === 'completed') return { ok: false, active: false, reason: 'Срок абонемента закончился', ...empty };
+    const active = !paused;
     const formats = sub.includedFormats || ['individual'];
     // Доп. пул (зеркало pricing/subscription_pool.plan_split): часы капсулы —
     // на капсулу, «4 ч индивидуально» — на индивидуальную бронь в кабинете. Они
@@ -138,13 +156,13 @@ export function subscriptionHours(
     if (!formats.includes(opts.format)) {
         if (extra > 0) {
             // Формат не входит в основной пул — платить может только доп. пул.
-            return { ok: true, active: true, reason: '', remaining: extra, pool: extra, reserved: 0, free: extra, extra, extraLabel };
+            return { ok: true, active, reason: '', remaining: extra, pool: extra, reserved: 0, free: extra, extra, extraLabel, paused };
         }
         return {
             ok: false,
-            active: true,
+            active,
             reason: `Абонемент только для ${formats.includes('individual') ? 'индивидуальной' : 'групповой'} работы`,
-            remaining: mainRemaining, pool: mainRemaining, reserved: 0, free: mainRemaining, extra: 0,
+            remaining: mainRemaining, pool: mainRemaining, reserved: 0, free: mainRemaining, extra: 0, paused,
         };
     }
     const remaining = mainRemaining + extra;
@@ -163,7 +181,7 @@ export function subscriptionHours(
 
     return {
         ok: true,
-        active: true,
+        active,
         reason: '',
         remaining,
         pool: pool + extra,
@@ -171,6 +189,7 @@ export function subscriptionHours(
         free: Math.max(0, pool + extra - reserved),
         extra,
         extraLabel,
+        paused,
     };
 }
 
@@ -227,12 +246,16 @@ export function paymentPlan(opts: {
      *  Бонус тратится по слотам так же, как на сервере. */
     items?: Array<{ hours: number; price: number }>;
 }): PaymentPlan {
-    const { hours, bonusHours, sub } = opts;
-    const subCovers = sub.ok && hours > 0 && sub.remaining >= hours - 0.01;
+    const { hours, bonusHours } = opts;
+    const subCovers = opts.sub.ok && hours > 0 && opts.sub.remaining >= hours - 0.01;
     // Как на сервере (pricing.resolve_payment_method): бонус не тратится на
     // бронь, которая ничего не стоит, — если её не покрывает абонемент.
     const free = !subCovers && opts.moneyPrice !== undefined && opts.moneyPrice <= 0;
     const bonusCovers = !opts.isSeries && !free && hours > 0 && bonusHours > 0 && bonusHours >= hours - 0.01;
+    // Абонемент на паузе (владелец 03.10): покрывает бронь, а бонус её целиком
+    // не покрывает — бронь снимет паузу, и сервер считает абонемент
+    // действующим (частичный бонус тогда сам не идёт). Иначе пауза остаётся.
+    const sub = opts.sub.paused ? { ...opts.sub, active: subCovers && !bonusCovers } : opts.sub;
     // Как на сервере (владелец 01.10): без действующего абонемента бонус идёт
     // и частично, если бронь чего-то стоит. Серию считает «примерка» сервера.
     const moneyPrice = Math.max(0, opts.moneyPrice ?? 0);
@@ -305,4 +328,14 @@ export function balanceLockedReason(plan: PaymentPlan): string {
  *  баланса и подписи. 0 — бронь целиком бонусом. */
 export function bonusMoneyDue(plan: PaymentPlan): number {
     return plan.bonusPartial ? plan.bonusMoney : 0;
+}
+
+/** Подпись рядом с оплатой, когда бронь снимет паузу абонемента (владелец 03.10). */
+export const PAUSE_LIFT_NOTE = 'Абонемент на паузе — после брони пауза снимется, неиспользованные дни паузы сохранятся';
+
+/** Строка «пауза снимется» или null. Разовая бронь — когда уходит часами
+ *  абонемента; серия («реши сам») — когда абонемент покрывает встречу. */
+export function pauseLiftNote(plan: PaymentPlan, method: PayMethod, isSeries = false): string | null {
+    if (!plan.sub.paused || !plan.subCovers) return null;
+    return method === 'subscription' || (isSeries && method === 'balance') ? PAUSE_LIFT_NOTE : null;
 }
