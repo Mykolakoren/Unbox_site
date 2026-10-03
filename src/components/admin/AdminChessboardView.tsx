@@ -1889,10 +1889,10 @@ export function AdminChessboardView() {
 
             {/* ── Legend ── */}
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-ink pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-unbox-light" data-chess-legend>
-                {/* Деньги (В2) — первыми: это главный вопрос у стойки. */}
+                {/* Деньги (В2; знаки — решение владельца 03.10) — первыми: это главный вопрос у стойки. */}
                 <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 36 ₾ — взять с клиента</span>
-                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />списано с баланса — деньги уже списаны с баланса клиента (если баланс в минусе, красным будет «к оплате»)</span>
-                <span className="ui-badge ui-badge--muted"><CircleDashed size={14} strokeWidth={2.5} aria-hidden="true" />спишется с баланса — деньги спишутся за сутки до начала, брать ничего не нужно</span>
+                <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 11 ₾ из 20 — часть уже покрыта балансом (например, скидкой за прошлую неделю), взять только разницу</span>
+                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено — бронь покрыта деньгами клиента: уже списана с баланса без долга или спишется за 24 ч до начала из плюса на балансе (скидка за прошлую неделю, предоплата); брать ничего не нужно. Списанная в долг — всегда «к оплате»</span>
                 <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
                 <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
                 <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
@@ -1900,7 +1900,7 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)]/30" label={statusLabel('booking', 'completed', 'staff')} />
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
                 <span className="flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> серия</span>
-                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный, галочка или кружок</span>
+                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный знак или галочка</span>
             </div>
             </div>
             {/* ── Панель брони — справа от сетки, сетку не закрывает (G7-12). ── */}
@@ -2199,22 +2199,19 @@ export function AdminChessboardView() {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-/** «к оплате / ✓ оплачено / с баланса» в клетке шахматки (В2). corner — значок
- *  в углу 30-минутной брони (одна клетка): подпись целиком — в aria-label и title.
- *  Три знака (dueMarkKind): к оплате — красный; оплачено (уже списано) — зелёная ✓;
- *  с баланса (ещё не списано, покрыто плюсом на балансе) — серый контурный кружок,
- *  НЕ галочка: денег никто не вносил. Записи в dueMap нет — ничего. */
+/** «к оплате / ✓ оплачено» в клетке шахматки (В2; правило знаков — владелец 03.10).
+ *  corner — значок в углу 30-минутной брони (одна клетка): подпись целиком — в
+ *  aria-label и title. Два знака (dueMarkKind): к оплате — красный (у частично
+ *  покрытой подпись «к оплате N ₾ из M»); оплачено — зелёная ✓ (списана без долга
+ *  или ещё не списана, но целиком покрыта плюсом на балансе — подсказка «спишется
+ *  за 24 ч до начала»). Записи в dueMap нет — ничего. */
 function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corner?: boolean }) {
     const kind = dueMarkKind(info);
     if (!info || !kind) return null;
-    const label = kind === 'owes' ? `к оплате ${formatGel(info.due)}`
-        : kind === 'covered' ? COVERED_HINT
-        : 'списано с баланса';
+    const label = dueHint(info);
     const icon = kind === 'owes'
         ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
-        : kind === 'covered'
-            ? <CircleDashed size={12} strokeWidth={2.5} aria-hidden="true" />
-            : <Check size={12} strokeWidth={3} aria-hidden="true" />;
+        : <Check size={12} strokeWidth={3} aria-hidden="true" />;
     if (corner) {
         return (
             <span
@@ -2224,7 +2221,6 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
                 className={clsx(
                     'absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl',
                     kind === 'owes' && 'bg-[var(--status-danger-fg)] text-[var(--status-danger-bg)]',
-                    kind === 'covered' && 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)]',
                     kind === 'paid' && 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]',
                 )}
             >
@@ -2234,12 +2230,12 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
     }
     return (
         <span
-            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : kind === 'covered' ? 'ui-badge--muted' : 'ui-badge--ok')}
+            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : 'ui-badge--ok')}
             title={label}
             aria-label={label}
         >
             {icon}
-            <span className="num">{kind === 'owes' ? formatGel(info.due) : kind === 'covered' ? COVERED_SHORT : 'списано с баланса'}</span>
+            <span className="num">{kind === 'owes' ? formatGel(info.due) : 'оплачено'}</span>
         </span>
     );
 }

@@ -458,7 +458,7 @@ function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archived
                     </span>
                 )}
             </span>
-            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} />
+            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} />
         </button>
     );
 }

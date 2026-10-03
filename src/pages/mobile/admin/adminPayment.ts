@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { BookingHistoryItem, User } from '../../../store/types';
 import { computeDueByBooking, type DueInfo } from '../../../utils/dueAmounts';
+import { applyAllocation } from '../../../utils/balanceAllocation';
+import { useAllocationIndex } from '../../../hooks/useBalanceAllocation';
 import { todayRows, byClient, bookingDayKey, batumiDayKey } from '../../../utils/adminToday';
 import { branchOfBooking } from '../../../utils/cashBranch';
 
@@ -16,6 +18,8 @@ export { branchOfBooking };
  * (adminToday.byClient → total), «из них за сегодня» — только для сегодняшней.
  */
 export function useAdminDueMap(bookings: BookingHistoryItem[], users: User[]): Map<string, DueInfo> {
+    // 03.10: поверх — раскладка ленты с сервера (applyAllocation), как на компьютере.
+    const allocIndex = useAllocationIndex(users || [], bookings || []);
     return useMemo(() => {
         const bal = new Map<string, number>();
         for (const u of users || []) {
@@ -23,8 +27,9 @@ export function useAdminDueMap(bookings: BookingHistoryItem[], users: User[]): M
             if (u.email) bal.set(u.email, v);
             if (u.id) bal.set(String(u.id), v);
         }
-        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
-    }, [bookings, users]);
+        const balanceOf = (uid: string) => (bal.has(uid) ? bal.get(uid)! : null);
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, allocIndex, balanceOf);
+    }, [bookings, users, allocIndex]);
 }
 
 export interface AcceptPayment {

@@ -5,6 +5,8 @@ import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
 import { formatDayMonth, formatGel, formatTime } from '../../utils/format';
 import { ruCountWord } from '../../utils/plural';
 import { REASON_LABELS } from '../../utils/ledgerReasons';
+import { ledgerRowLine, allocationHeadline } from '../../utils/balanceAllocation';
+import { useClientAllocation } from '../../hooks/useBalanceAllocation';
 import { SkeletonList } from '../ui/Skeleton';
 import { ErrorBar } from '../ui/ErrorBar';
 import { EmptyState } from '../ui/EmptyState';
@@ -21,6 +23,13 @@ import { EmptyState } from '../ui/EmptyState';
  * Это ДРУГОЙ срез, чем кассовые операции: касса — про живые деньги в кассе,
  * лента — про депозит клиента. Инвариант «сумма ленты == баланс» показываем
  * прямо в шапке: если он сломан, значит баланс правили мимо кошелька.
+ *
+ * 03.10 (владелец: «чтобы на балансе было видно, что было начислено и куда
+ * списалось»): под каждой строкой — серая строка раскладки ленты (самые старые
+ * деньги — самым ранним броням): у начисления «ушло на: 05.10 14:00 Каб. 2 — 9 ₾»
+ * / «на балансе: 5 ₾», у списания «из: скидка за неделю 9 ₾ + оплата 30.09 11 ₾»
+ * / «в долг 20 ₾ → закрыто оплатой 05.10» / «в долг 20 ₾ — ещё не оплачено».
+ * Сверху — сводка: из чего плюс на балансе и что он покроет, или из чего долг.
  */
 
 export function UserBalanceLedger({ userId }: { userId: string }) {
@@ -28,6 +37,9 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [reloadTick, setReloadTick] = useState(0);
+    // Раскладка — тем же ключом, что лента: баланс из ответа ленты (после оплаты
+    // карточка перечитывает ленту — раскладка перечитается вместе с ней).
+    const { data: alloc } = useClientAllocation(data ? userId : null, data ? data.balance : null, reloadTick);
 
     useEffect(() => {
         let alive = true;
@@ -57,6 +69,8 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
 
     const { entries, balance, ledgerSum, reconciles, truncated } = data;
     const diff = Math.round((ledgerSum - balance) * 100) / 100;
+    const allocRows = new Map((alloc && alloc.consistent ? alloc.rows : []).map(r => [r.id, r]));
+    const headline = allocationHeadline(alloc);
 
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200">
@@ -82,10 +96,13 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                 )}
             </div>
 
-            <p className="text-xs text-ink-60 mb-5">
+            <p className="text-xs text-ink-60 mb-3">
                 Всё, что двигало депозит клиента: списания за брони, возвраты, скидки,
                 пополнения и правки. Баланс сейчас — <span className="num">{formatGel(balance)}</span>.
             </p>
+            {headline && (
+                <p data-alloc-headline className="text-sm text-unbox-dark mb-5 leading-snug">{headline}</p>
+            )}
 
             {entries.length === 0 ? (
                 <EmptyState compact title="Движений по балансу пока не было" />
@@ -106,6 +123,7 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                                 const d = e.date ? parseUTC(e.date) : null;
                                 const isNegative = e.delta < 0;
                                 const label = REASON_LABELS[e.reason] || (e.reason ? `Прочее (${e.reason})` : 'Прочее');
+                                const allocLine = ledgerRowLine(allocRows.get(e.id));
                                 return (
                                     <tr
                                         key={e.id}
@@ -131,6 +149,9 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                                             <div className="text-gray-900">{label}</div>
                                             {e.description && e.description !== label && (
                                                 <div className="text-xs text-ink-60">{e.description}</div>
+                                            )}
+                                            {allocLine && (
+                                                <div data-alloc-line className="text-xs text-ink-60 mt-0.5 leading-snug">{allocLine}</div>
                                             )}
                                         </td>
                                         <td className="py-3 pr-2 align-top text-right text-xs text-ink-60 whitespace-nowrap">

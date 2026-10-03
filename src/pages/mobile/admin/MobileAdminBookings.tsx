@@ -401,7 +401,7 @@ export function MobileAdminBookings() {
                                     // статуса только у нестандартных, плюс «к оплате / ✓» (В2).
                                     <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                                         {b.status !== 'confirmed' && <StatusBadge kind="booking" status={b.status} audience="staff" />}
-                                        <DueBadge due={due?.due} paid={!!due} charged={due?.charged} />
+                                        <DueBadge due={due?.due} paid={!!due} charged={due?.charged} price={due?.price} />
                                     </span>
                                 )
                             }

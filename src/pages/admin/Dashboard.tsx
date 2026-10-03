@@ -14,6 +14,8 @@ import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 import { statusLabel, getStatusDef } from '../../design/statuses';
 import { STATUS, COLOR } from '../../design/tokens';
 import { computeDueByBooking } from '../../utils/dueAmounts';
+import { applyAllocation } from '../../utils/balanceAllocation';
+import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../utils/adminToday';
 import { hasPermission } from '../../utils/permissions';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
@@ -86,7 +88,10 @@ export function AdminDashboard() {
         return () => window.clearInterval(t);
     }, []);
 
-    // «К оплате» по каждой брони — та же карта, что в шахматке.
+    // «К оплате» по каждой брони — та же карта, что в шахматке (03.10: плюс
+    // раскладка ленты applyAllocation — брони, покрытые скидкой за прошлую
+    // неделю, «оплачено»; частично — «к оплате N из M»).
+    const allocIndex = useAllocationIndex(users, bookings);
     const dueMap = useMemo(() => {
         const bal = new Map<string, number>();
         for (const u of users) {
@@ -94,8 +99,9 @@ export function AdminDashboard() {
             if (u.email) bal.set(u.email, v);
             if (u.id) bal.set(String(u.id), v);
         }
-        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
-    }, [bookings, users]);
+        const balanceOf = (uid: string) => (bal.has(uid) ? bal.get(uid)! : null);
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, allocIndex, balanceOf);
+    }, [bookings, users, allocIndex]);
 
     const rows = useMemo(
         () => todayRows({ bookings, users, dueMap, dayKey, resources }),
@@ -404,7 +410,7 @@ function GridHouseToday({
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
                                             </td>
                                             <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} />
+                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} />
                                             </td>
                                         </tr>
                                     );

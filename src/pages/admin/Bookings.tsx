@@ -22,6 +22,8 @@ import { formatGel, formatDateLabel } from '../../utils/format';
 import { parseUTC } from '../../utils/dateUtils';
 import { DueBadge } from '../../components/admin/DueBadge';
 import { computeDueByBooking, type DueInfo } from '../../utils/dueAmounts';
+import { applyAllocation } from '../../utils/balanceAllocation';
+import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
 import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -362,7 +364,9 @@ export function AdminBookings() {
     };
 
     // «К оплате / оплачено» в списке — та же карта, что в шахматке и «Сегодня»
-    // (только computeDueByBooking, своих формул нет).
+    // (только computeDueByBooking + раскладка ленты applyAllocation, 03.10;
+    // своих формул нет).
+    const allocIndex = useAllocationIndex(users, bookings);
     const dueMap = useMemo(() => {
         const bal = new Map<string, number>();
         for (const u of users) {
@@ -370,8 +374,9 @@ export function AdminBookings() {
             if (u.email) bal.set(u.email, v);
             if (u.id) bal.set(String(u.id), v);
         }
-        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
-    }, [bookings, users]);
+        const balanceOf = (uid: string) => (bal.has(uid) ? bal.get(uid)! : null);
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, allocIndex, balanceOf);
+    }, [bookings, users, allocIndex]);
 
     // Недельная скидка с последнего понедельника — та же метка, что в «Сегодня»
     // (ревизия 02.10): один раз на клиента, у его первой брони в списке.
@@ -992,7 +997,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             </div>
                                         </div>
                                         <div>
-                                            <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
+                                            <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} />
                                             {!!rebateRow.get(booking.id) && (
                                                 <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, marginTop: 4, lineHeight: 1.35 }}>
                                                     {weeklyRebateNote(rebateRow.get(booking.id)!)}
@@ -1096,7 +1101,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     )}
                                                 </td>
                                                 <td style={{ padding: '12px 10px' }}>
-                                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
+                                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} />
                                                 </td>
                                                 <td className="num" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 600, color: GH.ink }}>
                                                     {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
