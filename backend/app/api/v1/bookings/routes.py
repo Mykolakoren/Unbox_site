@@ -4716,7 +4716,7 @@ def _reprice_for_move(
         new_price = round(max(0.0, old_price + peak_delta - dropped_money), 2)
         price_diff = round(new_price - old_price, 2)
         if paid and abs(price_diff) >= 0.01:
-            wallet.apply(session, owner, -price_diff, reason="move_peak_diff",
+            wallet.apply(session, owner, -price_diff, reason="reschedule_diff",
                          description=("Перенос брони по абонементу: разница пиковой надбавки"
                                       + (" и снятые допы" if dropped_money >= 0.01 else "")),
                          ref_type="booking", ref_id=ref, actor=actor)
@@ -4732,7 +4732,7 @@ def _reprice_for_move(
         if price_diff > 0:
             _move_funds_check(owner, price_diff)
         if abs(price_diff) >= 0.01:
-            wallet.apply(session, owner, -price_diff, reason="move_cash_diff",
+            wallet.apply(session, owner, -price_diff, reason="reschedule_diff",
                          description="Перенос брони по абонементу, оплаченной деньгами: разница цены",
                          ref_type="booking", ref_id=ref, actor=actor)
         booking.charge_amount = new_cash
