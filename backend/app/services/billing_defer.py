@@ -131,6 +131,41 @@ def _resource_type(session: Session, resource_id: Optional[str]) -> Optional[str
 # «диалекта» — крон пишет часы, немедленный путь писал ₾. Старые брони так и
 # лежат, и их возврат этим правилом не меняется (final_price, как и раньше).
 
+# Ярлыки пула, которые stamp_booking ставит, когда бронь оплачена ЧАСАМИ
+# (pool_label(h, x) → 'main' | 'extra' | 'mixed'; при 0 часов — None).
+_HOURS_POOL_LABELS = ("main", "extra", "mixed")
+
+
+def subscription_hours_held(b: Booking) -> float:
+    """Сколько часов абонемента держит бронь по абонементу.
+
+    hours_deducted > 0 — оно и есть. Старые брони серий (ревизия 03.10, прод
+    b894240e): крон снимал часы и ставил пул (hours_pool = main/extra/mixed), но
+    hours_deducted оставался 0/None, а снимок часов лежал в charge_amount. Такая
+    бронь оплачена ЧАСАМИ: часы = charge_amount (не больше длительности брони).
+    hours_pool пустой при 0 часов (stamp_booking(b, 0, 0) пишет None) — бронь
+    ушла в деньги, часов 0."""
+    h = float(b.hours_deducted or 0)
+    if h > 0:
+        return h
+    if (getattr(b, "hours_pool", None) or "") in _HOURS_POOL_LABELS and float(b.charge_amount or 0) > 0:
+        cap = float(b.duration or 0) / 60.0 if b.duration else float(b.charge_amount)
+        return round(min(float(b.charge_amount), cap), 4)
+    return 0.0
+
+
+def heal_legacy_subscription_hours(b: Booking) -> None:
+    """Старая «часовая» бронь (часы сняты, hours_deducted = 0/None) — дописать
+    часы в бронь, чтобы возврат и правки работали с часами, а не с деньгами.
+    Только в памяти: в базу уйдёт вместе с правкой, которая её вызвала."""
+    if (b.payment_method or "").lower() != "subscription" or float(b.hours_deducted or 0) > 0:
+        return
+    held = subscription_hours_held(b)
+    if held > 0:
+        b.hours_deducted = held
+        subscription_pool.stamp_booking(b, held, b.extra_hours_deducted)
+
+
 def subscription_money_due(final_price) -> float:
     """Сколько ₾ снять с баланса вместе с часами абонемента: вся денежная часть
     брони (пик + допы) — её final_price. Отрицательной не бывает."""
@@ -247,6 +282,11 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             covered = rem >= hrs > 0
         if covered:
             user.subscription = subscription_pool.debit_hours(user.subscription, hrs, extra=extra)
+            # Ревизия 03.10: снятые часы — в бронь ВСЕГДА. Раньше у старых броней
+            # серий hours_deducted был 0/None (часы брались из длительности), он
+            # таким и оставался — и бронь, оплаченная часами, выглядела как
+            # ушедшая в деньги (отмена вернула бы 1 ₾ вместо 1 ч).
+            b.hours_deducted = hrs
             subscription_pool.stamp_booking(b, hrs, extra)
             snapshot = hrs
             # Пиковая надбавка абонемента (pricing: final_price = subscription_peak_debt)
@@ -428,6 +468,7 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
         return False, "user_missing"
 
     method = (b.payment_method or "balance").lower()
+    heal_legacy_subscription_hours(b)
     # §5#12: часы — только у абонементной брони, где они реально списаны
     # (hours_deducted>0); ушедшая в баланс-долг (hours_deducted=0) — деньгами.
     hours_used = float(b.hours_deducted or 0) if method == "subscription" else 0.0

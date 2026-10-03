@@ -617,6 +617,8 @@ def _extend_subscription_booking(session: Session, booking: Booking, owner: User
     Всё снятое ложится в final_price (часы — в hours_deducted), поэтому отмена
     возвращает ровно взятое. Длительность брони ставит вызывающий. Не коммитит."""
     from app.services.pricing import PricingService
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
     old_minutes = int(booking.duration or 0)
     add_h = round(extra_minutes / 60.0, 4)
     try:
@@ -710,9 +712,12 @@ def _subscription_money_row(booking: Booking) -> bool:
     (S10), а вырезка дарила фантомный час (S11). Такие брони редки (часов не
     хватило за сутки до начала) — честный отказ надёжнее пересчёта долями:
     отмена вернёт ровно charge_amount, новая бронь посчитается заново."""
+    from app.services.billing_defer import subscription_hours_held
+    # Старая «часовая» бронь (часы сняты кроном, hours_deducted = 0, но пул
+    # помечен main/extra/mixed) — оплачена часами, не деньгами (ревизия 03.10).
     return ((booking.payment_method or "").lower() == "subscription"
             and (booking.payment_status or "paid") == "paid"
-            and float(booking.hours_deducted or 0) <= 0)
+            and subscription_hours_held(booking) <= 0)
 
 
 def _refund_booking_to_owner(
@@ -745,6 +750,11 @@ def _refund_booking_to_owner(
             "refund_percent": 0.0,
             "skipped_reason": booking.payment_status,
         }
+
+    # Старая «часовая» бронь без hours_deducted — вернуть ЧАСЫ, а не снимок
+    # часов из charge_amount как деньги (ревизия 03.10).
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     refund_meta = {
         "refunded_to": str(owner.id),
@@ -4671,6 +4681,8 @@ def _reprice_for_move(
     цена, крон возьмёт новую. Waived и запреты переноса проверяет вызывающий.
     Без владельца (служебная бронь) — только снятые допы. Не коммитит."""
     from app.services.pricing import PricingService, booking_extras_money
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
     old_price = round(float(booking.final_price or 0), 2)
     method = (booking.payment_method or "balance").lower()
     paid = (booking.payment_status or "paid") == "paid"
@@ -4838,6 +4850,8 @@ def trim_booking(
     ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     is_owner = _check_ownership(booking, current_user)
     is_admin = current_user.role in ADMIN_ROLES
@@ -5643,6 +5657,8 @@ def change_booking_format(
     booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     new_format = (payload.new_format or "").strip().lower()
     if new_format not in ("individual", "group"):
@@ -6633,6 +6649,8 @@ def shorten_booking(
     booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
@@ -6834,6 +6852,8 @@ def split_booking(
     booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:

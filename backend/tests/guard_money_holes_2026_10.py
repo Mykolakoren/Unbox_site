@@ -1849,6 +1849,58 @@ def test_r3_1_format_change_group_master_moves_hours_not_money():
     _ledger_ok(s, u, 100.0)
 
 
+@_scenario
+def test_r3_10_cron_writes_taken_hours_into_booking():
+    """Прод b894240e: старая бронь серии без hours_deducted — крон снимал час
+    (часы брал из длительности), ставил пул, но hours_deducted оставлял 0/None.
+    Теперь крон пишет снятые часы в бронь: hours_deducted 1.0, отмена → +1 ч."""
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START"))
+    b = _book(s, admin, u, days=3, start="14:00")
+    b.hours_deducted = None
+    s.add(b)
+    s.commit()
+    ok, _ = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    b = s.get(Booking, b.id)
+    assert ok and float(b.hours_deducted) == 1.0 and b.hours_pool == "main", (b.hours_deducted, b.hours_pool)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 9.0)
+    _cancel(s, admin, b)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
+
+
+@_scenario
+def test_r3_11_legacy_hours_row_is_hours_not_money():
+    """Старая «часовая» бронь: hours_deducted = 0, но пул помечен 'main', в
+    charge_amount — снимок часов (1.0). Это оплата ЧАСАМИ: не «ушла в деньги»
+    (правки не 409), отмена возвращает 1 ч, а не 1 ₾. Настоящая «в деньгах»
+    (пул пустой, charge_amount 18 ₾) — по-прежнему деньгами."""
+    from app.api.v1.bookings import routes
+    assert P.pool_label(0, 0) is None
+    assert (P.pool_label(1, 0), P.pool_label(1, 1), P.pool_label(2, 1)) == ("main", "extra", "mixed")
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=9.0, used_hours=1.0))
+    legacy = Booking(resource_id="room_1", location_id="unbox_uni", date=H._day(3), start_time="14:00", duration=60,
+                     final_price=0.0, payment_method="subscription", payment_status="paid", status="confirmed",
+                     hours_deducted=0.0, hours_pool="main", charge_amount=1.0, applied_rule="SUBSCRIPTION",
+                     user_id=u.email, user_uuid=u.id, format="individual")
+    money = Booking(resource_id="room_2", location_id="unbox_uni", date=H._day(3), start_time="14:00", duration=60,
+                    final_price=0.0, payment_method="subscription", payment_status="paid", status="confirmed",
+                    hours_deducted=0.0, hours_pool=None, charge_amount=18.0, applied_rule="SUBSCRIPTION",
+                    user_id=u.email, user_uuid=u.id, format="individual")
+    s.add(legacy)
+    s.add(money)
+    s.commit()
+    assert not routes._subscription_money_row(legacy) and routes._subscription_money_row(money)
+    _cancel(s, admin, legacy)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), f"старая часовая: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+    _cancel(s, admin, money)
+    assert (_bal(s, u), _rem(s, u)) == (118.0, 10.0), f"в деньгах: {_bal(s, u)} ₾ / {_rem(s, u)} ч"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
