@@ -407,6 +407,24 @@ def booking_refunded_money(session: Session, b: Booking) -> float:
     return round(sum(float(r.delta) for r in rows if float(r.delta) > 0), 2)
 
 
+def _refund_percent_from_text(desc: str, event_type: str = "booking_cancelled") -> Optional[float]:
+    """Доля возврата из текста старого события отмены (до 04.10 доля политики не
+    хранилась отдельным полем). Имя админа стоит В НАЧАЛЕ текста и может само
+    содержать «Refund: 5%» или «возврат 30%» (ревизия 04.10), поэтому шаблон
+    выбирается по типу события, привязан к своему хвосту, и берётся ПОСЛЕДНЕЕ
+    совпадение:
+      переаренда       — «… Owner refunded 50%, rest → Unbox income.»;
+      отмена серии     — «Отмена серии: возврат 50%» (имени нет, с начала);
+      одиночная отмена — «… Refund: 50%. Time to start: …»."""
+    import re as _re
+    if event_type == "booking_auto_cancelled_re_rent":
+        found = _re.findall(r"Owner refunded (\d+(?:\.\d+)?)%, rest", desc)
+    else:
+        found = (_re.findall(r"^Отмена серии: возврат (\d+(?:\.\d+)?)%", desc)
+                 or _re.findall(r"Refund: (\d+(?:\.\d+)?)%\. Time to start", desc))
+    return (float(found[-1]) / 100.0) if found else None
+
+
 def _cancel_refund_share(session: Session, b: Booking, money_base: float, refunded: float) -> float:
     """Какую долю брони вернула отмена (1.0 — всё, 0.0 — штраф 100 %).
 
@@ -435,9 +453,7 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
             md = ev.metadata_dump or {}
             pct = md.get("policy_refund_percent")
             if pct is None and md.get("skipped_reason"):
-                import re as _re
-                m = _re.search(r"(?:Refund:|refunded|возврат)\s*(\d+(?:\.\d+)?)\s*%", ev.description or "")
-                pct = (float(m.group(1)) / 100.0) if m else None
+                pct = _refund_percent_from_text(ev.description or "", ev.event_type)
             elif pct is None:
                 pct = md.get("refund_percent")
             if pct is not None:

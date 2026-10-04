@@ -2775,6 +2775,23 @@ def test_r5_3_negative_discount_not_shown():
     assert chess.count("Math.max(0, selectedBooking.discountAmount ?? 0) > 0") == 2
 
 
+def test_r5_7_refund_share_text_ignores_admin_name():
+    """Доля возврата из текста старого события (до policy_refund_percent): имя
+    админа стоит перед долей и само может содержать «Refund: 5%», «100%»,
+    «возврат 30%», «refunded 10%». Было: бралось ПЕРВОЕ совпадение — «Снять
+    штраф» вернул бы бонус-часы не той долей. Стало: шаблон привязан к хвосту
+    текста, берётся последнее совпадение."""
+    from app.services.billing_defer import _refund_percent_from_text as share
+    for name in ("Админ", "Refund: 5% Admin", "Анна 100%", "возврат 30% Иванов", "O'Brien (refunded 10%)",
+                 "Refund: 0%. Time to start: 1h"):
+        single = f"Booking cancelled by {name} (owner). Refund: 50%. Time to start: 70.0h"
+        rerent = f"Booking auto-cancelled due to re-rent claim by {name}. Owner refunded 50%, rest → Unbox income."
+        assert share(single) == 0.5, (name, share(single))
+        assert share(rerent, "booking_auto_cancelled_re_rent") == 0.5, (name, share(rerent, "booking_auto_cancelled_re_rent"))
+    assert share("Отмена серии: возврат 0%") == 0.0 and share("Отмена серии: возврат 100%") == 1.0
+    assert share("Отменено вручную") is None
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
