@@ -448,9 +448,10 @@ def _free_booking_sql() -> str:
               AND coalesce(b.payment_status, '') <> 'waived'
               AND (
                     -- бронь за 0 ₾ не по абонементу, не бонусом и не служебная;
-                    -- «Час в подарок» (BONUS_HOUR) — это бесплатный час клиента, погашен
+                    -- «Час в подарок» (BONUS_HOUR) — это бесплатный час клиента, погашен;
+                    -- BONUS_HOUR_PART — часть такой брони после «Разделить»/вырезки
                     (coalesce(b.payment_method, '') NOT IN ('subscription', 'bonus', 'service')
-                     AND coalesce(b.applied_rule, '') <> 'BONUS_HOUR')
+                     AND coalesce(b.applied_rule, '') NOT IN ('BONUS_HOUR', 'BONUS_HOUR_PART'))
                     -- скрытая утечка: «по абонементу», оплачена, но не списано ни часов,
                     -- ни денег. charge_amount — снимок списанного: часы (нашлись в пуле)
                     -- или лари (абонемент исчерпан → с баланса); 0 — не списано ничего

@@ -5138,9 +5138,9 @@ def trim_booking(
             if _is_manual:
                 _q.applied_rule = booking.applied_rule
         # Бонус-час «Часа в подарок» держит одна строка — исходная; новая строка
-        # (правый остаток при вырезке из середины) — просто ручная цена.
+        # (правый остаток при вырезке из середины) — часть подарочной брони.
         if booking.applied_rule == "BONUS_HOUR" and left > 0 and rightQuote is not None:
-            rightQuote.applied_rule = "MANUAL_OVERRIDE"
+            rightQuote.applied_rule = "BONUS_HOUR_PART"
 
     _kept_q = leftQuote if left > 0 else rightQuote
     if _kept_q is not None and _extras_money >= 0.01:
@@ -6273,8 +6273,13 @@ def apply_bonus_hour(
     if covered < 0.999:
         raise HTTPException(409, "Не удалось погасить бонус — попробуйте ещё раз")
 
+    # Метка подарка — ДО «Цены»: set_booking_price метку BONUS_HOUR не стирает и
+    # коммитит одним разом погашенный бонус, новую цену, движение денег и метку.
+    # Ревизия 04.10: метка ставилась вторым коммитом — при сбое между ними бонус
+    # был погашен, а метки (и возврата бонус-часа при отмене) не было.
+    booking.applied_rule = "BONUS_HOUR"
     # Тот же путь, что кнопка «Цена»: набивает audit, шлёт TG, двигает деньги
-    # при paid и коммитит всю транзакцию (вместе с погашенным бонусом).
+    # при paid и коммитит всю транзакцию (вместе с погашенным бонусом и меткой).
     set_booking_price(
         booking_id=booking_id,
         payload=SetPriceRequest(
@@ -6284,11 +6289,6 @@ def apply_bonus_hour(
         session=session,
         current_user=current_user,
     )
-    # Метка идемпотентности — ПОСЛЕ успешного расчёта (set_booking_price
-    # перетирает applied_rule в MANUAL_OVERRIDE, поэтому штампуем поверх).
-    booking.applied_rule = "BONUS_HOUR"
-    session.add(booking)
-    session.commit()
     session.refresh(booking)
     return booking
 
@@ -6859,6 +6859,19 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         owner.subscription = subscription_pool.debit_hours(owner.subscription, hours, extra=extra_hours)
         session.add(owner)
 
+    # 2б. «Час в подарок» (BONUS_HOUR): бонус-час клиента погашен ради скидки на
+    #    ДЕНЕЖНУЮ бронь. После перевода она оплачена часами абонемента, а деньги
+    #    за неё вернулись выше — подарок теряет смысл, и бонус-час возвращаем
+    #    целиком, как отмена 100 %. Отказ «сначала отмените подарок» вёл бы на
+    #    несуществующее действие. Ревизия 04.10: было — возврат 18 ₾ и −2 ч, а
+    #    бонус-час пропадал. Метка ниже меняется на SUBSCRIPTION — второй раз
+    #    отмена его не вернёт.
+    gift_back = 0.0
+    if (booking.applied_rule or "") == "BONUS_HOUR":
+        from app.services.bonus_service import refund_free_hours
+        refund_free_hours(session, owner.id, 1.0, reason="Перевод на абонемент: «Час в подарок» вернули")
+        gift_back = 1.0
+
     # 3. Перекраска брони.
     booking.payment_method = "subscription"
     booking.applied_rule = "SUBSCRIPTION"
@@ -6876,6 +6889,7 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         "client": owner.name or owner.email,
         "hours_deducted": hours,
         "refunded_to_balance": refunded,
+        "returned_bonus_hours": gift_back,
         "remaining_hours_after": subscription_pool.get_float(owner.subscription, "remaining_hours"),
     }
 
@@ -7270,7 +7284,7 @@ def split_booking(
         if _manual_rule:
             # Бонус-час «Часа в подарок» держит одна строка — исходная (первая
             # часть): отмена каждой части иначе вернула бы его снова.
-            return _manual_rule if (first or _manual_rule != "BONUS_HOUR") else "MANUAL_OVERRIDE"
+            return _manual_rule if (first or _manual_rule != "BONUS_HOUR") else "BONUS_HOUR_PART"
         return q.applied_rule if q is not None else booking.applied_rule
 
     def _part_discount(q, room: float) -> float:

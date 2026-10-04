@@ -239,7 +239,9 @@ function discountNote(b: BookingHistoryItem): string | null {
     if (b.appliedRule === 'SUBSCRIPTION') return 'По абонементу';
     if (!b.appliedRule || b.appliedRule === 'NONE') return null;
     if (!b.discountPercent && !b.discountAmount) return null;
-    return `${discountLabel(b.appliedRule)} · −${b.discountPercent ?? 0}% (база ${formatGel(b.basePrice ?? b.finalPrice)})`;
+    // «−0 %» не пишем (ручная цена выше цены движка — скидки нет), ревизия 04.10
+    const pct = b.discountPercent ?? 0;
+    return `${discountLabel(b.appliedRule)}${pct > 0 ? ` · −${pct}%` : ''} (база ${formatGel(b.basePrice ?? b.finalPrice)})`;
 }
 
 function discountLabel(rule: string | undefined | null): string {
@@ -248,6 +250,8 @@ function discountLabel(rule: string | undefined | null): string {
         case 'WEEKLY_PROGRESSIVE':    return 'Недельная (накопленные часы)';
         case 'CONSECUTIVE_HOURS':     return 'За длительность брони';
         case 'MANUAL_OVERRIDE':       return 'Ручная корректировка';
+        case 'BONUS_HOUR':            return 'Час в подарок';
+        case 'BONUS_HOUR_PART':       return 'Час в подарок (часть брони)';
         case 'SUBSCRIPTION':          return 'Абонемент';
         case 'SUBSCRIPTION_DISCOUNT': return 'Скидка по абонементу';
         case 'HOT_BOOKING':           return 'Горячая бронь';

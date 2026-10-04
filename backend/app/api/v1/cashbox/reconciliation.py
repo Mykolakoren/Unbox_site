@@ -62,6 +62,7 @@ RULE_LABELS = {
     "SUBSCRIPTION_DISCOUNT": "Скидка по абонементу",
     "HOT_BOOKING": "Горячая бронь",
     "BONUS_HOUR": "Час в подарок",
+    "BONUS_HOUR_PART": "Час в подарок (часть брони)",
     "COMP_ACCOUNT": "Служебная (бесплатно)",
 }
 PAY_METHOD = {"balance": "Баланс", "subscription": "Абонемент (часы)", "bonus": "Бонусный час"}

@@ -467,6 +467,15 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
     return 1.0
 
 
+def _left_after_cancel(hours: float, share_returned: float) -> float:
+    """Сколько бонус-часов осталось у брони после отмены: отмена вернула ровно
+    round(часы × доля, 2) (_refund_booking_to_owner), снятие штрафа отдаёт
+    остаток — разностью, а не вторым округлением доли. Ревизия 04.10 (seed
+    411): 0,67 ч при отмене 50 % — 0,34 отмена + 0,34 waive = 0,68."""
+    h = float(hours or 0)
+    return round(max(0.0, h - round(h * share_returned, 2)), 2)
+
+
 def _return_gift_hour(session: Session, b: Booking, user: Optional[User], share_returned: float) -> float:
     """«Час в подарок» (applied_rule = BONUS_HOUR): бонус-час клиента погашен
     при подарке. Снятие штрафа делает бронь бесплатной — бонус-час возвращаем
@@ -475,7 +484,7 @@ def _return_gift_hour(session: Session, b: Booking, user: Optional[User], share_
     отмена waived-брони не вернула его второй раз. Ревизия 04.10."""
     if (b.applied_rule or "") != "BONUS_HOUR":
         return 0.0
-    back = round(1.0 * (1.0 - share_returned), 2)
+    back = _left_after_cancel(1.0, share_returned)
     if back > 0 and user is not None:
         from app.services.bonus_service import refund_free_hours
         refund_free_hours(session, user.id, back, reason="Снятие штрафа: «Час в подарок»")
@@ -531,7 +540,7 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
         if (b.payment_method or "").lower() == "bonus" and float(b.hours_deducted or 0) > 0:
             owner = session.get(User, b.user_uuid) if b.user_uuid else None
             share_returned = _cancel_refund_share(session, b, 0.0, 0.0) if b.status == "cancelled" else 0.0
-            bonus_back = round(float(b.hours_deducted) * (1.0 - share_returned), 4)
+            bonus_back = _left_after_cancel(float(b.hours_deducted), share_returned)
             if bonus_back > 0 and owner is not None:
                 from app.services.bonus_service import refund_free_hours
                 refund_free_hours(session, owner.id, bonus_back, reason="Снятие штрафа за бронь")
@@ -589,14 +598,17 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
     # больше не держит бонус-часов — иначе отмена waived-брони вернула бы их
     # второй раз.
     bonus_back = 0.0
+    # Бонус-часы и подарок отмена вернула долей ПОЛИТИКИ (refund_percent), а не
+    # долей денег по ленте (та может отличаться на копейку округления).
+    _bonus_share = _cancel_refund_share(session, b, 0.0, 0.0) if b.status == "cancelled" else 0.0
     if method == "bonus" and float(b.hours_deducted or 0) > 0:
-        bonus_back = round(float(b.hours_deducted) * (1.0 - share_returned), 4)
+        bonus_back = _left_after_cancel(float(b.hours_deducted), _bonus_share)
         if bonus_back > 0:
             from app.services.bonus_service import refund_free_hours
             refund_free_hours(session, user.id, bonus_back, reason="Снятие штрафа за бронь")
         b.hours_deducted = 0.0
         subscription_pool.stamp_booking(b, 0, 0)
-    bonus_back = round(bonus_back + _return_gift_hour(session, b, user, share_returned), 4)
+    bonus_back = round(bonus_back + _return_gift_hour(session, b, user, _bonus_share), 4)
     if money_back >= 0.01:
         # Аудит 2026-08-27: у абонементной брони это пиковая надбавка/допы —
         # деньги, снятые отдельно от часов; у денежной — сама цена.

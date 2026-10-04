@@ -744,6 +744,7 @@ def test_free_booking_sql():
     _bk(s, u, d, method="service", pay="waived")
     _bk(s, u, d, pay="waived")
     _bk(s, u, d, rule="BONUS_HOUR")                                           # «Час в подарок»
+    _bk(s, u, d, rule="BONUS_HOUR_PART")                                      # часть подарочной брони после «Разделить»
     _bk(s, u, d, status="cancelled")
     _bk(s, u, datetime(2026, 8, 20), rule="MANUAL_OVERRIDE")                  # старше 30 дней
     _bk(s, owner, d, rule="COMP_ACCOUNT")

@@ -2969,7 +2969,7 @@ def test_r5_9a_gift_hour_returns_on_cancel_and_waive():
             s.expire_all()
             parts = s.exec(select(Booking).where(Booking.user_uuid == u.id).order_by(Booking.start_time)).all()
         rules = [x.applied_rule for x in parts]
-        assert rules[0] == "BONUS_HOUR" and set(rules[1:]) == {"MANUAL_OVERRIDE"}, (op, rules)
+        assert rules[0] == "BONUS_HOUR" and set(rules[1:]) == {"BONUS_HOUR_PART"}, (op, rules)
         for x in parts:
             _cancel(s, admin, s.get(Booking, x.id))
         assert (_free_hours(s, u), _bal(s, u)) == (1.0, 100.0), (op, _free_hours(s, u), _bal(s, u))
@@ -3118,6 +3118,119 @@ def test_r6_waive_refused_for_rejected_hot_booking():
     prefix = billing_defer.REJECTED_HOT_PREFIX
     assert f'f"{prefix} (' in _read("backend/app/api/v1/bookings/routes.py")
     assert f'f"{prefix} (' in _read("backend/app/api/v1/telegram.py")
+
+
+@_scenario
+def test_r6_a_convert_gift_booking_returns_gift_hour():
+    """«На абонемент» у брони с «Часом в подарок»: деньги за бронь возвращаются,
+    часы абонемента списываются — и бонус-час возвращается целиком (подарок
+    теряет смысл). Было: возврат 18 ₾ и −2 ч, а бонус-час пропадал. Отмена после
+    перевода второй раз его не возвращает."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    b = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=120, method="balance"))
+    assert (float(b.final_price), _bal(s, u)) == (18.0, 282.0), (b.final_price, _bal(s, u))
+    uu = s.get(User, u.id)
+    uu.subscription = _sub("WARM_START")
+    s.add(uu)
+    s.commit()
+    rem0 = _rem(s, u)
+    out = H._call(routes.convert_booking_to_subscription, booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    assert (_bal(s, u), _rem(s, u), _free_hours(s, u)) == (300.0, rem0 - 2.0, 1.0), \
+        (_bal(s, u), _rem(s, u), _free_hours(s, u))
+    _cancel(s, admin, s.get(Booking, b.id))
+    assert (_bal(s, u), _rem(s, u), _free_hours(s, u)) == (300.0, rem0, 1.0), (_bal(s, u), _rem(s, u), _free_hours(s, u))
+
+
+@_scenario
+def test_r6_b_waive_after_partial_cancel_returns_exact_remainder():
+    """Бонус-часы части с нечётными сотыми (3 ч, бонус 1 ч → [120, 60] → 0,67 и
+    0,33): отмена 50 % возвращает 0,34, «Снять штраф» — остаток 0,33 (а не второе
+    округление 0,34 — было 1,01 ч из 1,0). Seed 411 ревизора."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=500.0)
+    _bonus(s, u, 1.0)
+    b = _book(s, admin, u, days=3, start="12:00", minutes=180, method="balance")
+    a, c = _split(s, admin, b, [120, 60])
+    assert (float(a.hours_deducted), float(c.hours_deducted)) == (0.67, 0.33)
+    _cancel(s, admin, a, refund_percent=0.5)
+    assert _free_hours(s, u) == 0.34, _free_hours(s, u)
+    _waive(s, admin, a)
+    assert _free_hours(s, u) == 0.67, _free_hours(s, u)
+    _cancel(s, admin, c)
+    assert (_free_hours(s, u), _bal(s, u)) == (1.0, 500.0), (_free_hours(s, u), _bal(s, u))
+    # то же на подарке: отмена 50 % → 0,5, «Снять штраф» → ещё 0,5
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    g = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=60, method="balance"))
+    _cancel(s, admin, g, refund_percent=0.5)
+    _waive(s, admin, g)
+    assert _free_hours(s, u) == 1.0, _free_hours(s, u)
+
+
+@_scenario
+def test_r6_d_gift_label_in_the_same_commit_as_bonus():
+    """«Час в подарок»: погашенный бонус, новая цена и метка BONUS_HOUR — одним
+    коммитом. Было: метка вторым коммитом — сбой между ними оставлял бонус
+    погашенным без метки (и без возврата бонус-часа при отмене). Проверяем:
+    второй и следующие коммиты падают — метка всё равно в базе."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    b = _book(s, admin, u, start="14:00", minutes=60, method="balance")
+    _bonus(s, u, 1.0)
+    real_commit, calls = s.commit, []
+
+    def _commit_once():
+        calls.append(1)
+        if len(calls) > 1:
+            raise RuntimeError("сбой после первого коммита")
+        return real_commit()
+
+    s.commit = _commit_once
+    try:
+        routes.apply_bonus_hour(booking_id=str(b.id), session=s, current_user=admin)
+    except RuntimeError:
+        pass
+    finally:
+        s.commit = real_commit
+    s.rollback()
+    s.expire_all()
+    got = (s.get(Booking, b.id).applied_rule, float(s.get(Booking, b.id).final_price), _free_hours(s, u))
+    assert got == ("BONUS_HOUR", 0.0, 0.0), got
+
+
+@_scenario
+def test_r6_e_gift_split_part_has_own_label():
+    """«Разделить» 1-часовую подарочную бронь (0 ₾): вторая часть — метка
+    BONUS_HOUR_PART (цена — доля подарка, бонус-час держит первая часть), а не
+    «ручная цена 0 ₾», на которую ревизор «Бронь за 0 ₾» поднимал бы ложную
+    тревогу. Метка — ручная (пересчёт «часов подряд» её не трогает)."""
+    from app.services.pricing import MANUAL_PRICE_RULES
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    g = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=60, method="balance"))
+    parts = _split(s, admin, g, [30, 30])
+    assert [(x.applied_rule, float(x.final_price)) for x in parts] == [("BONUS_HOUR", 0.0), ("BONUS_HOUR_PART", 0.0)]
+    assert "BONUS_HOUR_PART" in MANUAL_PRICE_RULES
+    assert "'BONUS_HOUR_PART'" in _read("backend/scripts/money_audit.py")
+    for x in parts:
+        _cancel(s, admin, x)
+    assert (_free_hours(s, u), _bal(s, u)) == (1.0, 100.0)
+
+
+def test_r6_c_mobile_sheet_no_minus_zero_percent():
+    sheet = _read("src/pages/mobile/admin/bookingSheets.tsx")
+    assert "· −${b.discountPercent ?? 0}%" not in sheet, "мобильная шторка снова пишет «−0 %»"
+    assert "case 'BONUS_HOUR_PART'" in sheet and "case 'BONUS_HOUR'" in sheet
 
 
 if __name__ == "__main__":

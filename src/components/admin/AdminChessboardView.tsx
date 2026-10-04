@@ -781,6 +781,8 @@ export function AdminChessboardView() {
             case 'WEEKLY_PROGRESSIVE':    return 'Недельная (накопленные часы)';
             case 'CONSECUTIVE_HOURS':     return 'За длительность брони';
             case 'MANUAL_OVERRIDE':       return 'Ручная корректировка';
+            case 'BONUS_HOUR':            return 'Час в подарок';
+            case 'BONUS_HOUR_PART':       return 'Час в подарок (часть брони)';
             case 'SUBSCRIPTION':          return 'Абонемент';
             case 'SUBSCRIPTION_DISCOUNT': return 'Скидка по абонементу';
             case 'HOT_BOOKING':           return 'Горячая бронь';
