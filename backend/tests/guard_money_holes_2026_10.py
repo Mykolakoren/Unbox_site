@@ -48,6 +48,22 @@
   A продление pending сверх часов — добавка деньгами; B бот пересчитывает «часы
   подряд»; C «Цена»/«Час в подарок» не съедают допы; E скидка 0–100 % в PATCH.
 
+Ревизия №3 (03–04.10) — тесты test_r3_*:
+  r3_1 смена формата брони по абонементу не пересчитывает деньги движком —
+       только переносит часы между пулами;
+  r3_2 «Снять штраф» возвращает и бонус-часы (за вычетом доли, уже
+       возвращённой отменой); r3_3 — под замком строки, второй клик — отказ;
+  r3_4 тексты отказов ведут на рабочее действие («Отмените… и создайте
+       новую», клиенту < 24 ч — «Напишите администратору»);
+  r3_5 одобрение срочной брони «в деньги» — админу итог с суммой и балансом
+       (сайт и бот одинаково);
+  r3_6 сокращение денежной брони держит base/discount той же долей;
+  r3_7 «Цена» + вырезка: остатки — доли ручной цены по времени, не дороже
+       уплаченного; пересчёт «часов подряд» ручную цену не трогает;
+  r3_8 причина пропуска в переносе серии; текст клиенту после «Снять штраф»;
+  r3_10 крон пишет снятые часы в бронь; r3_11 старая «часовая» бронь — часы;
+  r3_split деление денежной брони: каждая часть держит ровно свою цену.
+
 Без сети и боевой базы: SQLite в памяти, время заморожено (пн 05.10.2026,
 10:00 по Тбилиси), Telegram и Google подменены.
 
@@ -2274,6 +2290,31 @@ def test_r3_split_money_booking_parts_hold_their_own_price():
         _cancel(s, admin, s.get(Booking, r.id))
     assert _bal(s, u) == 300.0, _bal(s, u)
     _ledger_ok(s, u, 300.0)
+
+
+@_scenario
+def test_r3_7_trim_subscription_manual_price_split_by_time():
+    """По абонементу «Цена» — это денежная часть брони (пик/допы). Вырезка
+    делит её по времени (а не пиком движка), метка ручной цены остаётся, часы —
+    как всегда; отмена возвращает ровно взятое (деньги и часы)."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("PRO_PLUS"), balance=100.0)
+    rem0 = _rem(s, u)
+    b = _book(s, admin, u, start="19:00", minutes=180, extras=["sandbox"])
+    assert (float(b.final_price), _bal(s, u)) == (15.0, 85.0), (b.final_price, _bal(s, u))   # пик 10 + песочница 5
+    _set_price(s, admin, b, 9.0)
+    out = _trim(s, admin, s.get(Booking, b.id), "20:00", "21:00")
+    assert isinstance(out, dict) and out.get("ok") and out["refunded_hours"] == 1.0, out
+    s.expire_all()
+    rows = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda r: r.start_time)
+    got = [(r.start_time, float(r.final_price), float(r.hours_deducted), r.applied_rule) for r in rows]
+    assert got == [("19:00", 3.0, 1.0, "MANUAL_OVERRIDE"), ("21:00", 3.0, 1.0, "MANUAL_OVERRIDE")], got
+    assert (_bal(s, u), _rem(s, u)) == (94.0, round(rem0 - 2.0, 4)), (_bal(s, u), _rem(s, u))
+    for r in rows:
+        _cancel(s, admin, r)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, rem0), (_bal(s, u), _rem(s, u))
+    _ledger_ok(s, u, 100.0)
 
 
 if __name__ == "__main__":
