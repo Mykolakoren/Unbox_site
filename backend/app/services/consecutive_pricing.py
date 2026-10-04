@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 
 from app.models.booking import Booking
 from app.models.user import User
-from app.services.pricing import PricingService, booking_extras_money
+from app.services.pricing import MANUAL_PRICE_RULES, PricingService, booking_extras_money
 from app.services.timeline import timeline_service
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,14 @@ def recompute_chain_and_settle(
     per_booking: List[dict] = []
 
     for b in chain:
+        # Ручная цена («Цена», «Час в подарок») — договорённость с клиентом и по
+        # политике скидок старше «часов подряд»: её не пересчитываем (часы брони
+        # при этом входят в длину цепочки — соседи получают свою скидку).
+        # Ревизия 04.10: клиент бронировал соседний час — «Час в подарок»
+        # сгорал (18 → 34 ₾, списано 16 ₾, метка BONUS_HOUR стёрта, и подарок
+        # можно было применить второй раз), «Цена» 10 ₾ становилась 18 ₾.
+        if (b.applied_rule or "") in MANUAL_PRICE_RULES:
+            continue
         try:
             h, m = map(int, b.start_time.split(":"))
             start_dt = b.date.replace(hour=h, minute=m, second=0, microsecond=0)

@@ -700,6 +700,14 @@ class PricingService:
     # Removed _apply_hot_booking as it is now integrated into calculate_price logic
 
 
+# Ручная цена брони — договорённость админа с клиентом: «Цена»
+# (MANUAL_OVERRIDE) и «Час в подарок» (BONUS_HOUR). По политике скидок
+# (src/config/pricing_policy.yaml → priority_order_booking_time, скидки не
+# складываются) ручная цена старше «часов подряд»: пересчёт цепочки её не
+# трогает, вырезка и деление брони делят её по времени, а не по движку.
+MANUAL_PRICE_RULES = ("MANUAL_OVERRIDE", "BONUS_HOUR")
+
+
 def booking_extras_money(booking) -> float:
     """Сколько ₾ из final_price брони — допы (песочница, проектор, кушетка, кофе).
 

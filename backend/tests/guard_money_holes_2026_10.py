@@ -2099,6 +2099,122 @@ def test_r3_6_shortened_money_booking_keeps_sandbox_in_later_edits():
     _ledger_ok(s, u, 300.0)
 
 
+@_scenario
+def test_r3_7_trim_after_manual_price_splits_the_deal_by_time():
+    """«Цена» ниже движка, потом «Вырезка» (фаззер, seed 842: 46 → «Цена» 10 →
+    вырезка часа → остаток 30 ₾ по движку, доплаты нет, а отмена вернула 30 ₾ из
+    воздуха). Стало: остатки — доли ручной цены по времени (допы — у первого
+    остатка), возврат — ровно доля вырезанного, метка ручной цены остаётся, и
+    пересчёт «часов подряд» после вырезки её не стирает."""
+    from app.services.pricing import booking_extras_money
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    b = _book(s, admin, u, start="14:00", minutes=180, method="balance", extras=["sandbox"])
+    assert float(b.final_price) == 56.0, b.final_price          # 3 ч −15 % = 51 + песочница 5
+    _set_price(s, admin, b, 15.0)                                # аренда 10 + песочница 5
+    assert _bal(s, u) == 285.0
+    out = _trim(s, admin, s.get(Booking, b.id), "15:00", "16:00")
+    assert isinstance(out, dict) and out.get("ok") and out["refunded_amount"] == 3.33, out
+    s.expire_all()
+    rows = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda r: r.start_time)
+    got = [(r.start_time, r.duration, float(r.final_price), float(r.charge_amount), r.applied_rule) for r in rows]
+    assert got == [("14:00", 60, 8.34, 8.34, "MANUAL_OVERRIDE"),
+                   ("16:00", 60, 3.33, 3.33, "MANUAL_OVERRIDE")], got
+    assert booking_extras_money(rows[0]) == 5.0, booking_extras_money(rows[0])   # песочница — в цене
+    assert _bal(s, u) == 288.33
+    for r in rows:
+        _cancel(s, admin, r)
+    assert _bal(s, u) == 300.0
+    _ledger_ok(s, u, 300.0)
+
+
+@_scenario
+def test_r3_7_trim_with_price_drift_returns_exactly_what_was_taken():
+    """Цена движка выросла после брони (здесь — личная ставка 40 ₾/ч): остатки по
+    движку (80 ₾) дороже уплаченного (51 ₾). Было: доплаты нет (отрицательный
+    «возврат» не списывался), а charge_amount остатков 80 — отмена вернула бы
+    29 ₾ из воздуха. Стало: вырезка сама делит уплаченное по времени (возврат
+    17 ₾); пересчёт «часов подряд» дальше ставит цену движка явным списанием —
+    charge_amount = final_price, отмена возвращает ровно взятое."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    b = _book(s, admin, u, start="14:00", minutes=180, method="balance", resource="room_2")
+    assert float(b.final_price) == 51.0, b.final_price
+    u = s.get(User, u.id)
+    u.crm_data = {"personal_hourly_rate": 40}
+    s.add(u)
+    s.commit()
+    out = _trim(s, admin, s.get(Booking, b.id), "15:00", "16:00")
+    assert isinstance(out, dict) and out.get("ok") and out["refunded_amount"] == 17.0, out
+    s.expire_all()
+    rows = [r for r in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all() if r.status == "confirmed"]
+    assert len(rows) == 2 and all(abs(float(r.charge_amount) - float(r.final_price)) < 0.01 for r in rows), \
+        [(r.final_price, r.charge_amount) for r in rows]
+    taken = round(300.0 - _bal(s, u), 2)
+    assert round(sum(float(r.charge_amount) for r in rows), 2) == taken, ([r.charge_amount for r in rows], taken)
+    for r in rows:
+        _cancel(s, admin, r)
+    assert _bal(s, u) == 300.0
+    _ledger_ok(s, u, 300.0)
+
+
+@_scenario
+def test_r3_7_chain_recompute_keeps_manual_price_and_gift():
+    """Пересчёт «часов подряд» не трогает ручную цену — по политике скидок
+    (pricing_policy.yaml: MANUAL_OVERRIDE старше «часов подряд», скидки не
+    складываются). Было: клиент бронировал соседний час — «Час в подарок»
+    сгорал (18 → 34 ₾, списано 16 ₾, метка BONUS_HOUR стёрта — подарок можно
+    было применить второй раз), «Цена» 10 ₾ становилась 18 ₾. Часы ручной брони
+    по-прежнему входят в длину цепочки: соседи получают свою скидку. Деление
+    брони с ручной ценой оставляет части ручными."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    a = _book(s, admin, u, start="12:00", minutes=120, method="balance", resource="room_2")
+    assert float(a.final_price) == 36.0, a.final_price
+    _bonus(s, u, 1.0)
+    out = H._call(routes.apply_bonus_hour, booking_id=str(a.id), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    assert _bal(s, u) == 282.0
+    n = _book(s, admin, u, start="14:00", minutes=60, method="balance", resource="room_2")
+    a = s.get(Booking, a.id)
+    assert (float(a.final_price), float(a.charge_amount), a.applied_rule) == (18.0, 18.0, "BONUS_HOUR"), \
+        (a.final_price, a.charge_amount, a.applied_rule)
+    assert float(s.get(Booking, n.id).final_price) == 17.0     # сосед — цепочка 3 ч (−15 %)
+    assert _bal(s, u) == 265.0
+    _bonus(s, u, 1.0)
+    again = H._call(routes.apply_bonus_hour, booking_id=str(a.id), session=s, current_user=admin)
+    s.rollback()
+    assert again == {"http": 409}, again
+
+    b = _book(s, admin, u, start="18:00", minutes=60, method="balance", resource="room_2")
+    _set_price(s, admin, b, 10.0)
+    _book(s, admin, u, start="19:00", minutes=60, method="balance", resource="room_2")
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), b.applied_rule) == (10.0, "MANUAL_OVERRIDE"), (b.final_price, b.applied_rule)
+
+    c = _book(s, admin, u, start="12:00", minutes=120, method="balance", resource="room_3")
+    _set_price(s, admin, c, 12.0)
+    parts = H._call(routes.split_booking, booking_id=str(c.id), payload=routes.SplitRequest(parts=[60, 60]),
+                    session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(parts, dict) and "http" in parts), parts
+    _book(s, admin, u, start="14:00", minutes=60, method="balance", resource="room_3")
+    s.expire_all()
+    got = sorted((r.start_time, float(r.final_price), float(r.charge_amount), r.applied_rule)
+                 for r in s.exec(select(Booking).where(Booking.user_uuid == u.id, Booking.resource_id == "room_3")).all())
+    assert got[:2] == [("12:00", 6.0, 6.0, "MANUAL_OVERRIDE"), ("13:00", 6.0, 6.0, "MANUAL_OVERRIDE")], got
+    for r in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+        if r.status != "cancelled":
+            _cancel(s, admin, r)
+    assert _bal(s, u) == 300.0
+    _ledger_ok(s, u, 300.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

@@ -5045,8 +5045,42 @@ def trim_booking(
     # строки, что остаётся исходной бронью), как при разделении (split).
     # Ревизия 03.10: раньше вырезка возвращала их деньги, а доп оставался в
     # брони бесплатно.
-    from app.services.pricing import booking_extras_money
+    from app.services.pricing import MANUAL_PRICE_RULES, booking_extras_money
     _extras_money = booking_extras_money(booking)
+
+    # Ручная цена («Цена», «Час в подарок») — договорённость: остатки получают
+    # её долю по времени, а не цену движка. И у любой брони остатки вместе не
+    # дороже того, что за аренду уже заплачено: вырезка не может стоить
+    # дороже. Ревизия 04.10 (фаззер, seed 842): 46 ₾ → «Цена» 10 → вырезка часа
+    # → остаток 30 ₾ по движку, доплаты нет (отрицательный возврат не
+    # списывается), а charge_amount 30 — отмена вернула бы 30 ₾ из воздуха.
+    # Пересчёт «часов подряд» после вырезки ручную цену не трогает
+    # (consecutive_pricing) — доли остаются.
+    _is_manual = (booking.applied_rule or "") in MANUAL_PRICE_RULES
+    if booking.payment_method == "balance":
+        _paid_total = float(booking.charge_amount if (booking.payment_status != "pending"
+                                                      and booking.charge_amount is not None)
+                            else (booking.final_price or 0))
+    else:
+        _paid_total = float(booking.final_price or 0)
+    _room_now = max(0.0, _paid_total - _extras_money)
+    _remnants = [(q, d) for q, d in ((leftQuote, left), (rightQuote, right)) if q is not None and d > 0]
+    _engine_room = sum(float(q.final_price or 0) for q, _ in _remnants)
+    if (booking.payment_method or "").lower() in ("balance", "subscription") and \
+            (_is_manual or _engine_room > _room_now + 0.005):
+        # Доли по времени; округление — в первый остаток, чтобы вместе они
+        # дали ровно долю оставшегося времени (возврат — ровно доля вырезанного).
+        _shares = [round(_room_now * _d / booking.duration, 2) for _, _d in _remnants]
+        _shares[0] = round(round(_room_now * sum(_d for _, _d in _remnants) / booking.duration, 2)
+                           - sum(_shares[1:]), 2)
+        for (_q, _d), _share in zip(_remnants, _shares):
+            _q.final_price = _share
+            if booking.payment_method == "balance" and _q.base_price is not None:
+                # аренда остатка = base − discount (так её видит оценщик допов)
+                _q.discount_amount = round(float(_q.base_price) - _share, 2)
+            if _is_manual:
+                _q.applied_rule = booking.applied_rule
+
     _kept_q = leftQuote if left > 0 else rightQuote
     if _kept_q is not None and _extras_money >= 0.01:
         _kept_q.final_price = round(float(_kept_q.final_price or 0) + _extras_money, 2)
@@ -6995,6 +7029,25 @@ def split_booking(
         return out
 
     room_prices = _split_amount(room_total)
+    # Ручная цена («Цена», «Час в подарок») остаётся ручной у каждой части —
+    # иначе ближайший пересчёт «часов подряд» вернул бы частям цену движка и
+    # списал разницу (он ручную цену не трогает, но только с её меткой).
+    # Аренда части денежной брони = её доля (base − discount, как в «Цене»).
+    from app.services.pricing import MANUAL_PRICE_RULES
+    _manual_rule = booking.applied_rule if (booking.applied_rule or "") in MANUAL_PRICE_RULES else None
+    _money_parts = (booking.payment_method or "balance").lower() not in ("subscription",)
+
+    def _part_rule(q):
+        if _manual_rule:
+            return _manual_rule
+        return q.applied_rule if q is not None else booking.applied_rule
+
+    def _part_discount(q, room: float) -> float:
+        if q is None:
+            return 0.0
+        if _manual_rule and _money_parts and q.base_price is not None:
+            return round(float(q.base_price) - room, 2)
+        return float(q.discount_amount)
     charged_total = float(booking.charge_amount) if booking.charge_amount is not None else None
     charges = _split_amount(charged_total) if charged_total is not None else None
     hours_total = float(booking.hours_deducted or 0)
@@ -7036,8 +7089,8 @@ def split_booking(
                         booking, hours[0], extras_split[0] if extras_split else 0.0)
             if q is not None:
                 booking.base_price = float(q.base_price)
-                booking.applied_rule = q.applied_rule
-                booking.discount_amount = float(q.discount_amount)
+                booking.applied_rule = _part_rule(q)
+                booking.discount_amount = _part_discount(q, room_prices[0])
                 booking.discount_percent = int(q.discount_percent)
             booking.gcal_event_id = None
             booking.updated_at = datetime.now()
@@ -7059,8 +7112,8 @@ def split_booking(
                 hours_deducted=(hours[idx] if hours is not None else None),
                 final_price=round(price, 2),
                 base_price=float(q.base_price) if q is not None else None,
-                applied_rule=q.applied_rule if q is not None else booking.applied_rule,
-                discount_amount=float(q.discount_amount) if q is not None else 0.0,
+                applied_rule=_part_rule(q),
+                discount_amount=_part_discount(q, room_prices[idx]),
                 discount_percent=int(q.discount_percent) if q is not None else 0,
                 extras=[],
                 user_id=booking.user_id,
