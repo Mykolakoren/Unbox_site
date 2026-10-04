@@ -2941,6 +2941,21 @@ def test_r5_9a_gift_hour_returns_on_cancel_and_waive():
                 assert _free_hours(s, u) == 1.0, ("отмена waived-брони вернула подарок второй раз", days)
             assert _bal(s, u) == 100.0, (days, pct, _bal(s, u))
             _ledger_ok(s, u, 100.0)
+    # «Цена» после подарка метку не стирает: отмена вернёт бонус-час, второй
+    # подарок на ту же бронь — отказ.
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    b = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=60, method="balance"))
+    _set_price(s, admin, b, 7.0)
+    assert s.get(Booking, b.id).applied_rule == "BONUS_HOUR"
+    _bonus(s, u, 1.0)
+    again = H._call(routes.apply_bonus_hour, booking_id=str(b.id), session=s, current_user=admin)
+    s.rollback()
+    assert again == {"http": 409}, again
+    _cancel(s, admin, s.get(Booking, b.id))
+    assert (_free_hours(s, u), _bal(s, u)) == (2.0, 100.0), (_free_hours(s, u), _bal(s, u))
     for op in ("split", "trim"):
         s = _db()
         admin = _admin(s)

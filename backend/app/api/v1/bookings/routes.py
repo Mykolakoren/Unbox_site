@@ -6065,7 +6065,11 @@ def set_booking_price(
         settled_now = True
 
     booking.final_price = new_price
-    booking.applied_rule = "MANUAL_OVERRIDE"
+    # «Час в подарок» (BONUS_HOUR) — тоже ручная цена, но с погашенным бонус-
+    # часом: метку не стираем, иначе отмена не вернула бы бонус-час, а подарок
+    # можно было бы применить второй раз (ревизия 04.10).
+    if (booking.applied_rule or "") != "BONUS_HOUR":
+        booking.applied_rule = "MANUAL_OVERRIDE"
     # Аренда в цене денежной брони = base_price − discount_amount (по ним
     # booking_extras_money отделяет допы при пересчётах): ручная цена меняет
     # аренду, допы остаются — держим это равенство точным.
