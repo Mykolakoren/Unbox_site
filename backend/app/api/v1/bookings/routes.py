@@ -4758,7 +4758,7 @@ def _reprice_for_move(
     проверкой средств, 400 до любых движений). Не списанная (pending): только
     цена, крон возьмёт новую. Waived и запреты переноса проверяет вызывающий.
     Без владельца (служебная бронь) — только снятые допы. Не коммитит."""
-    from app.services.pricing import PricingService, booking_extras_money
+    from app.services.pricing import MANUAL_PRICE_RULES, PricingService, booking_extras_money
     from app.services.billing_defer import heal_legacy_subscription_hours
     heal_legacy_subscription_hours(booking)
     old_price = round(float(booking.final_price or 0), 2)
@@ -4845,11 +4845,25 @@ def _reprice_for_move(
             # только явной кнопкой.
             ignore_subscription=True,
         )
-        # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту же долю
-        # — деньгами считаем только непокрытое (как при создании). Допы, что
-        # едут с бронью, остаются в цене (снятые уходят — их возврат в разнице).
-        new_price = round(_bonus_uncovered_price(booking, new_quote.final_price, new_duration)
-                          + kept_extras_money, 2)
+        # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость:
+        # перенос её не сбрасывает на цену движка. Длительность та же — аренда та
+        # же (денег не двигаем, кроме допов, которые новый кабинет не принимает);
+        # длительность другая — аренда по минутам, как в вырезке и делении. Метка
+        # остаётся: подарочный бонус-час не сгорает, отмена его вернёт. Ревизия
+        # 04.10: «Цена» 5 → перенос → 20 ₾, подарок → перенос → 20 ₾ и метка NONE.
+        _manual = (booking.applied_rule or "") in MANUAL_PRICE_RULES and method == "balance"
+        if _manual:
+            _old_dur = int(booking.duration or 0)
+            _rent = max(0.0, old_price - extras_money)
+            if _old_dur > 0 and int(new_duration) != _old_dur:
+                _rent = _rent * int(new_duration) / _old_dur
+            new_price = round(round(_rent, 2) + kept_extras_money, 2)
+        else:
+            # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту же долю
+            # — деньгами считаем только непокрытое (как при создании). Допы, что
+            # едут с бронью, остаются в цене (снятые уходят — их возврат в разнице).
+            new_price = round(_bonus_uncovered_price(booking, new_quote.final_price, new_duration)
+                              + kept_extras_money, 2)
         price_diff = round(new_price - old_price, 2)
         # `pending` bookings haven't been charged yet — the T-24h cron will
         # capture the (new) final_price in full. Touching the balance here would
@@ -4876,9 +4890,14 @@ def _reprice_for_move(
             )
         # Update booking price fields
         booking.base_price = new_quote.base_price
-        booking.applied_rule = new_quote.applied_rule
-        booking.discount_amount = new_quote.discount_amount
-        booking.discount_percent = new_quote.discount_percent
+        if _manual:
+            # метка ручной цены остаётся; аренда в цене = base − discount
+            # (по этому равенству оценщик допов отделяет допы)
+            booking.discount_amount = round(float(new_quote.base_price) - (new_price - kept_extras_money), 2)
+        else:
+            booking.applied_rule = new_quote.applied_rule
+            booking.discount_amount = new_quote.discount_amount
+            booking.discount_percent = new_quote.discount_percent
 
     booking.final_price = new_price
     if dropped_extras:
@@ -5875,14 +5894,29 @@ def change_booking_format(
             # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
             ignore_subscription=True,
         )
-        # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
-        # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
-        # клиент доплачивал весь слот, уже оплаченный бонус-часом.
-        quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
-        # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
-        # (ревизия 03.10, как «часы подряд» и перенос).
+        # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость:
+        # смена формата (длительность та же) её не пересчитывает — цена и метка
+        # остаются, денег не двигаем; админ при желании поправит «Ценой». Ревизия
+        # 04.10: цена сбрасывалась на цену движка, метка стиралась, подарочный
+        # бонус-час сгорал. Аренда в цене = base − discount — от новой базы.
+        from app.services.pricing import MANUAL_PRICE_RULES
         from app.services.pricing import booking_extras_money as _extras_money
-        quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
+        _manual = ((booking.applied_rule or "") in MANUAL_PRICE_RULES
+                   and (booking.payment_method or "balance").lower() == "balance")
+        if _manual:
+            _kept_extras = _extras_money(booking)
+            quote.final_price = old_price
+            quote.discount_amount = round(float(quote.base_price) - (old_price - _kept_extras), 2)
+            quote.discount_percent = booking.discount_percent or 0
+            quote.applied_rule = booking.applied_rule
+        else:
+            # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
+            # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
+            # клиент доплачивал весь слот, уже оплаченный бонус-часом.
+            quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
+            # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
+            # (ревизия 03.10, как «часы подряд» и перенос).
+            quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
 
         new_price = float(quote.final_price)
         new_hours = 0.0

@@ -3004,6 +3004,122 @@ def test_r5_9b_waive_refused_while_waiting_for_approval():
         assert (_bal(s, u), _free_hours(s, u)) == ((100.0, 1.0) if bonus else (100.0, 0.0)), (bonus, _bal(s, u), _free_hours(s, u))
 
 
+@_scenario
+def test_r6_gift_survives_reschedule_and_cancel_returns_hour():
+    """Подарок → перенос (время, кабинет, дата) → отмена: бонус-час 1,0, баланс к
+    старту. Было: перенос ставил цену движка (баланс 200 → 180) и стирал метку
+    BONUS_HOUR — после отмены деньги возвращались, а подарочный час — нет."""
+    for move in ("time", "room", "date"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=200.0)
+        b = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=60, method="balance"))
+        assert (_bal(s, u), _free_hours(s, u), float(b.final_price)) == (200.0, 0.0, 0.0)
+        if move == "time":
+            b = _reschedule(s, admin, b, start="16:00")
+        elif move == "room":
+            b = _reschedule(s, admin, b, start="14:00", resource="room_3")
+        else:
+            b = _reschedule(s, admin, b, start="14:00", days=1)
+        assert (b.applied_rule, float(b.final_price), _bal(s, u)) == ("BONUS_HOUR", 0.0, 200.0), \
+            (move, b.applied_rule, b.final_price, _bal(s, u))
+        _cancel(s, admin, b)
+        assert (_free_hours(s, u), _bal(s, u)) == (1.0, 200.0), (move, _free_hours(s, u), _bal(s, u))
+        _ledger_ok(s, u, 200.0)
+
+
+@_scenario
+def test_r6_manual_price_survives_reschedule_and_format():
+    """Ручная цена у денежной брони — договорённость: перенос на тот же размер
+    её держит (5 → 5), перенос с другой длительностью масштабирует аренду по
+    минутам (10 за 1 ч → 15 за 1,5 ч, доплата 5 ₾), смена формата держит цену;
+    допы — отдельно, base − discount = аренда (оценка допов не врёт); перенос в
+    кабинет без песочницы снимает её и возвращает один раз. Серия «эту и
+    следующие»: встреча с ручной ценой её держит."""
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.services.pricing import booking_extras_money
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=200.0)
+    a = _book(s, admin, u, start="14:00", minutes=60, method="balance")
+    _set_price(s, admin, a, 5.0)
+    a = _reschedule(s, admin, s.get(Booking, a.id), start="18:00")
+    assert (float(a.final_price), a.applied_rule, _bal(s, u)) == (5.0, "MANUAL_OVERRIDE", 195.0)
+
+    c = _book(s, admin, u, start="11:00", minutes=60, method="balance", resource="room_2")
+    _set_price(s, admin, c, 10.0)
+    out = H._call(routes.reschedule_booking, booking_id=str(c.id),
+                  data=routes.RescheduleRequest(new_date=H._day(0).strftime("%Y-%m-%d"), new_start_time="12:00",
+                                                new_duration=90),
+                  background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    c = s.get(Booking, c.id)
+    assert (float(c.final_price), c.duration, c.applied_rule) == (15.0, 90, "MANUAL_OVERRIDE"), \
+        (c.final_price, c.duration, c.applied_rule)
+    assert _bal(s, u) == 180.0, _bal(s, u)
+
+    d = _book(s, admin, u, start="16:00", minutes=60, method="balance", resource="room_3", extras=["sandbox"])
+    _set_price(s, admin, d, 12.0)                                          # аренда 7 + песочница 5
+    _format(s, admin, s.get(Booking, d.id), "group")
+    d = s.get(Booking, d.id)
+    got = (float(d.final_price), d.applied_rule, d.format, booking_extras_money(d),
+           round(float(d.base_price) - float(d.discount_amount), 2))
+    assert got == (12.0, "MANUAL_OVERRIDE", "group", 5.0, 7.0), got
+    assert _bal(s, u) == 168.0, _bal(s, u)
+    d = _reschedule(s, admin, d, start="16:00", resource="room_2")         # песочницы там нет
+    assert (float(d.final_price), d.extras, _bal(s, u)) == (7.0, [], 173.0), (d.final_price, d.extras, _bal(s, u))
+
+    rows = _series(s, admin, u, method="balance")                          # 18:00, через 3 дня, ×3
+    _set_price(s, admin, rows[1], 10.0)
+    routes.reschedule_booking_series(
+        booking_id=str(rows[0].id),
+        data=routes.RescheduleRequest(new_date=rows[0].date.strftime("%Y-%m-%d"), new_start_time="20:00"),
+        background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.commit()
+    s.expire_all()
+    got = [(s.get(Booking, r.id).start_time, float(s.get(Booking, r.id).final_price), s.get(Booking, r.id).applied_rule)
+           for r in rows]
+    assert got[1] == ("20:00", 10.0, "MANUAL_OVERRIDE") and got[0][1] == got[2][1] == 25.0, got
+
+    for x in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+        if x.status != "cancelled":
+            _cancel(s, admin, x)
+    assert _bal(s, u) == 200.0, _bal(s, u)
+    _ledger_ok(s, u, 200.0)
+
+
+@_scenario
+def test_r6_waive_refused_for_rejected_hot_booking():
+    """Отклонённая срочная бронь: за неё ничего не списывалось (бонус-часы вернуло
+    отклонение) — «Снять штраф» отвечает 409, а не помечает её «снят штраф».
+    Отклонение на сайте и в боте пишет одну и ту же причину — по ней и узнаём."""
+    from fastapi import HTTPException
+    from app.api.v1 import billing
+    from app.api.v1.bookings import routes
+    from app.services import billing_defer
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    b = _book(s, u, u, start="14:00", minutes=60, method="balance")
+    assert b.status == "pending_approval"
+    out = H._call(routes.reject_booking, booking_id=str(b.id), payload=None, session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    assert billing_defer.waive_charge(s, s.get(Booking, b.id), reason="тест", by_user=admin) == (False, "rejected")
+    s.rollback()
+    try:
+        billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+        raise AssertionError("снятие штрафа у отклонённой брони прошло")
+    except HTTPException as e:
+        s.rollback()
+        assert e.status_code == 409 and "отклонена" in e.detail, (e.status_code, e.detail)
+    prefix = billing_defer.REJECTED_HOT_PREFIX
+    assert f'f"{prefix} (' in _read("backend/app/api/v1/bookings/routes.py")
+    assert f'f"{prefix} (' in _read("backend/app/api/v1/telegram.py")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
