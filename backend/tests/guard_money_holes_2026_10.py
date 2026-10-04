@@ -2857,6 +2857,34 @@ def test_r5_4_refund_share_field_and_text_are_different_paths():
     assert share(None, "") == 1.0                                       # события нет — второй раз не вернём
 
 
+@_scenario
+def test_r5_5_trim_and_split_across_midnight_refuse_clearly():
+    """Бронь через полночь (21:00 + 4 ч): вырезка, после которой остаток начался
+    бы в 24:00, и «Разделить» с частью после полуночи — понятный отказ 400
+    (раньше 500: ValueError hour must be in 0..23). Части, которые начинаются до
+    полуночи, делятся как обычно; деньги при отказе не двигаются."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    b = _book(s, admin, u, start="21:00", minutes=240, method="balance")
+    bal = _bal(s, u)
+    out = _trim(s, admin, b, "23:00", "24:00")
+    assert out == {"http": 400}, out
+    for parts in ([60, 60, 60, 60], [180, 60]):
+        out = H._call(routes.split_booking, booking_id=str(b.id), payload=routes.SplitRequest(parts=parts),
+                      session=s, current_user=admin)
+        s.rollback()
+        assert out == {"http": 400}, (parts, out)
+    assert _bal(s, u) == bal and s.get(Booking, b.id).duration == 240
+    parts = _split(s, admin, s.get(Booking, b.id), [150, 90])
+    assert [(x.start_time, x.duration) for x in parts] == [("21:00", 150), ("23:30", 90)]
+    for x in parts:
+        _cancel(s, admin, x)
+    assert _bal(s, u) == 300.0
+    _ledger_ok(s, u, 300.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

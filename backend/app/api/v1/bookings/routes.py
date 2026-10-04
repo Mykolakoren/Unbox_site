@@ -5001,6 +5001,15 @@ def trim_booking(
             status_code=400,
             detail="Вырезается вся бронь — используйте полную отмену",
         )
+    # Бронь через полночь (21:00 + 4 ч): остаток с 24:00 и позже — это уже
+    # следующий день, а бронь живёт одной датой. Раньше — 500 (ValueError: hour
+    # must be in 0..23), ревизия 04.10.
+    if right > 0 and cTo >= 24 * 60:
+        raise HTTPException(
+            status_code=400,
+            detail=("Остаток брони начинался бы после полуночи — это уже следующий день, такую вырезку "
+                    "не сделать. Сократите бронь с конца или отмените её и создайте брони отдельно на каждый день."),
+        )
 
     owner = _resolve_booking_owner(session, booking)
 
@@ -7020,6 +7029,16 @@ def split_booking(
         start_min0 = _h * 60 + _m
     except Exception:
         raise HTTPException(status_code=400, detail="Не удалось разобрать время начала брони")
+
+    # Бронь через полночь: часть с 24:00 и позже — это уже следующий день, а
+    # бронь живёт одной датой. Раньше — 500 (ValueError: hour must be in
+    # 0..23), ревизия 04.10.
+    if any(start_min0 + sum(parts[:k]) >= 24 * 60 for k in range(len(parts))):
+        raise HTTPException(
+            status_code=400,
+            detail=("Часть брони начиналась бы после полуночи — это уже следующий день, так не разделить. "
+                    "Разделите так, чтобы каждая часть начиналась до 24:00, или создайте брони отдельно на каждый день."),
+        )
 
     total_hours = float(booking.duration or 0) / 60.0
     quotes, offset = [], 0
