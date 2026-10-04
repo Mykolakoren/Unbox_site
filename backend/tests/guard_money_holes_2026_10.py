@@ -2905,6 +2905,90 @@ def test_r5_6_split_bonus_hours_in_hundredths():
         assert (_free_hours(s, u), _bal(s, u)) == (1.0, 500.0), (cuts, _free_hours(s, u), _bal(s, u))
 
 
+def _gift(s, admin, u, b):
+    from app.api.v1.bookings import routes
+    _bonus(s, u, 1.0)
+    out = H._call(routes.apply_bonus_hour, booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    assert _free_hours(s, u) == 0.0
+    return s.get(Booking, b.id)
+
+
+@_scenario
+def test_r5_9a_gift_hour_returns_on_cancel_and_waive():
+    """«Час в подарок» погашает бонус-час клиента. Было: отмена брони 100 % —
+    100 ₾ / 0 ч (подарок сгорал). Стало: отмена возвращает бонус-час той же
+    долей, что и бронь; «Снять штраф» — оставшуюся долю; второй раз не
+    возвращается. После «Разделить» / вырезки бонус-час держит только исходная
+    строка — отмена всех частей возвращает ровно 1 ч."""
+    for days in (0, 3):
+        for pct, waive, want_after_cancel in ((1.0, False, 1.0), (0.5, True, 0.5), (0.0, True, 0.0), (None, True, None)):
+            s = _db()
+            admin = _admin(s)
+            u = _client(s, None, balance=100.0)
+            b = _book(s, admin, u, days=days, start="14:00", minutes=60, method="balance")
+            b = _gift(s, admin, u, b)
+            assert b.applied_rule == "BONUS_HOUR"
+            if pct is not None:
+                _cancel(s, admin, b, refund_percent=pct)
+                assert _free_hours(s, u) == want_after_cancel, (days, pct, _free_hours(s, u))
+            if waive:
+                _waive(s, admin, b)
+                assert _free_hours(s, u) == 1.0, (days, pct, _free_hours(s, u))
+            if pct is None:
+                _cancel(s, admin, s.get(Booking, b.id))
+                assert _free_hours(s, u) == 1.0, ("отмена waived-брони вернула подарок второй раз", days)
+            assert _bal(s, u) == 100.0, (days, pct, _bal(s, u))
+            _ledger_ok(s, u, 100.0)
+    for op in ("split", "trim"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=100.0)
+        b = _book(s, admin, u, start="14:00", minutes=180, method="balance")
+        b = _gift(s, admin, u, b)
+        if op == "split":
+            parts = _split(s, admin, b, [60, 60, 60])
+        else:
+            assert _trim(s, admin, b, "15:00", "16:00").get("ok")
+            s.expire_all()
+            parts = s.exec(select(Booking).where(Booking.user_uuid == u.id).order_by(Booking.start_time)).all()
+        rules = [x.applied_rule for x in parts]
+        assert rules[0] == "BONUS_HOUR" and set(rules[1:]) == {"MANUAL_OVERRIDE"}, (op, rules)
+        for x in parts:
+            _cancel(s, admin, s.get(Booking, x.id))
+        assert (_free_hours(s, u), _bal(s, u)) == (1.0, 100.0), (op, _free_hours(s, u), _bal(s, u))
+
+
+@_scenario
+def test_r5_9b_waive_refused_while_waiting_for_approval():
+    """«Снять штраф» у срочной брони, ждущей подтверждения, — отказ 409: она
+    ничего не держит (часы и деньги — при одобрении). Было: «снят штраф» +
+    одобрение — у денежной всё равно списывалось 20 ₾, у бонусной бронь
+    выходила бесплатной с возвращённым часом. После подтверждения штраф
+    снимается как обычно."""
+    from fastapi import HTTPException
+    from app.api.v1 import billing
+    for bonus in (False, True):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=100.0)
+        if bonus:
+            _bonus(s, u, 1.0)
+        b = _book(s, u, u, start="14:00", minutes=60, method="balance")
+        assert b.status == "pending_approval", b.status
+        try:
+            billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+            raise AssertionError("снятие штрафа у брони, ждущей подтверждения, прошло")
+        except HTTPException as e:
+            s.rollback()
+            assert e.status_code == 409 and "ждёт подтверждения" in e.detail, (e.status_code, e.detail)
+        b = _approve(s, admin, s.get(Booking, b.id))
+        assert (_bal(s, u), _free_hours(s, u)) == ((100.0, 0.0) if bonus else (80.0, 0.0)), (bonus, _bal(s, u))
+        _waive(s, admin, b)
+        assert (_bal(s, u), _free_hours(s, u)) == ((100.0, 1.0) if bonus else (100.0, 0.0)), (bonus, _bal(s, u), _free_hours(s, u))
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

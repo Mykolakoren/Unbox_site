@@ -463,6 +463,24 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
     return 1.0
 
 
+def _return_gift_hour(session: Session, b: Booking, user: Optional[User], share_returned: float) -> float:
+    """«Час в подарок» (applied_rule = BONUS_HOUR): бонус-час клиента погашен
+    при подарке. Снятие штрафа делает бронь бесплатной — бонус-час возвращаем
+    ту долю, что ещё у брони (отмена вернула свою долю). После возврата бронь
+    его больше не держит: метка — просто ручная цена (MANUAL_OVERRIDE), чтобы
+    отмена waived-брони не вернула его второй раз. Ревизия 04.10."""
+    if (b.applied_rule or "") != "BONUS_HOUR":
+        return 0.0
+    back = round(1.0 * (1.0 - share_returned), 2)
+    if back > 0 and user is not None:
+        from app.services.bonus_service import refund_free_hours
+        refund_free_hours(session, user.id, back, reason="Снятие штрафа: «Час в подарок»")
+    else:
+        back = 0.0
+    b.applied_rule = "MANUAL_OVERRIDE"
+    return back
+
+
 def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
                  result: Optional[dict] = None) -> Tuple[bool, str]:
     """Admin: cancel the charge.
@@ -486,6 +504,14 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
     if b.payment_status == "waived":
         return False, "already_waived"
 
+    # Срочная бронь, ждущая подтверждения, ничего не держит (часы и деньги
+    # снимаются при одобрении) — снимать нечего, а «снят штраф» + одобрение
+    # давали разное: денежная всё равно списывалась (100 → 80), бонусная
+    # выходила бесплатной с возвращённым часом (ревизия 04.10). Решение админа
+    # здесь — подтвердить или отклонить; штраф снимается после подтверждения.
+    if b.status == "pending_approval":
+        return False, "pending_approval"
+
     if b.payment_status == "pending":
         # Денег по брони ещё не брали (их возьмёт крон) — их и не возвращаем.
         # Но у бонусной брони бонус-часы сняты СРАЗУ при создании: снятие
@@ -506,6 +532,10 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
             # вернёт их второй раз.
             b.hours_deducted = 0.0
             subscription_pool.stamp_booking(b, 0, 0)
+        if (b.applied_rule or "") == "BONUS_HOUR":
+            _owner = session.get(User, b.user_uuid) if b.user_uuid else None
+            _share = _cancel_refund_share(session, b, 0.0, 0.0) if b.status == "cancelled" else 0.0
+            bonus_back = round(bonus_back + _return_gift_hour(session, b, _owner, _share), 4)
         b.payment_status = "waived"
         b.waiver_reason = reason.strip()
         b.waived_at = datetime.utcnow()
@@ -557,6 +587,7 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
             refund_free_hours(session, user.id, bonus_back, reason="Снятие штрафа за бронь")
         b.hours_deducted = 0.0
         subscription_pool.stamp_booking(b, 0, 0)
+    bonus_back = round(bonus_back + _return_gift_hour(session, b, user, share_returned), 4)
     if money_back >= 0.01:
         # Аудит 2026-08-27: у абонементной брони это пиковая надбавка/допы —
         # деньги, снятые отдельно от часов; у денежной — сама цена.

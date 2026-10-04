@@ -796,6 +796,15 @@ def _refund_booking_to_owner(
         _refund_bonus_h = round(float(booking.hours_deducted) * refund_percent, 2)
         if _refund_bonus_h > 0:
             refund_free_hours(session, owner.id, _refund_bonus_h)
+    # «Час в подарок» (BONUS_HOUR): бонус-час погашен при подарке — отмена
+    # возвращает его той же долей, что и бронь (и у брони заранее, где денег ещё
+    # не брали). Ревизия 04.10: 100 ₾ и 1 бонус-час → подарок → отмена 100 % →
+    # 100 ₾ / 0 ч. После «Снять штраф» метка уже не BONUS_HOUR (час вернул он).
+    if (booking.applied_rule or "") == "BONUS_HOUR":
+        from app.services.bonus_service import refund_free_hours
+        _gift_h = round(1.0 * refund_percent, 2)
+        if _gift_h > 0:
+            refund_free_hours(session, owner.id, _gift_h, reason="Отмена брони с «Часом в подарок»")
 
     if booking.payment_status in ("pending", "waived"):
         return {
@@ -5100,6 +5109,10 @@ def trim_booking(
                 _q.discount_amount = round(float(_q.base_price) - _share, 2)
             if _is_manual:
                 _q.applied_rule = booking.applied_rule
+        # Бонус-час «Часа в подарок» держит одна строка — исходная; новая строка
+        # (правый остаток при вырезке из середины) — просто ручная цена.
+        if booking.applied_rule == "BONUS_HOUR" and left > 0 and rightQuote is not None:
+            rightQuote.applied_rule = "MANUAL_OVERRIDE"
 
     _kept_q = leftQuote if left > 0 else rightQuote
     if _kept_q is not None and _extras_money >= 0.01:
@@ -7099,9 +7112,11 @@ def split_booking(
     _manual_rule = booking.applied_rule if (booking.applied_rule or "") in MANUAL_PRICE_RULES else None
     _rent_parts = (booking.payment_method or "balance").lower() not in ("subscription", "bonus")
 
-    def _part_rule(q):
+    def _part_rule(q, first: bool = False):
         if _manual_rule:
-            return _manual_rule
+            # Бонус-час «Часа в подарок» держит одна строка — исходная (первая
+            # часть): отмена каждой части иначе вернула бы его снова.
+            return _manual_rule if (first or _manual_rule != "BONUS_HOUR") else "MANUAL_OVERRIDE"
         return q.applied_rule if q is not None else booking.applied_rule
 
     def _part_discount(q, room: float) -> float:
@@ -7190,7 +7205,7 @@ def split_booking(
                         booking, hours[0], extras_split[0] if extras_split else 0.0)
             if q is not None:
                 booking.base_price = float(q.base_price)
-                booking.applied_rule = _part_rule(q)
+                booking.applied_rule = _part_rule(q, first=True)
                 booking.discount_amount = _part_discount(q, room_prices[0])
                 booking.discount_percent = int(q.discount_percent)
             booking.gcal_event_id = None

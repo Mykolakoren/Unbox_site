@@ -331,6 +331,12 @@ def waive_booking_charge(
             raise HTTPException(status_code=400, detail="Укажите причину снятия штрафа")
         if status == "already_waived":
             raise HTTPException(status_code=409, detail="Штраф уже снят ранее")
+        if status == "pending_approval":
+            raise HTTPException(
+                status_code=409,
+                detail=("Бронь ещё ждёт подтверждения — за неё ничего не списано. Подтвердите её "
+                        "(штраф можно снять после подтверждения) или отклоните."),
+            )
         raise HTTPException(status_code=500, detail=f"Не удалось снять штраф: {status}")
 
     session.commit()
