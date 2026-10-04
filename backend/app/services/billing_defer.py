@@ -150,6 +150,11 @@ def subscription_hours_held(b: Booking) -> float:
         return h
     if (getattr(b, "hours_pool", None) or "") in _HOURS_POOL_LABELS and float(b.charge_amount or 0) > 0:
         cap = float(b.duration or 0) / 60.0 if b.duration else float(b.charge_amount)
+        # Снимок часов не бывает больше длительности брони: charge_amount = 36
+        # у брони 2 ч — это деньги (₾), а не часы. Такую строку считаем
+        # денежной, даже если ярлык пула по ошибке остался (ревизия 04.10).
+        if b.duration and float(b.charge_amount) > cap + 0.01:
+            return 0.0
         return round(min(float(b.charge_amount), cap), 4)
     return 0.0
 
@@ -409,7 +414,13 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
     деньги — доля точно по ленте. Нет денег (бронь по абонементу без пика и
     допов) — доля из события отмены в ленте событий брони (refund_percent пишут
     отмена брони, отмена серии и переаренда). Ничего не нашли — считаем, что
-    вернули всё: второй раз часы не вернём."""
+    вернули всё: второй раз часы не вернём.
+
+    Доля политики — policy_refund_percent (с 04.10). В старых событиях отмены
+    брони, по которой денег ещё не брали (skipped_reason = pending/waived),
+    refund_percent перетёрт нулём («денег не брали»), хотя бонус-часы отмена
+    вернула долей политики — тогда доля берётся из текста события («Refund:
+    50%», «возврат 50%», «refunded 50%»)."""
     if money_base >= 0.01:
         return max(0.0, min(1.0, refunded / money_base))
     try:
@@ -421,7 +432,14 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
             .order_by(TimelineEvent.timestamp.desc())
         ).first()
         if ev is not None:
-            pct = (ev.metadata_dump or {}).get("refund_percent")
+            md = ev.metadata_dump or {}
+            pct = md.get("policy_refund_percent")
+            if pct is None and md.get("skipped_reason"):
+                import re as _re
+                m = _re.search(r"(?:Refund:|refunded|возврат)\s*(\d+(?:\.\d+)?)\s*%", ev.description or "")
+                pct = (float(m.group(1)) / 100.0) if m else None
+            elif pct is None:
+                pct = md.get("refund_percent")
             if pct is not None:
                 return max(0.0, min(1.0, float(pct)))
     except Exception:
@@ -453,13 +471,33 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
         return False, "already_waived"
 
     if b.payment_status == "pending":
+        # Денег по брони ещё не брали (их возьмёт крон) — их и не возвращаем.
+        # Но у бонусной брони бонус-часы сняты СРАЗУ при создании: снятие
+        # штрафа делает бронь бесплатной, и бонус-часы возвращаются ту долю,
+        # что ещё у брони (как в оплаченной ветке ниже). Ревизия 04.10: раньше
+        # здесь был ранний выход — бронь бесплатна, а бонус-час сгорел.
+        bonus_back = 0.0
+        if (b.payment_method or "").lower() == "bonus" and float(b.hours_deducted or 0) > 0:
+            owner = session.get(User, b.user_uuid) if b.user_uuid else None
+            share_returned = _cancel_refund_share(session, b, 0.0, 0.0) if b.status == "cancelled" else 0.0
+            bonus_back = round(float(b.hours_deducted) * (1.0 - share_returned), 4)
+            if bonus_back > 0 and owner is not None:
+                from app.services.bonus_service import refund_free_hours
+                refund_free_hours(session, owner.id, bonus_back, reason="Снятие штрафа за бронь")
+            elif owner is None:
+                bonus_back = 0.0
+            # Бронь больше не держит бонус-часов — отмена waived-брони не
+            # вернёт их второй раз.
+            b.hours_deducted = 0.0
+            subscription_pool.stamp_booking(b, 0, 0)
         b.payment_status = "waived"
         b.waiver_reason = reason.strip()
         b.waived_at = datetime.utcnow()
         b.waived_by = by_user.id
         session.add(b)
         if result is not None:
-            result.update(money=0.0, hours=0.0)
+            result.update(money=0.0, hours=0.0, bonus_hours=bonus_back,
+                          cancelled=(b.status == "cancelled"))
         return True, "waived_pending"
 
     # paid (or NULL == legacy paid)

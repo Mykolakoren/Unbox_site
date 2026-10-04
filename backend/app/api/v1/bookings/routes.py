@@ -1738,6 +1738,7 @@ def create_booking(
                         "refund_percent": RE_RENT_REFUND_PERCENT,
                         "new_booking_user": current_user.email,
                         **refund_meta,
+                        "policy_refund_percent": RE_RENT_REFUND_PERCENT,
                     },
                 )
             # Slot is now free — proceed with creating the new booking
@@ -4024,7 +4025,8 @@ def cancel_recurring_bookings(
             event_type="booking_cancelled",
             description=f"Отмена серии: возврат {int(round(applied_refund * 100))}%",
             metadata={"refund_percent": applied_refund, "via": "series", "group_id": group_id,
-                      **{k: v for k, v in _series_refund_meta.items() if k != "refund_percent"}},
+                      **{k: v for k, v in _series_refund_meta.items() if k != "refund_percent"},
+                      "policy_refund_percent": applied_refund},
             commit=False,
         )
 
@@ -4262,6 +4264,11 @@ def cancel_booking(
             "refund_percent": applied_refund,
             "admin_reason": reason,
             **refund_meta,
+            # Доля политики отмены. refund_percent выше у брони, по которой
+            # денег ещё не брали, перетирается нулём («денег не брали»), а
+            # бонус-часы отмена вернула этой долей — «Снять штраф» читает её
+            # (billing_defer._cancel_refund_share), ревизия 04.10.
+            "policy_refund_percent": applied_refund,
         },
     )
 
@@ -7074,23 +7081,36 @@ def split_booking(
                 charges[0] = round(charged_total - sum(charges[1:]), 2)
             else:
                 charges = _split_amount(charged_total)
+    def _split_by_minutes(total: float) -> list:
+        """Часы — по МИНУТАМ частей (остаток округления — в первую часть).
+
+        Ревизия 04.10 (S29): часы делились долями цены, а у брони по абонементу
+        цена части — только пиковая надбавка. Бронь 19:00–21:00 (пик с 20:00)
+        → части 0 ч и 2 ч: отмена обеих возвращала 495 ₾ вместо 500 (допы
+        первой части уходили вместе с «нулевыми» часами), а отмена только
+        второй — +1 ч из воздуха."""
+        _dur = float(sum(parts))
+        out = [round(total * p / _dur, 4) for p in parts]
+        out[0] = round(total - sum(out[1:]), 4)
+        return out
+
     hours_total = float(booking.hours_deducted or 0)
-    hours = _split_amount(hours_total) if hours_total > 0 else None
-    # Доп. пул делим теми же долями; каждая часть берёт не больше своих часов,
+    hours = _split_by_minutes(hours_total) if hours_total > 0 else None
+    # Доп. пул — тоже по минутам; каждая часть берёт не больше своих часов,
     # а сумма частей остаётся равной исходной (остаток — в первую часть).
     extra_total = subscription_pool.booking_extra(booking) if hours is not None else 0.0
     extras_split = None
     if hours is not None and extra_total > 0:
-        extras_split = _split_amount(extra_total)
+        extras_split = _split_by_minutes(extra_total)
         extras_split = [min(max(0.0, e), h) for e, h in zip(extras_split, hours)]
-        _rest = round(extra_total - sum(extras_split), 2)
+        _rest = round(extra_total - sum(extras_split), 4)
         for _i in range(len(extras_split)):
             if _rest <= 0:
                 break
-            _room = round(hours[_i] - extras_split[_i], 2)
+            _room = round(hours[_i] - extras_split[_i], 4)
             _add = min(_room, _rest)
-            extras_split[_i] = round(extras_split[_i] + _add, 2)
-            _rest = round(_rest - _add, 2)
+            extras_split[_i] = round(extras_split[_i] + _add, 4)
+            _rest = round(_rest - _add, 4)
 
     old_event_id = booking.gcal_event_id
     created: list = []

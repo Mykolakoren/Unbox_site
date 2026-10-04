@@ -2317,6 +2317,191 @@ def test_r3_7_trim_subscription_manual_price_split_by_time():
     _ledger_ok(s, u, 100.0)
 
 
+def _split(s, actor, b, parts):
+    from app.api.v1.bookings import routes
+    out = H._call(routes.split_booking, booking_id=str(b.id), payload=routes.SplitRequest(parts=list(parts)),
+                  session=s, current_user=actor)
+    assert not (isinstance(out, dict) and "http" in out), out
+    s.commit()
+    return [s.get(Booking, x.id) for x in out]
+
+
+def _pool(s, u) -> dict:
+    s.expire_all()
+    sub = s.get(User, u.id).subscription or {}
+    return {k: round(P.get_float(sub, k), 4) for k in
+            ("remaining_hours", "used_hours", "extra_hours_remaining", "extra_hours_used")}
+
+
+@_scenario
+def test_r4_1_split_subscription_hours_by_minutes():
+    """S29: Профи+, баланс 500, пул 42 ч; бронь 19:00–21:00 + песочница (пик с
+    20:00) = 2 ч и 10 ₾ → «Разделить» [60, 60]. Было: часы делились долями цены
+    (у брони по абонементу это только пик) — части 0 ч и 2 ч; отмена обеих
+    давала 495 ₾ вместо 500, отмена одной 20:00 — +1 ч из воздуха. Стало: по 1 ч
+    на часть (по минутам), деньги — как были: 5 ₾ (песочница) и 5 ₾ (пик)."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("PRO_PLUS"), balance=500.0)
+    rem0 = _rem(s, u)
+    b = _book(s, admin, u, start="19:00", minutes=120, extras=["sandbox"])
+    assert (float(b.final_price), float(b.hours_deducted), _bal(s, u), _rem(s, u)) == (10.0, 2.0, 490.0, rem0 - 2.0)
+    a, c = _split(s, admin, b, [60, 60])
+    got = [(x.start_time, float(x.hours_deducted), float(x.final_price)) for x in (a, c)]
+    assert got == [("19:00", 1.0, 5.0), ("20:00", 1.0, 5.0)], got
+    _cancel(s, admin, c)                                  # только 20:00
+    assert (_bal(s, u), _rem(s, u)) == (495.0, rem0 - 1.0), (_bal(s, u), _rem(s, u))
+    _cancel(s, admin, a)
+    assert (_bal(s, u), _rem(s, u)) == (500.0, rem0), (_bal(s, u), _rem(s, u))
+    _ledger_ok(s, u, 500.0)
+
+
+@_scenario
+def test_r4_1_split_random_parts_cancel_returns_everything():
+    """Свойство: на случайных разбиениях (по 30 мин) брони по абонементу —
+    основной пул, капсула Профи+ (доп. пул), «индивидуально» Группового мастера,
+    в пик и вне, с песочницей и без, сегодня и заранее — часы частей ровно по
+    минутам (основные и доп. пула), отмена одной части возвращает ровно её
+    часы и её деньги, отмена всех — баланс и пул к старту."""
+    import random
+    rnd = random.Random(20261004)
+    cases = [("PRO_PLUS", "room_1", "individual"), ("PRO_PLUS", "cap_1", "individual"),
+             ("GROUP_MASTER", "room_1", "individual"), ("WARM_START", "room_3", "individual"),
+             ("GROUP_MASTER", "room_1", "group")]
+    for trial in range(20):
+        plan, resource, fmt = cases[trial % len(cases)]
+        days = rnd.choice([0, 0, 3])
+        minutes = rnd.choice([120, 150, 180])
+        if plan == "GROUP_MASTER" and fmt == "individual":
+            minutes = rnd.choice([120, 150, 180])                    # доп. пул 4 ч
+        start = rnd.choice(["12:00", "18:00", "19:00", "19:30"] + (["09:00"] if days else []))
+        extras = ["sandbox"] if (resource in ("room_1", "room_3") and rnd.random() < 0.5) else []
+        cuts, left = [], minutes
+        while left > 0:
+            p = rnd.choice([30, 60, 90]) if left > 30 else 30
+            p = min(p, left)
+            cuts.append(p)
+            left -= p
+        if len(cuts) < 2:
+            cuts = [minutes - 30, 30]
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, _sub(plan), balance=500.0)
+        bal0, pool0 = _bal(s, u), _pool(s, u)
+        b = _book(s, admin, u, days=days, start=start, minutes=minutes, resource=resource, fmt=fmt, extras=extras)
+        tag = (trial, plan, resource, fmt, days, start, minutes, extras, cuts)
+        hrs, extra = float(b.hours_deducted or 0), P.booking_extra(b)
+        parts = _split(s, admin, b, cuts)
+        assert len(parts) == len(cuts), tag
+        if hrs > 0:
+            want = [round(hrs * c / minutes, 4) for c in cuts]
+            want[0] = round(hrs - sum(want[1:]), 4)
+            got = [round(float(x.hours_deducted or 0), 4) for x in parts]
+            assert got == want, (tag, got, want)
+            got_x = round(sum(P.booking_extra(x) for x in parts), 4)
+            assert abs(got_x - round(extra, 4)) <= 0.0001, (tag, got_x, extra)
+            for x, c in zip(parts, cuts):
+                assert abs(P.booking_extra(x) - extra * c / minutes) <= 0.0002, (tag, P.booking_extra(x), extra, c)
+        order = list(parts)
+        rnd.shuffle(order)
+        first = order[0]
+        bal_b, pool_b = _bal(s, u), _pool(s, u)
+        taken = (first.payment_status or "paid") == "paid"
+        h_first, m_first = float(first.hours_deducted or 0), float(first.final_price or 0)
+        x_first = P.booking_extra(first)
+        _cancel(s, admin, first)
+        if taken:
+            pool_a = _pool(s, u)
+            d_main = pool_a["remaining_hours"] - pool_b["remaining_hours"]
+            d_extra = pool_a["extra_hours_remaining"] - pool_b["extra_hours_remaining"]
+            assert abs(d_main - (h_first - x_first)) <= 0.0001 and abs(d_extra - x_first) <= 0.0001, \
+                (tag, "часы одной части", d_main, d_extra, h_first, x_first)
+            assert abs(_bal(s, u) - bal_b - m_first) <= 0.011, (tag, "деньги одной части", _bal(s, u), bal_b, m_first)
+        for x in order[1:]:
+            _cancel(s, admin, s.get(Booking, x.id))
+        assert _bal(s, u) == bal0 and _pool(s, u) == pool0, (tag, _bal(s, u), bal0, _pool(s, u), pool0)
+        _ledger_ok(s, u, 500.0)
+
+
+@_scenario
+def test_r4_2_waive_pending_bonus_booking_returns_bonus_hour():
+    """Бонусная бронь заранее (pending): бонус-час снят при создании. «Снять
+    штраф» делал бронь бесплатной, а бонус-час сгорал (ранний выход). Теперь
+    возвращается доля, что ещё у брони: без отмены — весь час, после отмены 50 %
+    — вторая половина, после 0 % — весь; отмена waived-брони второй раз не
+    возвращает. Доля отмены — из события (policy_refund_percent; в старых
+    событиях — из текста «Refund: 50%»)."""
+    from app.api.v1 import billing
+    from app.models.timeline import TimelineEvent
+    from app.services import billing_defer
+    for days, pct, cancel in ((3, None, False), (3, 0.5, True), (3, 0.0, True), (0, 0.5, True)):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=100.0, tg="777")
+        _bonus(s, u, 1.0)
+        b = _book(s, admin, u, days=days, start="14:00", method="balance")
+        assert b.payment_method == "bonus" and _free_hours(s, u) == 0.0, (b.payment_method, _free_hours(s, u))
+        if cancel:
+            _cancel(s, admin, b, refund_percent=pct)
+        with _Offline() as off:
+            billing.waive_booking_charge(booking_id=b.id, payload={"reason": "тест"}, session=s, current_user=admin)
+        assert _free_hours(s, u) == 1.0, (days, pct, _free_hours(s, u))
+        if not cancel:
+            text = [t for chat, t in off.sent if chat == "777"][-1]
+            assert "Оплата за бронь не будет списана. Бонусные часы вернули: 1 ч." in text, text
+            _cancel(s, admin, s.get(Booking, b.id))
+            assert _free_hours(s, u) == 1.0, "отмена waived-брони вернула бонус-час второй раз"
+        assert _bal(s, u) == 100.0
+    # Старое событие отмены (до 04.10): refund_percent перетёрт нулём, доля — в тексте.
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    _bonus(s, u, 1.0)
+    b = _book(s, admin, u, days=3, start="14:00", method="balance")
+    _cancel(s, admin, b, refund_percent=0.5)
+    ev = s.exec(select(TimelineEvent).where(TimelineEvent.target_id == str(b.id),
+                                            TimelineEvent.event_type == "booking_cancelled")).first()
+    md = dict(ev.metadata_dump or {})
+    assert md.get("policy_refund_percent") == 0.5 and md.get("refund_percent") == 0.0, md
+    md.pop("policy_refund_percent")
+    ev.metadata_dump = md
+    s.add(ev)
+    s.commit()
+    ok, why = billing_defer.waive_charge(s, s.get(Booking, b.id), reason="тест", by_user=admin)
+    s.commit()
+    assert ok and _free_hours(s, u) == 1.0, (why, _free_hours(s, u))
+
+
+@_scenario
+def test_r4_3_hours_label_with_money_amount_is_money():
+    """Защита признака старой «часовой» строки: пул помечен 'main', hours_deducted
+    = 0, а в charge_amount 36 — больше длительности брони в часах (2 ч), значит
+    это деньги (₾), не снимок часов. Бронь — денежная: отмена возвращает 36 ₾,
+    часы не трогает. Настоящая старая «часовая» (снимок 2.0 у брони 2 ч) — часы."""
+    from app.api.v1.bookings import routes
+    from app.services.billing_defer import subscription_hours_held
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, _sub("WARM_START", remaining_hours=0.0, used_hours=10.0), balance=64.0)
+    row = Booking(resource_id="room_1", location_id="unbox_uni", date=H._day(3), start_time="14:00", duration=120,
+                  final_price=0.0, payment_method="subscription", payment_status="paid", status="confirmed",
+                  hours_deducted=0.0, hours_pool="main", charge_amount=36.0, applied_rule="SUBSCRIPTION",
+                  user_id=u.email, user_uuid=u.id, format="individual")
+    hours_row = Booking(resource_id="room_2", location_id="unbox_uni", date=H._day(3), start_time="14:00",
+                        duration=120, final_price=0.0, payment_method="subscription", payment_status="paid",
+                        status="confirmed", hours_deducted=None, hours_pool="main", charge_amount=2.0,
+                        applied_rule="SUBSCRIPTION", user_id=u.email, user_uuid=u.id, format="individual")
+    s.add(row)
+    s.add(hours_row)
+    s.commit()
+    assert subscription_hours_held(row) == 0.0 and routes._subscription_money_row(row)
+    assert subscription_hours_held(hours_row) == 2.0 and not routes._subscription_money_row(hours_row)
+    _cancel(s, admin, row)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 0.0), (_bal(s, u), _rem(s, u))
+    _cancel(s, admin, hours_row)
+    assert (_bal(s, u), _rem(s, u)) == (100.0, 2.0), (_bal(s, u), _rem(s, u))
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

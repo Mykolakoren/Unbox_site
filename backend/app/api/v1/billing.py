@@ -357,6 +357,7 @@ def waive_booking_charge(
                 "amount": amount,
                 "returned_money": _money_back,
                 "returned_hours": _hours_back,
+                "returned_bonus_hours": _bonus_back,
                 "payment_method": booking.payment_method,
                 "previous_status": ("paid" if status == "waived_paid_refunded" else "pending"),
             },
@@ -380,6 +381,9 @@ def waive_booking_charge(
         # «уже вернули при отмене», а не «вернули: ничего».
         if status != "waived_paid_refunded":
             client_line = "Оплата за бронь не будет списана."
+            if _bonus_back > 0:
+                # бронь заранее с бонус-часами: их сняли при создании (ревизия 04.10)
+                client_line += f" Бонусные часы вернули: {_bonus_back:g} ч."
         elif _parts:
             client_line = ("Вернули ещё " if _after_cancel else "Вернули: ") + " и ".join(_parts) + "."
         else:
@@ -391,7 +395,8 @@ def waive_booking_charge(
             fields={
                 "Бронь": str(booking.id),
                 "Клиент": owner_label,
-                "Вернули": returned_label if status == "waived_paid_refunded" else "не списывалось",
+                "Вернули": (returned_label if status == "waived_paid_refunded"
+                            else ("не списывалось" + (f"; бонус-часы: {_bonus_back:g} ч" if _bonus_back > 0 else ""))),
                 "Причина": reason.strip(),
                 "Кто снял": current_user.email or current_user.name or "admin",
                 "Сценарий": status,  # waived_pending or waived_paid_refunded
