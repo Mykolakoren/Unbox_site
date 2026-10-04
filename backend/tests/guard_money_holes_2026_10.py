@@ -2394,14 +2394,14 @@ def test_r4_1_split_random_parts_cancel_returns_everything():
         parts = _split(s, admin, b, cuts)
         assert len(parts) == len(cuts), tag
         if hrs > 0:
-            want = [round(hrs * c / minutes, 4) for c in cuts]
+            want = [round(hrs * c / minutes, 2) for c in cuts]           # в сотых, остаток — в первую
             want[0] = round(hrs - sum(want[1:]), 4)
             got = [round(float(x.hours_deducted or 0), 4) for x in parts]
             assert got == want, (tag, got, want)
             got_x = round(sum(P.booking_extra(x) for x in parts), 4)
             assert abs(got_x - round(extra, 4)) <= 0.0001, (tag, got_x, extra)
             for x, c in zip(parts, cuts):
-                assert abs(P.booking_extra(x) - extra * c / minutes) <= 0.0002, (tag, P.booking_extra(x), extra, c)
+                assert abs(P.booking_extra(x) - extra * c / minutes) <= 0.0101, (tag, P.booking_extra(x), extra, c)
         order = list(parts)
         rnd.shuffle(order)
         first = order[0]
@@ -2883,6 +2883,26 @@ def test_r5_5_trim_and_split_across_midnight_refuse_clearly():
         _cancel(s, admin, x)
     assert _bal(s, u) == 300.0
     _ledger_ok(s, u, 300.0)
+
+
+@_scenario
+def test_r5_6_split_bonus_hours_in_hundredths():
+    """Деление брони с частичным бонусом (3 ч, бонус 1 ч) на [60, 60, 60]: бонус-
+    часы делились до 4 знаков (0,3334 / 0,3333 / 0,3333), а возврат при отмене
+    округляется до сотых — после отмены всех частей 0,99 ч вместо 1,0. Теперь
+    в сотых, остаток — в первую часть: 0,34 / 0,33 / 0,33."""
+    for cuts, want in (([60, 60, 60], [0.34, 0.33, 0.33]), ([30, 60, 90], [0.17, 0.33, 0.5])):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=500.0)
+        _bonus(s, u, 1.0)
+        b = _book(s, admin, u, days=3, start="12:00", minutes=180, method="balance")
+        assert (b.payment_method, float(b.hours_deducted)) == ("bonus", 1.0), (b.payment_method, b.hours_deducted)
+        parts = _split(s, admin, b, cuts)
+        assert [float(x.hours_deducted) for x in parts] == want, [x.hours_deducted for x in parts]
+        for x in parts:
+            _cancel(s, admin, x)
+        assert (_free_hours(s, u), _bal(s, u)) == (1.0, 500.0), (cuts, _free_hours(s, u), _bal(s, u))
 
 
 if __name__ == "__main__":
