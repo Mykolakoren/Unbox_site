@@ -2792,6 +2792,71 @@ def test_r5_7_refund_share_text_ignores_admin_name():
     assert share("Отменено вручную") is None
 
 
+@_scenario
+def test_r5_4_split_parts_keep_rent_equation():
+    """«Разделить»: у каждой части денежной брони base − discount = её аренда
+    (цена части без допов) — проверяем не только цены частей. Бронь 3 ч +
+    песочница (скидка 3-часового тира), «Сократить» на 1 ч, «Разделить» [60, 60]:
+    аренда частей 17 ₾ (а скидка движка для части — 2 ₾, аренда 18), песочница
+    — 5 ₾ у первой части. Ручная цена — то же."""
+    from app.services.pricing import booking_extras_money
+    for manual in (False, True):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=300.0)
+        b = _book(s, admin, u, start="14:00", minutes=180, method="balance", extras=["sandbox"])
+        assert float(b.final_price) == 56.0, b.final_price
+        _shorten(s, admin, b)
+        if manual:
+            _set_price(s, admin, s.get(Booking, b.id), 29.0)            # аренда 24 + песочница 5
+        parts = _split(s, admin, s.get(Booking, b.id), [60, 60])
+        rent = 12.0 if manual else 17.0
+        for i, x in enumerate(parts):
+            extras = 5.0 if i == 0 else 0.0
+            got = (round(float(x.base_price) - float(x.discount_amount), 2), float(x.final_price), booking_extras_money(x))
+            assert got == (rent, rent + extras, extras), (manual, i, got)
+        for x in parts:
+            _cancel(s, admin, x)
+        assert _bal(s, u) == 300.0, (manual, _bal(s, u))
+
+
+@_scenario
+def test_r5_4_refund_share_field_and_text_are_different_paths():
+    """policy_refund_percent (с 04.10) и разбор текста старого события — два
+    разных пути, проверяем каждый отдельно: поле есть — берётся оно, даже если
+    текст говорит другое; поля нет и событие брони без списания (skipped_reason)
+    — доля из текста; поля нет у оплаченной — refund_percent; события нет — 1.0."""
+    from uuid import uuid4
+    from app.models.timeline import TimelineEvent
+    from app.services.billing_defer import _cancel_refund_share
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+
+    def share(md, desc, etype="booking_cancelled"):
+        b = Booking(resource_id="room_1", location_id="unbox_uni", date=H._day(3), start_time="14:00", duration=60,
+                    final_price=0.0, payment_method="bonus", payment_status="pending", status="cancelled",
+                    hours_deducted=1.0, user_id=u.email, user_uuid=u.id, format="individual")
+        s.add(b)
+        s.commit()
+        if md is not None:
+            s.add(TimelineEvent(event_type=etype, actor_id=admin.id, actor_req_role="owner", target_id=str(b.id),
+                                target_type="booking", description=desc, metadata_dump=md))
+            s.commit()
+        return _cancel_refund_share(s, b, 0.0, 0.0)
+
+    text100 = "Booking cancelled by Refund: 30% Admin (owner). Refund: 100%. Time to start: 70.0h"
+    assert share({"refund_percent": 0.0, "skipped_reason": "pending", "policy_refund_percent": 0.5}, text100) == 0.5
+    assert share({"refund_percent": 0.0, "skipped_reason": "pending"}, text100) == 1.0
+    assert share({"refund_percent": 0.0, "skipped_reason": "pending"}, "Отмена серии: возврат 50%") == 0.5
+    assert share({"refund_percent": 0.0, "skipped_reason": "pending"},
+                 "Booking auto-cancelled due to re-rent claim by X. Owner refunded 50%, rest → Unbox income.",
+                 "booking_auto_cancelled_re_rent") == 0.5
+    assert share({"refund_percent": 0.3}, text100) == 0.3              # оплаченная: поле refund_percent
+    assert share({"refund_percent": 0.0, "skipped_reason": "pending"}, "без доли в тексте") == 1.0
+    assert share(None, "") == 1.0                                       # события нет — второй раз не вернём
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
