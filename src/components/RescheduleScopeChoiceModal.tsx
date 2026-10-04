@@ -64,14 +64,25 @@ export function RescheduleScopeChoiceModal({
             const res = await bookingsApi.rescheduleBookingSeries(bookingId, { newDate, newStartTime, newResourceId });
             const skipped = res?.skipped?.length ?? 0;
             if (skipped > 0) {
-                // Use a longer toast so the admin sees which dates didn't move
-                // (e.g. because somebody else booked over the new time on a
-                // particular week). Keep the message single-line so it fits
-                // the toast width.
-                const dates = res.skipped.map(s => formatDayMonth(s.date.slice(0, 10))).join(', ');
+                // Длинный тост: админ видит, какие даты не переехали и ПОЧЕМУ —
+                // слот занят, встреча уже прошла, снят штраф, не хватает денег
+                // на доплату… (ревизия 04.10: раньше — только даты, без причины,
+                // и непонятно, что делать с каждой).
                 toast.warning(
-                    `Перенесено: эта + ${res.propagated}. Не перенесено (${skipped}): ${dates}`,
-                    { duration: 8000 },
+                    `Перенесено: эта + ${res.propagated}. Не перенесено (${skipped}):`,
+                    {
+                        description: (
+                            <ul className="mt-1 space-y-0.5">
+                                {res.skipped.map((s, i) => (
+                                    <li key={s.id || i}>
+                                        <span className="num font-medium">{formatDayMonth(s.date.slice(0, 10))}</span>
+                                        {' — '}{s.reason || 'не удалось перенести'}
+                                    </li>
+                                ))}
+                            </ul>
+                        ),
+                        duration: 15000,
+                    },
                 );
             } else {
                 toast.success(`Перенесена эта бронь и ${res?.propagated ?? 0} последующих`);

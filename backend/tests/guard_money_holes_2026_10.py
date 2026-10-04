@@ -2215,6 +2215,38 @@ def test_r3_7_chain_recompute_keeps_manual_price_and_gift():
     _ledger_ok(s, u, 300.0)
 
 
+@_scenario
+def test_r3_8_series_reschedule_tells_why_a_date_was_skipped():
+    """Перенос серии «эту и следующие»: у пропущенной встречи — причина рядом с
+    датой, и она ведёт на действие, которое сработает. Было: окно показывало
+    только даты, а причина «снят штраф» звала «перенесите её отдельно» —
+    одиночный перенос такой брони сам отвечает 409."""
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    rows = _series(s, admin, u, method="balance")
+    _waive(s, admin, rows[2])
+    out = routes.reschedule_booking_series(
+        booking_id=str(rows[0].id),
+        data=routes.RescheduleRequest(new_date=rows[0].date.strftime("%Y-%m-%d"), new_start_time="16:00"),
+        background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.commit()
+    assert out["propagated"] == 1 and len(out["skipped"]) == 1, out
+    reason = out["skipped"][0]["reason"]
+    assert reason == ("У брони снят штраф — перенос поменял бы её цену. "
+                      "Отмените бронь и создайте новую."), reason
+    single = H._call(routes.reschedule_booking, booking_id=str(rows[2].id),
+                     data=routes.RescheduleRequest(new_date=rows[2].date.strftime("%Y-%m-%d"), new_start_time="16:00"),
+                     background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.rollback()
+    assert single == {"http": 409}, single
+
+    modal = _read("src/components/RescheduleScopeChoiceModal.tsx")
+    assert "s.reason" in modal and "description:" in modal, "окно переноса серии не показывает причину пропуска"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
