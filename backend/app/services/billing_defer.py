@@ -135,9 +135,11 @@ def _resource_type(session: Session, resource_id: Optional[str]) -> Optional[str
 # (pool_label(h, x) → 'main' | 'extra' | 'mixed'; при 0 часов — None).
 _HOURS_POOL_LABELS = ("main", "extra", "mixed")
 
-# Причина отмены, которую пишут отклонение срочной брони на сайте (/reject) и
-# в Telegram: по ней «Снять штраф» узнаёт отклонённую бронь.
-REJECTED_HOT_PREFIX = "Отклонено админом"
+# Отклонение срочной брони на сайте (/reject) и в Telegram пишет в cancelled_by
+# «admin:<почта>» — только оно (обычная отмена пишет почту админа без префикса,
+# переаренда — «system:re-rent»). По этому полю (а не по тексту причины, который
+# админ может набрать и при обычной отмене) «Снять штраф» узнаёт отклонённую бронь.
+REJECTED_BY_PREFIX = "admin:"
 
 
 def subscription_hours_held(b: Booking) -> float:
@@ -524,10 +526,12 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
     # здесь — подтвердить или отклонить; штраф снимается после подтверждения.
     if b.status == "pending_approval":
         return False, "pending_approval"
-    # Отклонённая срочная бронь (сайт /reject и ответ в Telegram пишут причину
-    # «Отклонено админом …»): за неё ничего не списывалось, бонус-часы вернуло
-    # отклонение — платить и прощать нечего.
-    if b.status == "cancelled" and (b.cancellation_reason or "").startswith(REJECTED_HOT_PREFIX):
+    # Отклонённая срочная бронь (сайт /reject и ответ в Telegram пишут
+    # «admin:…» в cancelled_by) ни разу не оплачивалась: бонус-часы вернуло
+    # отклонение — платить и прощать нечего. Оплаченную бронь, отменённую админом
+    # с причиной «Отклонено админом…», это не задевает (ревизия 04.10).
+    if (b.status == "cancelled" and (b.payment_status or "") == "pending"
+            and (b.cancelled_by or "").startswith(REJECTED_BY_PREFIX)):
         return False, "rejected"
 
     if b.payment_status == "pending":

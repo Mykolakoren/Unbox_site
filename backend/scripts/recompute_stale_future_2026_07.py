@@ -78,6 +78,10 @@ def run(dry_run: bool) -> int:
             # новой цене, charge_amount проставится тогда же и совпадёт).
             if b.charge_amount is not None:
                 continue
+            # Ручная цена — «Цена», «Час в подарок», часть подарочной брони:
+            # договорённость, пересчёт её не трогает (как pricing.MANUAL_PRICE_RULES).
+            if (b.applied_rule or "") in ("MANUAL_OVERRIDE", "BONUS_HOUR", "BONUS_HOUR_PART"):
+                continue
             try:
                 bd = ps.calculate_price(
                     user=u, resource_id=b.resource_id, start_time=_start_dt(b),

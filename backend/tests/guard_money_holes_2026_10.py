@@ -3115,9 +3115,23 @@ def test_r6_waive_refused_for_rejected_hot_booking():
     except HTTPException as e:
         s.rollback()
         assert e.status_code == 409 and "отклонена" in e.detail, (e.status_code, e.detail)
-    prefix = billing_defer.REJECTED_HOT_PREFIX
-    assert f'f"{prefix} (' in _read("backend/app/api/v1/bookings/routes.py")
-    assert f'f"{prefix} (' in _read("backend/app/api/v1/telegram.py")
+    prefix = billing_defer.REJECTED_BY_PREFIX
+    assert f'booking.cancelled_by = f"{prefix}{{current_user.email}}"' in _read("backend/app/api/v1/bookings/routes.py")
+    assert f'booking.cancelled_by = f"{prefix}{{actor_email}}"' in _read("backend/app/api/v1/telegram.py")
+    # Оплаченная бронь, отменённая админом на 50 % с причиной «Отклонено админом…»,
+    # — не отклонённая: «Снять штраф» работает (раньше — ложный 409 по тексту).
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=100.0)
+    p = _book(s, admin, u, start="16:00", minutes=60, method="balance")
+    from fastapi import BackgroundTasks
+    out = H._call(routes.cancel_booking, booking_id=str(p.id), background_tasks=BackgroundTasks(), session=s,
+                  current_user=admin, refund_percent=0.5, reason="Отклонено админом: клиент не пришёл")
+    s.commit()
+    assert not (isinstance(out, dict) and "http" in out), out
+    assert _bal(s, u) == 90.0
+    _waive(s, admin, p)
+    assert _bal(s, u) == 100.0, _bal(s, u)
 
 
 @_scenario

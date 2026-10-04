@@ -768,6 +768,29 @@ def test_free_booking_sql():
         assert f"'{email.lower()}'" in sql, f"comp-аккаунт {email} не исключён"
 
 
+def test_gift_zero_long_sql():
+    """«Бронь за 0 ₾»: «Час в подарок» дольше часа за 0 ₾ — след лазейки
+    (подарочную бронь удлинили переносом / сменой формата без доплаты, закрыто
+    04.10), ревизор её показывает. Час в подарок и его части не длиннее часа за
+    0 ₾ — законно, не показываются."""
+    ma = _audit()
+    s = _db()
+    u = _user(s, "client@x.ge")
+    d = datetime(2026, 9, 30)
+    _bk(s, u, d, rule="BONUS_HOUR", duration=180)                             # ✓ подарок 1 ч → 3 ч за 0
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=90, start="16:00")         # ✓ часть такой брони
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00")              # законно: подарок на час
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00")         # законно: часть подарка
+    _bk(s, u, d, rule="BONUS_HOUR", duration=120, price=18.0, start="18:00") # 2 ч с подарком за 18 ₾
+    _bk(s, u, d, rule="MANUAL_OVERRIDE", duration=120, start="20:00")         # ручная 0 — это free_booking
+    _bk(s, u, d, rule="BONUS_HOUR", duration=180, status="cancelled", start="08:00")
+    _bk(s, u, datetime(2026, 8, 20), rule="BONUS_HOUR", duration=180)         # старше окна
+    rows = ma.run_check(s, _check(ma, "free_booking"), ma.audit_params(NOW))
+    got = sorted((r["date"], r["start_time"], r["duration"], r["applied_rule"]) for r in rows)
+    assert got == [("2026-09-30", "12:00", 180, "BONUS_HOUR"), ("2026-09-30", "16:00", 90, "BONUS_HOUR_PART"),
+                   ("2026-09-30", "20:00", 120, "MANUAL_OVERRIDE")], got
+
+
 def test_repeat_income_same_day_sql():
     ma = _audit()
     s = _db()

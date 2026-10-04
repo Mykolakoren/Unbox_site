@@ -4845,18 +4845,28 @@ def _reprice_for_move(
             # только явной кнопкой.
             ignore_subscription=True,
         )
-        # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость:
-        # перенос её не сбрасывает на цену движка. Длительность та же — аренда та
-        # же (денег не двигаем, кроме допов, которые новый кабинет не принимает);
-        # длительность другая — аренда по минутам, как в вырезке и делении. Метка
-        # остаётся: подарочный бонус-час не сгорает, отмена его вернёт. Ревизия
-        # 04.10: «Цена» 5 → перенос → 20 ₾, подарок → перенос → 20 ₾ и метка NONE.
+        # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость
+        # об АБСОЛЮТНОЙ скидке в лари (цена движка − цена брони): перенос её не
+        # сбрасывает на цену движка, но и не дарит новый слот по старой цене.
+        # Аренда = старая аренда + движок(новый слот) − движок(старый слот), не
+        # ниже 0: перенос в пик или из капсулы в кабинет доплачивает разницу,
+        # удлинение — добавку по движку, как «Продлить» (подарок 1 ч → 3 ч = 31 ₾,
+        # а не 0). Укорочение — аренда по минутам, как вырезка и деление, и затем
+        # та же разница слотов уже на новой длительности. Метка остаётся:
+        # подарочный бонус-час не сгорает, отмена его вернёт. Ревизии 04.10
+        # (круги 6–7).
         _manual = (booking.applied_rule or "") in MANUAL_PRICE_RULES and method == "balance"
         if _manual:
-            _old_dur = int(booking.duration or 0)
+            _d0, _d1 = int(booking.duration or 0), int(new_duration)
             _rent = max(0.0, old_price - extras_money)
-            if _old_dur > 0 and int(new_duration) != _old_dur:
-                _rent = _rent * int(new_duration) / _old_dur
+            if 0 < _d1 < _d0:
+                _rent = _rent * _d1 / _d0
+            _old_slot = PricingService(session).calculate_price(
+                user=owner, resource_id=booking.resource_id, start_time=old_start_dt,
+                duration_minutes=min(_d0, _d1) if _d0 > 0 else _d1, format_type=booking.format,
+                exclude_booking_id=str(booking.id), ignore_subscription=True,
+            )
+            _rent = max(0.0, _rent + float(new_quote.final_price or 0) - float(_old_slot.final_price or 0))
             new_price = round(round(_rent, 2) + kept_extras_money, 2)
         else:
             # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту же долю
@@ -5894,19 +5904,28 @@ def change_booking_format(
             # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
             ignore_subscription=True,
         )
-        # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость:
-        # смена формата (длительность та же) её не пересчитывает — цена и метка
-        # остаются, денег не двигаем; админ при желании поправит «Ценой». Ревизия
-        # 04.10: цена сбрасывалась на цену движка, метка стиралась, подарочный
-        # бонус-час сгорал. Аренда в цене = base − discount — от новой базы.
+        # Ручная цена («Цена», «Час в подарок») у денежной брони — абсолютная
+        # скидка в лари сохраняется: аренда = старая аренда + движок(новый формат)
+        # − движок(старый формат) на том же слоте и длительности, не ниже 0. Метка
+        # остаётся. Ревизии 04.10: сначала цена сбрасывалась на цену движка (метка
+        # стиралась, подарочный час сгорал), потом держалась как есть — подарок
+        # 1 ч за 0 ₾ превращался в группу за 0 ₾ (группа стоит 35, теперь 15 ₾).
+        # Аренда в цене = base − discount — от новой базы.
         from app.services.pricing import MANUAL_PRICE_RULES
         from app.services.pricing import booking_extras_money as _extras_money
         _manual = ((booking.applied_rule or "") in MANUAL_PRICE_RULES
                    and (booking.payment_method or "balance").lower() == "balance")
         if _manual:
             _kept_extras = _extras_money(booking)
-            quote.final_price = old_price
-            quote.discount_amount = round(float(quote.base_price) - (old_price - _kept_extras), 2)
+            _old_fmt = PricingService(session).calculate_price(
+                user=booking_owner, resource_id=booking.resource_id, start_time=start_dt,
+                duration_minutes=booking.duration, format_type=booking.format or "individual",
+                ignore_subscription=True,
+            )
+            _rent = max(0.0, (old_price - _kept_extras)
+                        + float(quote.final_price or 0) - float(_old_fmt.final_price or 0))
+            quote.final_price = round(round(_rent, 2) + _kept_extras, 2)
+            quote.discount_amount = round(float(quote.base_price) - round(_rent, 2), 2)
             quote.discount_percent = booking.discount_percent or 0
             quote.applied_rule = booking.applied_rule
         else:

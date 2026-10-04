@@ -82,7 +82,10 @@ def main() -> int:
             if not b.user_uuid:
                 skipped["no-owner"] += 1
                 continue
-            if (b.applied_rule or "") == "MANUAL_OVERRIDE":
+            # Ручная цена — «Цена», «Час в подарок» и часть подарочной брони
+            # (те же метки, что pricing.MANUAL_PRICE_RULES; списком здесь, чтобы
+            # скрипт не зависел от версии кода на сервере).
+            if (b.applied_rule or "") in ("MANUAL_OVERRIDE", "BONUS_HOUR", "BONUS_HOUR_PART"):
                 skipped["manual-override"] += 1
                 continue
             owner = session.get(User, b.user_uuid)
