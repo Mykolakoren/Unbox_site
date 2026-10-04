@@ -906,26 +906,67 @@ def test_reschedule_recomputes_price_on_time_change():
     """17.09 (кейс Алёны Ловиц): перенос 18:00 → 19:00 оставлял старую цену —
     пересчёт шёл только при смене кабинета/длительности, хотя цена зависит и
     от времени (пик 20:00-22:00) и от даты. Служебные брони без владельца
-    должны переноситься без 400."""
+    должны переноситься без 400.
+
+    Ревизия 04.10 (круг 3, п.9): сторож проверял подстроки в куске файла от
+    reschedule_booking до reschedule_booking_series — туда попадали определение
+    _reprice_for_move и вырезка, так что «_reprice_for_move(»,
+    «ignore_subscription=True» и «exclude_booking_id» находились, даже если
+    перенос перестал звать помощника. Теперь — по синтаксическому дереву:
+    настоящий ВЫЗОВ в обоих путях переноса, с нужными аргументами."""
+    import ast
     import pathlib
     src = (pathlib.Path(__file__).parent.parent / "app/api/v1/bookings/routes.py").read_text()
-    i = src.find("def reschedule_booking")
-    body = src[i:src.find("def reschedule_booking_series", i)]
+    tree = ast.parse(src)
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    for name in ("reschedule_booking", "reschedule_booking_series", "_reprice_for_move"):
+        assert name in funcs, f"в bookings/routes.py нет функции {name}"
+
+    def _calls(node, callee):
+        return [c for c in ast.walk(node) if isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Name) and c.func.id == callee]
+
+    def _kw(call, name):
+        return next((k.value for k in call.keywords if k.arg == name), None)
+
+    body = ast.get_source_segment(src, funcs["reschedule_booking"])
     assert "time_changed" in body and "date_changed" in body, \
         "перенос снова не пересчитывает цену при смене времени/даты"
     assert "room_changed or duration_changed or time_changed or date_changed" in body
     assert "без владельца (служебная)" in body, \
         "перенос служебной брони (уборка) снова падает 400"
-    # Ревизия денег 03.10: пересчёт цены — общим помощником _reprice_for_move
-    # (его же зовёт перенос серии «эту и следующие»), и только при владельце.
-    assert "if booking_owner:" in body and "_reprice_for_move(" in body
-    assert 'ignore_subscription=True' in body, "денежная бронь при переносе снова котируется с абонементом"
-    # Ревизия денег 17.09: три обязательных условия нового пересчёта.
+
+    # Ревизия денег 03.10: пересчёт цены — общим помощником _reprice_for_move,
+    # и в одиночном переносе, и в серии «эту и следующие».
+    for fn in ("reschedule_booking", "reschedule_booking_series"):
+        calls = _calls(funcs[fn], "_reprice_for_move")
+        assert calls, f"{fn}: перенос снова не пересчитывает цену (нет вызова _reprice_for_move)"
+        for c in calls:
+            for kw in ("new_resource", "new_date", "new_start_time", "new_duration", "actor"):
+                assert _kw(c, kw) is not None, f"{fn}: _reprice_for_move зовётся без {kw}"
+    # Одиночный перенос: пересчёт — только при владельце (служебная бронь без
+    # владельца переносится без пересчёта), и его итог реально ложится в бронь.
+    owner_ifs = [n for n in ast.walk(funcs["reschedule_booking"]) if isinstance(n, ast.If)
+                 and isinstance(n.test, ast.Name) and n.test.id == "booking_owner"]
+    assert any(_calls(n, "_reprice_for_move") for n in owner_ifs), \
+        "перенос снова зовёт пересчёт цены без проверки владельца"
+    assert "price_recalculated = True" in body, "аудит переноса снова слеп к цене"
+    # Серия: каждая встреча — на СВОЮ дату, новое время — общее.
+    sib_call = _calls(funcs["reschedule_booking_series"], "_reprice_for_move")[0]
+    assert ast.unparse(_kw(sib_call, "new_date")) == "sib.date", ast.unparse(_kw(sib_call, "new_date"))
+    assert ast.unparse(_kw(sib_call, "new_start_time")) == "data.new_start_time"
+
+    # Сам помощник: котировка движка не видит саму бронь соседом и для
+    # денежной брони не котируется абонементом.
+    quotes = [c for c in ast.walk(funcs["_reprice_for_move"]) if isinstance(c, ast.Call)
+              and isinstance(c.func, ast.Attribute) and c.func.attr == "calculate_price"]
+    assert quotes and all(_kw(q, "exclude_booking_id") is not None for q in quotes), \
+        "бронь снова считает себя своим соседом — фантомная скидка за часы подряд"
+    assert any(isinstance(_kw(q, "ignore_subscription"), ast.Constant) and _kw(q, "ignore_subscription").value is True
+               for q in quotes), "денежная бронь при переносе снова котируется с абонементом"
+    # Ревизия денег 17.09: перенос waived-брони не двигает деньги от стухшей цены.
     assert 'booking.payment_status == "waived"' in body, \
         "перенос waived-брони снова двигает деньги от стухшей цены"
-    assert "exclude_booking_id=str(booking.id)" in body, \
-        "бронь снова считает себя своим соседом — фантомная скидка за часы подряд"
-    assert "price_recalculated" in body, "аудит переноса снова слеп к цене"
 
 
 def test_ux_audit_2026_09_24_fixes_hold():
