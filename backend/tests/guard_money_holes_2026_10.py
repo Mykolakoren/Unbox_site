@@ -2586,6 +2586,171 @@ def test_r5_1_every_charge_amount_write_heals_first():
         assert must in healers, f"{must}: нет heal_legacy_subscription_hours"
 
 
+@_scenario
+def test_r5_2_extend_keeps_rent_equation_and_manual_label():
+    """«Продлить» денежную бронь (ревизия 04.10). Было: base/discount брались из
+    котировки на новую длительность, а цена — прежняя + добавка: после
+    «Сократить» → «Продлить» кофе 3 ₾ оценивался в 1 ₾, и следующий перенос
+    его «съедал» (31 → 31 вместо 33); «Цена» и «Час в подарок» теряли метку —
+    соседняя бронь возвращала цену движка. Стало: base − discount = аренда в
+    цене, метка ручной цены остаётся, добавка — цена движка за добавленное время."""
+    from app.api.v1.bookings import routes
+    from app.services.pricing import booking_extras_money
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=200.0)
+    b = _book(s, admin, u, start="11:00", minutes=120, method="balance", resource="room_3", extras=["coffee_meama"])
+    assert float(b.final_price) == 39.0, b.final_price
+    _shorten(s, admin, b)
+    _extend(s, admin, s.get(Booking, b.id))
+    b = s.get(Booking, b.id)
+    assert (float(b.final_price), booking_extras_money(b)) == (31.0, 3.0), (b.final_price, booking_extras_money(b))
+    assert round(float(b.base_price) - float(b.discount_amount), 2) == 28.0, (b.base_price, b.discount_amount)
+    b = _reschedule(s, admin, b, start="15:00")
+    assert float(b.final_price) == 33.0, b.final_price            # 90 мин × 20 + кофе 3
+
+    for kind in ("manual", "gift"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=300.0)
+        a = _book(s, admin, u, start="18:00", minutes=60, method="balance")
+        if kind == "manual":
+            _set_price(s, admin, a, 5.0)
+        else:
+            _bonus(s, u, 1.0)
+            out = H._call(routes.apply_bonus_hour, booking_id=str(a.id), session=s, current_user=admin)
+            s.commit()
+            assert not (isinstance(out, dict) and "http" in out), out
+        price0 = float(s.get(Booking, a.id).final_price)
+        _extend(s, admin, s.get(Booking, a.id))
+        a = s.get(Booking, a.id)
+        rule = "MANUAL_OVERRIDE" if kind == "manual" else "BONUS_HOUR"
+        assert (a.applied_rule, float(a.final_price)) == (rule, price0 + 10.0), (kind, a.applied_rule, a.final_price)
+        n = _book(s, admin, u, start="19:30", minutes=60, method="balance")
+        _cancel(s, admin, n)
+        a = s.get(Booking, a.id)
+        assert (a.applied_rule, float(a.final_price)) == (rule, price0 + 10.0), (kind, a.applied_rule, a.final_price)
+
+
+def _extras_estimate_violations(s, u) -> list:
+    """Инвариант: у денежной брони оценка допов (booking_extras_money) = допы
+    в брони (не больше цены). Допы, оплаченные на месте, здесь не используются."""
+    from app.services.pricing import PricingService, booking_extras_money
+    s.expire_all()
+    bad = []
+    for b in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+        if b.status == "cancelled" or (b.payment_method or "") != "balance" or b.base_price is None:
+            continue
+        listed = round(float(PricingService.calculate_extras_price(list(b.extras or []))), 2)
+        est = round(float(booking_extras_money(b)), 2)
+        if abs(est - min(listed, float(b.final_price or 0))) > 0.011:
+            bad.append(f"{b.start_time} {b.duration}м final={b.final_price} base={b.base_price} "
+                       f"disc={b.discount_amount} rule={b.applied_rule}: допы {est} ≠ {listed}")
+    return bad
+
+
+@_scenario
+def test_r5_2_extras_estimate_holds_after_every_operation():
+    """Сторож-фаззер (на основе fuzz_inv_x ревизора): случайные цепочки правок
+    денежных броней с допами — сократить, продлить, перенести (время/кабинет),
+    формат, вырезать, разделить, «Цена», «Час в подарок», доп с баланса, сосед
+    по цепочке и его отмена. После КАЖДОЙ правки оценка допов = допы в брони;
+    в конце отмена всего возвращает баланс к старту."""
+    import random
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    for seed in range(30):
+        rnd = random.Random(7000 + seed)
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=500.0)
+        books = []
+        for _ in range(rnd.choice([1, 2])):
+            res = rnd.choice(["room_1", "room_3"])
+            try:
+                books.append(_book(s, admin, u, start=rnd.choice(["11:00", "14:00", "18:00"]),
+                                   minutes=rnd.choice([60, 120, 180]), method="balance", resource=res,
+                                   extras=rnd.choice([["sandbox"], ["coffee_meama"], ["sandbox", "coffee_meama"]])))
+            except AssertionError:
+                pass
+        log = []
+        for _ in range(rnd.randint(3, 7)):
+            if not books:
+                break
+            b = s.get(Booking, rnd.choice(books).id)
+            if b is None or b.status != "confirmed":
+                continue
+            op = rnd.choice(["shorten", "extend", "extend", "resched", "room", "format", "trim", "split",
+                             "price", "gift", "extras", "neighbor"])
+            st = int(b.start_time.split(":")[0])
+            if op == "shorten" and b.duration >= 120:
+                out = H._call(routes.shorten_booking, booking_id=str(b.id),
+                              payload=routes.ShortenRequest(remove_minutes=60, side=rnd.choice(["end", "start"])),
+                              session=s, current_user=admin)
+            elif op == "extend":
+                out = H._call(routes.extend_booking, booking_id=str(b.id),
+                              payload=routes.ExtendRequest(extra_minutes=30), session=s, current_user=admin)
+            elif op in ("resched", "room"):
+                out = H._call(routes.reschedule_booking, booking_id=str(b.id),
+                              data=routes.RescheduleRequest(
+                                  new_date=b.date.strftime("%Y-%m-%d"),
+                                  new_start_time=(rnd.choice(["12:00", "15:00", "19:00", "20:00"]) if op == "resched"
+                                                  else b.start_time),
+                                  new_resource_id=(rnd.choice(["room_1", "room_2", "room_3"]) if op == "room" else None)),
+                              background_tasks=BackgroundTasks(), session=s, current_user=admin)
+            elif op == "format":
+                out = H._call(routes.change_booking_format, booking_id=str(b.id),
+                              payload=routes.ChangeFormatRequest(
+                                  new_format="group" if (b.format or "individual") == "individual" else "individual"),
+                              session=s, current_user=admin)
+            elif op == "trim" and b.duration >= 180 and st + 2 <= 23:
+                out = H._call(routes.trim_booking, booking_id=str(b.id),
+                              data=routes.TrimRequest(remove_from=f"{st + 1:02d}:{b.start_time[3:]}",
+                                                      remove_to=f"{st + 2:02d}:{b.start_time[3:]}"),
+                              background_tasks=BackgroundTasks(), session=s, current_user=admin)
+                ids = {x.id for x in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all()}
+                books += [s.get(Booking, i) for i in ids if i not in {x.id for x in books}]
+            elif op == "split" and b.duration >= 120 and b.duration % 60 == 0:
+                out = H._call(routes.split_booking, booking_id=str(b.id),
+                              payload=routes.SplitRequest(parts=[60, b.duration - 60]), session=s, current_user=admin)
+                if isinstance(out, list):
+                    books += [s.get(Booking, x.id) for x in out[1:]]
+            elif op == "price":
+                out = H._call(routes.set_booking_price, booking_id=str(b.id),
+                              payload=routes.SetPriceRequest(new_price=rnd.choice([10.0, 30.0, 50.0]), reason="тест"),
+                              session=s, current_user=admin)
+            elif op == "gift":
+                _bonus(s, u, 1.0)
+                out = H._call(routes.apply_bonus_hour, booking_id=str(b.id), session=s, current_user=admin)
+            elif op == "extras" and b.resource_id != "room_2":
+                out = H._call(routes.add_booking_extras, booking_id=str(b.id),
+                              payload=routes.AddExtrasRequest(extras=["coffee_meama"], payment_method="balance"),
+                              session=s, current_user=admin)
+            elif op == "neighbor":
+                end = st * 60 + int(b.start_time[3:]) + int(b.duration)
+                try:
+                    books.append(_book(s, admin, u, start=f"{end // 60:02d}:{end % 60:02d}", minutes=60,
+                                       method="balance", resource=b.resource_id))
+                except AssertionError:
+                    pass
+                out = None
+            else:
+                continue
+            if isinstance(out, dict) and "http" in out:
+                s.rollback()
+            else:
+                s.commit()
+            log.append(op)
+            bad = _extras_estimate_violations(s, u)
+            assert not bad, (seed, log, bad)
+        s.expire_all()
+        for x in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+            if x.status != "cancelled":
+                _cancel(s, admin, x)
+        assert _bal(s, u) == 500.0, (seed, log, _bal(s, u))
+        _ledger_ok(s, u, 500.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

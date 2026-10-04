@@ -6323,9 +6323,12 @@ def extend_booking(
     # Берём именно РАЗНИЦУ котировок, а не новую цену целиком: в final_price
     # уже могут сидеть допы (кофе и т.п. из /add-extras) и покрытие бонусными
     # часами — движок про них не знает и затёр бы их.
-    from app.services.pricing import PricingService
+    from app.services.pricing import MANUAL_PRICE_RULES, PricingService, booking_extras_money
     pricing = PricingService(session)
     target_user = _resolve_booking_owner(session, booking)
+    # Допы в цене ДО продления (продление их не меняет) — чтобы после продления
+    # аренда в цене (base − discount) осталась равной final − допы.
+    _extras_before = booking_extras_money(booking)
 
     try:
         _h, _m = map(int, (booking.start_time or "0:0").split(":"))
@@ -6381,13 +6384,25 @@ def extend_booking(
 
     booking.duration = new_duration
     booking.final_price = round((booking.final_price or 0) + extra_price, 2)
-    # Тариф брони после продления берём из новой котировки — иначе карточка,
-    # аудит и недельный перерасчёт видят старый процент скидки.
+    # Тариф брони после продления — из новой котировки (карточка, аудит и
+    # недельный перерасчёт видят новый процент скидки). Но цена брони — прежняя
+    # + добавка (цена движка за добавленное время), а не котировка целиком, поэтому
+    # скидку держим так, чтобы base − discount = аренда в цене (final − допы):
+    # по этому равенству оценщик допов (booking_extras_money) отделяет допы.
+    # Ревизия 04.10: discount брался из котировки, и после «Сократить» →
+    # «Продлить» кофе 3 ₾ оценивался в 1 ₾ (следующий перенос его «съедал»).
+    # Ручная цена («Цена», «Час в подарок») метку не теряет — иначе следующий
+    # пересчёт «часов подряд» поставил бы цену движка.
     if new_quote is not None:
         booking.base_price = float(new_quote.base_price)
-        booking.applied_rule = new_quote.applied_rule
-        booking.discount_amount = float(new_quote.discount_amount)
-        booking.discount_percent = int(new_quote.discount_percent)
+        if (booking.payment_method or "balance").lower() == "balance":
+            booking.discount_amount = round(
+                float(new_quote.base_price) - (float(booking.final_price or 0) - _extras_before), 2)
+        else:
+            booking.discount_amount = float(new_quote.discount_amount)
+        if (booking.applied_rule or "") not in MANUAL_PRICE_RULES:
+            booking.applied_rule = new_quote.applied_rule
+            booking.discount_percent = int(new_quote.discount_percent)
     booking.updated_at = datetime.now()
 
     # Charge the extra time to the booking's OWNER — always, whoever clicked.
@@ -7056,10 +7071,14 @@ def split_booking(
     # Ручная цена («Цена», «Час в подарок») остаётся ручной у каждой части —
     # иначе ближайший пересчёт «часов подряд» вернул бы частям цену движка и
     # списал разницу (он ручную цену не трогает, но только с её меткой).
-    # Аренда части денежной брони = её доля (base − discount, как в «Цене»).
+    # Аренда части денежной брони = её доля: base − discount = доля аренды (как
+    # в «Цене» и «Продлить») — по этому равенству оценщик допов отделяет допы.
+    # Ревизия 04.10 (fuzz_inv_x, seed 852): скидка бралась из котировки части,
+    # и после «Сократить» → «Разделить» песочница 5 ₾ оценивалась в 4,81.
+    # У бонусной и абонементной — как было (там аренда считается иначе).
     from app.services.pricing import MANUAL_PRICE_RULES
     _manual_rule = booking.applied_rule if (booking.applied_rule or "") in MANUAL_PRICE_RULES else None
-    _money_parts = (booking.payment_method or "balance").lower() not in ("subscription",)
+    _rent_parts = (booking.payment_method or "balance").lower() not in ("subscription", "bonus")
 
     def _part_rule(q):
         if _manual_rule:
@@ -7069,7 +7088,7 @@ def split_booking(
     def _part_discount(q, room: float) -> float:
         if q is None:
             return 0.0
-        if _manual_rule and _money_parts and q.base_price is not None:
+        if _rent_parts and q.base_price is not None:
             return round(float(q.base_price) - room, 2)
         return float(q.discount_amount)
     charged_total = float(booking.charge_amount) if booking.charge_amount is not None else None
