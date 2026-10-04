@@ -2751,6 +2751,30 @@ def test_r5_2_extras_estimate_holds_after_every_operation():
         _ledger_ok(s, u, 500.0)
 
 
+@_scenario
+def test_r5_3_negative_discount_not_shown():
+    """«Цена» выше цены движка (35 при базе 20 → discount −15) — скидка хранится
+    отрицательной (держит равенство аренды), но в показах не ниже 0: «Вы
+    сэкономили» в профиле её не вычитает, выгрузка сверки пишет 0, попап брони
+    не показывает «база 20 − -15» и «−0%»."""
+    from app.api.v1.users import profile
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    a = _book(s, admin, u, start="14:00", minutes=60, method="balance")
+    _set_price(s, admin, a, 35.0)
+    assert float(s.get(Booking, a.id).discount_amount) == -15.0
+    _book(s, admin, u, start="16:00", minutes=120, method="balance", resource="room_2")   # 2 ч −10 % = скидка 4
+    saved = profile.get_discount_progress(session=s, current_user=s.get(User, u.id))["total_saved"]
+    assert saved == 4.0, saved
+    recon = _read("backend/app/api/v1/cashbox/reconciliation.py")
+    assert "max(0.0, float(b.discount_amount or 0.0))" in recon, "выгрузка снова пишет отрицательную скидку"
+    chess = _read("src/components/admin/AdminChessboardView.tsx")
+    assert "· −${selectedBooking.discountPercent ?? 0}%" not in chess, "попап снова пишет «−0%»"
+    assert "− ${formatGel(selectedBooking.discountAmount ?? 0" not in chess, "попап снова пишет «база 20 − -15»"
+    assert chess.count("Math.max(0, selectedBooking.discountAmount ?? 0) > 0") == 2
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

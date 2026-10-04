@@ -27,10 +27,13 @@ def get_discount_progress(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Get weekly discount progress and total savings."""
-    # 1. Total Saved (All Time)
+    # 1. Total Saved (All Time). Скидка ниже нуля (ручная цена выше цены
+    # движка: «Цена» 35 при базе 20 → discount −15) хранится ради равенства
+    # «аренда = base − discount», но экономией не считается и сумму не уменьшает.
     stmt_saved = select(func.sum(Booking.discount_amount)).where(
         (Booking.user_uuid == current_user.id) | (Booking.user_id == current_user.email),
-        Booking.status == 'confirmed'
+        Booking.status == 'confirmed',
+        Booking.discount_amount > 0,
     )
     total_saved = session.exec(stmt_saved).one() or 0.0
 

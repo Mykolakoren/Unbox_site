@@ -1352,17 +1352,19 @@ export function AdminChessboardView() {
                                 {/* Цена + Скидка — две строки. Раньше админам приходилось
                                     лазить в /admin/bookings или гадать «почему 18 а не 20»;
                                     теперь правило и процент видно прямо в попапе. */}
+                                {/* Скидка ниже нуля (ручная цена выше движка) не показывается
+                                    как «база 20 − -15», а «−0%» — не показывается вовсе. */}
                                 {selectedBooking.appliedRule && selectedBooking.appliedRule !== 'NONE'
                                     && selectedBooking.appliedRule !== 'SUBSCRIPTION'
                                     && (selectedBooking.discountPercent || selectedBooking.discountAmount) ? (
                                     <>
                                         <InfoRow
                                             label="Цена"
-                                            value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} − ${formatGel(selectedBooking.discountAmount ?? 0, { fraction: 0 })})`}
+                                            value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)}${Math.max(0, selectedBooking.discountAmount ?? 0) > 0 ? ` − ${formatGel(Math.max(0, selectedBooking.discountAmount ?? 0), { fraction: 0 })}` : ''})`}
                                         />
                                         <InfoRow
                                             label="Скидка"
-                                            value={`${discountRuleLabel(selectedBooking.appliedRule)} · −${selectedBooking.discountPercent ?? 0}%`}
+                                            value={`${discountRuleLabel(selectedBooking.appliedRule)}${(selectedBooking.discountPercent ?? 0) > 0 ? ` · −${selectedBooking.discountPercent}%` : ''}`}
                                         />
                                     </>
                                 ) : (
@@ -1951,11 +1953,11 @@ export function AdminChessboardView() {
                             <>
                                 <InfoRow
                                     label="Цена"
-                                    value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} − ${formatGel(selectedBooking.discountAmount ?? 0, { fraction: 0 })})`}
+                                    value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)}${Math.max(0, selectedBooking.discountAmount ?? 0) > 0 ? ` − ${formatGel(Math.max(0, selectedBooking.discountAmount ?? 0), { fraction: 0 })}` : ''})`}
                                 />
                                 <InfoRow
                                     label="Скидка"
-                                    value={`${discountRuleLabel(selectedBooking.appliedRule)} · −${selectedBooking.discountPercent ?? 0}%`}
+                                    value={`${discountRuleLabel(selectedBooking.appliedRule)}${(selectedBooking.discountPercent ?? 0) > 0 ? ` · −${selectedBooking.discountPercent}%` : ''}`}
                                 />
                             </>
                         ) : (

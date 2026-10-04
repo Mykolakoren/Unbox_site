@@ -197,7 +197,8 @@ def reconciliation_export(
             (u.name if u else b.user_id) or b.user_id,
             res_names.get(b.resource_id, b.resource_id), b.start_time, round((b.duration or 0) / 60.0, 2),
             float(b.base_price) if b.base_price is not None else float(b.final_price or 0.0),
-            float(b.discount_amount or 0.0),
+            # скидка ниже нуля (ручная цена выше движка) — в выгрузке 0
+            max(0.0, float(b.discount_amount or 0.0)),
             RULE_LABELS.get(rule, "" if rule in ("", "NONE") else rule),
             ", ".join(b.extras or []),
             float(b.final_price or 0.0) if b.payment_method != "subscription" else 0.0,
