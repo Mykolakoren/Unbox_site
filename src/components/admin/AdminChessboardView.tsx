@@ -1389,8 +1389,8 @@ export function AdminChessboardView() {
                                         <button
                                             onClick={async () => {
                                                 try {
-                                                    await bookingsApi.approveBooking(selectedBooking.id);
-                                                    toast.success('Бронь подтверждена, клиент уведомлён');
+                                                    const res = await bookingsApi.approveBooking(selectedBooking.id);
+                                                    toast.success(res.approvalNote || 'Бронь подтверждена, клиент уведомлён');
                                                     setSelectedBooking(null);
                                                     await fetchAllBookings();
                                                 } catch (e: any) {

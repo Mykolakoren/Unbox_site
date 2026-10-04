@@ -279,7 +279,10 @@ export const bookingsApi = {
         return response.data;
     },
 
-    approveBooking: async (bookingId: string): Promise<BookingHistoryItem> => {
+    /** approvalNote — если часов абонемента не хватило и бронь ушла в деньги:
+     *  «Подтверждено. … списано с баланса N ₾, баланс клиента теперь X ₾»
+     *  (ревизия денег 03.10). Экраны показывают его вместо обычного тоста. */
+    approveBooking: async (bookingId: string): Promise<BookingHistoryItem & { approvalNote?: string | null }> => {
         const response = await api.post<any>(`/bookings/${bookingId}/approve`);
         return mapToFrontend(response.data);
     },

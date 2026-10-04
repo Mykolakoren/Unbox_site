@@ -136,9 +136,9 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
     const doApprove = async (b: BookingHistoryItem) => {
         setBusy(b.id);
         try {
-            await bookingsApi.approveBooking(b.id);
+            const res = await bookingsApi.approveBooking(b.id);
             await fetchAllBookings();
-            toast.success('Одобрено');
+            toast.success(res.approvalNote || 'Одобрено');
             onClose();
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось одобрить');

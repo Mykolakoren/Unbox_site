@@ -114,6 +114,9 @@ class BookingRead(BookingBase):
     recurring_group_id: Optional[str] = None
     hours_pool: Optional[str] = None
     extra_hours_deducted: Optional[float] = None
+    # Только в ответе одобрения срочной брони (ревизия 03.10): что списали,
+    # если часов абонемента не хватило и бронь ушла в деньги. Не колонка.
+    approval_note: Optional[str] = None
 
 
 class BookingPublicRead(SQLModel):

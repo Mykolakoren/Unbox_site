@@ -393,8 +393,8 @@ export function AdminBookings() {
     const handleApprove = async (bookingId: string) => {
         setApprovingId(bookingId);
         try {
-            await bookingsApi.approveBooking(bookingId);
-            toast.success('Бронь одобрена');
+            const res = await bookingsApi.approveBooking(bookingId);
+            toast.success(res.approvalNote || 'Бронь одобрена');
             // Refresh bookings
             useUserStore.getState().fetchAllBookings();
         } catch (e: any) {

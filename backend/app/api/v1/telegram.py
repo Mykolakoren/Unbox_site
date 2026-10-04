@@ -2000,8 +2000,16 @@ def _handle_hot_booking_callback(
         session.commit()
         session.refresh(booking)
         # «Часы подряд» — как на сайте (ревизия 03.10: бот не пересчитывал).
-        from app.api.v1.bookings.routes import recompute_chain_after_approval
+        from app.api.v1.bookings.routes import (
+            recompute_chain_after_approval, hot_approval_admin_note, notify_admins_hot_money_fallback,
+        )
         recompute_chain_after_approval(session, booking, actor)
+        # Бронь ушла в деньги — то же сообщение, что на сайте: в админ-чат и во
+        # всплывающий ответ кнопки.
+        if owner is not None:
+            session.refresh(owner)
+        approval_note = hot_approval_admin_note(owner, paid_info)
+        notify_admins_hot_money_fallback(owner, booking, approval_note, actor_label)
 
         try:
             ev_id = _gcal.create_event(booking, user_name=actor_label)
@@ -2055,7 +2063,10 @@ def _handle_hot_booking_callback(
             _send(chat_id, f"✅ Подтверждено @ {actor_label} · {stamp}", parse_mode="HTML")
         except Exception:
             pass
-        _answer_callback(callback_id, "✓ Подтверждено")
+        if approval_note:
+            _answer_callback(callback_id, approval_note[:190], show_alert=True)
+        else:
+            _answer_callback(callback_id, "✓ Подтверждено")
         return {"ok": True}
 
     if action == "br":

@@ -538,6 +538,37 @@ def _gel(x: float) -> str:
     return f"{round(float(x or 0), 2):g}".replace(".", ",")
 
 
+def hot_approval_admin_note(owner: Optional[User], info: Optional[dict]) -> Optional[str]:
+    """Сообщение АДМИНУ после одобрения, когда бронь по абонементу ушла в
+    деньги (часов не хватило / пауза / формат не в пуле). Кредитный лимит при
+    одобрении не проверяем (так решено), но админ должен видеть, что списано и
+    какой теперь баланс клиента. Сайт и бот — один текст (ревизия 03.10)."""
+    if not info or not info.get("fallback") or owner is None:
+        return None
+    return (f"Подтверждено. Часов абонемента не хватило — списано с баланса {_gel(info.get('money', 0))} ₾, "
+            f"баланс клиента теперь {_gel(owner.balance or 0)} ₾.")
+
+
+def notify_admins_hot_money_fallback(owner: Optional[User], booking: Booking, note: Optional[str],
+                                     actor_label: str) -> None:
+    """То же сообщение — в админ-чат (сайт и бот одинаково). Сбой Telegram
+    одобрение не ломает."""
+    if not note or owner is None:
+        return
+    try:
+        telegram_service.send_admin_event(
+            event="hot_booking_money_fallback",
+            fields={
+                "Клиент": owner.name or owner.email,
+                "Когда": f"{booking.date.strftime('%d.%m.%Y') if booking.date else '—'} · {booking.start_time}",
+                "Итог": note,
+                "Кто подтвердил": actor_label,
+            },
+        )
+    except Exception:
+        logger.warning("[approve] admin money-fallback note failed", exc_info=True)
+
+
 def hot_approval_paid_line(booking: Booking, info: Optional[dict] = None) -> str:
     """Строка «чем оплачено» в сообщении клиенту об одобрении срочной брони
     (сайт и Telegram — одна функция). Ревизия 03.10: бронь по абонементу
@@ -7291,7 +7322,13 @@ def approve_booking(
     # зовёт кнопка в Telegram).
     recompute_chain_after_approval(session, booking, current_user)
 
-    return enrich_booking_status(booking)
+    # Бронь ушла в деньги — админу понятное сообщение: в ответе (экран покажет
+    # его вместо «Бронь подтверждена») и в админ-чат, как у кнопки в Telegram.
+    _note = hot_approval_admin_note(b_owner, _paid_info)
+    notify_admins_hot_money_fallback(b_owner, booking, _note, current_user.name or current_user.email or "админ")
+    out = BookingRead.model_validate(enrich_booking_status(booking), from_attributes=True)
+    out.approval_note = _note
+    return out
 
 
 class RejectBookingPayload(PydanticBaseModel):

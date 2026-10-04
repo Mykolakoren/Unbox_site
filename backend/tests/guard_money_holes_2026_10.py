@@ -2013,6 +2013,57 @@ def test_r3_4_refusal_texts_point_to_real_actions():
     assert _detail(s.get(User, u.id)).endswith("Напишите администратору.")
 
 
+@_scenario
+def test_r3_5_money_fallback_approval_tells_admin_site_and_bot():
+    """Одобрение срочной брони, ушедшей в деньги (часов не хватило): лимит не
+    проверяем, но админу — понятный текст, одинаковый на сайте и в боте:
+    «Подтверждено. Часов абонемента не хватило — списано с баланса 18 ₾, баланс
+    клиента теперь -18 ₾.» Сайт — в ответе (approval_note) и в админ-чат, бот —
+    во всплывающем ответе кнопки и в админ-чат. Обычное одобрение — без него."""
+    from app.api.v1 import telegram as tg
+    from app.api.v1.bookings import routes
+    from app.services.telegram import telegram_service
+    events, answers = [], []
+    saved_ev, saved_ans = telegram_service.send_admin_event, tg._answer_callback
+    telegram_service.send_admin_event = lambda **kw: events.append((kw.get("event"), dict(kw.get("fields") or {}))) or True
+    tg._answer_callback = lambda cid, text="", show_alert=False: answers.append((text, show_alert))
+    try:
+        s = _db()
+        admin = _admin(s)
+        admin.telegram_id = "555"
+        s.add(admin)
+        s.commit()
+        u = _client(s, _sub("WARM_START", remaining_hours=1.0, used_hours=9.0), balance=0.0)
+        b1 = _book(s, u, u, start="15:00")
+        b2 = _book(s, u, u, start="16:00")
+        b3 = _book(s, u, u, start="17:00")
+        out1 = routes.approve_booking(booking_id=str(b1.id), session=s, current_user=admin)
+        s.commit()
+        assert out1.approval_note is None and not [e for e in events if e[0] == "hot_booking_money_fallback"]
+        out2 = routes.approve_booking(booking_id=str(b2.id), session=s, current_user=admin)
+        s.commit()
+        note = "Подтверждено. Часов абонемента не хватило — списано с баланса 18 ₾, баланс клиента теперь -18 ₾."
+        assert out2.approval_note == note, out2.approval_note
+        site_ev = [f for e, f in events if e == "hot_booking_money_fallback"]
+        assert len(site_ev) == 1 and site_ev[0]["Итог"] == note, site_ev
+        tg._handle_hot_booking_callback(s, "cb", 1, 2, 555, f"ba:{b3.id}")
+        s.commit()
+        note3 = "Подтверждено. Часов абонемента не хватило — списано с баланса 18 ₾, баланс клиента теперь -36 ₾."
+        bot_ev = [f for e, f in events if e == "hot_booking_money_fallback"]
+        assert len(bot_ev) == 2 and bot_ev[1]["Итог"] == note3, bot_ev
+        assert answers and answers[-1] == (note3, True), answers
+    finally:
+        telegram_service.send_admin_event, tg._answer_callback = saved_ev, saved_ans
+
+
+def test_r3_5_frontend_shows_approval_note():
+    api = _read("src/api/bookings.ts")
+    assert "approvalNote?: string | null" in api
+    for path in ("src/components/admin/AdminChessboardView.tsx", "src/pages/admin/Bookings.tsx",
+                 "src/pages/mobile/admin/bookingSheets.tsx", "src/pages/mobile/admin/MobileAdminInbox.tsx"):
+        assert "res.approvalNote ||" in _read(path), f"{path}: одобрение «в деньги» не показывает админу итог"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

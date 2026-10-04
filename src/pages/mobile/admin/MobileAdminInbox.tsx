@@ -71,9 +71,9 @@ export function MobileAdminInbox() {
     const approve = async (b: BookingHistoryItem) => {
         setBusy(b.id);
         try {
-            await bookingsApi.approveBooking(b.id);
+            const res = await bookingsApi.approveBooking(b.id);
             setItems(prev => prev.filter(x => x.id !== b.id));
-            toast.success('Бронь одобрена');
+            toast.success(res.approvalNote || 'Бронь одобрена');
         } catch {
             toast.error('Не удалось одобрить бронь. Попробуйте ещё раз');
             reload();
