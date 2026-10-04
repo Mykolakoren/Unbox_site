@@ -10,6 +10,8 @@ import type { BookingHistoryItem } from '../../../store/types';
 import { RESOURCES } from '../../../utils/data';
 import { REASON_LABELS } from '../../../utils/ledgerReasons';
 import { computeDueByBooking } from '../../../utils/dueAmounts';
+import { applyAllocation, indexAllocation, ledgerRowLine, allocationHeadline } from '../../../utils/balanceAllocation';
+import { useClientAllocation } from '../../../hooks/useBalanceAllocation';
 import { batumiDayKey, bookingDayKey } from '../../../utils/adminToday';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
@@ -75,11 +77,15 @@ export function MobileAdminUserCard() {
     useEffect(() => { loadBookings(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [user?.email]);
 
     const balance = Number(user?.balance ?? 0);
+    // Раскладка ленты клиента (03.10) — для «к оплате» и «Движений баланса».
+    const { data: alloc } = useClientAllocation(user ? String(user.id) : null, user ? balance : null);
     const dueMap = useMemo(() => {
         if (!bookings || !user) return new Map();
         const ids = new Set([user.email, String(user.id)]);
-        return computeDueByBooking(bookings, uid => (ids.has(uid) ? balance : null));
-    }, [bookings, user, balance]);
+        const balanceOf = (uid: string) => (ids.has(uid) ? balance : null);
+        const index = alloc ? indexAllocation([{ ...alloc, email: alloc.email ?? user.email }]) : null;
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, index, balanceOf);
+    }, [bookings, user, balance, alloc]);
 
     const upcoming = useMemo(() => {
         if (!bookings) return [];
@@ -225,7 +231,7 @@ export function MobileAdminUserCard() {
                                             {b.status === 'pending_approval' ? ' · ждёт одобрения' : ''}
                                         </div>
                                     </div>
-                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} />
+                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
                                 </div>
                             );
                         })}
@@ -239,7 +245,7 @@ export function MobileAdminUserCard() {
             </Collapsible>
 
             <Collapsible title="Движения баланса">
-                <LedgerList userId={String(user.id)} />
+                <LedgerList userId={String(user.id)} balance={balance} />
             </Collapsible>
 
             <Collapsible title="Бонусы">
@@ -302,9 +308,16 @@ function Collapsible({ title, badge, defaultOpen = false, children }: {
     );
 }
 
-/** Движения баланса списком в две строки: дата и причина слева, ±сумма и итог справа. */
-function LedgerList({ userId }: { userId: string }) {
+/** Движения баланса списком в две строки: дата и причина слева, ±сумма и итог справа.
+ *  03.10: под строкой — куда ушли деньги / чем оплачено (раскладка ленты), сверху — сводка. */
+function LedgerList({ userId, balance }: { userId: string; balance: number }) {
     const [data, setData] = useState<BalanceLedgerResponse | null>(null);
+    const { data: alloc } = useClientAllocation(userId, balance);
+    // Раскладка — к той же ленте, что на экране (баланс совпадает), иначе не показываем.
+    const allocOk = !!alloc && alloc.consistent && !!data
+        && Math.round(Number(alloc.balance) * 100) === Math.round(Number(data.balance) * 100);
+    const allocRows = useMemo(() => new Map((allocOk ? alloc!.rows : []).map(r => [r.id, r])), [alloc, allocOk]);
+    const headline = allocOk ? allocationHeadline(alloc) : null;
     const [failed, setFailed] = useState(false);
     const [tick, setTick] = useState(0);
     useEffect(() => {
@@ -314,15 +327,22 @@ function LedgerList({ userId }: { userId: string }) {
             .then(r => { if (alive) setData(r); })
             .catch(() => { if (alive) setFailed(true); });
         return () => { alive = false; };
-    }, [userId, tick]);
+        // balance — после пополнения лента перечитывается вместе с раскладкой.
+    }, [userId, tick, balance]);
 
     if (failed) return <ErrorBar message="Не удалось загрузить движения баланса" onRetry={() => setTick(t => t + 1)} />;
     if (!data) return <SkeletonList count={3} label="Загружаем движения баланса" cardHeight={52} />;
     if (data.entries.length === 0) return <EmptyState compact title="Движений пока нет" />;
     return (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {headline && (
+                <div data-alloc-headline style={{ fontSize: 13, color: 'var(--color-ink-80)', lineHeight: 1.45, paddingBottom: 8, borderBottom: '1px solid var(--color-ink-08)' }}>
+                    {headline}
+                </div>
+            )}
             {data.entries.slice(0, 30).map(e => {
                 const when = e.date ? parseUTC(e.date) : null;
+                const allocLine = ledgerRowLine(allocRows.get(e.id));
                 return (
                     <div key={e.id} style={{
                         display: 'flex', gap: 10, alignItems: 'flex-start',
@@ -336,6 +356,11 @@ function LedgerList({ userId }: { userId: string }) {
                                 {when ? `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}` : '—'}
                                 {e.description ? ` · ${e.description}` : ''}
                             </div>
+                            {allocLine && (
+                                <div data-alloc-line style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, lineHeight: 1.4 }}>
+                                    {allocLine}
+                                </div>
+                            )}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                             <div className="num" style={{

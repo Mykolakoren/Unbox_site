@@ -9,7 +9,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle, CircleDashed } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -21,7 +21,9 @@ import { resourceKind } from '../../utils/subscriptionHours';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { BookingMoneyHints } from './BookingMoneyHints';
-import { computeDueByBooking, dueLabel, dueMarkKind, COVERED_SHORT, COVERED_HINT, type DueInfo } from '../../utils/dueAmounts';
+import { computeDueByBooking, dueLabel, dueMarkKind, dueHint, type DueInfo } from '../../utils/dueAmounts';
+import { applyAllocation } from '../../utils/balanceAllocation';
+import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type RefundOption } from './AdminCancelBookingModal';
 import { BookingPriceModal } from './BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -254,6 +256,10 @@ export function AdminChessboardView() {
     // «К оплате» по каждой брони из баланса клиента (вариант В, 29.09): долг —
     // на самые свежие списанные брони, плюс на балансе (недельная скидка,
     // предоплата) — на ближайшие ещё не списанные. Только отображение.
+    // 03.10: поверх — раскладка ленты с сервера (applyAllocation): долг — на той
+    // брони, к которой его привязала лента (бронь вне окна 5000 его не теряет и
+    // не отдаёт чужим), у покрытых плюсом — чем покрыто. Нет сводки — как было.
+    const allocIndex = useAllocationIndex(users, bookings);
     const dueMap = useMemo(() => {
         const bal = new Map<string, number>();
         for (const u of users) {
@@ -261,8 +267,9 @@ export function AdminChessboardView() {
             if (u.email) bal.set(u.email, v);
             if (u.id) bal.set(String(u.id), v);
         }
-        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
-    }, [bookings, users]);
+        const balanceOf = (uid: string) => (bal.has(uid) ? bal.get(uid)! : null);
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, allocIndex, balanceOf);
+    }, [bookings, users, allocIndex]);
 
     // ── Bookings on selected date ─────────────────────────────────────────────
     const bookingsOnDate = useMemo(() => {
@@ -1723,11 +1730,13 @@ export function AdminChessboardView() {
                                                             )}
                                                             <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
-                                                        {/* «к оплате / ✓ оплачено / с баланса» (В2) — на КАЖДОЙ брони, в т.ч.
-                                                            прошедшей. Три знака (dueMarkKind): к оплате — красный (!),
-                                                            оплачено — зелёная ✓ (уже списано), с баланса — контурный
-                                                            кружок (ещё не списано, брать нечего). 30-минутная (одна
-                                                            клетка) — значок в углу, подпись — в aria-label/title.
+                                                        {/* «к оплате / ✓ оплачено» (В2; правило знаков — решение владельца 03.10) —
+                                                            на КАЖДОЙ брони, в т.ч. прошедшей. Два знака (dueMarkKind): к оплате —
+                                                            красный (!), у частично покрытой — «к оплате N из M» (взять только
+                                                            разницу); оплачено — зелёная ✓: списана и долга на ней нет ИЛИ ещё не
+                                                            списана, но её целиком покрывает плюс на балансе (скидка за прошлую
+                                                            неделю, предоплата). Списанная в долг — всегда «к оплате».
+                                                            30-минутная (одна клетка) — значок в углу, подпись — в aria-label/title.
                                                             Сумма — только из dueMap. */}
                                                         {cell.colspan === 1 ? (
                                                             <CellDueMark info={dueMap.get(b.id)} corner />
@@ -1735,30 +1744,24 @@ export function AdminChessboardView() {
                                                             const d = dueMap.get(b.id);
                                                             const kind = dueMarkKind(d);
                                                             const wide = (cell.colspan ?? 1) >= 3;
-                                                            // Слова «к оплате» / «оплачено» / «с баланса» влезают рядом
-                                                            // со временем только от 2 часов (4 клетки). В 1,5 ч — «09:00 ✓»:
-                                                            // слово обрезалось («оплачеі»), подпись целиком — в title/aria-label.
+                                                            // Слова «к оплате» / «оплачено» влезают рядом со временем только
+                                                            // от 2 часов (4 клетки). В 1,5 ч — «09:00 ✓»: слово обрезалось
+                                                            // («оплачеі»), подпись целиком — в title/aria-label.
                                                             const roomy = (cell.colspan ?? 1) >= 4;
-                                                            const markLabel = kind === 'owes' && d ? `к оплате ${formatGel(d.due)}`
-                                                                : kind === 'covered' ? COVERED_HINT
-                                                                : kind === 'paid' ? 'списано с баланса' : '';
+                                                            const markLabel = dueHint(d);
+                                                            const partial = !!d && d.due > 0 && d.due < d.price;
                                                             return (
                                                                 <div className="text-xs leading-tight truncate tabular-nums flex items-center gap-1">
                                                                     {wide && <span className="font-normal">{b.startTime}</span>}
                                                                     {kind === 'owes' && d ? (
                                                                         <span className="font-semibold inline-flex items-center gap-0.5" title={markLabel} aria-label={markLabel}>
                                                                             <AlertCircle size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
-                                                                            {roomy ? 'к оплате ' : ''}{formatGel(d.due)}
-                                                                        </span>
-                                                                    ) : kind === 'covered' ? (
-                                                                        <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-muted-fg)]" title={markLabel} aria-label={markLabel}>
-                                                                            <CircleDashed size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
-                                                                            {roomy ? COVERED_SHORT : wide ? null : formatGel(b.finalPrice)}
+                                                                            {roomy && !partial ? 'к оплате ' : ''}{formatGel(d.due)}{roomy && partial ? ` из ${formatGel(d.price)}` : ''}
                                                                         </span>
                                                                     ) : kind === 'paid' ? (
                                                                         <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]" title={markLabel} aria-label={markLabel}>
                                                                             <Check size={12} strokeWidth={3} className="shrink-0" aria-hidden="true" />
-                                                                            {roomy ? 'списано с баланса' : wide ? null : formatGel(b.finalPrice)}
+                                                                            {roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}
                                                                         </span>
                                                                     ) : (
                                                                         <span className="font-normal" title={b.paymentMethod === 'subscription' ? 'абонемент' : undefined}>
@@ -1888,10 +1891,10 @@ export function AdminChessboardView() {
 
             {/* ── Legend ── */}
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-ink pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-unbox-light" data-chess-legend>
-                {/* Деньги (В2) — первыми: это главный вопрос у стойки. */}
+                {/* Деньги (В2; знаки — решение владельца 03.10) — первыми: это главный вопрос у стойки. */}
                 <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 36 ₾ — взять с клиента</span>
-                <span className="ui-badge ui-badge--ok"><Check size={14} strokeWidth={3} aria-hidden="true" />списано с баланса — деньги уже списаны с баланса клиента (если баланс в минусе, красным будет «к оплате»)</span>
-                <span className="ui-badge ui-badge--muted"><CircleDashed size={14} strokeWidth={2.5} aria-hidden="true" />спишется с баланса — деньги спишутся за сутки до начала, брать ничего не нужно</span>
+                <span className="ui-badge ui-badge--danger whitespace-normal h-auto py-1" title="Часть брони уже покрыта балансом клиента (например, скидкой за прошлую неделю) — взять только разницу"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 11 ₾ из 20 — взять только разницу</span>
+                <span className="ui-badge ui-badge--ok whitespace-normal h-auto py-1" title="Уже списана с баланса без долга или спишется за 24 ч до начала из плюса на балансе (скидка за прошлую неделю, предоплата). Списанная в долг — всегда «к оплате»"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено — бронь покрыта деньгами клиента, брать ничего не нужно</span>
                 <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
                 <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
                 <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
@@ -1899,7 +1902,7 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)]/30" label={statusLabel('booking', 'completed', 'staff')} />
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
                 <span className="flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> серия</span>
-                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный, галочка или кружок</span>
+                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный знак или галочка</span>
             </div>
             </div>
             {/* ── Панель брони — справа от сетки, сетку не закрывает (G7-12). ── */}
@@ -2198,22 +2201,19 @@ export function AdminChessboardView() {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-/** «к оплате / ✓ оплачено / с баланса» в клетке шахматки (В2). corner — значок
- *  в углу 30-минутной брони (одна клетка): подпись целиком — в aria-label и title.
- *  Три знака (dueMarkKind): к оплате — красный; оплачено (уже списано) — зелёная ✓;
- *  с баланса (ещё не списано, покрыто плюсом на балансе) — серый контурный кружок,
- *  НЕ галочка: денег никто не вносил. Записи в dueMap нет — ничего. */
+/** «к оплате / ✓ оплачено» в клетке шахматки (В2; правило знаков — владелец 03.10).
+ *  corner — значок в углу 30-минутной брони (одна клетка): подпись целиком — в
+ *  aria-label и title. Два знака (dueMarkKind): к оплате — красный (у частично
+ *  покрытой подпись «к оплате N ₾ из M»); оплачено — зелёная ✓ (списана без долга
+ *  или ещё не списана, но целиком покрыта плюсом на балансе — подсказка «спишется
+ *  за 24 ч до начала»). Записи в dueMap нет — ничего. */
 function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corner?: boolean }) {
     const kind = dueMarkKind(info);
     if (!info || !kind) return null;
-    const label = kind === 'owes' ? `к оплате ${formatGel(info.due)}`
-        : kind === 'covered' ? COVERED_HINT
-        : 'списано с баланса';
+    const label = dueHint(info);
     const icon = kind === 'owes'
         ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
-        : kind === 'covered'
-            ? <CircleDashed size={12} strokeWidth={2.5} aria-hidden="true" />
-            : <Check size={12} strokeWidth={3} aria-hidden="true" />;
+        : <Check size={12} strokeWidth={3} aria-hidden="true" />;
     if (corner) {
         return (
             <span
@@ -2223,7 +2223,6 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
                 className={clsx(
                     'absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl',
                     kind === 'owes' && 'bg-[var(--status-danger-fg)] text-[var(--status-danger-bg)]',
-                    kind === 'covered' && 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)]',
                     kind === 'paid' && 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]',
                 )}
             >
@@ -2233,12 +2232,12 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
     }
     return (
         <span
-            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : kind === 'covered' ? 'ui-badge--muted' : 'ui-badge--ok')}
+            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : 'ui-badge--ok')}
             title={label}
             aria-label={label}
         >
             {icon}
-            <span className="num">{kind === 'owes' ? formatGel(info.due) : kind === 'covered' ? COVERED_SHORT : 'списано с баланса'}</span>
+            <span className="num">{kind === 'owes' ? formatGel(info.due) : 'оплачено'}</span>
         </span>
     );
 }

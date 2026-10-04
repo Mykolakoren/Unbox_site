@@ -291,14 +291,18 @@ def test_mobile_admin_cash_gated():
 
 def test_today_uncharged_and_covered_labels():
     badge = _code(COMP + "DueBadge.tsx")
-    assert "charged === false ? 'спишется с баланса' : paidLabel" in badge, \
-        "не списанная бронь, покрытая плюсом баланса, снова «оплачено»"
+    # 03.10 (решение владельца «оплачено скидкой»): не списанная бронь, которую
+    # целиком покрывает плюс на балансе, — «✓ оплачено» с подсказкой «спишется за
+    # 24 ч до начала» (было «◌ спишется с баланса», 01.10).
+    assert "charged === false ? COVERED_HINT : PAID_HINT" in badge and "paidLabel = 'оплачено'" in badge, \
+        "не списанная бронь, покрытая плюсом баланса, — не «оплачено» с подсказкой"
     assert "ui-badge--pending" in badge and "statusLabel('payment', 'not_charged', 'staff')" in badge, \
         "нет плашки «не списана»"
     st = _read("src/design/statuses.ts")
     assert "not_charged: { label: 'Не списана', tone: 'pending'" in st
-    for rel, needle in ((ADMIN + "Dashboard.tsx", "<DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} />"),
-                        (MADMIN + "MobileAdminDashboard.tsx", "<DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} />")):
+    # 03.10: + price — у частично покрытой брони «к оплате N ₾ из M» (решение владельца).
+    for rel, needle in ((ADMIN + "Dashboard.tsx", "<DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="),
+                        (MADMIN + "MobileAdminDashboard.tsx", "<DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className=")):
         assert needle in _code(rel), f"{rel}: «Сегодня» без «не списана / покрыто балансом»"
 
     res = _node_run(f"""
@@ -407,7 +411,8 @@ def test_visual_polish_today_chess_team_users():
     assert "tableLayout: 'fixed'" in dash and "<colgroup>" in dash, "«Кто придёт»: колонка клиента снова узкая"
     chess = _code("src/components/admin/AdminChessboardView.tsx")
     assert "const roomy = (cell.colspan ?? 1) >= 4;" in chess
-    assert "{roomy ? 'списано с баланса' : wide ? null : formatGel(b.finalPrice)}" in chess, "подпись снова не в коротком блоке"
+    # 03.10: подпись знака — «оплачено» (было «списано с баланса»), правило ширины прежнее.
+    assert "{roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}" in chess, "подпись снова не в коротком блоке"
     assert "title={markLabel} aria-label={markLabel}" in chess, "у «✓» в коротком блоке нет подписи"
     mob = _code(MADMIN + "MobileAdminDashboard.tsx")
     assert "position: 'fixed'" not in mob, "«+» на «Сегодня» снова плавает поверх отметок оплаты"

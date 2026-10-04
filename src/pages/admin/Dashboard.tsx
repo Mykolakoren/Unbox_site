@@ -14,6 +14,8 @@ import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 import { statusLabel, getStatusDef } from '../../design/statuses';
 import { STATUS, COLOR } from '../../design/tokens';
 import { computeDueByBooking } from '../../utils/dueAmounts';
+import { applyAllocation, hiddenDebts, type HiddenDebt } from '../../utils/balanceAllocation';
+import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../utils/adminToday';
 import { hasPermission } from '../../utils/permissions';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
@@ -86,7 +88,10 @@ export function AdminDashboard() {
         return () => window.clearInterval(t);
     }, []);
 
-    // «К оплате» по каждой брони — та же карта, что в шахматке.
+    // «К оплате» по каждой брони — та же карта, что в шахматке (03.10: плюс
+    // раскладка ленты applyAllocation — брони, покрытые скидкой за прошлую
+    // неделю, «оплачено»; частично — «к оплате N из M»).
+    const allocIndex = useAllocationIndex(users, bookings);
     const dueMap = useMemo(() => {
         const bal = new Map<string, number>();
         for (const u of users) {
@@ -94,13 +99,24 @@ export function AdminDashboard() {
             if (u.email) bal.set(u.email, v);
             if (u.id) bal.set(String(u.id), v);
         }
-        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
-    }, [bookings, users]);
+        const balanceOf = (uid: string) => (bal.has(uid) ? bal.get(uid)! : null);
+        return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, allocIndex, balanceOf);
+    }, [bookings, users, allocIndex]);
 
     const rows = useMemo(
         () => todayRows({ bookings, users, dueMap, dayKey, resources }),
         [bookings, users, dueMap, dayKey, resources],
     );
+    // Долги по броням вне списка (риск 1, 03.10): брони старше окна админки,
+    // отменённые со штрафом, списания не за бронь — на бронях списка их не видно.
+    const hidden = useMemo(() => {
+        const bal = new Map<string, number>();
+        for (const u of users) {
+            if (u.email) bal.set(u.email, Number((u as any).balance ?? 0));
+            if (u.id) bal.set(String(u.id), Number((u as any).balance ?? 0));
+        }
+        return hiddenDebts(dueMap, bookings, allocIndex, uid => (bal.has(uid) ? bal.get(uid)! : null));
+    }, [dueMap, bookings, allocIndex, users]);
     const summary = useMemo(() => todaySummary(rows), [rows]);
     const clients = useMemo(() => byClient(rows, users), [rows, users]);
 
@@ -181,6 +197,7 @@ export function AdminDashboard() {
             archived={archived}
             recentBookings={recentBookings}
             rebates={rebates}
+            hidden={hidden}
         />
     );
 }
@@ -204,6 +221,8 @@ interface TodayProps {
     recentBookings: BookingHistoryItem[];
     /** Недельная скидка с последнего понедельника, ₾ — по id клиента и почте. */
     rebates: Map<string, number>;
+    /** Долги по броням вне списка (раскладка ленты, 03.10). */
+    hidden: HiddenDebt[];
 }
 
 const hairline = `1px solid ${GH.ink10}`;
@@ -216,7 +235,7 @@ const monoLabel: React.CSSProperties = {
 };
 
 function GridHouseToday({
-    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, onPaid, archived, recentBookings, rebates,
+    dayKey, status, onRetry, rows, summary, clients, users, overLimit, tomorrow, cash, onPaid, archived, recentBookings, rebates, hidden,
 }: TodayProps) {
     const navigate = useNavigate();
     const [filter, setFilter] = useState<'all' | 'due'>('all');
@@ -403,8 +422,9 @@ function GridHouseToday({
                                             <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                 <StatusBadge kind="booking" status={r.status} audience="staff" variant="dot" />
                                             </td>
-                                            <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} />
+                                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                                                {/* «к оплате 11 ₾ из 20» может перенестись — колонка прежней ширины, имени клиента не тесно. */}
+                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="whitespace-normal h-auto py-1" />
                                             </td>
                                         </tr>
                                     );
@@ -452,6 +472,36 @@ function GridHouseToday({
                                     <CollectRow key={c.userId} c={c} user={findUser(c.userId) ?? findUser(c.rows[0]?.userId ?? '')} onPaid={onPaid} rebates={rebates} />
                                 ))}
                             </ul>
+                        </section>
+                    )}
+
+                    {!loading && hidden.length > 0 && (
+                        <section aria-labelledby="today-hidden" data-hidden-debts style={{ border: hairline }}>
+                            <div style={{ padding: '12px 16px', borderBottom: hairline }}>
+                                <h2 id="today-hidden" style={{ fontSize: 16, fontWeight: 600, margin: 0, color: STATUS.danger.fg }}>
+                                    Долги по броням вне списка: {ruCountWord(hidden.length, ['клиент', 'клиента', 'клиентов'])}, <span className="num">{formatGel(hidden.reduce((s, h) => s + h.amount, 0))}</span>
+                                </h2>
+                                <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2 }}>
+                                    Старые брони, отменённые со штрафом, списания не за бронь — на бронях в списке их не видно
+                                </div>
+                            </div>
+                            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                                {hidden.slice(0, 8).map(h => {
+                                    const u = users.find(x => String(x.id) === h.userId || x.email === h.email);
+                                    return (
+                                        <li key={h.userId} style={{ borderTop: hairline, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                                            <Link to={`/admin/users/${encodeURIComponent(h.email || h.userId)}`} title={h.debts.map(d => `${d.label} — ${formatGel(d.amount)}`).join('; ')}
+                                                style={{ color: GH.ink, textDecoration: 'none', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {u?.name || h.email || h.userId}
+                                            </Link>
+                                            <span className="num" style={{ whiteSpace: 'nowrap', color: STATUS.danger.fg }}>{formatGel(h.amount)}</span>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                            {hidden.length > 8 && (
+                                <div style={{ borderTop: hairline, padding: '8px 16px', fontSize: 14, color: GH.ink60 }}>И ещё {hidden.length - 8}</div>
+                            )}
                         </section>
                     )}
 

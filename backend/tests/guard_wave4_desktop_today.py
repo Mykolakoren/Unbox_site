@@ -144,10 +144,15 @@ def test_chessboard_due_mark_on_every_booking():
     assert "<CellDueMark info={dueMap.get(b.id)} corner />" in d, "у 30-минутной брони нет значка в углу"
     # Сумма «к оплате» — на любой брони ≥ 1 ч; слово «к оплате» — от 2 ч (roomy):
     # в 1,5 ч оно обрезалось (доработка 01.10, guard_wave4_polish).
-    assert "{roomy ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
+    # 03.10: у частично покрытой брони в плитке — «11 ₾ из 20 ₾» (без слова, чтобы не обрезалось).
+    assert "{roomy && !partial ? 'к оплате ' : ''}{formatGel(d.due)}" in d, "у брони ≥ 1 ч нет «к оплате X ₾»"
     helper = _between(src, "function CellDueMark(", "function LegendItem(")
     assert "aria-label={label}" in helper and "title={label}" in helper, "значок в углу без подписи"
-    assert "`к оплате ${formatGel(info.due)}`" in helper
+    # 03.10 (решение владельца «оплачено скидкой»): подпись знака — dueHint
+    # («к оплате 11 ₾ из 20 — …» / «Оплачено …»); было `к оплате ${formatGel(info.due)}`.
+    assert "const label = dueHint(info);" in helper
+    due = _read("src/utils/dueAmounts.ts")
+    assert "export function dueHint(" in due and "`${dueLabel(info)} — взять с клиента`" in due
     # Мобильная ветка — тоже с отметкой.
     m = src[src.index("// ── MOBILE VIEW ──"):src.index("// ── DESKTOP VIEW ──")]
     assert "<CellDueMark info={dueMap.get(b.id)} />" in m, "на телефоне у брони нет отметки оплаты"
@@ -164,7 +169,10 @@ def test_chessboard_unpaid_is_danger_tone():
 def test_chessboard_legend_explains_money():
     src = _read(CHESS)
     leg = _between(src, "data-chess-legend", "</div>")
-    assert "к оплате" in leg and "списано с баланса" in leg, "легенда не объясняет «к оплате» / «списано с баланса»"
+    # 03.10: «✓ списано с баланса» и «◌ спишется с баланса» объединены в «✓ оплачено»
+    # (решение владельца: брони, покрытые скидкой за прошлую неделю, — «оплачено»).
+    assert "к оплате" in leg and "оплачено — бронь покрыта деньгами клиента" in leg, \
+        "легенда не объясняет «к оплате» / «оплачено»"
     assert "ui-badge--danger" in leg and "ui-badge--ok" in leg
 
 
@@ -194,7 +202,12 @@ CHESS_MONEY_FP = {
     ("const doShorten = async", "    /** \"Перенести\""): "830d3b7231125147",
     ("const handleDropMove = async", "    /** Собственно перенос"): "25ae16962b80e8ba",
     ("const doMove = async", "    // ─── Render"): "40db36a87307795b",
-    ("const dueMap = useMemo(() => {", "    // ── Bookings on selected date"): "b8f8276e912cd3bf",
+    # 03.10 (решение владельца «оплачено скидкой + куда ушли деньги»): dueMap =
+    # applyAllocation(computeDueByBooking(...)) — раскладка ленты с сервера поверх
+    # прежнего расчёта (долг — на брони, к которой его привязала лента; бронь вне
+    # окна 5000 его не теряет). Паритет сумм — guard_balance_allocation_2026_10.
+    # Прежний отпечаток b8f8276e912cd3bf.
+    ("const dueMap = useMemo(() => {", "    // ── Bookings on selected date"): "21f8f8a83d64d3f1",
 }
 
 LIST_MONEY_FP = {

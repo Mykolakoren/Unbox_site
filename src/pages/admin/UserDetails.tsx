@@ -1436,7 +1436,7 @@ export function AdminUserDetails() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                                 <div className="space-y-6">
                                     <div className="space-y-6">
-                                        <UserBalanceLedger userId={user.id || user.email} />
+                                        <UserBalanceLedger userId={user.id || user.email} balance={user.balance} />
                                         <UserTransactions email={user.email} />
                                     </div>
                                     <UserTasks email={user.email} tasks={user.adminTasks || []} />
@@ -1556,7 +1556,7 @@ export function AdminUserDetails() {
                                 </div>
                                 <div className="p-4">
                                     <div className="space-y-6">
-                                        <UserBalanceLedger userId={user.id || user.email} />
+                                        <UserBalanceLedger userId={user.id || user.email} balance={user.balance} />
                                         <UserTransactions email={user.email} />
                                     </div>
                                 </div>

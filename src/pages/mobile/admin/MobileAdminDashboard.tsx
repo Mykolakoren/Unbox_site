@@ -11,6 +11,8 @@ import { RESOURCES } from '../../../utils/data';
 import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { useAdminDueMap, acceptPaymentFor, branchOfBooking, type AcceptPayment } from './adminPayment';
+import { useAllocationIndex } from '../../../hooks/useBalanceAllocation';
+import { hiddenDebts } from '../../../utils/balanceAllocation';
 import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
 import { TopupSheet } from './TopupSheet';
 import { DueBadge } from '../../../components/admin/DueBadge';
@@ -82,6 +84,18 @@ export function MobileAdminDashboard() {
     }, [fetchAllBookings]);
 
     const dueMap = useAdminDueMap(bookings, users);
+    // Долги по броням вне списка (риск 1, 03.10): брони старше окна админки,
+    // отменённые со штрафом, списания не за бронь — на бронях списка их не видно.
+    const allocIndex = useAllocationIndex(users || [], bookings || []);
+    const hidden = useMemo(() => {
+        const bal = new Map<string, number>();
+        for (const u of users || []) {
+            if (u.email) bal.set(u.email, Number(u.balance ?? 0));
+            if (u.id) bal.set(String(u.id), Number(u.balance ?? 0));
+        }
+        return hiddenDebts(dueMap, bookings, allocIndex, uid => (bal.has(uid) ? bal.get(uid)! : null));
+    }, [dueMap, bookings, allocIndex, users]);
+    const hiddenTotal = Math.round(hidden.reduce((s, h) => s + h.amount, 0) * 100) / 100;
     const todayKey = batumiDayKey();
     const tomorrowKey = batumiDayKey(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
@@ -322,6 +336,33 @@ export function MobileAdminDashboard() {
                 )}
             </div>
 
+            {/* Долги по броням вне списка (03.10) — только если есть. */}
+            {!bookingsPending && hidden.length > 0 && (
+                <section data-hidden-debts aria-label="Долги по броням вне списка" style={{ padding: '0 16px' }}>
+                    <div style={{ background: 'var(--status-danger-bg)', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--status-danger-fg)' }}>
+                            Долги по броням вне списка: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}, <span className="num">{formatGel(hiddenTotal)}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                            Старые брони, отменённые со штрафом, списания не за бронь — на бронях в списке их не видно
+                        </div>
+                        {hidden.slice(0, 8).map(h => {
+                            const u = (users || []).find(x => String(x.id) === h.userId || x.email === h.email);
+                            return (
+                                <Link key={h.userId} to={`/m/admin/users/${encodeURIComponent(h.email || h.userId)}`}
+                                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 14, color: 'var(--color-ink)', textDecoration: 'none', minHeight: 32, alignItems: 'center' }}>
+                                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u?.name || h.email || h.userId}</span>
+                                    <span className="num" style={{ color: 'var(--status-danger-fg)', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatGel(h.amount)}</span>
+                                </Link>
+                            );
+                        })}
+                        {hidden.length > 8 && (
+                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>И ещё {hidden.length - 8} — в списке клиентов</div>
+                        )}
+                    </div>
+                </section>
+            )}
+
             {/* Прогноз должников — одной строкой, раскрывается по тапу. */}
             {forecast && forecast.count > 0 && (
                 <div style={{ padding: '0 16px' }}>
@@ -458,7 +499,7 @@ function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archived
                     </span>
                 )}
             </span>
-            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} />
+            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
         </button>
     );
 }
