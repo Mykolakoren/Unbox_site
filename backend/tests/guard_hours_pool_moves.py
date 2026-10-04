@@ -65,11 +65,18 @@ import contextlib  # noqa: E402
 
 
 @contextlib.contextmanager
-def frozen_time():
+def frozen_time(at=None):
     """Заморозить время: подменить datetime во всех модулях app.* (они делают
     `from datetime import datetime`) и в sys.modules (импорты ВНУТРИ функций,
     напр. гейт горячей брони). На выходе всё возвращается — сторожа гоняются
-    в одном процессе, остальным нужно настоящее время."""
+    в одном процессе, остальным нужно настоящее время.
+
+    `at` — другой замороженный момент (UTC, без зоны) вместо FIXED_UTC; на
+    выходе прежний момент возвращается (вложенные заморозки не мешают)."""
+    global FIXED_UTC
+    _saved_at = FIXED_UTC
+    if at is not None:
+        FIXED_UTC = at
     import app.api.v1.bookings.routes  # noqa: F401
     import app.api.v1.billing  # noqa: F401
     import app.api.v1.users.admin  # noqa: F401
@@ -94,6 +101,7 @@ def frozen_time():
         sys.modules["datetime"] = real_mod
         for mod in patched:
             setattr(mod, "datetime", _real_datetime)
+        FIXED_UTC = _saved_at
 
 
 def _db() -> Session:

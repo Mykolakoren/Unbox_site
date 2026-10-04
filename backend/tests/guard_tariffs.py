@@ -15,18 +15,25 @@
 
     python3 backend/tests/guard_tariffs.py
 """
+import functools
 import os
 import sys
 from datetime import datetime, timedelta
 from uuid import uuid4
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("ENVIRONMENT", "development")
 
 from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import app.models  # noqa: E402,F401  — регистрирует все таблицы
+# Лента баланса: перенос с доплатой пишет в неё — без явного импорта таблицы в
+# базе сторожа не было, если до _db() никто не загрузил модуль кошелька.
+import app.models.balance_ledger  # noqa: E402,F401
+
+import guard_hours_pool_moves as H  # noqa: E402
 from app.models.bonus import Bonus  # noqa: E402
 from app.models.resource import Resource  # noqa: E402
 from app.models.user import User  # noqa: E402
@@ -700,6 +707,35 @@ def test_frontend_offers_late_reschedule_like_server():
     assert "{lateLeft > 0 && (" in late, "в ветке «меньше суток» перенос не завязан на бесплатные переносы"
     for rel in ("src/components/SubscriptionCard.tsx", "src/pages/mobile/MobileSubscription.tsx"):
         assert "Переносов позже суток" in _read(rel), f"{rel}: нет «Переносов позже суток: осталось N»"
+
+
+# ─── Своё время у сторожа ───────────────────────────────────────────────
+# Ревизия 04.10: сторож жил по настоящим часам. Бронь «через 10 ч» в 06–08 и
+# 19–20 UTC попадала в пик (20–22 / 09–10 по Тбилиси), перенос двигал деньги —
+# и проверка краснела от времени запуска, а не от кода. Теперь каждая проверка
+# идёт при замороженном времени: пн 05.10.2026 08:00 UTC (12:00 по Тбилиси) —
+# брони «через 2 ч» и «через 10 ч» (14:00 и 22:00) вне пика. И в отдельном
+# запуске, и в общем стороже (test_regression_guard) время одно и то же.
+_FROZEN_AT = datetime(2026, 10, 5, 8, 0, 0)
+
+
+def _frozen(fn):
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        g = fn.__globals__
+        saved = g.get("datetime")
+        with H.frozen_time(at=_FROZEN_AT):
+            g["datetime"] = H.FakeDatetime
+            try:
+                return fn(*a, **kw)
+            finally:
+                g["datetime"] = saved
+    return wrapper
+
+
+for _name, _fn in list(globals().items()):
+    if _name.startswith("test_") and callable(_fn):
+        globals()[_name] = _frozen(_fn)
 
 
 if __name__ == "__main__":
