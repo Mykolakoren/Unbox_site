@@ -2064,6 +2064,41 @@ def test_r3_5_frontend_shows_approval_note():
         assert "res.approvalNote ||" in _read(path), f"{path}: одобрение «в деньги» не показывает админу итог"
 
 
+@_scenario
+def test_r3_6_shortened_money_booking_keeps_sandbox_in_later_edits():
+    """Денежная 2 ч + песочница = 41 ₾ → сократили на 1 ч → 23 ₾. Дальше перенос,
+    смена формата, «часы подряд» — песочница остаётся в цене. Было: после
+    сокращения base/discount не менялись, оценщик допов видел 0, и перенос делал
+    20 ₾ (песочница выпала)."""
+    from app.services.pricing import booking_extras_money
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    a = _book(s, admin, u, start="14:00", minutes=120, method="balance", extras=["sandbox"])
+    _shorten(s, admin, a)
+    a = s.get(Booking, a.id)
+    assert (float(a.final_price), booking_extras_money(a)) == (23.0, 5.0), (a.final_price, booking_extras_money(a))
+    a = _reschedule(s, admin, a, start="15:00")
+    assert (float(a.final_price), a.extras) == (25.0, ["sandbox"]), (a.final_price, a.extras)
+
+    b = _book(s, admin, u, start="10:00", minutes=120, method="balance", extras=["sandbox"], resource="room_3")
+    _shorten(s, admin, b)
+    _format(s, admin, s.get(Booking, b.id), "group")
+    b = s.get(Booking, b.id)
+    assert float(b.final_price) == 40.0, b.final_price  # группа 35 + песочница 5
+
+    c = _book(s, admin, u, start="18:00", minutes=120, method="balance", extras=["sandbox"], resource="room_2")
+    _shorten(s, admin, c)
+    _book(s, admin, u, start="19:00", minutes=60, method="balance", resource="room_2")  # «часы подряд»: 2 ч → −10 %
+    c = s.get(Booking, c.id)
+    assert float(c.final_price) == 23.0 and booking_extras_money(c) == 5.0, (c.final_price, booking_extras_money(c))
+    for r in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
+        if r.status != "cancelled":
+            _cancel(s, admin, r)
+    assert _bal(s, u) == 300.0
+    _ledger_ok(s, u, 300.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

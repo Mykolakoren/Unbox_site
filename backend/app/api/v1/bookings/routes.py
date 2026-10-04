@@ -6827,6 +6827,16 @@ def shorten_booking(
     if (booking.payment_method or "").lower() == "subscription":
         booking.hours_deducted = new_hours
         subscription_pool.stamp_booking(booking, new_hours, new_extra)
+    elif old_duration > 0:
+        # Аренда в цене денежной брони = base_price − discount_amount (по ним
+        # booking_extras_money отделяет допы). Аренда уменьшилась той же долей —
+        # и base/discount той же долей (ревизия 03.10: иначе после сокращения
+        # оценщик видел допы = 0, и следующий перенос/«часы подряд»/формат
+        # выкидывали песочницу: 41 → 23 → перенос → 20 ₾).
+        _ratio = new_duration / old_duration
+        if booking.base_price is not None:
+            booking.base_price = round(float(booking.base_price) * _ratio, 2)
+        booking.discount_amount = round(float(booking.discount_amount or 0) * _ratio, 2)
     if settled_now:
         booking.charge_amount = new_price
     booking.updated_at = datetime.now()
