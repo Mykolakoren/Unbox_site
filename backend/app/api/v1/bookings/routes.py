@@ -444,6 +444,10 @@ def charge_hot_booking_on_approval(
     Ставит confirmed + paid + charged_at + charge_amount. Не коммитит.
     Возвращает {"method", "hours", "money", "fallback"} — для текста клиенту.
     Без владельца (старые брони) — как раньше: ничего не списываем."""
+    # Единое правило: перед записью charge_amount старая «часовая» строка лечится
+    # (у горячей брони её не бывает — вызов ничего не меняет, но правило одно).
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
     from app.services.billing_defer import subscription_cash_price, subscription_money_due
     method = (booking.payment_method or "balance").lower()
     info = {"method": method, "hours": 0.0, "money": 0.0, "fallback": False}
@@ -5985,6 +5989,12 @@ def set_booking_price(
     booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    # Старая «часовая» строка (часы в charge_amount, hours_deducted пуст):
+    # перенести часы в hours_deducted ДО записи денег в charge_amount — иначе
+    # «Цена» затирала снимок часов, и отмена/«Снять штраф» не возвращали час
+    # (регрессия круга 4, ревизия 04.10).
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     new_price = float(payload.new_price)
     if new_price < 0:
@@ -6486,6 +6496,11 @@ def add_booking_extras(
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Допы можно добавить только к подтверждённой броне")
+    # Старая «часовая» строка: часы — в hours_deducted до того, как доп с баланса
+    # допишет деньги в charge_amount (иначе строка станет «денежной», и отмена
+    # вернёт снимок часов как ₾, а час — нет).
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
 
     from app.services.pricing import PricingService
 

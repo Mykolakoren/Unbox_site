@@ -2502,6 +2502,90 @@ def test_r4_3_hours_label_with_money_amount_is_money():
     assert (_bal(s, u), _rem(s, u)) == (100.0, 2.0), (_bal(s, u), _rem(s, u))
 
 
+@_scenario
+def test_r5_1_legacy_hours_row_price_then_cancel_returns_hour():
+    """Регрессия круга 4 (ревизия 04.10), сторож legacy__price__1h: старая
+    «часовая» строка (часы сняты кроном, hours_deducted пуст, пул 'main', снимок
+    часов 1.0 в charge_amount) → «Цена» 10 записывала деньги поверх снимка
+    часов, строка становилась «денежной», и отмена возвращала 10 ₾, а час — нет
+    (пул 9). Теперь каждая запись charge_amount сначала лечит строку: баланс 100,
+    пул 10. То же — «Снять штраф» после «Цены» и доп с баланса до отмены."""
+    from app.api.v1.bookings import routes
+    from app.services import billing_defer
+    for follow in ("cancel", "waive", "extras"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, _sub("WARM_START"), balance=100.0)
+        b = _book(s, admin, u, days=3, start="14:00")
+        ok, why = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+        s.commit()
+        assert ok, why
+        b = s.get(Booking, b.id)
+        b.hours_deducted = None
+        s.add(b)
+        s.commit()
+        assert (b.hours_pool, float(b.charge_amount), _bal(s, u), _rem(s, u)) == ("main", 1.0, 100.0, 9.0)
+        if follow == "extras":
+            out = H._call(routes.add_booking_extras, booking_id=str(b.id),
+                          payload=routes.AddExtrasRequest(extras=["sandbox"], payment_method="balance"),
+                          session=s, current_user=admin)
+            s.commit()
+            assert not (isinstance(out, dict) and "http" in out), out
+            assert _bal(s, u) == 95.0, _bal(s, u)
+        else:
+            _set_price(s, admin, b, 10.0)
+            assert (_bal(s, u), _rem(s, u)) == (90.0, 9.0), (follow, _bal(s, u), _rem(s, u))
+        b = s.get(Booking, b.id)
+        assert float(b.hours_deducted or 0) == 1.0 and not routes._subscription_money_row(b), \
+            (follow, b.hours_deducted, b.charge_amount)
+        if follow == "waive":
+            _waive(s, admin, b)
+        else:
+            _cancel(s, admin, b)
+        assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), (follow, _bal(s, u), _rem(s, u))
+        _ledger_ok(s, u, 100.0)
+
+
+def test_r5_1_every_charge_amount_write_heals_first():
+    """Каждая функция, которая пишет charge_amount существующей брони по
+    абонементу, сначала лечит старую «часовую» строку (сама или общим
+    помощником, который её лечит)."""
+    import ast
+    src = _read("backend/app/api/v1/bookings/routes.py")
+    tree = ast.parse(src)
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+    def calls(fn):
+        return {c.func.id for c in ast.walk(funcs[fn]) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+
+    healers = {fn for fn in funcs if "heal_legacy_subscription_hours" in calls(fn)}
+    writers = []
+    for name, node in funcs.items():
+        for a in ast.walk(node):
+            if isinstance(a, ast.Assign) and any(
+                    isinstance(t, ast.Attribute) and t.attr == "charge_amount"
+                    and isinstance(t.value, ast.Name) and t.value.id == "booking" for t in a.targets):
+                writers.append(name)
+                break
+    # создание брони пишет charge_amount НОВОЙ строке (booking_in / Booking(...)) — не сюда.
+    # «На абонемент» переводит только НЕабонементную бронь (абонементную он
+    # отказывает: «Бронь уже списана с абонемента») — старой «часовой» строки
+    # там не бывает.
+    exempt = {"_convert_booking_to_subscription"}
+    assert writers, "не нашлось ни одной записи charge_amount — сторож устарел"
+    src_conv = _body(src, "def _convert_booking_to_subscription(", "\ndef ")
+    assert 'if booking.payment_method == "subscription":' in src_conv, "перевод на абонемент снова пускает абонементную бронь"
+    for name in writers:
+        if name in exempt:
+            continue
+        ok = name in healers or any(h in calls(name) for h in healers)
+        assert ok, f"{name}: пишет charge_amount, не вылечив старую «часовую» строку"
+    for must in ("set_booking_price", "add_booking_extras", "charge_hot_booking_on_approval",
+                 "shorten_booking", "trim_booking", "split_booking", "change_booking_format",
+                 "_reprice_for_move", "_extend_subscription_booking"):
+        assert must in healers, f"{must}: нет heal_legacy_subscription_hours"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
