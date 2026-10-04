@@ -45,8 +45,15 @@ deploy_front() {
   tar czf "$TARBALL" -C dist .
   ls -lh "$TARBALL"
 
-  $SCP "$TARBALL" "$SSH_HOST:/tmp/unbox-dist.tgz"
+  # 04.10: обрыв scp раньше молча пропускался — скрипт шёл дальше к подмене.
+  # Теперь 3 попытки, и без успешной загрузки — стоп (прод не трогаем).
+  local ok=0
+  for attempt in 1 2 3; do
+    if $SCP -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$TARBALL" "$SSH_HOST:/tmp/unbox-dist.tgz"; then ok=1; break; fi
+    echo "upload attempt $attempt failed — retry in 10s"; sleep 10
+  done
   rm -f "$TARBALL"
+  if [ "$ok" -ne 1 ]; then echo "UPLOAD FAILED — прод не тронут"; exit 1; fi
 
   banner "FRONTEND swap on Droplet"
   $SSH "set -e
