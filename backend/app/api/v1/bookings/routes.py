@@ -7051,7 +7051,29 @@ def split_booking(
             return round(float(q.base_price) - room, 2)
         return float(q.discount_amount)
     charged_total = float(booking.charge_amount) if booking.charge_amount is not None else None
-    charges = _split_amount(charged_total) if charged_total is not None else None
+    charges = None
+    if charged_total is not None:
+        if (booking.payment_method or "balance").lower() == "subscription":
+            # По абонементу: у брони с часами charge_amount для денег не читается,
+            # у ушедшей в деньги — это снятые ₾ за весь слот; делим долями движка.
+            charges = _split_amount(charged_total)
+        else:
+            # Денежная бронь: каждая часть держит ровно свою цену (допы — в первой
+            # части, как и в цене). Ревизия 04.10 (фаззер ревизора, seed 403):
+            # снятое делилось долями движка, а допы целиком шли в цену первой
+            # части — charge_amount ≠ final_price у каждой части, и «Цена» на
+            # первой части возвращала от final_price: +2,5 ₾ из воздуха.
+            _prices = [round(room_prices[k] + (extras_price if k == 0 else 0.0), 2) for k in range(len(parts))]
+            _psum = round(sum(_prices), 2)
+            if abs(_psum - charged_total) < 0.005:
+                charges = _prices
+            elif _psum > 0:
+                # старая бронь, где снятое разошлось с ценой — делим снятое
+                # долями цен частей, сумма остаётся ровно снятой
+                charges = [round(charged_total * pr / _psum, 2) for pr in _prices]
+                charges[0] = round(charged_total - sum(charges[1:]), 2)
+            else:
+                charges = _split_amount(charged_total)
     hours_total = float(booking.hours_deducted or 0)
     hours = _split_amount(hours_total) if hours_total > 0 else None
     # Доп. пул делим теми же долями; каждая часть берёт не больше своих часов,

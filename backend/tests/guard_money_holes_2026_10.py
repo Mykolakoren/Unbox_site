@@ -2247,6 +2247,35 @@ def test_r3_8_series_reschedule_tells_why_a_date_was_skipped():
     assert "s.reason" in modal and "description:" in modal, "окно переноса серии не показывает причину пропуска"
 
 
+@_scenario
+def test_r3_split_money_booking_parts_hold_their_own_price():
+    """Фаззер ревизора (fuzz5, seed 403): 2 ч + доп = 41 ₾ → «Разделить» на два
+    часа → части 23 ₾ (с допом) и 18 ₾, а снятое делилось долями движка —
+    20,5 и 20,5. «Цена» 15 на первой части возвращала 8 ₾ от final_price 23
+    (а взято было 20,5) — +2,5 ₾ из воздуха после отмены. Стало: каждая часть
+    держит ровно свою цену (charge_amount = final_price)."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    b = _book(s, admin, u, start="15:00", minutes=120, method="balance", extras=["sandbox"])
+    assert float(b.final_price) == 41.0, b.final_price
+    parts = H._call(routes.split_booking, booking_id=str(b.id), payload=routes.SplitRequest(parts=[60, 60]),
+                    session=s, current_user=admin)
+    s.commit()
+    assert not (isinstance(parts, dict) and "http" in parts), parts
+    s.expire_all()
+    rows = sorted(s.exec(select(Booking).where(Booking.user_uuid == u.id)).all(), key=lambda r: r.start_time)
+    got = [(r.start_time, float(r.final_price), float(r.charge_amount)) for r in rows]
+    assert got == [("15:00", 23.0, 23.0), ("16:00", 18.0, 18.0)], got
+    _set_price(s, admin, rows[0], 15.0)
+    assert _bal(s, u) == 267.0, _bal(s, u)          # 300 − 41 + 8
+    for r in rows:
+        _cancel(s, admin, s.get(Booking, r.id))
+    assert _bal(s, u) == 300.0, _bal(s, u)
+    _ledger_ok(s, u, 300.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
