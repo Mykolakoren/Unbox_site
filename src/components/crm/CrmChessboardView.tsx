@@ -27,6 +27,7 @@ import { clientCanModifyBooking } from '../../utils/subscription';
 import { ADMIN_ROLES } from '../../utils/permissions';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { tbilisiNow } from '../../utils/dateUtils';
+import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { CURRENCIES } from '../../utils/currency';
 import { formatDayMonth } from '../../utils/format';
 import { ruPlural } from '../../utils/plural';
@@ -59,15 +60,18 @@ function CrmQuickBookModal({
     crmClients,
     onClose,
     onBooked,
+    presetClientId,
 }: {
     slot: { resId: string; time: string; date: Date; duration: number };
     crmClients: CrmClient[];
     onClose: () => void;
     onBooked: (bookingId: string, clientId: string | null, price: number) => Promise<void>;
+    /** 05.10: «Снять кабинет» у сессии без кабинета — клиент уже известен. */
+    presetClientId?: string;
 }) {
     const resource = RESOURCES.find(r => r.id === slot.resId);
     const [duration, setDuration] = useState(slot.duration);
-    const [selectedClientId, setSelectedClientId] = useState('');
+    const [selectedClientId, setSelectedClientId] = useState(presetClientId || '');
     const [price, setPrice] = useState('');
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
@@ -245,8 +249,9 @@ function CrmQuickBookModal({
                     )}
                 </div>
 
-                {/* Повторение */}
-                <div>
+                {/* Повторение. У сессии из календаря — без серии: первая встреча
+                    серии задвоилась бы с уже существующей (05.10). */}
+                {!presetClientId && <div>
                     <div style={PICK_LABEL}>Повторение</div>
                     <div className="ui-chip-row" role="group" aria-label="Повторение">
                         {([
@@ -284,7 +289,7 @@ function CrmQuickBookModal({
                             </span>
                         </div>
                     )}
-                </div>
+                </div>}
             </div>
         </Sheet>
     );
@@ -866,6 +871,30 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         return map;
     }, [clients]);
 
+    // 05.10 (владелец): «сессии без кабинета» — встречи из календаря (CRM-сессии без
+    // аренды) на выбранный день. Только показ; деньги не двигаются, пока специалист
+    // сам не снимет кабинет. Онлайн-встречи тоже попадут сюда — строку можно скрыть.
+    const [showGhosts, setShowGhosts] = useState<boolean>(() => {
+        try { return localStorage.getItem('crm.showGhosts') !== '0'; } catch { return true; }
+    });
+    useEffect(() => {
+        try { localStorage.setItem('crm.showGhosts', showGhosts ? '1' : '0'); } catch { /* приватный режим */ }
+    }, [showGhosts]);
+    const ghostSessions = useMemo(() => {
+        const dateStr = format(selectedDate, 'yyyy-MM-dd');
+        const out: { session: (typeof sessions)[number]; time: string; duration: number }[] = [];
+        for (const sess of sessions) {
+            if (sess.bookingId || sess.status === 'CANCELLED_CLIENT' || sess.status === 'CANCELLED_THERAPIST') continue;
+            const wc = utcNaiveToTbilisi(sess.date);
+            if (!wc || wc.date !== dateStr) continue;
+            out.push({ session: sess, time: wc.time, duration: sess.durationMinutes || 60 });
+        }
+        return out.sort((a, b) => a.time.localeCompare(b.time));
+    }, [sessions, selectedDate]);
+    const [ghostTarget, setGhostTarget] = useState<(typeof ghostSessions)[number] | null>(null);
+    // Сессия, которую привязать к брони после «Снять кабинет» (вместо новой сессии).
+    const ghostLinkRef = useRef<{ sessionId: string; clientId: string } | null>(null);
+
     // Row cells. Tbilisi-aware now() — without it admins on UK VPN saw
     // wrong "is past" boundary (slots already over by Tbilisi-clock still
     // looked free in their browser-local 22:00 evening).
@@ -1146,7 +1175,12 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     };
 
     const handleBooked = async (bookingId: string, clientId: string | null, price: number) => {
-        if (clientId && bookingId) {
+        const ghost = ghostLinkRef.current;
+        ghostLinkRef.current = null;
+        if (ghost && bookingId && (!clientId || clientId === ghost.clientId)) {
+            // Встреча уже есть в календаре — привязываем её к новой аренде.
+            await updateSession(ghost.sessionId, { bookingId, isBooked: true });
+        } else if (clientId && bookingId) {
             const bookingDate = format(selectedDate, 'yyyy-MM-dd');
             const timeStr = bookSlot?.time || '00:00';
             // 01.10: сессия сразу уходит в Google Календарь (если подключён) —
@@ -1530,6 +1564,97 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     ) : null;
 
     // ── MOBILE VIEW ──
+    // ── 05.10: «Сессии без кабинета» — окно действий, строка шахматки, полоса на телефоне ──
+    useEffect(() => { if (!bookSlot) ghostLinkRef.current = null; }, [bookSlot]);
+    const ghostAligned = (time: string) => _minToTime(Math.floor(timeToMin(time) / 30) * 30);
+    const ghostSlots = (time: string, duration: number) => {
+        const first = TIME_SLOTS.indexOf(ghostAligned(time));
+        if (first < 0) return [] as string[];
+        const n = Math.max(1, Math.ceil((timeToMin(time) - timeToMin(ghostAligned(time)) + duration) / 30));
+        return TIME_SLOTS.slice(first, first + n);
+    };
+    const ghostFreeRooms = ghostTarget
+        ? filteredResources.filter(r => {
+            const slots = ghostSlots(ghostTarget.time, ghostTarget.duration);
+            return slots.length > 0 && slots.every(t => !isSlotOccupied(r.id, t));
+        })
+        : [];
+    const ghostOwnBookings = ghostTarget
+        ? bookingsOnDate.filter(b => {
+            if (b.userId !== currentUser?.email || b.status !== 'confirmed') return false;
+            const bs = timeToMin(b.startTime), be = bs + (b.duration || 60);
+            const gs = timeToMin(ghostTarget.time), ge = gs + ghostTarget.duration;
+            return bs < ge && gs < be;
+        })
+        : [];
+    const ghostName = (g: { session: { clientId: string } }) => clientById.get(g.session.clientId)?.name || 'Клиент';
+    const linkGhostToBooking = async (bookingId: string) => {
+        if (!ghostTarget) return;
+        try {
+            await updateSession(ghostTarget.session.id, { bookingId, isBooked: true });
+            toast.success('Сессия привязана к аренде');
+            setGhostTarget(null);
+            await fetchSessions();
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Не удалось привязать сессию'));
+        }
+    };
+    const bookCabinetForGhost = (resId: string) => {
+        if (!ghostTarget) return;
+        ghostLinkRef.current = { sessionId: ghostTarget.session.id, clientId: ghostTarget.session.clientId };
+        const t = ghostAligned(ghostTarget.time);
+        const dur = Math.max(30, Math.ceil((timeToMin(ghostTarget.time) - timeToMin(t) + ghostTarget.duration) / 30) * 30);
+        setGhostTarget(null);
+        setBookSlot({ resId, time: t, date: selectedDate, duration: dur });
+    };
+    const ghostSheet = ghostTarget && (
+        <Sheet
+            open
+            onClose={() => setGhostTarget(null)}
+            title="Сессия без кабинета"
+            description={`${ghostName(ghostTarget)} · ${ghostTarget.time} · ${ghostTarget.duration} мин`}
+            width={440}
+        >
+            <div className="space-y-4 text-sm">
+                <p className="text-ink-60 m-0">Встреча есть в календаре, а кабинет под неё не снят. Если это онлайн-сессия — кабинет не нужен.</p>
+                {ghostOwnBookings.length > 0 && (
+                    <PickList label="Привязать к вашей аренде">
+                        {ghostOwnBookings.map(b => (
+                            <PickRow key={b.id} onClick={() => linkGhostToBooking(b.id)} meta={`${b.startTime} · ${b.duration || 60} мин`}>
+                                {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
+                            </PickRow>
+                        ))}
+                    </PickList>
+                )}
+                <PickList label="Снять кабинет на это время">
+                    {ghostFreeRooms.length === 0
+                        ? <div style={PICK_EMPTY}>Свободных кабинетов на это время нет{filterLocation !== 'all' ? ' в выбранном филиале' : ''}</div>
+                        : ghostFreeRooms.map(r => (
+                            <PickRow key={r.id} onClick={() => bookCabinetForGhost(r.id)} meta={LOCATIONS.find(l => l.id === r.locationId)?.name}>
+                                {r.name}
+                            </PickRow>
+                        ))}
+                </PickList>
+                <p className="text-xs text-ink-60 m-0">Кабинет оплачивается по обычным правилам, только после вашего подтверждения в следующем окне.</p>
+            </div>
+        </Sheet>
+    );
+    const ghostStrip = showGhosts && ghostSessions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" aria-label="Сессии без кабинета">
+            {ghostSessions.map(g => (
+                <button
+                    key={g.session.id}
+                    type="button"
+                    onClick={() => setGhostTarget(g)}
+                    className="px-2 py-1 text-xs border border-dashed border-ink-40 text-ink opacity-70 hover:opacity-100 bg-card"
+                    title="Встреча из календаря без аренды кабинета — нажмите, чтобы снять кабинет или привязать"
+                >
+                    {g.time} {ghostName(g)} · нет кабинета
+                </button>
+            ))}
+        </div>
+    );
+
     if (isMobile) {
         // Build a lookup for booking cells by slot
         const mobileCells = mobileRes ? (rowCellsMap.get(mobileRes.id) ?? []) : [];
@@ -1659,6 +1784,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             <div className="space-y-3">
                 {weekNav}
                 {daySelector}
+                {ghostStrip}
 
                 {/* Resource tabs */}
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" role="group" aria-label="Кабинет">
@@ -1694,6 +1820,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         key={`${bookSlot.resId}|${bookSlot.time}|${bookSlot.duration}`} // новый период — новое окно: иначе 2-й и далее брались с длительностью 1-го
                         slot={bookSlot}
                         crmClients={clients}
+                        presetClientId={ghostLinkRef.current?.clientId}
                         // Cancel at any point in the queue → drop remaining
                         // chunks. The user has the chips & can re-trigger
                         // "Забронировать" if they want to retry.
@@ -1701,6 +1828,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         onBooked={handleBooked}
                     />
                 )}
+                {ghostSheet}
                 {linkBooking && (
                     <LinkBookingModal
                         booking={linkBooking}
@@ -1754,6 +1882,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             {loc.name}
                         </Chip>
                     ))}
+                    <Chip selected={showGhosts} onClick={() => setShowGhosts(v => !v)}>
+                        Сессии без кабинета{ghostSessions.length ? ` · ${ghostSessions.length}` : ''}
+                    </Chip>
                 </div>
             </div>
 
@@ -1784,6 +1915,44 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         </tr>
                     </thead>
                     <tbody>
+                        {showGhosts && ghostSessions.length > 0 && (() => {
+                            // Дорожки, чтобы пересекающиеся встречи не налезали друг на друга.
+                            const lanes: number[] = [];
+                            const placed = ghostSessions.map(g => {
+                                const start = timeToMin(g.time), end = start + g.duration;
+                                let lane = lanes.findIndex(e => e <= start);
+                                if (lane < 0) { lane = lanes.length; lanes.push(end); } else lanes[lane] = end;
+                                return { g, lane };
+                            });
+                            const first = timeToMin(TIME_SLOTS[0]);
+                            return (
+                                <tr>
+                                    <td className="sticky left-0 z-10 bg-card border-b border-r border-ink-10 px-3 py-2 text-xs font-medium text-ink-60 min-w-[180px]">
+                                        Сессии без кабинета
+                                    </td>
+                                    <td colSpan={TIME_SLOTS.length} className="border-b border-ink-08 p-0">
+                                        <div className="relative" style={{ height: lanes.length * 32 + 4 }}>
+                                            {placed.map(({ g, lane }) => (
+                                                <button
+                                                    key={g.session.id}
+                                                    type="button"
+                                                    onClick={() => setGhostTarget(g)}
+                                                    className="absolute h-7 border border-dashed border-ink-40 bg-card text-ink text-xs px-1.5 truncate text-left opacity-70 hover:opacity-100 focus-visible:opacity-100"
+                                                    style={{
+                                                        left: Math.max(0, (timeToMin(g.time) - first) / 30) * SLOT_W,
+                                                        width: Math.max(SLOT_W, (g.duration / 30) * SLOT_W) - 2,
+                                                        top: 2 + lane * 32,
+                                                    }}
+                                                    title={`${ghostName(g)} · ${g.time} · ${g.duration} мин — встреча из календаря без кабинета. Нажмите, чтобы снять кабинет или привязать`}
+                                                >
+                                                    {g.time} {ghostName(g)} · нет кабинета
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })()}
                         {filteredResources.map(resource => {
                             const cells = rowCellsMap.get(resource.id) ?? [];
                             return (
@@ -1828,6 +1997,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                             ];
 
                                             const hasMultipleClients = isMine && linkedSessions.length > 1;
+                                            // 05.10: своя аренда, под которую нет сессии в календаре.
+                                            const noSession = isMine && linkedSessions.length === 0;
 
                                             return (
                                                 <td
@@ -1926,7 +2097,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 'group h-8 border text-xs font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1 transition-colors',
                                                                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                                                                 isMine
-                                                                    ? 'bg-ink text-on-ink border-ink cursor-grab active:cursor-grabbing hover:bg-ink-80'
+                                                                    ? (noSession
+                                                                        ? 'bg-ink/45 text-on-ink border-ink border-dashed cursor-grab active:cursor-grabbing hover:bg-ink/60'
+                                                                        : 'bg-ink text-on-ink border-ink cursor-grab active:cursor-grabbing hover:bg-ink-80')
                                                                     : claimable
                                                                         ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/40 border-dashed cursor-pointer hover:bg-[var(--status-pending-bg)]/70'
                                                                         : 'bg-transparent text-ink-60 border-ink-20 font-medium cursor-pointer hover:border-ink-40 hover:text-ink',
@@ -1947,7 +2120,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                             )}
                                                             <span className="truncate flex-1">
                                                                 {isMine
-                                                                    ? (linkedClient ? linkedClient.name : 'Без клиента')
+                                                                    ? (linkedClient ? linkedClient.name : 'Без клиента') + (noSession ? ' · нет сессии' : '')
                                                                     : claimable
                                                                         ? 'На пересдаче'
                                                                         : 'Занято'}
@@ -2057,6 +2230,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     key={`${bookSlot.resId}|${bookSlot.time}|${bookSlot.duration}`} // новый период — новое окно: иначе 2-й и далее брались с длительностью 1-го
                     slot={bookSlot}
                     crmClients={clients.filter(c => c.isActive)}
+                    presetClientId={ghostLinkRef.current?.clientId}
                     onClose={() => {
                         // Cancel mid-queue → drop remaining chunks; keep
                         // the chips so the user can retry without
@@ -2069,7 +2243,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             )}
 
             {/* Link client to existing booking modal */}
-            {linkBooking && (
+            {ghostSheet}
+                {linkBooking && (
                 <LinkBookingModal
                     booking={linkBooking}
                     crmClients={clients.filter(c => c.isActive)}
