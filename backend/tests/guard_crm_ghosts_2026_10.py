@@ -39,6 +39,14 @@ def test_own_booking_without_session_marked():
     assert "(noSession ? ' · нет сессии' : '')" in SRC
 
 
+def test_ghost_row_uses_table_cells():
+    """05.10: плитки стояли абсолютными пикселями по SLOT_W и уезжали от колонок,
+    когда таблица шире экрана (14:30 оказывалось на 13:30)."""
+    assert "colSpan={x.span}" in SRC, "строка «без кабинета» — настоящими клетками таблицы"
+    assert "absolute h-7" not in SRC, "абсолютное позиционирование плиток вернулось"
+    assert "есть ваша аренда — привязать" in SRC
+
+
 if __name__ == "__main__":
     f = 0
     for n, fn in sorted(globals().items()):

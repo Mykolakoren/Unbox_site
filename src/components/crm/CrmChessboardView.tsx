@@ -1588,6 +1588,18 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         })
         : [];
     const ghostName = (g: { session: { clientId: string } }) => clientById.get(g.session.clientId)?.name || 'Клиент';
+    // Есть своя аренда на это время, к которой ещё не привязана живая сессия.
+    const ghostHasOwnBooking = (g: { time: string; duration: number }) => {
+        const gs = timeToMin(g.time), ge = gs + g.duration;
+        return bookingsOnDate.some(b => {
+            if (b.userId !== currentUser?.email || b.status !== 'confirmed') return false;
+            const bs = timeToMin(b.startTime), be = bs + (b.duration || 60);
+            const live = (sessionsByBookingId.get(b.id) || []).filter(x => x.status !== 'CANCELLED_CLIENT' && x.status !== 'CANCELLED_THERAPIST');
+            return bs < ge && gs < be && live.length === 0;
+        });
+    };
+    const ghostLabel = (g: (typeof ghostSessions)[number]) =>
+        `${g.time} ${ghostName(g)} · ${ghostHasOwnBooking(g) ? 'есть ваша аренда — привязать' : 'нет кабинета'}`;
     const linkGhostToBooking = async (bookingId: string) => {
         if (!ghostTarget) return;
         try {
@@ -1649,7 +1661,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     className="px-2 py-1 text-xs border border-dashed border-ink-40 text-ink opacity-70 hover:opacity-100 bg-card"
                     title="Встреча из календаря без аренды кабинета — нажмите, чтобы снять кабинет или привязать"
                 >
-                    {g.time} {ghostName(g)} · нет кабинета
+                    {ghostLabel(g)}
                 </button>
             ))}
         </div>
@@ -1916,42 +1928,53 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     </thead>
                     <tbody>
                         {showGhosts && ghostSessions.length > 0 && (() => {
-                            // Дорожки, чтобы пересекающиеся встречи не налезали друг на друга.
-                            const lanes: number[] = [];
-                            const placed = ghostSessions.map(g => {
-                                const start = timeToMin(g.time), end = start + g.duration;
-                                let lane = lanes.findIndex(e => e <= start);
-                                if (lane < 0) { lane = lanes.length; lanes.push(end); } else lanes[lane] = end;
-                                return { g, lane };
-                            });
-                            const first = timeToMin(TIME_SLOTS[0]);
-                            return (
-                                <tr>
-                                    <td className="sticky left-0 z-10 bg-card border-b border-r border-ink-10 px-3 py-2 text-xs font-medium text-ink-60 min-w-[180px]">
-                                        Сессии без кабинета
-                                    </td>
-                                    <td colSpan={TIME_SLOTS.length} className="border-b border-ink-08 p-0">
-                                        <div className="relative" style={{ height: lanes.length * 32 + 4 }}>
-                                            {placed.map(({ g, lane }) => (
+                            // Настоящие клетки таблицы (colSpan), как у броней: абсолютные
+                            // пиксели расходились с колонками, когда таблица шире экрана.
+                            // Пересекающиеся встречи — каждая дорожка своей строкой.
+                            const lanes: { g: (typeof ghostSessions)[number]; first: number; span: number }[][] = [];
+                            for (const g of ghostSessions) {
+                                const slots = ghostSlots(g.time, g.duration);
+                                if (slots.length === 0) continue;
+                                const first = TIME_SLOTS.indexOf(slots[0]);
+                                const item = { g, first, span: slots.length };
+                                const lane = lanes.find(l => l.every(x => x.first + x.span <= first || first + item.span <= x.first));
+                                if (lane) lane.push(item); else lanes.push([item]);
+                            }
+                            return lanes.map((lane, li) => {
+                                const byFirst = new Map(lane.map(x => [x.first, x]));
+                                const cells: ReactNode[] = [];
+                                for (let k = 0; k < TIME_SLOTS.length; ) {
+                                    const x = byFirst.get(k);
+                                    if (x) {
+                                        cells.push(
+                                            <td key={k} colSpan={x.span} className="border-b border-ink-08 p-0.5">
                                                 <button
-                                                    key={g.session.id}
                                                     type="button"
-                                                    onClick={() => setGhostTarget(g)}
-                                                    className="absolute h-7 border border-dashed border-ink-40 bg-card text-ink text-xs px-1.5 truncate text-left opacity-70 hover:opacity-100 focus-visible:opacity-100"
-                                                    style={{
-                                                        left: Math.max(0, (timeToMin(g.time) - first) / 30) * SLOT_W,
-                                                        width: Math.max(SLOT_W, (g.duration / 30) * SLOT_W) - 2,
-                                                        top: 2 + lane * 32,
-                                                    }}
-                                                    title={`${ghostName(g)} · ${g.time} · ${g.duration} мин — встреча из календаря без кабинета. Нажмите, чтобы снять кабинет или привязать`}
+                                                    onClick={() => setGhostTarget(x.g)}
+                                                    className="w-full h-7 border border-dashed border-ink-40 bg-card text-ink text-xs px-1.5 truncate text-left opacity-70 hover:opacity-100 focus-visible:opacity-100"
+                                                    title={`${ghostName(x.g)} · ${x.g.time} · ${x.g.duration} мин — встреча из календаря без кабинета. Нажмите, чтобы снять кабинет или привязать`}
                                                 >
-                                                    {g.time} {ghostName(g)} · нет кабинета
+                                                    {ghostLabel(x.g)}
                                                 </button>
-                                            ))}
-                                        </div>
-                                    </td>
-                                </tr>
-                            );
+                                            </td>
+                                        );
+                                        k += x.span;
+                                    } else {
+                                        cells.push(<td key={k} className="border-b border-ink-08" />);
+                                        k += 1;
+                                    }
+                                }
+                                return (
+                                    <tr key={`ghost-${li}`}>
+                                        {li === 0 && (
+                                            <td rowSpan={lanes.length} className="sticky left-0 z-10 bg-card border-b border-r border-ink-10 px-3 py-2 text-xs font-medium text-ink-60 min-w-[180px] align-top">
+                                                Сессии без кабинета
+                                            </td>
+                                        )}
+                                        {cells}
+                                    </tr>
+                                );
+                            });
                         })()}
                         {filteredResources.map(resource => {
                             const cells = rowCellsMap.get(resource.id) ?? [];
