@@ -180,7 +180,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             <div style={boxHair}>
                 <div style={subhead}>Отмена и горящие окна</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Бесплатная отмена.</strong> Строго более чем за 24 часа до начала.</div>
-                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Горячая бронь.</strong> Бронь менее чем за 12 часов — требует одобрения администратора.</div>
+                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Срочная бронь.</strong> В будни — меньше чем за 12 часов до начала, в субботу и воскресенье — меньше чем за 24 часа. Ждёт подтверждения администратора: подтверждайте или отклоняйте на сайте, а не в Telegram.</div>
             </div>
         </div>
     );
@@ -280,22 +280,22 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
 
                 <div style={{ border: `1px solid ${GH.ink10}`, padding: 16, marginBottom: 20 }}>
                     <p style={{ ...para, margin: 0, fontSize: 12, color: GH.ink60 }}>
-                        <strong style={{ color: GH.ink, fontWeight: 700 }}>Примечание.</strong> Скидки не суммируются — применяется одна, наиболее выгодная для клиента. Бонусный баланс и приветственный час списываются отдельно, поверх итоговой цены.
+                        <strong style={{ color: GH.ink, fontWeight: 700 }}>Примечание.</strong> Скидка за длительность и недельная не складываются: недельная добирает разницу до своего процента. Личная скидка заменяет все остальные. Бонусные часы тратятся раньше денег.
                     </p>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
                     <div style={boxHair}>
                         <div style={subhead}>Приоритет расчётов · один чек</div>
                         <div style={li}><span style={bullet}>01</span>Базовая цена (тариф × длительность)</div>
-                        <div style={li}><span style={bullet}>02</span>Одна скидка: ручная → абонемент → недельная → за длительность</div>
-                        <div style={li}><span style={bullet}>03</span>Списание с баланса (бонусы, приветственный час)</div>
+                        <div style={li}><span style={bullet}>02</span>Скидка: личная, или скидка тарифа абонемента, или за длительность («часы подряд»)</div>
+                        <div style={li}><span style={bullet}>03</span>Недельная скидка — в понедельник деньгами на баланс за прошлую неделю</div>
                     </div>
                     <div style={boxHair}>
-                        <div style={subhead}>Еженедельный кэшбэк</div>
+                        <div style={subhead}>Недельная скидка</div>
                         <p style={{ ...para, fontSize: 13 }}>
-                            Если прогрессивный процент в конце недели даёт цену ниже фактически уплаченной — разница зачисляется на бонусный баланс.
+                            В понедельник в 05:00 сайт считает часы клиента за прошлую неделю (5 ч — 10 %, 11 ч — 25 %, 16 ч — 50 %) и возвращает разницу деньгами на баланс. Допы в скидку не входят.
                         </p>
-                        <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: 0 }}>Срок действия бонусов — 60 дней.</p>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: 0 }}>Срока нет. Скидка уже учтена в «к оплате»; кто сколько получил — «Касса → Недельные скидки».</p>
                     </div>
                 </div>
             </div>
@@ -313,7 +313,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         return (
             <div>
                 <p style={{ ...para, color: GH.ink60, fontSize: 13, marginBottom: 20 }}>
-                    Абонемент даёт гарантированную скидку и фиксированный пакет часов. Часы списываются при подтверждении брони.
+                    Абонемент даёт гарантированную скидку и фиксированный пакет часов. Часы списываются за 24 часа до начала брони (если бронь ближе — сразу).
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
                     {plans.map((plan, i) => (
@@ -391,7 +391,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                 <div style={li}><span style={bullet}>03</span><strong>На пересдаче</strong> — владелец нажал «Пересдать», но время пока никто не занял. Бронь ещё активна.</div>
                 <div style={li}><span style={bullet}>04</span><strong>Отменена</strong> — бронь отменена (возврат зависит от политики — см. ценовую политику).</div>
                 <div style={li}><span style={bullet}>05</span><strong>Прошла</strong> — время брони вышло.</div>
-                <div style={li}><span style={bullet}>06</span><strong>Неявка</strong> — клиент не пришёл без отмены. Попадает в чек-лист закрытия смены.</div>
+                <div style={li}><span style={bullet}>06</span><strong>Неявка</strong> — отдельной отметки нет: бронь уже списана за сутки до начала. Вернуть деньги за прошедшую бронь может старший администратор или владелец через отмену.</div>
             </div>
 
             <div style={boxHair}>
@@ -440,7 +440,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         { id: 'day', title: 'В течение дня', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
         { id: 'evening', title: 'Вечерний чек-лист', subtitle: 'Выключение, уборка, отчёт по кассе', body: <EveningChecklist /> },
         { id: 'rules', title: 'Правила пространства', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
-        { id: 'pricing', title: 'Ценовая политика', subtitle: 'Тарифы, скидки, приветственный час, кэшбэк', body: <Pricing /> },
+        { id: 'pricing', title: 'Ценовая политика', subtitle: 'Тарифы, скидки, приветственный час, недельная скидка', body: <Pricing /> },
         { id: 'subscriptions', title: 'Абонементы', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
         { id: 'glossary', title: 'Глоссарий', subtitle: 'Термины: бронь vs сессия, статусы, способы оплаты', body: <Glossary /> },
     ];

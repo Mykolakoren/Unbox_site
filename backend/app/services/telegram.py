@@ -476,7 +476,7 @@ class TelegramService:
     EVENT_TITLES = {
         "booking_created":           ("🆕", "Новая бронь"),
         "booking_series_created":    ("🔁", "Новая серия броней"),
-        "booking_pending_approval":  ("⏳", "Бронь &lt;12 ч — нужно подтвердить"),
+        "booking_pending_approval":  ("⏳", "Срочная бронь — нужно подтвердить"),
         "booking_cancelled":         ("✖",  "Отмена брони"),
         "booking_rescheduled":       ("↻",  "Перенос брони"),
         "booking_re_rent_listed":    ("🔄", "Выставлена на переаренду"),

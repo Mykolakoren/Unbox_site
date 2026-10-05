@@ -74,7 +74,7 @@ export function EditCreditLimitModal({ isOpen, onClose, currentLimit, onConfirm 
                             autoFocus
                         />
                         <p className="text-xs text-ink-60 mt-2">
-                            Клиент сможет создавать бронирования при балансе до {formatGel(-Number(limit || 0))}
+                            Брони меньше чем за сутки клиент сможет создавать, пока баланс не ниже {formatGel(-Number(limit || 0))}. Брони, созданные заранее, спишутся за 24 часа до начала даже сверх лимита
                         </p>
                     </div>
 
