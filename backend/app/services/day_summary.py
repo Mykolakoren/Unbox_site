@@ -436,6 +436,51 @@ def debtors_at(session: Session, at_utc: datetime, limit: int = 1000) -> dict:
     }
 
 
+def clients_of_day(session: Session, day: date, at_utc: datetime, branch: Optional[str] = None) -> dict:
+    """Клиенты дня для вечерней сверки с таблицей (владелец 05.10): кто был в этот
+    день (подтверждённые / прошедшие брони, без обслуживания), филиал, часы и
+    баланс на конец дня — тем же способом, что «Должны» (баланс − лента после)."""
+    d0 = datetime(day.year, day.month, day.day)
+    rows = session.exec(
+        select(Booking).where(
+            Booking.date >= d0, Booking.date < d0 + timedelta(days=1),
+            col(Booking.status).in_(["confirmed", "completed"]),
+        )
+    ).all()
+    per: dict[str, dict] = {}
+    for b in rows:
+        uid = _user_key(b)
+        if not uid or (b.payment_method or "").lower() == "maintenance":
+            continue
+        br = branch_of_location(b.location_id)
+        if branch and br != branch:
+            continue
+        e = per.setdefault(uid, {"user_id": uid, "hours": 0.0, "branches": set()})
+        e["hours"] += float(b.duration or 0) / 60.0
+        e["branches"].add(br)
+    if not per:
+        return {"count": 0, "items": []}
+    after = {
+        uid: float(sm or 0)
+        for uid, sm in session.exec(
+            select(BalanceLedger.user_id, func.sum(BalanceLedger.delta))
+            .where(BalanceLedger.created_at >= at_utc, col(BalanceLedger.user_id).in_(list(per)))
+            .group_by(BalanceLedger.user_id)
+        ).all()
+    }
+    items = []
+    for u in session.exec(select(User).where(col(User.id).in_([UUID(k) for k in per]))).all():
+        e = per[str(u.id)]
+        items.append({
+            "user_id": str(u.id), "name": u.name or u.email,
+            "branch": ", ".join(sorted(e["branches"])), "hours": _r(e["hours"]),
+            "balance": _r(float(u.balance or 0) - after.get(str(u.id), 0.0)),
+            "staff": (u.role or "") in ADMIN_ROLES,
+        })
+    items.sort(key=lambda x: (x["staff"], (x["name"] or "").lower()))
+    return {"count": len(items), "items": items}
+
+
 # ── Главная функция ──────────────────────────────────────────────────────
 
 def compute_day_summary(
@@ -568,6 +613,7 @@ def compute_day_summary(
         },
         "weekly_rebates": {"amount": _r(float(rebate_amount or 0)), "count": int(rebate_users or 0)},
         "debtors": debtors_at(session, min(end, now_utc or datetime.utcnow()), limit=debtors_limit),
+        "clients": clients_of_day(session, day, min(end, now_utc or datetime.utcnow()), branch),
     }
 
 

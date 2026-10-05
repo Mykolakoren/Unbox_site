@@ -145,6 +145,7 @@ export function DaySummary({
                         )}
                     </div>
                     <CommonCard data={shown} radius={radius} clientPath={clientPath} />
+                    <ClientsCard data={shown} radius={radius} clientPath={clientPath} />
                 </>
             )}
 
@@ -412,6 +413,39 @@ function CommonCard({ data, radius, clientPath }: { data: CashboxDaySummary; rad
                     sub="Не деньги: правки балансов клиентов и недельные скидки. В «пришло» и «ушло» не входят"
                 />
             )}
+        </Card>
+    );
+}
+
+/** Клиенты дня (владелец 05.10): для вечерней сверки с таблицей — баланс каждого,
+ *  кто был в этот день, на конец дня. Старый бэк поля не отдаёт — блока нет. */
+function ClientsCard({ data, radius, clientPath }: { data: CashboxDaySummary; radius: number; clientPath?: (k: string) => string }) {
+    const clients = data.clients;
+    if (!clients || clients.count === 0) return null;
+    return (
+        <Card
+            title="Клиенты дня — для сверки"
+            aside={<span className="num" style={{ fontSize: 14, color: COLOR.ink60 }}>{ruCountWord(clients.count, ['клиент', 'клиента', 'клиентов'])}</span>}
+            radius={radius}
+        >
+            <div style={{ fontSize: 12, color: COLOR.ink60, marginBottom: 6, lineHeight: 1.45 }}>
+                Баланс на конец дня{data.isToday ? ' (день ещё идёт — сейчас)' : ''}. Сравните с таблицей; не совпало — напишите владельцу.
+            </div>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {clients.items.map(c => (
+                    <li key={c.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: `1px solid ${COLOR.ink08}`, fontSize: 14 }}>
+                        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                            {clientPath ? (
+                                <Link to={clientPath(c.userId)} style={{ color: COLOR.ink, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</Link>
+                            ) : (
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                            )}
+                            <span style={{ fontSize: 12, color: COLOR.ink60 }}>{c.branch} · {String(c.hours).replace('.', ',')} ч{c.staff ? ' · сотрудник' : ''}</span>
+                        </span>
+                        <span className="num" style={{ whiteSpace: 'nowrap', color: c.balance < 0 ? STATUS.danger.fg : COLOR.ink }}>{formatGel(c.balance)}</span>
+                    </li>
+                ))}
+            </ul>
         </Card>
     );
 }

@@ -171,6 +171,12 @@ export interface CashboxDaySummary {
         items: { userId: string; name: string; email: string; debt: number; staff: boolean }[];
         asOf: string;
     };
+    /** Клиенты дня для вечерней сверки с таблицей (05.10): кто был, филиал, часы, баланс на конец дня.
+     *  Необязательно — старый бэк поля не отдаёт. */
+    clients?: {
+        count: number;
+        items: { userId: string; name: string; branch: string; hours: number; balance: number; staff: boolean }[];
+    };
 }
 
 /** GET /cashbox/weekly-rebates — недельные скидки за неделю броней. */
