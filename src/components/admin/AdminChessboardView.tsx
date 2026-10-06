@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LOCATIONS, RESOURCES, availableExtrasForResource } from '../../utils/data';
@@ -9,7 +9,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle, UserRound } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -77,6 +77,13 @@ export function AdminChessboardView() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [selectedBooking, setSelectedBooking] = useState<BookingHistoryItem | null>(null);
+    const navigate = useNavigate();
+    // Из панели брони — сразу в карточку клиента (владелец 06.10).
+    const openClient = (userId: string | undefined | null) => {
+        if (!userId) return;
+        setSelectedBooking(null);
+        navigate(`/admin/users/${encodeURIComponent(userId)}`);
+    };
     // Правки сегодняшней брони (в т.ч. завершившейся): продление с выбором
     // времени и дозаказ допов — общие модалки со списком броней.
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
@@ -1344,10 +1351,17 @@ export function AdminChessboardView() {
                     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm p-3" onClick={() => setSelectedBooking(null)}>
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
                             <div className="flex items-start justify-between mb-3">
-                                <div>
-                                    <div className="font-bold text-unbox-dark">{getUserName(selectedBooking.userId)}</div>
+                                <button
+                                    type="button"
+                                    data-open-client
+                                    onClick={() => openClient(selectedBooking.userId)}
+                                    title="Открыть карточку клиента"
+                                    className="text-left min-h-11 -my-1 rounded-lg hover:bg-unbox-light/60"
+                                >
+                                    <div className="font-bold text-unbox-dark underline decoration-unbox-green/50 underline-offset-2">{getUserName(selectedBooking.userId)}</div>
                                     <div className="text-xs text-ink-60">{selectedBooking.userId}</div>
-                                </div>
+                                    <div className="text-xs text-unbox-green font-medium inline-flex items-center gap-1 mt-0.5"><UserRound size={12} aria-hidden="true" /> Карточка клиента →</div>
+                                </button>
                                 <button onClick={() => setSelectedBooking(null)} aria-label="Закрыть" className="min-w-11 min-h-11 -m-2 flex items-center justify-center hover:bg-unbox-light rounded-lg">
                                     <X size={16} />
                                 </button>
@@ -1914,14 +1928,23 @@ export function AdminChessboardView() {
                 >
                     {/* Header */}
                     <div className="px-4 py-3 flex justify-between items-start border-b border-unbox-light">
-                        <div className="overflow-hidden">
-                            <div className="font-bold text-unbox-dark text-sm leading-tight">
+                        <button
+                            type="button"
+                            data-open-client
+                            onClick={() => openClient(selectedBooking.userId)}
+                            title="Открыть карточку клиента"
+                            className="overflow-hidden text-left rounded-lg -ml-1 px-1 hover:bg-unbox-light/60"
+                        >
+                            <div className="font-bold text-unbox-dark text-sm leading-tight underline decoration-unbox-green/50 underline-offset-2">
                                 {getUserName(selectedBooking.userId)}
                             </div>
                             <div className="text-xs text-ink-60 truncate">
                                 {selectedBooking.userId}
                             </div>
-                        </div>
+                            <div className="text-xs text-unbox-green font-medium inline-flex items-center gap-1 mt-0.5">
+                                <UserRound size={12} aria-hidden="true" /> Карточка клиента →
+                            </div>
+                        </button>
                         <button
                             onClick={() => setSelectedBooking(null)}
                             aria-label="Закрыть"

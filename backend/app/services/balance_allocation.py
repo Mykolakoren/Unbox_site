@@ -891,3 +891,133 @@ def _summary_entry(u, data: dict, now: datetime) -> dict:
         # Только при минусе: при плюсе списанные брони и так «оплачено».
         "unlinked": unlinked_charged(data["rows"], data["all"], now) if res["balance"] < 0 else [],
     }
+
+
+# ── «Чем оплачено» в таблице броней (06.10) ──────────────────────────────
+
+# Способ оплаты в словах стойки: наличные — в кассу, карта — перевод на счёт.
+PAID_VIA_METHOD = {"cash": "наличные в кассу", "card_tbc": "на счёт TBC", "card_bog": "на счёт BOG"}
+PAID_VIA_MAX_IDS = 200
+
+
+def paid_via_label(sources: list[dict], debt: float) -> list[str]:
+    """Подписи «чем оплачено» по партиям, которые раскладка положила на бронь."""
+    out: list[str] = []
+
+    def add(s: str):
+        if s and s not in out:
+            out.append(s)
+
+    for s in sources or []:
+        kind = s.get("kind")
+        if kind == KIND_TOPUP:
+            add({v: PAID_VIA_METHOD[k] for k, v in METHOD_LABELS.items()}.get(s.get("detail") or "", "оплата на баланс"))
+        elif kind == KIND_REBATE:
+            add("скидка за неделю")
+        elif kind == KIND_REFUND:
+            add("возврат")
+        elif kind == KIND_BASELINE:
+            add("остаток на начало")
+        elif kind == KIND_CORRECTION:
+            add("корректировка")
+        else:
+            add("с баланса")
+    if debt >= EPS:
+        add(f"в долг {debt:g} ₾")
+    return out
+
+
+def paid_via(session, booking_ids: list[str], now_utc: Optional[datetime] = None) -> dict:
+    """Чем оплачена каждая бронь: {"items": [{bookingId, via: [...], kind}]}.
+
+    kind: subscription | bonus | paid | debt | pending | free | none.
+    Абонемент и бонус — по способу брони; деньги — по раскладке ленты клиента
+    (самые старые деньги — самым ранним броням), т.е. какое пополнение (наличные,
+    TBC, BOG) реально за неё заплатило. Только чтение.
+    """
+    from sqlalchemy import or_
+    from sqlmodel import select
+    from app.models.booking import Booking
+    from app.models.user import User
+
+    from uuid import UUID
+    ids = []
+    for x in dict.fromkeys(str(x).strip() for x in booking_ids):
+        try:
+            ids.append(UUID(x))
+        except ValueError:
+            continue  # мусор в запросе — пропускаем, не 500
+    ids = ids[:PAID_VIA_MAX_IDS]
+    if not ids:
+        return {"items": []}
+    blist = session.exec(
+        select(Booking.id, Booking.user_uuid, Booking.user_id, Booking.payment_method, Booking.payment_status,
+               Booking.final_price).where(Booking.id.in_(ids))
+    ).all()
+    uuids = {b.user_uuid for b in blist if b.user_uuid}
+    emails = {b.user_id for b in blist if b.user_id and not b.user_uuid}
+    conds = []
+    if uuids:
+        conds.append(User.id.in_(list(uuids)))
+    if emails:
+        conds.append(User.email.in_(list(emails)))
+    users = session.exec(select(User.id, User.email, User.balance).where(or_(*conds))).all() if conds else []
+    by_uuid = {str(u.id): u for u in users}
+    by_email = {(u.email or "").lower(): u for u in users if u.email}
+
+    money_users = []
+    for b in blist:
+        if (b.payment_method or "") in ("subscription", "bonus"):
+            continue
+        u = by_uuid.get(str(b.user_uuid)) if b.user_uuid else by_email.get((b.user_id or "").lower())
+        if u and u not in money_users:
+            money_users.append(u)
+    inputs = load_inputs(session, money_users) if money_users else {}
+    now = _now_tbs(now_utc)
+    per_booking: dict[str, dict] = {}
+    pending_ids: set[str] = set()
+    charged_ids: set[str] = set()
+    for u in money_users:
+        data = inputs.get(str(u.id))
+        if not data:
+            continue
+        try:
+            res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0))
+        except Exception:  # noqa: BLE001 — один клиент не роняет таблицу
+            logger.exception("[paid-via] клиент %s пропущен", u.id)
+            continue
+        for row in res["bookings"]:
+            per_booking[row["bookingId"]] = row
+        pending_ids.update(b.id for b in data["all"] if due_kind(b, now) == "pending")
+        charged_ids.update(b.id for b in data["all"] if due_kind(b, now) == "charged")
+
+    items = []
+    for b in blist:
+        bid = str(b.id)
+        pm = b.payment_method or ""
+        if pm == "subscription":
+            items.append({"bookingId": bid, "kind": "subscription", "via": ["часы абонемента"]})
+            continue
+        if pm == "bonus":
+            items.append({"bookingId": bid, "kind": "bonus", "via": ["бонус"]})
+            continue
+        row = per_booking.get(bid)
+        if not (row and _c(row["charged"]) > 0) and pm == "service":
+            items.append({"bookingId": bid, "kind": "free", "via": ["служебная"]})
+            continue
+        if not (row and _c(row["charged"]) > 0) and (
+                float(b.final_price or 0) <= 0 or b.payment_status == "waived"):
+            items.append({"bookingId": bid, "kind": "free", "via": ["без оплаты"]})
+            continue
+        if row and (_c(row["charged"]) > 0 or _c(row["debt"]) > 0):
+            via = paid_via_label(row["sources"], float(row["debt"] or 0))
+            kind = "debt" if _c(row["debt"]) > 0 else "paid"
+            items.append({"bookingId": bid, "kind": kind, "via": via})
+        elif bid in pending_ids:
+            items.append({"bookingId": bid, "kind": "pending", "via": ["ещё не списано"]})
+        elif bid in charged_ids:
+            # Списана, но в ленте строки нет (часть после деления, старый профиль).
+            items.append({"bookingId": bid, "kind": "paid", "via": ["с баланса"]})
+        else:
+            items.append({"bookingId": bid, "kind": "none", "via": []})
+    return {"items": items}

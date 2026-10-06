@@ -17,11 +17,15 @@
       по их броням), которые и так видит любой админ в списке клиентов и в
       шахматке. finance.view_reports — про кассу и отчёты; если бы значки
       зависели от него, админ без отчётов видел бы «к оплате» не на тех бронях.
+
+  GET /balance-allocation/paid-via?ids=… — колонка «Чем оплачено» в таблице
+      броней (06.10): наличные в кассу / на счёт TBC·BOG / абонемент / бонус /
+      в долг — по той же раскладке ленты. Право — как у сводки.
 """
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
 from app.api import deps
@@ -69,3 +73,13 @@ def get_balance_allocation_summary(
     current_user: User = Depends(require_clients_view),
 ) -> Any:
     return balance_allocation.summary(session)
+
+
+@router.get("/balance-allocation/paid-via")
+def get_balance_allocation_paid_via(
+    *,
+    ids: str = Query("", description="id броней через запятую (до 200)"),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_clients_view),
+) -> Any:
+    return balance_allocation.paid_via(session, ids.split(","))

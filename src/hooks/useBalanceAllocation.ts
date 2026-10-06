@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { balanceAllocationApi } from '../api/balanceAllocation';
+import { balanceAllocationApi, type PaidViaItem } from '../api/balanceAllocation';
 import { indexAllocation, type AllocationIndex, type ClientAllocation } from '../utils/balanceAllocation';
 import { useUserStore } from '../store/userStore';
 import { hasPermission } from '../utils/permissions';
@@ -142,4 +142,46 @@ export function useClientAllocation(
         loading: !!key && !current,
         stale: !current && !!prev,
     };
+}
+
+// ── «Чем оплачено» для видимых строк таблицы броней (06.10) ─────────────
+
+const EMPTY_PAID_VIA: Map<string, PaidViaItem> = new Map();
+
+/**
+ * id брони → чем оплачена («наличные в кассу», «на счёт TBC», «часы абонемента»…).
+ * Запрос — только за видимые строки (до 200); ключ перезапроса — те же
+ * отпечатки, что у сводки: после оплаты/списания подписи обновятся.
+ * Нет права/сбой — пустая карта, таблица работает как раньше.
+ */
+export function usePaidVia(
+    ids: ReadonlyArray<string>,
+    users: ReadonlyArray<User>,
+    bookings: ReadonlyArray<BookingHistoryItem>,
+): Map<string, PaidViaItem> {
+    const currentUser = useUserStore(s => s.currentUser);
+    const enabled = !!currentUser && ADMIN_ROLES.includes(currentUser.role || '')
+        && hasPermission(currentUser, 'crm.view_clients');
+    const idsKey = ids.join(',');
+    const sig = `${balanceSignature(users)}#${bookingsSignature(bookings)}#${idsKey}`;
+    const [map, setMap] = useState<Map<string, PaidViaItem>>(() => new Map());
+    useEffect(() => {
+        if (!enabled || !idsKey) return;
+        let cancelled = false;
+        const t = window.setTimeout(() => {
+            balanceAllocationApi.paidVia(idsKey.split(','))
+                .then(items => {
+                    if (cancelled) return;
+                    setMap(prev => {
+                        const next = new Map(prev);
+                        for (const it of items) next.set(it.bookingId, it);
+                        return next;
+                    });
+                })
+                .catch(() => { /* подписи просто не появятся */ });
+        }, 400);
+        return () => { cancelled = true; window.clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, sig]);
+    return enabled ? map : EMPTY_PAID_VIA;
 }
