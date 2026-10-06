@@ -180,7 +180,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             <div style={boxHair}>
                 <div style={subhead}>Отмена и горящие окна</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Бесплатная отмена.</strong> Строго более чем за 24 часа до начала.</div>
-                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Срочная бронь.</strong> В будни — меньше чем за 12 часов до начала, в субботу и воскресенье — меньше чем за 24 часа. Ждёт подтверждения администратора: подтверждайте или отклоняйте на сайте, а не в Telegram.</div>
+                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Срочная бронь.</strong> В будни — меньше чем за 12 часов до начала, в субботу и воскресенье — меньше чем за 24 часа. А также бронь, сделанная после 21:00 на завтра с началом до 12:00. Ждёт подтверждения администратора: подтверждайте или отклоняйте на сайте, а не в Telegram.</div>
             </div>
         </div>
     );

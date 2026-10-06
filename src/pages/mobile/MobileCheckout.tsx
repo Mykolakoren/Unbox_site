@@ -5,6 +5,7 @@ import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'dat
 import { Check, ChevronDown, Hourglass, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
+import { tbilisiNow } from '../../utils/dateUtils';
 import { isFrozenSub, notifyIfPauseLifted } from '../../utils/pauseLiftNotice';
 import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
@@ -218,7 +219,12 @@ export function MobileCheckout() {
         const dow = first.start.getDay(); // 0=Sun, 6=Sat (local browser TZ)
         const isWeekend = dow === 0 || dow === 6;
         const threshold = isWeekend ? 24 : 12;
-        return hoursUntil >= 0 && hoursUntil < threshold;
+        // 06.10: после 21:00 — бронь на завтра до 12:00 тоже ждёт подтверждения.
+        const now = tbilisiNow();
+        const tomorrow = new Date(`${now.ymd}T12:00:00`); tomorrow.setDate(tomorrow.getDate() + 1);
+        const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+        const eveningNextMorning = now.h >= 21 && sameDay(first.start, tomorrow) && first.start.getHours() < 12;
+        return hoursUntil >= 0 && (hoursUntil < threshold || eveningNextMorning);
     }, [priced.items]);
 
     // ── Порядок оплаты (владелец 29.09): бонус → абонемент → баланс ──

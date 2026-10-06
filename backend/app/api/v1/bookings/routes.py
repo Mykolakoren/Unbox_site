@@ -1926,7 +1926,16 @@ def create_booking(
         # weekday() on Tbilisi-local start_dt: 5=Sat, 6=Sun
         _is_weekend = start_dt.weekday() >= 5
         HOT_BOOKING_THRESHOLD_HOURS = 24 if _is_weekend else 12
-        is_hot = 0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS
+        # 06.10 (владелец): бронь, сделанная после 21:00, на завтра с началом до
+        # 12:00 — тоже на подтверждение (даже если до неё больше 12 ч): админы
+        # должны успеть спланировать выход на работу утром.
+        _now_tb = (_now + _TB_OFFSET).replace(tzinfo=None)
+        _evening_next_morning = (
+            _now_tb.hour >= 21
+            and start_dt.date() == (_now_tb + _td(days=1)).date()
+            and start_dt.hour < 12
+        )
+        is_hot = (0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS) or (_diff_hours > 0 and _evening_next_morning)
 
         if is_hot and not is_admin_or_above:
             # Don't deduct balance — set status to pending_approval
