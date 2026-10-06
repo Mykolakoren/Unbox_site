@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
-import { RESOURCES } from '../../utils/data';
+import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { Search, LayoutGrid, List, Check, X, Loader2, MousePointerClick } from 'lucide-react';
 import clsx from 'clsx';
 import { AdminChessboardView } from '../../components/admin/AdminChessboardView';
@@ -102,6 +102,14 @@ const ghTableLinkBtn = (color: string): React.CSSProperties => ({
     padding: '2px 4px',
 });
 
+// Филиалы для фильтра списка — те же, что в шахматке.
+const BRANCHES = LOCATIONS;
+
+/** Филиал брони: из брони, а у старых броней без него — по кабинету. */
+function bookingBranch(b: BookingHistoryItem): string | undefined {
+    return b.locationId || RESOURCES.find(r => r.id === b.resourceId)?.locationId;
+}
+
 export function AdminBookings() {
     const [searchParams] = useSearchParams();
     // Excel #59 — ?view=grid deep-link from "Перенести" action flips to the
@@ -111,6 +119,14 @@ export function AdminBookings() {
     const { bookings, users, fetchUsers, fetchAllBookings, cancelBooking, listForReRent, currentUser } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
+    // Филиал (владелец 06.10): выбор помним на этом компьютере.
+    const [branchFilter, setBranchFilterState] = useState<string>(() => {
+        try { return localStorage.getItem('admin.bookings.branch') || 'all'; } catch { return 'all'; }
+    });
+    const setBranchFilter = (v: string) => {
+        setBranchFilterState(v);
+        try { localStorage.setItem('admin.bookings.branch', v); } catch { /* приватный режим */ }
+    };
     const [search, setSearch] = useState(searchParams.get('search') || '');
     // Default view = chessboard (admin team works in shahmatka day-to-day).
     // Honour ?view=list in the URL so deep-links/bookmarks still open in
@@ -179,6 +195,7 @@ export function AdminBookings() {
     const filteredBookings = bookings
         .filter(b => {
             if (filterStatus !== 'all' && b.status !== filterStatus) return false;
+            if (branchFilter !== 'all' && bookingBranch(b) !== branchFilter) return false;
             if (timeFilter !== 'all') {
                 const bk = bookingBucket(bookingStartMs(b), nowRef);
                 if (timeFilter === 'today' && bk !== 'today') return false;
@@ -475,6 +492,7 @@ export function AdminBookings() {
                 filteredBookings={filteredBookings}
                 viewMode={viewMode} setViewMode={setViewMode}
                 filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+                branchFilter={branchFilter} setBranchFilter={setBranchFilter}
                 timeFilter={timeFilter} setTimeFilter={setTimeFilter}
                 search={search} setSearch={setSearch}
                 navigate={navigate}
@@ -508,6 +526,7 @@ type GHAdminBookingsProps = {
     filteredBookings: BookingHistoryItem[];
     viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
     filterStatus: string; setFilterStatus: (s: string) => void;
+    branchFilter: string; setBranchFilter: (s: string) => void;
     timeFilter: TimeFilter; setTimeFilter: (t: TimeFilter) => void;
     search: string; setSearch: (s: string) => void;
     navigate: ReturnType<typeof useNavigate>;
@@ -552,6 +571,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     const {
         bookings, filteredBookings, viewMode, setViewMode,
         filterStatus, setFilterStatus, timeFilter, setTimeFilter, search, setSearch,
+        branchFilter, setBranchFilter,
         navigate, getUserName, handleEditPrice, handleCancel,
         handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
         convertingId, handleMove, handleApprove, handleReject,
@@ -570,7 +590,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     // снова первые 50.
     const PAGE = 50;
     const [limit, setLimit] = useState(PAGE);
-    useEffect(() => { setLimit(PAGE); }, [filterStatus, timeFilter, search]);
+    useEffect(() => { setLimit(PAGE); }, [filterStatus, timeFilter, search, branchFilter]);
     const visible = filteredBookings.slice(0, limit);
     const rest = filteredBookings.length - visible.length;
     // «Чем оплачено» (06.10): наличные в кассу / на счёт / абонемент / в долг —
@@ -948,6 +968,36 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 );
                             })}
                         </div>
+                        {/* Фильтр по филиалу (владелец 06.10) */}
+                        <div data-branch-filter style={{ display: 'flex', gap: 0, border: `1px solid ${GH.ink}`, borderTop: 'none', flexWrap: 'wrap', overflowX: 'auto' }}>
+                            {[{ value: 'all', label: 'Все филиалы' }, ...BRANCHES.map(l => ({ value: l.id, label: l.name }))].map((o) => {
+                                const active = branchFilter === o.value;
+                                return (
+                                    <button
+                                        key={o.value}
+                                        onClick={() => setBranchFilter(o.value)}
+                                        aria-pressed={active}
+                                        style={{
+                                            fontFamily: GH_MONO,
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            letterSpacing: '0.06em',
+                                            textTransform: 'uppercase',
+                                            padding: narrow ? '8px 10px' : '10px 14px',
+                                            background: active ? GH.ink : 'transparent',
+                                            color: active ? GH.paper : GH.ink,
+                                            border: 'none',
+                                            borderRight: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                            flex: narrow ? 1 : undefined,
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >
+                                        {o.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
 
                     {filteredBookings.length === 0 ? (
@@ -966,7 +1016,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                             ) : (
                                 <EmptyState
                                     title="Броней не найдено"
-                                    hint={search || filterStatus !== 'all' || timeFilter !== 'all'
+                                    hint={search || filterStatus !== 'all' || timeFilter !== 'all' || branchFilter !== 'all'
                                         ? 'Измените поиск или фильтры.'
                                         : 'Новые брони появятся здесь.'}
                                 />
