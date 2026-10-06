@@ -258,8 +258,31 @@ export function todaySummary(rows: TodayRow[]): TodaySummary {
     return { amount, clients, label };
 }
 
-/** Правая колонка «Взять сегодня»: по клиенту — за сегодня, весь долг, лимит. */
-export function byClient(rows: TodayRow[], users: TodayUserInput[]): TodayClient[] {
+/**
+ * 06.10 (владелец): долг по броням ПОСЛЕ сегодняшнего дня, которые сайт уже
+ * списал заранее (за сутки до начала). Сегодня его не просим — «к оплате» только
+ * за сегодняшние и прошедшие брони; завтрашнюю возьмут завтра. Ключ — userId брони.
+ */
+export function futureChargedDue(
+    bookings: ReadonlyArray<{ id: string | number; userId?: string | null; date?: unknown }>,
+    dueMap: Map<string, { due: number; charged: boolean }>,
+    dayKey: string,
+): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const b of bookings || []) {
+        const d = dueMap.get(String(b.id));
+        if (!d || !d.charged || !(d.due > 0)) continue;
+        const k = bookingDayKey(b.date as string | Date | null | undefined);
+        if (!k || k <= dayKey) continue;
+        const key = String(b.userId || '');
+        out.set(key, round2((out.get(key) || 0) + d.due));
+    }
+    return out;
+}
+
+/** Правая колонка «Взять сегодня»: по клиенту — за сегодня, весь долг, лимит.
+ *  futureDue (06.10): долг по будущим списанным броням — вычитается из «взять». */
+export function byClient(rows: TodayRow[], users: TodayUserInput[], futureDue?: Map<string, number>): TodayClient[] {
     const idx = userIndex(users);
     const groups = new Map<string, TodayRow[]>();
     for (const r of rows || []) {
@@ -283,7 +306,7 @@ export function byClient(rows: TodayRow[], users: TodayUserInput[]): TodayClient
             phone: list[0].phone,
             today,
             debt,
-            total: round2(debt + notCharged),
+            total: Math.max(today, round2(debt + notCharged - (futureDue?.get(String(list[0].userId)) ?? 0))),
             balance,
             creditLimit: limit,
             overLimit: limit !== null && debt > limit,

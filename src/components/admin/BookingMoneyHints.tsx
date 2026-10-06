@@ -1,3 +1,4 @@
+import { batumiDayKey, bookingDayKey } from '../../utils/adminToday';
 import { useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { createPortal } from 'react-dom';
@@ -74,15 +75,28 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     }, [booking.id, booking.paymentMethod]);
 
     const balance = client?.balance ?? null;
-    const debt = balance !== null && balance < 0 ? -balance : 0;
+    // 06.10 (владелец): долг по броням после сегодняшнего дня (уже списанным заранее)
+    // сейчас не просим — только за сегодняшние и прошедшие. Есть раскладка — вычитаем.
+    const todayKey = batumiDayKey();
+    const laterDebt = allocOk
+        ? (alloc!.debts || []).reduce((s, d) => {
+            const k = d.date ? bookingDayKey(d.date) : null;
+            return k && k > todayKey ? s + Number(d.amount || 0) : s;
+        }, 0)
+        : 0;
+    const debt = balance !== null && balance < 0 ? Math.max(0, Math.round((-balance - laterDebt) * 100) / 100) : 0;
     const price = booking.finalPrice ?? 0;
     // 03.10: ещё не списанная бронь, часть которой уже покрывает плюс на балансе
     // (скидка за прошлую неделю, предоплата), — подставляем только разницу.
     const partlyCovered = !!due && !due.charged && due.due > 0 && due.due < price;
     const pendingAmount = partlyCovered ? due!.due : price;
-    const suggested = debt > 0 ? debt : (booking.paymentStatus === 'pending' ? pendingAmount : 0);
+    // Окно самой будущей брони, уже списанной в долг: подставляем её долг (клиент может заплатить заранее).
+    const ownLater = !!due && due.charged && due.due > 0 && (bookingDayKey(booking.date as unknown as string) ?? '') > todayKey ? due.due : 0;
+    const suggested = debt > 0 ? debt : ownLater > 0 ? ownLater : (booking.paymentStatus === 'pending' ? pendingAmount : 0);
     const suggestedHint = debt > 0
-        ? `Подставлен долг клиента: ${formatGel(debt)}`
+        ? `Подставлен долг клиента за сегодня и прошедшие брони: ${formatGel(debt)}`
+        : ownLater > 0
+        ? `Подставлен долг за эту бронь: ${formatGel(ownLater)} — её можно оплатить и в день брони`
         : booking.paymentStatus === 'pending' && price > 0
             ? (partlyCovered
                 ? `Подставлена разница: ${formatGel(pendingAmount)} из ${formatGel(price)} — остальное уже на балансе клиента (спишется за сутки до начала)`

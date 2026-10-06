@@ -16,7 +16,7 @@ import { STATUS, COLOR } from '../../design/tokens';
 import { computeDueByBooking } from '../../utils/dueAmounts';
 import { applyAllocation, hiddenDebts, type HiddenDebt } from '../../utils/balanceAllocation';
 import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
-import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../utils/adminToday';
+import { todayRows, todaySummary, byClient, batumiDayKey, futureChargedDue, type TodayRow, type TodayClient } from '../../utils/adminToday';
 import { hasPermission } from '../../utils/permissions';
 import { cashBranchOfBooking } from '../../utils/cashBranch';
 import { useArchivedClients } from '../../hooks/useArchivedClients';
@@ -118,7 +118,9 @@ export function AdminDashboard() {
         return hiddenDebts(dueMap, bookings, allocIndex, uid => (bal.has(uid) ? bal.get(uid)! : null));
     }, [dueMap, bookings, allocIndex, users]);
     const summary = useMemo(() => todaySummary(rows), [rows]);
-    const clients = useMemo(() => byClient(rows, users), [rows, users]);
+    // 06.10: долг по завтрашним (уже списанным) броням сегодня не просим.
+    const futureDue = useMemo(() => futureChargedDue(bookings, dueMap, dayKey), [bookings, dueMap, dayKey]);
+    const clients = useMemo(() => byClient(rows, users, futureDue), [rows, users, futureDue]);
 
     // Брони клиентов, которых нет в обычном списке (аккаунт в архиве после
     // склейки), — подписываем именем из архива с пометкой «архив».

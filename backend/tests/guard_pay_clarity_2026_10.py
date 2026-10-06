@@ -200,7 +200,8 @@ def test_summary_and_by_client_calc_untouched():
     assert "if (r.due !== null && r.due > 0) {" in code and "who.add(r.clientKey ?? r.userId);" in code, \
         "todaySummary считает клиентов не по строкам due > 0"
     assert "list.reduce((s, r) => s + (r.due !== null && r.due > 0 ? r.due : 0), 0)" in code, "byClient.today изменён"
-    assert "total: round2(debt + notCharged)," in code, "byClient.total изменён"
+    # 06.10 (владелец): из «взять» вычитается долг по будущим, уже списанным броням.
+    assert "total: Math.max(today, round2(debt + notCharged - (futureDue?.get(String(list[0].userId)) ?? 0)))," in code, "byClient.total изменён"
 
 
 if __name__ == "__main__":

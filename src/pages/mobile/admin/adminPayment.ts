@@ -3,7 +3,7 @@ import type { BookingHistoryItem, User } from '../../../store/types';
 import { computeDueByBooking, type DueInfo } from '../../../utils/dueAmounts';
 import { applyAllocation } from '../../../utils/balanceAllocation';
 import { useAllocationIndex } from '../../../hooks/useBalanceAllocation';
-import { todayRows, byClient, bookingDayKey, batumiDayKey } from '../../../utils/adminToday';
+import { futureChargedDue, todayRows, byClient, bookingDayKey, batumiDayKey } from '../../../utils/adminToday';
 import { branchOfBooking } from '../../../utils/cashBranch';
 
 // Филиал по кабинету — общий с компьютером (src/utils/cashBranch.ts).
@@ -54,7 +54,7 @@ export function acceptPaymentFor(
     const dayKey = bookingDayKey(b.date as any) ?? batumiDayKey();
     const rows = todayRows({ bookings: bookings as any, users, dueMap, dayKey });
     const key = String(user.id || user.email);
-    const mine = byClient(rows, users).find(c => c.userId === key);
+    const mine = byClient(rows, users, futureChargedDue(bookings, dueMap, batumiDayKey())).find(c => c.userId === key);
     const balance = Number(user.balance ?? 0);
     const total = mine ? mine.total : Math.max(0, -balance);
     if (!(total > 0)) return null;

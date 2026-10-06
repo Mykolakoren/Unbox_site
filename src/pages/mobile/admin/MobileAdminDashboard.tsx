@@ -8,7 +8,7 @@ import { useBookingStore } from '../../../store/bookingStore';
 import { bookingsApi } from '../../../api/bookings';
 import type { BookingHistoryItem } from '../../../store/types';
 import { RESOURCES } from '../../../utils/data';
-import { todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
+import { futureChargedDue, todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { useAdminDueMap, acceptPaymentFor, branchOfBooking, type AcceptPayment } from './adminPayment';
 import { useAllocationIndex } from '../../../hooks/useBalanceAllocation';
@@ -118,8 +118,8 @@ export function MobileAdminDashboard() {
     }, [rowsToday, rowsTomorrow, users]);
     const archived = useArchivedClients(missingUserIds);
     const owing = useMemo(
-        () => byClient(rowsToday, users).filter(c => c.today > 0 || c.total > 0),
-        [rowsToday, users],
+        () => byClient(rowsToday, users, futureChargedDue(bookings, dueMap, todayKey)).filter(c => c.today > 0 || c.total > 0),
+        [rowsToday, users, bookings, dueMap, todayKey],
     );
     // «Должны» делим: сначала те, с кого брать сегодня (today > 0), ниже — долг по
     // другим броням (today = 0: брони уже списаны с баланса, брать не сегодня).

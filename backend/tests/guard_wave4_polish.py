@@ -401,7 +401,7 @@ def test_archived_clients_named_not_counted():
         assert "useArchivedClients(missingUserIds)" in src, f"{rel}: бронь архивного клиента снова началом почты"
         assert ">архив<" in src, f"{rel}: нет пометки «архив»"
         assert feed in src, f"{rel}: архивные клиенты подмешаны в деньги «Сегодня»"
-        assert "byClient(rows, users)" in src or "byClient(rowsToday, users)" in src
+        assert "byClient(rows, users" in src or "byClient(rowsToday, users" in src
     chess = _code("src/components/admin/AdminChessboardView.tsx")
     assert "useArchivedClients(missingUserIds)" in chess and "(архив)" in chess, "шахматка: архивный клиент снова началом почты"
 
