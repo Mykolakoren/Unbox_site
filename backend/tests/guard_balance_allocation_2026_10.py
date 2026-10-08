@@ -325,6 +325,9 @@ def _db():
     return Session(engine)
 
 
+_P2_DAY = (__import__("datetime").datetime.utcnow() + __import__("datetime").timedelta(days=30)).date()
+
+
 def _seed(s):
     from app.models.balance_ledger import BalanceLedger
     from app.models.booking import Booking
@@ -371,7 +374,8 @@ def _seed(s):
     led(plus, "2026-10-05T01:00:01", 9, "weekly_rebate", "weekly_rebate", str(plus.id))
     s.add(WeeklyRebate(user_id=plus.id, week_start=date(2026, 9, 21), amount=9, tier_percent=10,
                        created_at=datetime(2026, 10, 5, 1, 0, 2)))
-    p2 = bk(plus, "2026-10-08T00:00:00", "12:00", 20, pay="pending")
+    # Будущая несписанная бронь — дата от «сейчас» (08.10 стала прошлым 08.10.2026 и сторож упал).
+    p2 = bk(plus, f"{_P2_DAY.isoformat()}T00:00:00", "12:00", 20, pay="pending")
     # Долг 40 ₾: старая бронь (август — вне окна админки) и новая — обе в долг.
     old = bk(debt, "2026-08-03T00:00:00", "10:00", 20)
     new = bk(debt, "2026-10-04T00:00:00", "14:00", 20)
@@ -407,7 +411,7 @@ def test_endpoints_and_rights_sqlite():
     money = {m["bookingId"]: m for m in res["bookings"]}
     assert money[str(d["p1"].id)]["sources"][0]["detail"] == "TBC", "способ оплаты не из кассовой проводки"
     assert [(c["bookingId"], c["covered"], c["due"]) for c in res["coverage"]] == [(str(d["p2"].id), 9.0, 11.0)]
-    assert res["coverage"][0]["booking"]["label"] == "08.10 12:00 Каб. 2"
+    assert res["coverage"][0]["booking"]["label"] == f"{_P2_DAY:%d.%m} 12:00 Каб. 2"
     by_email = api.get_user_balance_allocation(user_id="plus@demo.ge", session=s, current_user=d["admin"])
     assert by_email["userId"] == str(d["plus"].id)
 

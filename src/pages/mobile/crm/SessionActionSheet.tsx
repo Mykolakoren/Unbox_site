@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-    Check, X, MapPin, Calendar, Trash2,
+    Check, X, MapPin, Calendar, Trash2, RotateCcw,
     Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock,
 } from 'lucide-react';
 import { crmApi, type CrmSession, type CrmClient, type CrmNote, type CrmPayment } from '../../../api/crm';
@@ -66,7 +66,7 @@ interface Props {
     onBookNext?: (session: CrmSession) => void;
 }
 
-type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'delete' | 'cabinet';
+type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'cancel' | 'delete' | 'cabinet';
 
 /** Служебная пометка, которую бэкенд ставит сессиям из заявок с сайта
  *  (specialist_schedule.py). Это не заметка специалиста — не предлагаем
@@ -159,7 +159,10 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     };
 
     const handleStatus = async (status: CrmSession['status']) => {
-        try { await update({ status }, status === 'COMPLETED' ? 'Сессия отмечена как прошедшая' : 'Статус обновлён'); setMode('main'); } catch { /* toast already shown */ }
+        const msg = status === 'COMPLETED' ? 'Сессия отмечена как прошедшая'
+            : status === 'CANCELLED_CLIENT' || status === 'CANCELLED_THERAPIST' ? 'Сессия отменена'
+            : 'Статус обновлён';
+        try { await update({ status }, msg); setMode('main'); } catch { /* toast already shown */ }
     };
 
     const handlePaid = async (isPaid: boolean) => {
@@ -352,7 +355,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     onPrice={() => openMode('price')}
                     onNotes={() => openMode('notes')}
                     onReschedule={() => openMode('reschedule')}
-                    onDelete={() => openMode('delete')}
+                    onCancel={() => openMode('cancel')}
                     onCabinet={() => openMode('cabinet')}
                     onBookNext={onBookNext && !viewingOther ? () => onBookNext(session) : undefined}
                     paymentBlock={client && payment ? (
@@ -413,6 +416,14 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     onBack={() => setMode('main')}
                 />
             )}
+            {mode === 'cancel' && (
+                <CancelConfirm
+                    busy={busy}
+                    onStatus={handleStatus}
+                    onDelete={() => openMode('delete')}
+                    onBack={() => setMode('main')}
+                />
+            )}
             {mode === 'delete' && (
                 <DeleteConfirm
                     session={session}
@@ -427,7 +438,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
 
 function Main({
     session, client, busy, notes, legacyNote, onStatus, onPaid, onPrice, onNotes, onReschedule,
-    onDelete, onCabinet, onBookNext, paymentBlock,
+    onCancel, onCabinet, onBookNext, paymentBlock,
 }: {
     session: CrmSession;
     client?: CrmClient;
@@ -439,7 +450,7 @@ function Main({
     onPrice: () => void;
     onNotes: () => void;
     onReschedule: () => void;
-    onDelete: () => void;
+    onCancel: () => void;
     onCabinet: () => void;
     onBookNext?: () => void;
     /** Блок «Оплата» (правка платежа, доплата, расхождение с ценой). */
@@ -449,6 +460,7 @@ function Main({
     // G6-M4: у будущей сессии нет «Прошла» — случайный тап делал завтрашнюю
     // сессию долгом. Главное действие будущей — «Перенести».
     const isFuture = parseUTC(session.date).getTime() > Date.now();
+    const isCancelled = session.status === 'CANCELLED_CLIENT' || session.status === 'CANCELLED_THERAPIST';
     const cabinet = useLinkedBooking(session, false).label;
     const latestNote = notes?.[0]?.content || legacyNote;
     const currency = sessionCurrency(session, client);
@@ -498,16 +510,25 @@ function Main({
                         onClick={() => onStatus('PLANNED')}
                     />
                 )}
-                {/* "Отмена" = удаление: 2026-05-14 spec — больше нет CANCELLED
-                    статуса, отмена просто удаляет запись. Бронь кабинета при
-                    этом НЕ отменяется (delete_session её не трогает). */}
-                <ActionTile
-                    icon={<X size={18} aria-hidden="true" />}
-                    label="Отменить"
-                    tone="danger-soft"
-                    disabled={busy}
-                    onClick={onDelete}
-                />
+                {/* 08.10 (владелец): «Отменить» — как на компьютере: статус
+                    «Отменил клиент / специалист», сессия остаётся в истории.
+                    Удалить совсем (ошибочная запись) — шагом дальше. */}
+                {isCancelled ? (
+                    <ActionTile
+                        icon={<RotateCcw size={18} aria-hidden="true" />}
+                        label="Вернуть"
+                        disabled={busy}
+                        onClick={() => onStatus(isFuture ? 'PLANNED' : 'COMPLETED')}
+                    />
+                ) : (
+                    <ActionTile
+                        icon={<X size={18} aria-hidden="true" />}
+                        label="Отменить"
+                        tone="danger-soft"
+                        disabled={busy}
+                        onClick={onCancel}
+                    />
+                )}
             </div>
 
             {/* Оплата: вся строка — кнопка. Раньше срабатывал только системный
@@ -835,6 +856,36 @@ function CabinetForm({ session, busy, onDetach, onCancelBooking, onBack }: {
     );
 }
 
+function CancelConfirm({ busy, onStatus, onDelete, onBack }: {
+    busy: boolean;
+    onStatus: (s: CrmSession['status']) => void;
+    onDelete: () => void;
+    onBack: () => void;
+}) {
+    return (
+        <FormShell title="Отменить сессию?" onBack={onBack}>
+            <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '0 0 12px' }}>
+                Сессия останется в истории со статусом отмены и не будет считаться долгом. Бронь кабинета и событие в Google Календаре не меняются.
+            </p>
+            <Button variant="danger" block disabled={busy} onClick={() => onStatus('CANCELLED_CLIENT')}>
+                Отменил клиент
+            </Button>
+            <Button variant="secondary" block disabled={busy} onClick={() => onStatus('CANCELLED_THERAPIST')} style={{ marginTop: 8 }}>
+                Отменил специалист
+            </Button>
+            <button
+                type="button"
+                data-delete-session
+                disabled={busy}
+                onClick={onDelete}
+                style={{ marginTop: 16, width: '100%', minHeight: 44, background: 'transparent', border: 'none', color: 'var(--status-danger-fg)', fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+                <Trash2 size={14} aria-hidden="true" /> Записали по ошибке — удалить совсем
+            </button>
+        </FormShell>
+    );
+}
+
 function DeleteConfirm({ session, busy, onDelete, onBack }: {
     session: CrmSession;
     busy: boolean;
@@ -842,7 +893,7 @@ function DeleteConfirm({ session, busy, onDelete, onBack }: {
     onBack: () => void;
 }) {
     return (
-        <FormShell title="Отменить сессию?" onBack={onBack}>
+        <FormShell title="Удалить сессию?" onBack={onBack}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: 'var(--status-pending-fg)', marginBottom: 12 }}>
                 <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
                 <span style={{ fontSize: 14 }}>
@@ -851,11 +902,11 @@ function DeleteConfirm({ session, busy, onDelete, onBack }: {
                 </span>
             </div>
             <Button variant="danger" block disabled={busy} onClick={() => onDelete('this')}>
-                Отменить только эту сессию
+                Удалить только эту сессию
             </Button>
             {session.recurringGroupId && (
                 <Button variant="danger" block disabled={busy} onClick={() => onDelete('future')} style={{ marginTop: 8 }}>
-                    Отменить эту и все будущие в серии
+                    Удалить эту и все будущие в серии
                 </Button>
             )}
         </FormShell>
