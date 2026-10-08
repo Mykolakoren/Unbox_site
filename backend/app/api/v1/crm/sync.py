@@ -555,6 +555,9 @@ def sync_from_calendar(
         ignored = _ignored_names(current_user)
         name_events: dict = {}
         for ev in result["unmatched"]:
+            # 08.10: приглашение от другого человека карточкой не становится.
+            if ev.get("is_invite"):
+                continue
             clean = _clean_client_name(ev["summary"])
             if not clean or len(clean) < 2:
                 continue
@@ -603,7 +606,7 @@ def sync_from_calendar(
         for ev in result["unmatched"]:
             clean = _clean_client_name(ev["summary"])
             norm = _normalize_name(clean) if clean else ""
-            if norm in new_clients_map:
+            if norm in new_clients_map and not ev.get("is_invite"):
                 ev["client_id"] = new_clients_map[norm]
                 result["matched"].append(ev)
             else:
@@ -643,7 +646,9 @@ def sync_from_calendar(
                 continue
             unique_names[norm] = {
                 "name": clean,
-                "looks_non_client": _looks_non_client(clean),
+                # Приглашение от другого человека — тоже пропускаем (08.10).
+                "looks_non_client": _looks_non_client(clean) or bool(ev.get("is_invite")),
+                "is_invite": bool(ev.get("is_invite")),
                 "ignored": norm in ignored,
             }
         creatable = [v for v in unique_names.values() if not v["looks_non_client"] and not v["ignored"]]
@@ -1035,6 +1040,9 @@ def sync_from_calendar(
             if entry.get("has_alias_code"):
                 continue
             if entry.get("is_recurring"):
+                continue
+            # 08.10: чужие приглашения не переименовываем — это не наше событие.
+            if entry.get("is_invite"):
                 continue
             # Google rejects PATCH on cancelled/declined events — and even if
             # it didn't, rewriting the summary of a cancelled slot is

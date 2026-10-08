@@ -137,7 +137,7 @@ export interface CrmSyncResult {
     unmatchedSummaries: string[];
     dryRun?: boolean;
     /** Только в предпросмотре: кто станет новой карточкой клиента. */
-    wouldCreateNames?: { name: string; looksNonClient: boolean; ignored: boolean }[];
+    wouldCreateNames?: { name: string; looksNonClient: boolean; isInvite?: boolean; ignored: boolean }[];
 }
 
 export interface CrmPayment {

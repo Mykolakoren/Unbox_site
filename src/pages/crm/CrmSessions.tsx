@@ -1299,8 +1299,8 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                     </div>
                                     {(p.syncResult.wouldCreateNames || []).map((n: any) => (
                                         n.looksNonClient ? (
-                                            <div key={n.name} className="text-xs py-1" style={{ color: GH.ink60 }} title="Похоже на личное дело — карточку не создадим">
-                                                — {n.name} <span className="italic">(похоже не клиент, пропустим)</span>
+                                            <div key={n.name} className="text-xs py-1" style={{ color: GH.ink60 }} title={n.isInvite ? 'Встречу назначил другой человек — карточку не создадим' : 'Похоже на личное дело — карточку не создадим'}>
+                                                — {n.name} <span className="italic">{n.isInvite ? '(приглашение от другого человека, пропустим)' : '(похоже не клиент, пропустим)'}</span>
                                             </div>
                                         ) : (
                                             <label key={n.name} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer" style={{ minHeight: 36 }}>

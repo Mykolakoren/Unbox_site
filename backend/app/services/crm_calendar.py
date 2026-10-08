@@ -455,6 +455,21 @@ def delete_calendar_event(calendar_id: str, event_id: str) -> None:
             raise
 
 
+def is_foreign_invite(ev: dict, calendar_id: str) -> bool:
+    """Приглашение от другого человека (08.10, «Координации» у владельца).
+
+    Организатор события — не этот календарь: Google кладёт приглашение в
+    ОСНОВНОЙ календарь приглашённого, и перенести его оттуда нельзя. Такие
+    события не становятся новыми карточками клиентов и не переименовываются;
+    если в приглашении код или имя существующего клиента — привязка остаётся.
+    """
+    org = ev.get("organizer") or {}
+    if not org or org.get("self"):
+        return False
+    email = (org.get("email") or "").strip().lower()
+    return bool(email) and email != (calendar_id or "").strip().lower()
+
+
 def sync_from_calendar(
     calendar_id: str,
     clients: list,  # list of TherapistClient objects
@@ -586,6 +601,7 @@ def sync_from_calendar(
             # in Google Calendar to prevent future ambiguity.
             "suggested_summary": None,
             "is_recurring": bool(ev.get("recurringEventId")),
+            "is_invite": is_foreign_invite(ev, calendar_id),
         }
 
         if matched_client:
