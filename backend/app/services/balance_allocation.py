@@ -900,8 +900,20 @@ PAID_VIA_METHOD = {"cash": "наличные в кассу", "card_tbc": "на �
 PAID_VIA_MAX_IDS = 200
 
 
-def paid_via_label(sources: list[dict], debt: float) -> list[str]:
-    """Подписи «чем оплачено» по партиям, которые раскладка положила на бронь."""
+def _src_day(src: dict) -> Optional[date]:
+    """День партии по Тбилиси (date партии — наивное UTC в isoformat)."""
+    try:
+        return _tbs(datetime.fromisoformat(str(src.get("date")))).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def paid_via_label(sources: list[dict], debt: float, today: Optional[date] = None) -> list[str]:
+    """Подписи «чем оплачено» по партиям, которые раскладка положила на бронь.
+
+    today (06.10→08.10, просьба админов «свести кассу за день»): у оплаты
+    дописывается день — «наличные в кассу · сегодня» / «· 06.10».
+    """
     out: list[str] = []
 
     def add(s: str):
@@ -911,7 +923,9 @@ def paid_via_label(sources: list[dict], debt: float) -> list[str]:
     for s in sources or []:
         kind = s.get("kind")
         if kind == KIND_TOPUP:
-            add({v: PAID_VIA_METHOD[k] for k, v in METHOD_LABELS.items()}.get(s.get("detail") or "", "оплата на баланс"))
+            base = {v: PAID_VIA_METHOD[k] for k, v in METHOD_LABELS.items()}.get(s.get("detail") or "", "оплата на баланс")
+            d = _src_day(s) if today is not None else None
+            add(f"{base} · {'сегодня' if d == today else _ddmm(d)}" if d else base)
         elif kind == KIND_REBATE:
             add("скидка за неделю")
         elif kind == KIND_REFUND:
@@ -991,6 +1005,7 @@ def paid_via(session, booking_ids: list[str], now_utc: Optional[datetime] = None
         pending_ids.update(b.id for b in data["all"] if due_kind(b, now) == "pending")
         charged_ids.update(b.id for b in data["all"] if due_kind(b, now) == "charged")
 
+    today = now.date()
     items = []
     for b in blist:
         bid = str(b.id)
@@ -1010,9 +1025,10 @@ def paid_via(session, booking_ids: list[str], now_utc: Optional[datetime] = None
             items.append({"bookingId": bid, "kind": "free", "via": ["без оплаты"]})
             continue
         if row and (_c(row["charged"]) > 0 or _c(row["debt"]) > 0):
-            via = paid_via_label(row["sources"], float(row["debt"] or 0))
+            via = paid_via_label(row["sources"], float(row["debt"] or 0), today)
             kind = "debt" if _c(row["debt"]) > 0 else "paid"
-            items.append({"bookingId": bid, "kind": kind, "via": via})
+            paid_today = any(x.get("kind") == KIND_TOPUP and _src_day(x) == today for x in row["sources"])
+            items.append({"bookingId": bid, "kind": kind, "via": via, "paidToday": paid_today})
         elif bid in pending_ids:
             items.append({"bookingId": bid, "kind": "pending", "via": ["ещё не списано"]})
         elif bid in charged_ids:
@@ -1021,3 +1037,66 @@ def paid_via(session, booking_ids: list[str], now_utc: Optional[datetime] = None
         else:
             items.append({"bookingId": bid, "kind": "none", "via": []})
     return {"items": items}
+
+
+# ── «Оплачено сегодня» в списке броней (08.10, просьба админов) ──────────
+
+def paid_today(session, day: Optional[date] = None, now_utc: Optional[datetime] = None) -> dict:
+    """Какие брони оплачены деньгами, принятыми в этот день (по Тбилиси).
+
+    Берём пополнения дня (касса → баланс) и смотрим по раскладке ленты, на
+    какие брони они ушли. Часть денег могла лечь на баланс вперёд (бронь ещё
+    не списана) или закрыть долг не за бронь — это «unallocated».
+    Ответ: {day, items: [{bookingId, amount, methods}], total, toBookings,
+    unallocated: [{userId, name, amount}]}. Только чтение.
+    """
+    from sqlmodel import select
+    from app.models.balance_ledger import BalanceLedger as L
+    from app.models.user import User
+
+    now = _now_tbs(now_utc)
+    day = day or now.date()
+    start = datetime.combine(day, datetime.min.time()) - TZ
+    end = start + timedelta(days=1)
+    rows = session.exec(
+        select(L.id, L.user_id, L.delta).where(
+            L.reason.in_(("topup", "topup_adjust")), L.created_at >= start, L.created_at < end,
+        )
+    ).all()
+    today_rows = {str(r.id): r for r in rows if float(r.delta or 0) > 0}
+    if not today_rows:
+        return {"day": day.isoformat(), "items": [], "total": 0.0, "toBookings": 0.0, "unallocated": []}
+    uids = sorted({str(r.user_id) for r in today_rows.values()})
+    users = session.exec(select(User.id, User.email, User.name, User.balance).where(User.id.in_(uids))).all()
+    inputs = load_inputs(session, users)
+    per_booking: dict[str, dict] = {}
+    unallocated = []
+    total = sum(_c(r.delta) for r in today_rows.values())
+    for u in users:
+        data = inputs.get(str(u.id))
+        if not data:
+            continue
+        try:
+            res = allocate(data["rows"], data["bookings"], balance=float(u.balance or 0))
+        except Exception:  # noqa: BLE001
+            logger.exception("[paid-today] клиент %s пропущен", u.id)
+            continue
+        mine = {rid for rid, r in today_rows.items() if str(r.user_id) == str(u.id)}
+        used = 0
+        for brow in res["bookings"]:
+            for src in brow["sources"]:
+                if src.get("rowId") in mine:
+                    it = per_booking.setdefault(brow["bookingId"], {"bookingId": brow["bookingId"], "amount": 0, "methods": []})
+                    it["amount"] += _c(src.get("amount") or 0)
+                    m = PAID_VIA_METHOD.get({v: k for k, v in METHOD_LABELS.items()}.get(src.get("detail") or "", ""), "оплата на баланс")
+                    if m not in it["methods"]:
+                        it["methods"].append(m)
+                    used += _c(src.get("amount") or 0)
+        got = sum(_c(today_rows[rid].delta) for rid in mine)
+        if got - used > 0:
+            unallocated.append({"userId": str(u.id), "name": u.name or u.email, "amount": _g(got - used)})
+    items = [{**v, "amount": _g(v["amount"])} for v in per_booking.values()]
+    return {
+        "day": day.isoformat(), "items": items, "total": _g(total),
+        "toBookings": _g(sum(_c(i["amount"]) for i in items)), "unallocated": unallocated,
+    }

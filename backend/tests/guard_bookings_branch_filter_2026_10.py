@@ -16,7 +16,7 @@ def test_branch_filter_in_list():
     assert "if (branchFilter !== 'all' && bookingBranch(b) !== branchFilter) return false;" in s
     assert "b.locationId || RESOURCES.find(r => r.id === b.resourceId)?.locationId" in s, "старые брони — по кабинету"
     assert "localStorage.getItem('admin.bookings.branch')" in s and "try {" in s
-    assert "[filterStatus, timeFilter, search, branchFilter]" in s, "смена филиала — снова первые 50"
+    assert "[filterStatus, timeFilter, search, branchFilter" in s, "смена филиала — снова первые 50"
 
 
 if __name__ == "__main__":

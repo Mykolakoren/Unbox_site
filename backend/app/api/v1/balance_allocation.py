@@ -83,3 +83,22 @@ def get_balance_allocation_paid_via(
     current_user: User = Depends(require_clients_view),
 ) -> Any:
     return balance_allocation.paid_via(session, ids.split(","))
+
+
+@router.get("/balance-allocation/paid-today")
+def get_balance_allocation_paid_today(
+    *,
+    day: str = Query("", description="YYYY-MM-DD по Тбилиси; пусто — сегодня"),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_clients_view),
+) -> Any:
+    """Фильтр «Оплачено сегодня» в списке броней (08.10): какие брони оплачены
+    деньгами, принятыми в этот день. Право — как у сводки."""
+    from datetime import date as _date
+    d = None
+    if day:
+        try:
+            d = _date.fromisoformat(day)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="day: нужен формат YYYY-MM-DD")
+    return balance_allocation.paid_today(session, d)

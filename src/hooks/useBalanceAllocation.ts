@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { balanceAllocationApi, type PaidViaItem } from '../api/balanceAllocation';
+import { balanceAllocationApi, type PaidViaItem, type PaidTodayResponse } from '../api/balanceAllocation';
 import { indexAllocation, type AllocationIndex, type ClientAllocation } from '../utils/balanceAllocation';
 import { useUserStore } from '../store/userStore';
 import { hasPermission } from '../utils/permissions';
@@ -184,4 +184,36 @@ export function usePaidVia(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enabled, sig]);
     return enabled ? map : EMPTY_PAID_VIA;
+}
+
+// ── «Оплачено сегодня» — фильтр списка броней (08.10) ──────────────────
+
+/**
+ * Брони, оплаченные деньгами, принятыми сегодня, + сколько легло на баланс
+ * вперёд. Грузится только когда фильтр включён; перезапрос — после оплат.
+ */
+export function usePaidToday(
+    on: boolean,
+    users: ReadonlyArray<User>,
+    bookings: ReadonlyArray<BookingHistoryItem>,
+): { data: PaidTodayResponse | null; loading: boolean; failed: boolean } {
+    const currentUser = useUserStore(s => s.currentUser);
+    const enabled = on && !!currentUser && ADMIN_ROLES.includes(currentUser.role || '')
+        && hasPermission(currentUser, 'crm.view_clients');
+    const sig = `${balanceSignature(users)}#${bookingsSignature(bookings)}`;
+    const [data, setData] = useState<PaidTodayResponse | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [failed, setFailed] = useState(false);
+    useEffect(() => {
+        if (!enabled) return;
+        let cancelled = false;
+        setLoading(true);
+        setFailed(false);
+        balanceAllocationApi.paidToday()
+            .then(r => { if (!cancelled) setData(r); })
+            .catch(() => { if (!cancelled) setFailed(true); })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [enabled, sig]);
+    return { data: enabled ? data : null, loading: enabled && loading, failed: enabled && failed };
 }

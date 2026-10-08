@@ -23,8 +23,8 @@ import { parseUTC } from '../../utils/dateUtils';
 import { DueBadge } from '../../components/admin/DueBadge';
 import { computeDueByBooking, type DueInfo } from '../../utils/dueAmounts';
 import { applyAllocation } from '../../utils/balanceAllocation';
-import { useAllocationIndex, usePaidVia } from '../../hooks/useBalanceAllocation';
-import type { PaidViaItem } from '../../api/balanceAllocation';
+import { useAllocationIndex, usePaidVia, usePaidToday } from '../../hooks/useBalanceAllocation';
+import type { PaidViaItem, PaidTodayResponse } from '../../api/balanceAllocation';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
 import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -127,6 +127,14 @@ export function AdminBookings() {
         setBranchFilterState(v);
         try { localStorage.setItem('admin.bookings.branch', v); } catch { /* приватный режим */ }
     };
+    // «Оплачено сегодня» (08.10, админы: свести кассу за день) — брони,
+    // оплаченные деньгами, принятыми сегодня, по раскладке ленты.
+    const [paidTodayOnly, setPaidTodayOnly] = useState(false);
+    const paidToday = usePaidToday(paidTodayOnly, users, bookings);
+    const paidTodayIds = useMemo(
+        () => (paidToday.data ? new Set(paidToday.data.items.map(i => i.bookingId)) : null),
+        [paidToday.data],
+    );
     const [search, setSearch] = useState(searchParams.get('search') || '');
     // Default view = chessboard (admin team works in shahmatka day-to-day).
     // Honour ?view=list in the URL so deep-links/bookmarks still open in
@@ -196,6 +204,7 @@ export function AdminBookings() {
         .filter(b => {
             if (filterStatus !== 'all' && b.status !== filterStatus) return false;
             if (branchFilter !== 'all' && bookingBranch(b) !== branchFilter) return false;
+            if (paidTodayOnly && paidTodayIds && !paidTodayIds.has(b.id)) return false;
             if (timeFilter !== 'all') {
                 const bk = bookingBucket(bookingStartMs(b), nowRef);
                 if (timeFilter === 'today' && bk !== 'today') return false;
@@ -493,6 +502,7 @@ export function AdminBookings() {
                 viewMode={viewMode} setViewMode={setViewMode}
                 filterStatus={filterStatus} setFilterStatus={setFilterStatus}
                 branchFilter={branchFilter} setBranchFilter={setBranchFilter}
+                paidTodayOnly={paidTodayOnly} setPaidTodayOnly={setPaidTodayOnly} paidToday={paidToday}
                 timeFilter={timeFilter} setTimeFilter={setTimeFilter}
                 search={search} setSearch={setSearch}
                 navigate={navigate}
@@ -527,6 +537,8 @@ type GHAdminBookingsProps = {
     viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
     filterStatus: string; setFilterStatus: (s: string) => void;
     branchFilter: string; setBranchFilter: (s: string) => void;
+    paidTodayOnly: boolean; setPaidTodayOnly: (v: boolean) => void;
+    paidToday: { data: PaidTodayResponse | null; loading: boolean; failed: boolean };
     timeFilter: TimeFilter; setTimeFilter: (t: TimeFilter) => void;
     search: string; setSearch: (s: string) => void;
     navigate: ReturnType<typeof useNavigate>;
@@ -559,9 +571,10 @@ type GHAdminBookingsProps = {
 /** Подпись «чем оплачено» под значком оплаты (06.10). */
 function PaidViaNote({ item }: { item?: PaidViaItem }) {
     if (!item || !item.via.length) return null;
-    const color = item.kind === 'debt' ? STATUS.danger.fg : GH.ink60;
+    // Оплачено сегодняшними деньгами — зелёным и жирно (сверка кассы за день).
+    const color = item.kind === 'debt' ? STATUS.danger.fg : item.paidToday ? STATUS.ok.fg : GH.ink60;
     return (
-        <div data-paid-via={item.kind} style={{ fontSize: 12, color, marginTop: 4, lineHeight: 1.35 }}>
+        <div data-paid-via={item.kind} data-paid-today={item.paidToday ? 'yes' : undefined} style={{ fontSize: 12, color, fontWeight: item.paidToday ? 650 : 400, marginTop: 4, lineHeight: 1.35 }}>
             {item.via.join(' + ')}
         </div>
     );
@@ -571,7 +584,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     const {
         bookings, filteredBookings, viewMode, setViewMode,
         filterStatus, setFilterStatus, timeFilter, setTimeFilter, search, setSearch,
-        branchFilter, setBranchFilter,
+        branchFilter, setBranchFilter, paidTodayOnly, setPaidTodayOnly, paidToday,
         navigate, getUserName, handleEditPrice, handleCancel,
         handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
         convertingId, handleMove, handleApprove, handleReject,
@@ -590,7 +603,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     // снова первые 50.
     const PAGE = 50;
     const [limit, setLimit] = useState(PAGE);
-    useEffect(() => { setLimit(PAGE); }, [filterStatus, timeFilter, search, branchFilter]);
+    useEffect(() => { setLimit(PAGE); }, [filterStatus, timeFilter, search, branchFilter, paidTodayOnly]);
     const visible = filteredBookings.slice(0, limit);
     const rest = filteredBookings.length - visible.length;
     // «Чем оплачено» (06.10): наличные в кассу / на счёт / абонемент / в долг —
@@ -998,6 +1011,39 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 );
                             })}
                         </div>
+                        {/* «Оплачено сегодня» (08.10) */}
+                        <div data-paid-today-filter style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', border: `1px solid ${GH.ink}`, borderTop: 'none', padding: '6px 8px' }}>
+                            <button
+                                type="button"
+                                onClick={() => setPaidTodayOnly(!paidTodayOnly)}
+                                aria-pressed={paidTodayOnly}
+                                style={{
+                                    fontFamily: GH_MONO, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                                    padding: narrow ? '6px 10px' : '6px 12px',
+                                    background: paidTodayOnly ? STATUS.ok.fg : 'transparent',
+                                    color: paidTodayOnly ? GH.paper : STATUS.ok.fg,
+                                    border: `1px solid ${STATUS.ok.fg}`, cursor: 'pointer', whiteSpace: 'nowrap',
+                                }}
+                            >
+                                ₾ Оплачено сегодня
+                            </button>
+                            {paidTodayOnly && (
+                                <span style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.4 }}>
+                                    {paidToday.loading && !paidToday.data ? 'Считаем…'
+                                        : paidToday.failed ? 'Не удалось загрузить — попробуйте ещё раз'
+                                        : paidToday.data ? (
+                                            <>
+                                                Сегодня принято <b style={{ color: GH.ink }}>{formatGel(paidToday.data.total)}</b>
+                                                {' · '}на брони {formatGel(paidToday.data.toBookings)} ({paidToday.data.items.length})
+                                                {paidToday.data.unallocated.length > 0 && (
+                                                    <> · на баланс вперёд: {paidToday.data.unallocated.map(u => `${u.name} ${formatGel(u.amount)}`).join(', ')}</>
+                                                )}
+                                                {'. Полная сверка — «Касса → Итоги дня».'}
+                                            </>
+                                        ) : null}
+                                </span>
+                            )}
+                        </div>
                     </div>
 
                     {filteredBookings.length === 0 ? (
@@ -1016,7 +1062,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                             ) : (
                                 <EmptyState
                                     title="Броней не найдено"
-                                    hint={search || filterStatus !== 'all' || timeFilter !== 'all' || branchFilter !== 'all'
+                                    hint={search || filterStatus !== 'all' || timeFilter !== 'all' || branchFilter !== 'all' || paidTodayOnly
                                         ? 'Измените поиск или фильтры.'
                                         : 'Новые брони появятся здесь.'}
                                 />
