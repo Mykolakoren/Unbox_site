@@ -21,6 +21,8 @@ import {
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { linkCabinetPath, nextSessionLabel, useBookNext, useQuickPay } from './crmFlows';
 import { usePullToRefresh } from '../usePullToRefresh';
+import { RentalSessionSheet, rentalsWithoutSession } from '../../../components/crm/CrmWeekGrid';
+import type { BookingHistoryItem } from '../../../store/types';
 import { PullIndicator } from '../PullIndicator';
 import { partialPayment, sessionDebt } from '../../../utils/sessionMoney';
 
@@ -75,6 +77,9 @@ export function MobileCrmToday() {
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
+    const myEmail = useUserStore(s => s.currentUser?.email);
+    // 10.10 «Один календарь», этап 4.4: своя аренда без сессии на этот день.
+    const [rentalTarget, setRentalTarget] = useState<BookingHistoryItem | null>(null);
 
     useEffect(() => {
         // Брони — чтобы у сессии было «Кабинет 5 · Unbox Uni», а не «кабинет».
@@ -472,6 +477,29 @@ export function MobileCrmToday() {
                     </section>
                 )}
 
+                {/* Аренды без сессии (4.4): кабинет снят, а встречи в CRM нет. */}
+                {dayLoaded && !viewingOther && (() => {
+                    const rentals = rentalsWithoutSession(bookings, myEmail, dateStr, sessions);
+                    if (!rentals.length) return null;
+                    return (
+                        <section aria-labelledby="crm-shelf-rentals" style={shelfStyle} data-rentals-shelf>
+                            <h2 id="crm-shelf-rentals" style={shelfTitle}>Аренда без сессии</h2>
+                            <div style={listCard}>
+                                {rentals.map((b, i) => (
+                                    <SessionLine
+                                        key={b.id}
+                                        first={i === 0}
+                                        time={b.startTime || ''}
+                                        name={RESOURCES.find(r => r.id === b.resourceId)?.name ?? 'Кабинет'}
+                                        onOpen={() => setRentalTarget(b)}
+                                        right={<Button variant="secondary" size="touch" onClick={() => setRentalTarget(b)}>Записать сессию</Button>}
+                                    />
+                                ))}
+                            </div>
+                        </section>
+                    );
+                })()}
+
                 {/* 3. Без следующей встречи */}
                 {dayLoaded && shelves.noNext.length > 0 && !viewingOther && (
                     <section aria-labelledby="crm-shelf-nonext" style={shelfStyle}>
@@ -509,6 +537,14 @@ export function MobileCrmToday() {
                 )}
             </div>
 
+            {rentalTarget && (
+                <RentalSessionSheet
+                    booking={rentalTarget}
+                    onClose={() => setRentalTarget(null)}
+                    onOpenBookings={() => navigate('/m/bookings')}
+                    onDone={async () => { setRentalTarget(null); await fetchBookings?.(); await reloadAll(); }}
+                />
+            )}
             {activeSheet && (
                 <SessionActionSheet
                     session={activeSheet}

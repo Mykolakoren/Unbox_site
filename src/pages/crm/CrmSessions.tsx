@@ -25,6 +25,7 @@ import { crmApi } from '../../api/crm';
 import type { CrmSession, CrmSessionUpdate, CrmClient, CrmPayment } from '../../api/crm';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { NewSessionSheet } from '../../components/crm/NewSessionSheet';
+import { CrmWeekGrid } from '../../components/crm/CrmWeekGrid';
 import { toGel, CURRENCIES } from '../../utils/currency';
 import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -1095,7 +1096,13 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
             {/* ── Content ── */}
             <div style={{ paddingBottom: 64 }}>
-                {p.view === 'week' ? (
+                {p.view === 'week' && !ghNarrow && p.onNewSession ? (
+                    /* 10.10 «Один календарь» (этапы 4.1–4.3): сетка недели — сессии и
+                       аренды вместе, новая встреча по клику, перенос перетаскиванием. */
+                    <div style={{ marginTop: 16 }}>
+                        <CrmWeekGrid onChanged={p.onReload} />
+                    </div>
+                ) : p.view === 'week' ? (
                     <div style={{ marginTop: 16 }}>
                         {/* Week nav */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
