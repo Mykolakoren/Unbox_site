@@ -478,6 +478,41 @@ def _left_after_cancel(hours: float, share_returned: float) -> float:
     return round(max(0.0, h - round(h * share_returned, 2)), 2)
 
 
+GIFT_LIVE_STATUSES = ("confirmed", "pending_approval", "completed")
+
+
+def pass_gift_on(session: Session, b: Booking) -> bool:
+    """«Час в подарок» после «Разделить» / вырезки (ревизия 09.10, ревизор денег):
+    бонус-час держит одна строка (BONUS_HOUR), а скидка подарка — у всех частей
+    (BONUS_HOUR_PART). Если строку с часом отменяют / прощают / переводят на
+    абонемент, пока живы другие части той же подарочной брони, час НЕ
+    возвращаем — он переходит к ближайшей живой части (её скидка — тот же
+    подарок). Вернётся, когда уйдёт последняя часть. Было: отмена первой части
+    возвращала час целиком, вторая часть оставалась со скидкой (~11 ₾ + час).
+    Части узнаём по клиенту, дню и метке BONUS_HOUR_PART (метку ставят только
+    деление и вырезка подарочной брони). True — передали (возвращать нечего).
+    """
+    if (b.applied_rule or "") != "BONUS_HOUR":
+        return False
+    q = select(Booking).where(
+        Booking.id != b.id,
+        Booking.applied_rule == "BONUS_HOUR_PART",
+        Booking.status.in_(GIFT_LIVE_STATUSES),  # type: ignore[attr-defined]
+        Booking.date == b.date,
+    )
+    # Прощённая часть («Снять штраф») подарок больше не держит и не принимает.
+    q = q.where(Booking.user_uuid == b.user_uuid) if b.user_uuid else q.where(Booking.user_id == b.user_id)
+    nxt = sorted((x for x in session.exec(q).all() if (x.payment_status or "") != "waived"),
+                 key=lambda x: (x.start_time or "", str(x.id)))
+    if not nxt:
+        return False
+    nxt[0].applied_rule = "BONUS_HOUR"
+    session.add(nxt[0])
+    b.applied_rule = "BONUS_HOUR_PART"   # эта строка часа больше не держит
+    session.add(b)
+    return True
+
+
 def _return_gift_hour(session: Session, b: Booking, user: Optional[User], share_returned: float) -> float:
     """«Час в подарок» (applied_rule = BONUS_HOUR): бонус-час клиента погашен
     при подарке. Снятие штрафа делает бронь бесплатной — бонус-час возвращаем
@@ -485,6 +520,8 @@ def _return_gift_hour(session: Session, b: Booking, user: Optional[User], share_
     его больше не держит: метка — просто ручная цена (MANUAL_OVERRIDE), чтобы
     отмена waived-брони не вернула его второй раз. Ревизия 04.10."""
     if (b.applied_rule or "") != "BONUS_HOUR":
+        return 0.0
+    if pass_gift_on(session, b):
         return 0.0
     back = _left_after_cancel(1.0, share_returned)
     if back > 0 and user is not None:

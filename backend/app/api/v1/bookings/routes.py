@@ -802,9 +802,13 @@ def _refund_booking_to_owner(
     # 100 ₾ / 0 ч. После «Снять штраф» метка уже не BONUS_HOUR (час вернул он).
     if (booking.applied_rule or "") == "BONUS_HOUR":
         from app.services.bonus_service import refund_free_hours
-        _gift_h = round(1.0 * refund_percent, 2)
-        if _gift_h > 0:
-            refund_free_hours(session, owner.id, _gift_h, reason="Отмена брони с «Часом в подарок»")
+        from app.services.billing_defer import pass_gift_on
+        # Живы другие части подарочной брони (после «Разделить») — час переходит
+        # к ним, а не возвращается (ревизия 09.10).
+        if not pass_gift_on(session, booking):
+            _gift_h = round(1.0 * refund_percent, 2)
+            if _gift_h > 0:
+                refund_free_hours(session, owner.id, _gift_h, reason="Отмена брони с «Часом в подарок»")
 
     if booking.payment_status in ("pending", "waived"):
         return {
@@ -4426,6 +4430,28 @@ def reschedule_booking(
             status_code=400, detail="Некорректная дата — нужен формат ГГГГ-ММ-ДД"
         )
 
+    # Части подарочной брони («Час в подарок» после «Разделить» / вырезки) —
+    # только в пределах дня: бонус-час держит одна часть, и при её отмене он
+    # переходит к живой части ТОГО ЖЕ дня (billing_defer.pass_gift_on). Перенос
+    # части на другой день оставлял бы её со скидкой подарка, а отмена первой —
+    # возвращала бы час целиком (ревизор денег 09.10).
+    if new_date.date() != booking.date.date() and (booking.applied_rule or "") in ("BONUS_HOUR", "BONUS_HOUR_PART"):
+        _gift_parts = session.exec(
+            select(Booking).where(
+                Booking.id != booking.id,
+                Booking.applied_rule.in_(("BONUS_HOUR", "BONUS_HOUR_PART")),  # type: ignore[attr-defined]
+                Booking.status.in_(("confirmed", "pending_approval", "completed")),  # type: ignore[attr-defined]
+                Booking.date == booking.date,
+                (Booking.user_uuid == booking.user_uuid) if booking.user_uuid else (Booking.user_id == booking.user_id),
+            )
+        ).first()
+        if _gift_parts is not None or (booking.applied_rule or "") == "BONUS_HOUR_PART":
+            raise HTTPException(
+                status_code=409,
+                detail="Это часть брони с «Часом в подарок» — её можно перенести только в пределах того же дня. "
+                       "Для другого дня отмените части и создайте новую бронь.",
+            )
+
     free_reschedule_used = False
     free_reschedules_left_after: Optional[int] = None
     # Слот фактически не меняется (та же дата, время, кабинет) — бесплатный
@@ -6888,8 +6914,11 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
     gift_back = 0.0
     if (booking.applied_rule or "") == "BONUS_HOUR":
         from app.services.bonus_service import refund_free_hours
-        refund_free_hours(session, owner.id, 1.0, reason="Перевод на абонемент: «Час в подарок» вернули")
-        gift_back = 1.0
+        from app.services.billing_defer import pass_gift_on
+        # Живы другие части подарочной брони — час переходит к ним (ревизия 09.10).
+        if not pass_gift_on(session, booking):
+            refund_free_hours(session, owner.id, 1.0, reason="Перевод на абонемент: «Час в подарок» вернули")
+            gift_back = 1.0
 
     # 3. Перекраска брони.
     booking.payment_method = "subscription"

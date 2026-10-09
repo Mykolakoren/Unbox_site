@@ -3294,6 +3294,61 @@ def test_r6_e_gift_split_part_has_own_label():
     assert (_free_hours(s, u), _bal(s, u)) == (1.0, 100.0)
 
 
+@_scenario
+def test_r8_gift_split_cancel_first_part_passes_hour_on():
+    """ДЫРА (ревизор денег 09.10): подарок на 2 ч → «Разделить» [60, 60] → отмена
+    первой части возвращала бонус-час целиком, а вторая оставалась со скидкой
+    подарка (~11 ₾ + час). Теперь: пока жива другая часть — час переходит к ней
+    (метка BONUS_HOUR), возвращается при отмене последней. Так же — при
+    «Снять штраф» и «На абонемент» первой части. Итог любой последовательности:
+    подарочный час вернулся ровно один раз, баланс — к старту."""
+    for order in ("first_then_second", "second_then_first", "waive_first", "pay_second"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, None, balance=300.0)
+        g = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=120, method="balance"))
+        p1, p2 = _split(s, admin, g, [60, 60])
+        assert (p1.applied_rule, p2.applied_rule) == ("BONUS_HOUR", "BONUS_HOUR_PART"), (p1.applied_rule, p2.applied_rule)
+        if order == "first_then_second":
+            _cancel(s, admin, s.get(Booking, p1.id))
+            assert _free_hours(s, u) == 0.0, (order, "час вернулся при живой второй части")
+            assert s.get(Booking, p2.id).applied_rule == "BONUS_HOUR", "час перешёл ко второй части"
+            _cancel(s, admin, s.get(Booking, p2.id))
+            assert (_free_hours(s, u), _bal(s, u)) == (1.0, 300.0), (order, _free_hours(s, u), _bal(s, u))
+        elif order == "second_then_first":
+            _cancel(s, admin, s.get(Booking, p2.id))
+            assert _free_hours(s, u) == 0.0
+            _cancel(s, admin, s.get(Booking, p1.id))
+            assert (_free_hours(s, u), _bal(s, u)) == (1.0, 300.0), (order, _free_hours(s, u), _bal(s, u))
+        elif order == "waive_first":
+            _waive(s, admin, s.get(Booking, p1.id))
+            assert _free_hours(s, u) == 0.0, (order, "«Снять штраф» вернул час при живой второй части")
+            _cancel(s, admin, s.get(Booking, p2.id))
+            assert _free_hours(s, u) == 1.0, (order, _free_hours(s, u))
+        else:  # вторая часть проведена (не отменена) — час не возвращается вовсе
+            _cancel(s, admin, s.get(Booking, p1.id))
+            assert _free_hours(s, u) == 0.0 and s.get(Booking, p2.id).applied_rule == "BONUS_HOUR"
+        _ledger_ok(s, u, 300.0)
+
+    # Перенос части подарочной брони на другой день — 409 (иначе отмена первой
+    # части не нашла бы «сестру» и вернула час целиком); в пределах дня — можно.
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=300.0)
+    g = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=120, method="balance"))
+    p1, p2 = _split(s, admin, g, [60, 60])
+    for part in (p2, p1):
+        out = H._call(routes.reschedule_booking, booking_id=str(part.id),
+                      data=routes.RescheduleRequest(new_date=H._day(1).strftime("%Y-%m-%d"), new_start_time="14:00"),
+                      background_tasks=BackgroundTasks(), session=s, current_user=admin)
+        s.rollback()
+        assert out == {"http": 409}, (part.applied_rule, out)
+    p2 = _reschedule(s, admin, s.get(Booking, p2.id), start="17:00")          # тот же день — можно
+    assert p2.start_time == "17:00"
+
+
 def test_r6_c_mobile_sheet_no_minus_zero_percent():
     sheet = _read("src/pages/mobile/admin/bookingSheets.tsx")
     assert "· −${b.discountPercent ?? 0}%" not in sheet, "мобильная шторка снова пишет «−0 %»"
