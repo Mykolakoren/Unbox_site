@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
-import { LOCATIONS, RESOURCES, availableExtrasForResource } from '../../utils/data';
+import { LOCATIONS, RESOURCES, EXTRAS, availableExtrasForResource } from '../../utils/data';
 import {
     format, addMinutes, setHours, setMinutes, startOfToday,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
@@ -893,6 +893,27 @@ export function AdminChessboardView() {
     // failure, raised inside listForReRent) lines up with the action, and we
     // pull fresh state to keep the chessboard's own copy of the booking
     // honest.
+    // «Убрать доп» (09.10, админы: «призрачный проектор»): один доп за раз.
+    const handleRemoveExtra = async (b: BookingHistoryItem, extraId: string) => {
+        const name = EXTRAS.find(e => e.id === extraId)?.name ?? extraId;
+        const ok = await confirm({
+            title: `Убрать «${name}» из брони?`,
+            body: 'Если доп списали с баланса — деньги вернутся клиенту на баланс. Если его оплатили на месте — сайт подскажет вернуть деньги из кассы.',
+            confirmLabel: 'Убрать доп',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        try {
+            const res = await bookingsApi.removeBookingExtra(b.id, extraId);
+            if (res.paidOnSpot > 0) toast.warning(res.message); else toast.success(res.message);
+            await fetchAllBookings();
+            setSelectedBooking(res.booking ?? null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось убрать доп');
+        }
+    };
+
     const handleToggleReRent = async (b: BookingHistoryItem) => {
         try {
             await listForReRent(b.id);
@@ -1408,6 +1429,29 @@ export function AdminChessboardView() {
                                     />
                                 )}
                                 <InfoRow label="Статус" value={bookingStatusBadge(selectedBooking)} />
+                                {(selectedBooking.extras?.length ?? 0) > 0 && (
+                                    <InfoRow
+                                        label="Допы"
+                                        value={
+                                            <span className="inline-flex flex-wrap justify-end gap-1" data-extras-row>
+                                                {(selectedBooking.extras ?? []).map((x, i) => (
+                                                    <span key={`${x}-${i}`} className="inline-flex items-center gap-1 rounded-md bg-sunken px-1.5 py-0.5 text-xs">
+                                                        {EXTRAS.find(e => e.id === x)?.name ?? x}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveExtra(selectedBooking, x)}
+                                                            aria-label={`Убрать ${EXTRAS.find(e => e.id === x)?.name ?? x}`}
+                                                            title="Убрать доп"
+                                                            className="min-w-6 min-h-6 inline-flex items-center justify-center rounded hover:bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]"
+                                                        >
+                                                            <X size={12} aria-hidden="true" />
+                                                        </button>
+                                                    </span>
+                                                ))}
+                                            </span>
+                                        }
+                                    />
+                                )}
                                 <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                             </div>
                             {/* Pending hot-booking — Approve / Reject inline в попапе.
@@ -2012,6 +2056,29 @@ export function AdminChessboardView() {
                             label="Статус"
                             value={bookingStatusBadge(selectedBooking)}
                         />
+                        {(selectedBooking.extras?.length ?? 0) > 0 && (
+                            <InfoRow
+                                label="Допы"
+                                value={
+                                    <span className="inline-flex flex-wrap justify-end gap-1" data-extras-row>
+                                        {(selectedBooking.extras ?? []).map((x, i) => (
+                                            <span key={`${x}-${i}`} className="inline-flex items-center gap-1 rounded-md bg-sunken px-1.5 py-0.5 text-xs">
+                                                {EXTRAS.find(e => e.id === x)?.name ?? x}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveExtra(selectedBooking, x)}
+                                                    aria-label={`Убрать ${EXTRAS.find(e => e.id === x)?.name ?? x}`}
+                                                    title="Убрать доп"
+                                                    className="min-w-6 min-h-6 inline-flex items-center justify-center rounded hover:bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]"
+                                                >
+                                                    <X size={12} aria-hidden="true" />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </span>
+                                }
+                            />
+                        )}
                         <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                         {/* Recurring series banner — shows "Постоянная бронь · осталось N
                             сессий" plus a [Продлить] button when this booking is part

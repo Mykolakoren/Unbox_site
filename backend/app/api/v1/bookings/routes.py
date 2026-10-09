@@ -6618,6 +6618,113 @@ def add_booking_extras(
     return enrich_booking_status(booking)
 
 
+class RemoveExtraRequest(PydanticBaseModel):
+    extra: str                        # id допа (projector, sandbox, ...)
+
+
+@router.patch("/{booking_id}/remove-extra")
+def remove_booking_extra(
+    booking_id: str,
+    payload: RemoveExtraRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Убрать ошибочный доп из брони (просьба админов 09.10, «призрачный проектор»).
+
+    Зеркало /add-extras. Убираем ОДИН такой доп. Деньги:
+      * доп сидел в цене брони (оплата с баланса или при создании) — цена брони
+        уменьшается; если бронь уже списана — разница возвращается на баланс
+        строкой extras_refund «на свою бронь», charge_amount — в ногу;
+      * доп оплатили на месте (наличные/карта) — в цене его нет, баланс не
+        трогаем; ответ просит вернуть деньги из кассы расходом.
+    Сколько допа «в цене» — booking_extras_money до и после (та же функция, что
+    у пересчётов), поэтому наличный доп не превратится в возврат на баланс.
+    """
+    if current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Только администратор может убирать допы")
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
+    # Блокировка строки (ревизор денег 09.10): двойной клик / повтор запроса
+    # иначе вернул бы деньги дважды; второй запрос подождёт и получит
+    # «Такого допа в брони нет».
+    booking = session.exec(
+        select(Booking).where(Booking.id == b_uuid).with_for_update()
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    if booking.status not in ("confirmed", "completed"):
+        raise HTTPException(status_code=400, detail="Убрать доп можно только у действующей или прошедшей брони")
+    extra = (payload.extra or "").strip()
+    current = list(booking.extras or [])
+    if extra not in current:
+        raise HTTPException(status_code=400, detail="Такого допа в брони нет")
+
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
+    from app.services.pricing import PricingService, booking_extras_money
+
+    price_one = round(float(PricingService.calculate_extras_price([extra])), 2)
+    in_price_before = booking_extras_money(booking)
+    remaining = list(current)
+    remaining.remove(extra)
+    listed_after = round(float(PricingService.calculate_extras_price(remaining)), 2)
+    # Деньги допов, что останутся в цене: не больше, чем стоят оставшиеся допы.
+    reduction = round(max(0.0, in_price_before - min(in_price_before, listed_after)), 2)
+    reduction = min(reduction, price_one)
+
+    charged = booking.payment_status not in ("pending", "waived")
+    owner = _resolve_booking_owner(session, booking)
+    if reduction > 0 and charged and not owner:
+        raise HTTPException(status_code=409, detail="Не найден владелец брони — вернуть деньги некому. Напишите Николаю.")
+    if owner is not None:
+        owner = session.exec(select(User).where(User.id == owner.id).with_for_update()
+                             .execution_options(populate_existing=True)).one()
+
+    booking.extras = remaining
+    booking.updated_at = datetime.now()
+    refunded = 0.0
+    if reduction > 0:
+        booking.final_price = round(max(0.0, float(booking.final_price or 0) - reduction), 2)
+        if charged and owner:
+            wallet.credit(session, owner, reduction, reason="extras_refund",
+                          description="Возврат за убранный доп",
+                          ref_type="booking", ref_id=str(booking.id), actor=current_user)
+            if booking.charge_amount is not None:
+                booking.charge_amount = round(max(0.0, float(booking.charge_amount) - reduction), 2)
+            refunded = reduction
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+
+    # Подсказка «верните из кассы» — только если доп правда принимали на месте
+    # (приход «Допы к броне (дозаказ)» по клиенту): бонусная/бесплатная бронь
+    # тоже даёт 0 «в цене», но денег на месте там не брали (ревизор денег 09.10).
+    paid_on_spot = 0.0
+    if reduction < price_one and price_one > 0 and owner is not None:
+        from app.models.cashbox_transaction import CashboxTransaction
+        spot = session.exec(
+            select(CashboxTransaction).where(
+                CashboxTransaction.client_id == str(owner.id),
+                CashboxTransaction.type == "income",
+                CashboxTransaction.description.like(f"Допы к броне (дозаказ):%{extra}%"),  # type: ignore[union-attr]
+            )
+        ).first()
+        if spot is not None:
+            paid_on_spot = round(price_one - reduction, 2)
+    if refunded > 0:
+        message = f"Доп убран, {refunded:g} ₾ вернулись на баланс клиента"
+    elif reduction > 0:
+        message = f"Доп убран, цена брони стала меньше на {reduction:g} ₾"
+    elif paid_on_spot > 0:
+        message = f"Доп убран. Его оплачивали на месте — верните клиенту {paid_on_spot:g} ₾ из кассы (расход)"
+    else:
+        message = "Доп убран. Денег за него с баланса не списывали"
+    return {"booking": enrich_booking_status(booking), "refunded": refunded,
+            "priceReduced": reduction, "paidOnSpot": paid_on_spot, "message": message}
+
+
 # ─── Перевод брони на абонемент ──────────────────────────────────────────────
 # Клиент оплатил бронь с баланса, а потом выяснилось, что у него есть активный
 # абонемент (или админ провёл бронь балансом по ошибке). Эта функция переводит

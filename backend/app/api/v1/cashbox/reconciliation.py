@@ -42,6 +42,7 @@ REASON_LABELS = {
     "booking_refund": "Возврат за бронь",
     "reschedule_diff": "Перенос: разница в цене",
     "extras_charge": "Допы",
+    "extras_refund": "Возврат за допы",
     "extend_charge": "Продление",
     "price_change": "Изменение цены брони",
     "weekly_rebate": "Недельная скидка (возврат)",
@@ -80,7 +81,7 @@ def _bucket(reason: str, method: str | None) -> str:
         return "charge"
     if reason == "booking_refund":
         return "refund"
-    if reason in ("extras_charge", "extend_charge"):
+    if reason in ("extras_charge", "extend_charge", "extras_refund"):
         return "extras"
     if reason == "weekly_rebate":
         return "rebate"

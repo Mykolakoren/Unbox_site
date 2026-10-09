@@ -250,6 +250,16 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /** Убрать ошибочный доп (09.10): деньги за доп с баланса вернутся на баланс. */
+    removeBookingExtra: async (bookingId: string, extra: string) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/remove-extra`, { extra });
+        return {
+            booking: mapToFrontend(response.data?.booking),
+            message: String(response.data?.message || 'Доп убран'),
+            paidOnSpot: Number(response.data?.paidOnSpot || 0),
+        };
+    },
+
     /** Перевести бронь с баланса на списание с абонемента.
      *  Деньги вернутся на баланс, часы спишутся с абонемента. */
     convertToSubscription: async (bookingId: string) => {

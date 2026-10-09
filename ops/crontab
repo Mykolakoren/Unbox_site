@@ -36,3 +36,6 @@
 # Каждые 20 мин дергает /crm/sync/auto для всех профилей с подключённым
 # календарём. Секрет тот же, что у денежного крона.
 */20 * * * * curl -fsS -X POST 'http://127.0.0.1:8000/api/v1/crm/sync/auto?secret=<REMINDER_SECRET>' >> /var/log/unbox-crm-sync.log 2>&1
+
+# 09.10: счёт за прошлую неделю (пн 09:00 Тбилиси) — клиенты с меткой «счёт за неделю» / WEEKLY_INVOICE_EMAILS
+0 5 * * 1 cd /var/www/unbox/backend && venv/bin/python3 scripts/weekly_invoices.py >> /var/log/unbox-weekly-invoices.log 2>&1
