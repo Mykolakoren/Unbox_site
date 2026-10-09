@@ -8,11 +8,16 @@ from app.models.notification import Notification, NotificationRead
 
 router = APIRouter()
 
+# 10.10: уведомления — любому вошедшему, но только СВОИ (recipient_id == он сам).
+# Раньше было «только админ» (колокольчик был только в админке, март): CRM писала
+# специалистам «конфликт в календаре», «перенесите бронь», «Слежу за слотами —
+# освободилось», а они получали 403 и не видели ничего.
+
 
 @router.get("/", response_model=List[NotificationRead])
 def list_notifications(
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[User, Depends(deps.require_admin)],
+    current_user: Annotated[User, Depends(deps.get_current_user)],
     unread_only: bool = Query(False),
     skip: int = 0,
     limit: int = 50,
@@ -29,7 +34,7 @@ def list_notifications(
 @router.get("/unread-count")
 def unread_count(
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[User, Depends(deps.require_admin)],
+    current_user: Annotated[User, Depends(deps.get_current_user)],
 ):
     count = session.exec(
         select(func.count(Notification.id)).where(
@@ -44,7 +49,7 @@ def unread_count(
 def mark_read(
     notification_id: str,
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[User, Depends(deps.require_admin)],
+    current_user: Annotated[User, Depends(deps.get_current_user)],
 ):
     n = session.get(Notification, notification_id)
     if not n or n.recipient_id != str(current_user.id):
@@ -58,7 +63,7 @@ def mark_read(
 @router.post("/read-all")
 def mark_all_read(
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[User, Depends(deps.require_admin)],
+    current_user: Annotated[User, Depends(deps.get_current_user)],
 ):
     notifications = session.exec(
         select(Notification).where(
