@@ -1022,6 +1022,10 @@ def sync_from_calendar(
             win_end.isoformat(), len(seen_gcal_ids),
         )
 
+    # Этап 3 (09.10): однозначные пары «сессия ↔ своя аренда в то же время» — связать.
+    from app.services.crm_autolink import auto_link
+    auto_linked = auto_link(session, current_user)
+
     session.commit()
 
     # ── Backfill alias codes into Google Calendar summaries ──────────────
@@ -1087,6 +1091,7 @@ def sync_from_calendar(
         # Защитный режим: сколько удалений из Google задержано (сессии целы).
         "deletions_held": len(set(deletions_held)),
         "auto_created_clients": auto_created_clients,
+        "auto_linked": auto_linked,
         "codes_backfilled": codes_backfilled,
         "backfill_errors": backfill_errors,
         "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],

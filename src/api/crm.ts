@@ -413,7 +413,7 @@ export const crmApi = {
         return res.data;
     },
 
-    autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number }> => {
+    autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number; autoLinked?: number }> => {
         const response = await api.post('/crm/sessions/auto-complete');
         return response.data;
     },

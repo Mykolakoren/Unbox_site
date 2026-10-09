@@ -73,6 +73,11 @@ export function CrmDashboard() {
                 const n = result.autoCompleted;
                 toast.info(`${n} ${sessionsWord(n)} ${n === 1 ? 'отмечена прошедшей' : 'отмечены прошедшими'}`);
             }
+            // Этап 3 (09.10): сессии, совпавшие по времени с вашей арендой, связаны сами.
+            const l = result.autoLinked ?? 0;
+            if (l > 0) {
+                toast.success(`${l} ${sessionsWord(l)} ${l === 1 ? 'привязана' : 'привязаны'} к вашей аренде кабинета — совпало время`);
+            }
         }).catch(() => {}).finally(() => {
             reloadDashboard();
         });
