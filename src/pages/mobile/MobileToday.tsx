@@ -16,7 +16,7 @@ import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { getRecurrence, withRecurrence, nextDeadline } from './admin/taskRecurrence';
 import { toast } from 'sonner';
 import type { BookingHistoryItem } from '../../store/types';
-import { canBookCabinets } from '../../utils/permissions';
+import { canBookCabinets, ADMIN_ROLES } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard } from '../../components/SpecialistGate';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
@@ -74,7 +74,8 @@ export function MobileToday() {
     // is meant to surface "что горит" without becoming a long list.
     const [myTasks, setMyTasks] = useState<AdminTask[]>([]);
     useEffect(() => {
-        if (!currentUser?.id) return;
+        // Задачи — только у сотрудников (клиент получал 403 на каждый заход, 10.10).
+        if (!currentUser?.id || !ADMIN_ROLES.includes(currentUser.role || '')) return;
         adminTasksApi.list({ assigneeId: currentUser.id })
             .then(list => {
                 const horizonMs = Date.now() + 3 * 24 * 3600 * 1000;

@@ -1,3 +1,4 @@
+import { hasPermission } from '../utils/permissions';
 import { useUserStore } from '../store/userStore';
 import { useBookingStore } from '../store/bookingStore';
 import { useCrmStore } from '../store/crmStore';
@@ -2317,9 +2318,10 @@ export function MyBookingsPage() {
         }
     }, [crmMode]);
 
-    // Fetch CRM clients if user might be a specialist
+    // CRM-клиенты — только тем, у кого есть Psy-CRM (специалист, владелец, старший
+    // админ). Обычный клиент получал 403 на каждый заход (обход сайта 10.10).
     useEffect(() => {
-        if (currentUser) {
+        if (currentUser && (['specialist', 'owner', 'senior_admin'].includes(currentUser.role || '') || hasPermission(currentUser, 'psy_crm.access'))) {
             fetchClients(true).catch(() => {});
         }
     }, [currentUser, fetchClients]);
