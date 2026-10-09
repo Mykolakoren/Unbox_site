@@ -751,7 +751,11 @@ export function AdminChessboardView() {
         // Сумма — только из dueMap (computeDueByBooking).
         const dueInfo = dueMap.get(b.id);
         if (dueInfo && dueInfo.due > 0 && (b.status === 'confirmed' || b.status === 'completed')) {
-            return 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-2';
+            // 09.10 (Егор, Кариманидзе): неоплаченная на пересдаче — красная, но
+            // пунктиром + значок «⇄», иначе отметка пересдачи пряталась под красным.
+            return b.isReRentListed && b.status === 'confirmed'
+                ? 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-2 border-dashed'
+                : 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-2';
         }
         if (b.status === 'completed')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)]/30';
         if (b.status === 're-rented')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)] border-dashed';
@@ -1155,6 +1159,11 @@ export function AdminChessboardView() {
                         <div className="min-w-0">
                             <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
                             <div className="text-xs truncate font-medium">{getUserName(b.userId)}</div>
+                            {b.isReRentListed && b.status === 'confirmed' && (
+                                <div className="text-xs font-semibold inline-flex items-center gap-1" data-rerent-mark>
+                                    <ArrowLeftRight size={12} aria-hidden="true" /> на пересдаче
+                                </div>
+                            )}
                         </div>
                         <CellDueMark info={dueMap.get(b.id)} />
                     </button>
@@ -1735,12 +1744,15 @@ export function AdminChessboardView() {
                                                                 ? 'ring-2 ring-unbox-green ring-offset-1 shadow-sm'
                                                                 : 'hover:brightness-95 hover:shadow-sm'
                                                         )}
-                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${formatGel(b.finalPrice)}${dueMap.get(b.id) ? ` · ${dueLabel(dueMap.get(b.id))}` : ''} — перетащите, чтобы перенести`}
+                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${formatGel(b.finalPrice)}${dueMap.get(b.id) ? ` · ${dueLabel(dueMap.get(b.id))}` : ''}${b.isReRentListed && b.status === 'confirmed' ? ' · на пересдаче' : ''} — перетащите, чтобы перенести`}
                                                     >
                                                         <div className="font-semibold truncate text-xs leading-tight flex items-center gap-0.5">
                                                             {/* Серия — значок «повтор» (было ⭐); пересданная — тот же значок. */}
                                                             {(b.recurringGroupId || b.status === 're-rented') && (
                                                                 <Repeat size={12} className="shrink-0" aria-label={b.recurringGroupId ? 'Серия' : 'Пересдана'} />
+                                                            )}
+                                                            {b.isReRentListed && b.status === 'confirmed' && (
+                                                                <ArrowLeftRight size={12} className="shrink-0" data-rerent-mark aria-label="На пересдаче" />
                                                             )}
                                                             <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
