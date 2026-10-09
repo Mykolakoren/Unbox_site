@@ -3398,6 +3398,12 @@ def test_r9_night_tail():
     rt = _read("backend/app/api/v1/bookings/routes.py")
     core = rt[rt.index("def charge_hot_booking_on_approval("):rt.index("def recompute_chain_after_approval(")]
     assert "select(User).where(User.id == owner.id).with_for_update()" in core
+    fmt = rt[rt.index("def change_booking_format("):rt.index("def change_booking_format(") + 4000]
+    assert "select(Booking).where(Booking.id == booking.id).with_for_update()" in fmt, "смена формата без замка брони"
+    assert "select(User).where(User.id == booking_owner.id).with_for_update()" in fmt, "смена формата без замка клиента"
+    adm = _read("src/components/admin/AdminChessboardView.tsx")
+    assert adm.count("selectedBooking.appliedRule !== 'BONUS_HOUR' && selectedBooking.appliedRule !== 'BONUS_HOUR_PART'") == 2, \
+        "кнопка «Час в подарок» у брони, где подарок уже применён"
 
 
 def test_r6_c_mobile_sheet_no_minus_zero_percent():

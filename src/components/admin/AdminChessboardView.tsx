@@ -1518,7 +1518,8 @@ export function AdminChessboardView() {
                                     </div>
                                     <div className={clsx("grid gap-1.5", bCompleted ? "grid-cols-1" : "grid-cols-3")}>
                                         <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
-                                        {!bCompleted && selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
+                                        {!bCompleted && selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60
+                                            && selectedBooking.appliedRule !== 'BONUS_HOUR' && selectedBooking.appliedRule !== 'BONUS_HOUR_PART' && (
                                             <button onClick={() => handleBonusHour(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink inline-flex items-center justify-center gap-1"><Gift size={14} aria-hidden="true" /> Час в подарок</button>
                                         )}
                                         {!bCompleted && (
@@ -2189,7 +2190,8 @@ export function AdminChessboardView() {
                                     >
                                         Цена
                                     </button>
-                                    {selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
+                                    {selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60
+                                        && selectedBooking.appliedRule !== 'BONUS_HOUR' && selectedBooking.appliedRule !== 'BONUS_HOUR_PART' && (
                                         <button
                                             onClick={() => handleBonusHour(selectedBooking)}
                                             className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors inline-flex items-center justify-center gap-1"

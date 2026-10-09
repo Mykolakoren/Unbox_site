@@ -47,6 +47,9 @@ const DAY_MIN = 8 * 60;     // сетка не уже 08:00–22:00
 const DAY_MAX = 22 * 60;
 const SESSION_DURATIONS = [45, 50, 60, 90, 120];
 const LIVE_BOOKING = new Set(['confirmed', 'completed', 'pending_approval']);
+/** Занятость кабинета: ещё и пересданная бронь (как в шахматке CRM). */
+const BUSY_BOOKING = new Set(['confirmed', 'completed', 'pending_approval', 're-rented']);
+const CANCELLED_SESSION = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
 
 type Item = {
     key: string;
@@ -64,7 +67,13 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (
 const toHM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const roomName = (id?: string | null) => (id ? (RESOURCES.find(r => r.id === id)?.name ?? id) : '');
 const shortRoom = (id?: string | null) => roomName(id).replace('Кабинет', 'Каб.').replace('Капсула', 'Капс.');
-const bookingDay = (b: BookingHistoryItem) => { try { return format(parseUTC(b.date), 'yyyy-MM-dd'); } catch { return ''; } };
+// День брони — сама дата из базы (полночь дня по Тбилиси), без пояса браузера
+// (ревизор 10.10: при VPN с отрицательным смещением бронь уезжала на вчера).
+const bookingDay = (b: BookingHistoryItem) => {
+    const raw = b.date as unknown;
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+    try { return format(parseUTC(b.date), 'yyyy-MM-dd'); } catch { return ''; }
+};
 const durLabel = (min: number) => (min < 60 ? `${min} мин` : `${String(min / 60).replace('.', ',')} ч`);
 /** Длительность аренды под сессию: полчасами, не меньше часа (50 мин → 1 ч). */
 const rentalMinutes = (sessionMin: number) => Math.max(60, Math.ceil(sessionMin / SLOT) * SLOT);
@@ -111,17 +120,20 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
     const days = useMemo(() => eachDayOfInterval({ start: weekStart, end: endOfWeek(weekStart, { weekStartsOn: 1 }) })
         .map(d => format(d, 'yyyy-MM-dd')), [weekStart]);
 
+    const loadSeq = useRef(0);
     const loadWeek = useCallback(async () => {
+        const seq = ++loadSeq.current;
         setLoading(true);
         try {
             // С запасом в сутки: сессии в базе по UTC, неделя — по Тбилиси.
             const from = format(addDays(weekStart, -1), 'yyyy-MM-dd');
             const to = format(addDays(weekStart, 7), 'yyyy-MM-dd');
-            setSessions(await crmApi.getSessions({ dateFrom: from, dateTo: to }));
+            const list = await crmApi.getSessions({ dateFrom: from, dateTo: to });
+            if (seq === loadSeq.current) setSessions(list);   // ответ прошлой недели не затирает новую
         } catch (e) {
-            toast.error(apiErrorMessage(e, 'Не удалось загрузить неделю'));
+            if (seq === loadSeq.current) toast.error(apiErrorMessage(e, 'Не удалось загрузить неделю'));
         } finally {
-            setLoading(false);
+            if (seq === loadSeq.current) setLoading(false);
         }
     }, [weekStart]);
 
@@ -147,7 +159,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
     );
 
     const itemsByDay = useMemo(() => {
-        const linked = new Set(sessions.filter(s => s.bookingId).map(s => s.bookingId as string));
+        const linked = new Set(sessions.filter(s => s.bookingId && !CANCELLED_SESSION.has(s.status)).map(s => s.bookingId as string));
         const raw: Omit<Item, 'lane' | 'lanes'>[] = [];
         for (const s of sessions) {
             if (s.status === 'CANCELLED_CLIENT' || s.status === 'CANCELLED_THERAPIST') continue;
@@ -185,16 +197,19 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
     const isPast = (day: string, min: number) => day < now.ymd || (day === now.ymd && min < now.totalMins);
 
     // ── Перетаскивание (4.3) ────────────────────────────────────────────
-    const drag = useRef<{ item: Item; x: number; y: number; moved: boolean } | null>(null);
+    // grab — на сколько слотов ниже начала плитки её схватили (двигаем верх, а не курсор).
+    const drag = useRef<{ item: Item; x: number; y: number; moved: boolean; grab: number } | null>(null);
+    // После перетаскивания браузер шлёт click в колонку дня — его гасим (ревизор 10.10).
+    const justDragged = useRef(false);
     const [preview, setPreview] = useState<{ day: string; start: number } | null>(null);
 
-    const slotAt = (clientX: number, clientY: number): { day: string; start: number } | null => {
+    const slotAt = (clientX: number, clientY: number, grab = 0): { day: string; start: number } | null => {
         const el = document.elementFromPoint(clientX, clientY)?.closest('[data-week-day]') as HTMLElement | null;
         if (!el) return null;
         const day = el.getAttribute('data-week-day') || '';
         const rect = el.getBoundingClientRect();
         const y = clientY - rect.top;
-        const idx = Math.max(0, Math.min(rows - 1, Math.floor(y / ROW_H)));
+        const idx = Math.max(0, Math.min(rows - 1, Math.floor(y / ROW_H) - grab));
         return { day, start: gridFrom + idx * SLOT };
     };
 
@@ -204,7 +219,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
             if (!d) return;
             if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
             d.moved = true;
-            const at = slotAt(e.clientX, e.clientY);
+            const at = slotAt(e.clientX, e.clientY, d.grab);
             if (at) setPreview(at);
         };
         const up = (e: PointerEvent) => {
@@ -212,28 +227,48 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
             drag.current = null;
             if (!d) return;
             if (!d.moved) { setPreview(null); setOpenItem(d.item); return; }
-            const at = slotAt(e.clientX, e.clientY);
+            justDragged.current = true;
+            window.setTimeout(() => { justDragged.current = false; }, 0);
+            const at = slotAt(e.clientX, e.clientY, d.grab);
             setPreview(null);
             if (at && (at.day !== d.item.day || at.start !== d.item.start)) void moveItem(d.item, at.day, at.start);
         };
+        // Отменённый жест (меню, долгое касание) и Esc — бросаем перетаскивание.
+        const cancel = () => { if (drag.current) { drag.current = null; setPreview(null); } };
+        const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') cancel(); };
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
-        return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointercancel', cancel);
+        window.addEventListener('keydown', esc);
+        return () => {
+            window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+            window.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', esc);
+        };
     });
 
     const moveItem = async (it: Item, day: string, start: number) => {
         const when = `${formatDateLabel(day)}, ${toHM(start)}`;
         const who = it.session ? (clientById.get(it.session.clientId)?.name ?? 'встречу') : `аренду ${shortRoom(it.booking?.resourceId)}`;
         const withBooking = !!it.booking;
+        const startsMs = (() => {
+            const [y, mo, dd] = it.day.split('-').map(Number);
+            return Date.UTC(y, mo - 1, dd, 0, 0) + (it.start - 4 * 60) * 60000;     // Тбилиси → UTC
+        })();
+        const lateMove = withBooking && startsMs - Date.now() < 24 * 3600 * 1000;
         const ok = await confirm({
             title: `Перенести ${it.session ? `встречу «${who}»` : who} на ${when}?`,
             body: withBooking
-                ? `Аренда ${shortRoom(it.booking?.resourceId)} переедет вместе с ней${it.session ? ', событие в Google тоже' : ''}. Если новое время дороже (пиковые часы), разницу спишет баланс — по обычным правилам переноса.${it.booking?.recurringGroupId ? ' Это встреча из серии — переносится только она; всю серию переносят в «Бронированиях».' : ''}`
+                ? `Аренда ${shortRoom(it.booking?.resourceId)} переедет вместе с ней${it.session ? ', событие в Google тоже' : ''}. Если новое время дороже (пиковые часы), разницу спишет баланс — по обычным правилам переноса.${it.booking?.recurringGroupId ? ' Это встреча из серии — переносится только она; всю серию переносят в «Бронированиях».' : ''}${lateMove ? ' До встречи меньше суток: по правилам аренды перенос может быть недоступен или израсходует бесплатный перенос абонемента.' : ''}`
                 : 'Событие в Google Календаре передвинется вслед за сессией. Кабинета у этой встречи нет.',
             confirmLabel: 'Перенести',
             cancelLabel: 'Оставить',
         });
         if (!ok) return;
+        if (!it.booking && it.session?.bookingId) {
+            // Аренда есть, но не в загруженном списке — переносом сессии бронь осталась бы на месте.
+            toast.error('У встречи есть аренда кабинета — перенесите её в «Бронированиях», сессия переедет вместе с ней.');
+            return;
+        }
         setBusy(true);
         try {
             if (it.booking) {
@@ -259,7 +294,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
 
     // ── Рисунок ───────────────────────────────────────────────────────
     const tileStyle = (it: Item, past: boolean): CSSProperties => {
-        const noCab = it.kind === 'session' && !it.booking;
+        const noCab = it.kind === 'session' && !it.booking && !it.session?.bookingId;
         const rental = it.kind === 'rental';
         return {
             position: 'absolute',
@@ -270,7 +305,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
             borderRadius: 6,
             padding: '2px 6px',
             fontSize: 12, lineHeight: 1.25, overflow: 'hidden', textAlign: 'left',
-            cursor: busy ? 'progress' : 'grab', touchAction: 'none',
+            cursor: busy ? 'progress' : 'grab', touchAction: 'none', userSelect: 'none',
             border: rental ? '1.5px dashed var(--color-ink-30, #b9c2be)'
                 : noCab ? '1.5px dashed var(--status-ok-fg)' : '1px solid var(--status-ok-fg)',
             background: rental ? 'var(--color-paper, #fff)' : noCab ? 'var(--color-paper, #fff)' : 'var(--status-ok-bg)',
@@ -283,14 +318,14 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
         if (it.kind === 'rental') return { title: shortRoom(it.booking?.resourceId), sub: 'нет сессии' };
         const c = it.session ? clientById.get(it.session.clientId) : undefined;
         const name = c ? `${c.name}${c.aliasCode ? ` #${c.aliasCode}` : ''}` : 'Клиент';
-        return { title: name, sub: it.booking ? shortRoom(it.booking.resourceId) : 'нет кабинета' };
+        return { title: name, sub: it.booking ? shortRoom(it.booking.resourceId) : it.session?.bookingId ? 'кабинет снят' : 'нет кабинета' };
     };
 
     const counts = useMemo(() => {
         let noCab = 0, noSess = 0;
         for (const l of itemsByDay.values()) for (const i of l) {
             if (i.kind === 'rental') noSess++;
-            else if (!i.booking) noCab++;
+            else if (!i.booking && !i.session?.bookingId) noCab++;
         }
         return { noCab, noSess };
     }, [itemsByDay]);
@@ -335,9 +370,10 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
                     <div
                         key={d}
                         data-week-day={d}
-                        role="grid"
+                        role="group"
                         aria-label={formatDateLabel(d)}
                         onClick={(e) => {
+                            if (justDragged.current || drag.current) return;
                             if ((e.target as HTMLElement).closest('[data-week-item]')) return;
                             const at = slotAt(e.clientX, e.clientY);
                             if (at) setNewSlot({ day: at.day, time: toHM(at.start) });
@@ -362,7 +398,8 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
                                     title={`${t.title} · ${toHM(it.start)}–${toHM(it.start + it.dur)} · ${t.sub}`}
                                     onPointerDown={(e) => {
                                         if (busy || e.button !== 0) return;
-                                        drag.current = { item: it, x: e.clientX, y: e.clientY, moved: false };
+                                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                        drag.current = { item: it, x: e.clientX, y: e.clientY, moved: false, grab: Math.max(0, Math.floor((e.clientY - r.top) / ROW_H)) };
                                     }}
                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenItem(it); } }}
                                     style={tileStyle(it, past)}
@@ -378,7 +415,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
                             <div aria-hidden="true" style={{
                                 position: 'absolute', left: 2, right: 2, top: ((preview.start - gridFrom) / SLOT) * ROW_H,
                                 height: (drag.current.item.dur / SLOT) * ROW_H, border: '2px solid var(--color-accent, #2e7a5c)',
-                                borderRadius: 6, background: 'rgba(46,122,92,0.08)', pointerEvents: 'none', zIndex: 3,
+                                borderRadius: 6, background: 'var(--color-accent-soft, rgba(46,122,92,0.08))', pointerEvents: 'none', zIndex: 3,
                                 fontSize: 12, padding: '2px 6px', fontWeight: 600,
                             }}>{toHM(preview.start)}</div>
                         )}
@@ -432,7 +469,7 @@ function freeRooms(resources: Res[], bookings: BookingHistoryItem[], day: string
     const list = (resources.length ? resources : (RESOURCES as unknown as Res[]))
         .filter(r => r.isActive !== false && (location === 'all' || r.locationId === location));
     return list.filter(r => !bookings.some(b => {
-        if (b.resourceId !== r.id || !LIVE_BOOKING.has(b.status) || !b.startTime) return false;
+        if (b.resourceId !== r.id || !BUSY_BOOKING.has(b.status) || !b.startTime) return false;
         if (bookingDay(b) !== day) return false;
         const bs = toMin(b.startTime), be = bs + (b.duration || 60);
         return bs < end && start < be;
@@ -527,10 +564,24 @@ function NewMeetingSheet({ slot, clients, bookings, resources, past, onClose, on
         try {
             let bookingId: string | undefined;
             if (withRoom) bookingId = await createRental(roomId, slot.day, slot.time, rentMin);
-            await createSessionResolvingCalendar(createSession, updateSession, {
-                clientId, date: toTbilisiNaive(slot.day, slot.time), durationMinutes: dur,
-                price: Number(price) || undefined, bookingId, isBooked: !!bookingId, pushToCalendar: true,
-            });
+            let made: unknown = null;
+            try {
+                made = await createSessionResolvingCalendar(createSession, updateSession, {
+                    clientId, date: toTbilisiNaive(slot.day, slot.time), durationMinutes: dur,
+                    price: Number(price) || undefined, bookingId, isBooked: !!bookingId, pushToCalendar: true,
+                });
+            } catch (e) {
+                if (!bookingId) throw e;
+                toast.error(`${shortRoom(roomId)} снят, но сессия не записалась: ${apiErrorMessage(e, 'ошибка')}. Нажмите на аренду в сетке → «Записать сессию».`, { duration: 10000 });
+                await onDone();
+                return;
+            }
+            if (!made) {
+                // Отказались в вопросе «у клиента уже есть встреча рядом».
+                if (bookingId) toast.warning(`${shortRoom(roomId)} снят, сессию не записали — аренда видна в сетке как «нет сессии».`, { duration: 8000 });
+                await onDone();
+                return;
+            }
             toast.success(bookingId ? `Встреча записана, ${shortRoom(roomId)} снят` : 'Встреча записана');
             await onDone();
         } catch (e) {
@@ -602,7 +653,11 @@ function ItemSheet({ item, client, clients, bookings, resources, past, onClose, 
 
     const run = async (fn: () => Promise<unknown>, ok: string) => {
         setBusy(true);
-        try { await fn(); toast.success(ok); await onDone(); }
+        try {
+            const r = await fn();
+            if (r === false) { await onDone(); return; }   // отказались в вопросе о встрече рядом
+            toast.success(ok); await onDone();
+        }
         catch (e) { toast.error(apiErrorMessage(e, 'Не получилось')); }
         finally { setBusy(false); }
     };
@@ -620,11 +675,12 @@ function ItemSheet({ item, client, clients, bookings, resources, past, onClose, 
             </> : mode === 'link' ? <>
                 <Button variant="primary" loading={busy} disabled={!linkClient} onClick={() => run(async () => {
                     const c = clients.find(x => x.id === linkClient);
-                    await createSessionResolvingCalendar(createSession, updateSession, {
+                    const made = await createSessionResolvingCalendar(createSession, updateSession, {
                         clientId: linkClient, date: toTbilisiNaive(item.day, toHM(item.start)),
                         durationMinutes: item.booking?.duration || 60, price: c?.basePrice || undefined,
                         bookingId: item.booking?.id, isBooked: true, pushToCalendar: true,
                     });
+                    return made ? true : false;
                 }, 'Сессия записана на эту аренду')}>Записать сессию</Button>
                 <Button variant="secondary" disabled={busy} onClick={() => setMode('main')}>Назад</Button>
             </> : undefined}
@@ -636,6 +692,7 @@ function ItemSheet({ item, client, clients, bookings, resources, past, onClose, 
                             ? <>Кабинет снят, а сессии на это время нет. Если это встреча с клиентом — запишите её, она появится и в Google Календаре.</>
                             : item.booking
                                 ? <>Кабинет: <b>{roomName(item.booking.resourceId)}</b></>
+                                : s?.bookingId ? <>Кабинет под эту встречу снят.</>
                                 : <>Кабинет под эту встречу не снят. Если это онлайн-сессия — кабинет не нужен.</>}
                     </div>
                     {s && (
@@ -645,7 +702,7 @@ function ItemSheet({ item, client, clients, bookings, resources, past, onClose, 
                     )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
                         {s && client && <Button variant="secondary" icon={<UserRound size={16} aria-hidden="true" />} onClick={() => onOpenClient(client.id)}>Карточка клиента</Button>}
-                        {s && !item.booking && !past && <Button variant="primary" icon={<MapPin size={16} aria-hidden="true" />} onClick={() => setMode('room')}>Снять кабинет на это время</Button>}
+                        {s && !item.booking && !s.bookingId && !past && <Button variant="primary" icon={<MapPin size={16} aria-hidden="true" />} onClick={() => setMode('room')}>Снять кабинет на это время</Button>}
                         {s && past && !s.isPaid && (
                             <Button variant="secondary" icon={<Wallet size={16} aria-hidden="true" />} loading={busy}
                                 onClick={() => run(() => crmApi.quickPaySession(s.id), 'Оплата отмечена')}>Отметить оплату</Button>
@@ -688,7 +745,7 @@ export function RentalSessionSheet({ booking, onClose, onDone, onOpenBookings }:
 
 /** Свои аренды дня без сессии (телефон). */
 export function rentalsWithoutSession(bookings: BookingHistoryItem[], email: string | undefined, day: string, sessions: CrmSession[]): BookingHistoryItem[] {
-    const linked = new Set(sessions.filter(x => x.bookingId).map(x => x.bookingId as string));
+    const linked = new Set(sessions.filter(x => x.bookingId && !CANCELLED_SESSION.has(x.status)).map(x => x.bookingId as string));
     return bookings
         .filter(b => b.userId === email && LIVE_BOOKING.has(b.status) && bookingDay(b) === day && !linked.has(b.id))
         .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
