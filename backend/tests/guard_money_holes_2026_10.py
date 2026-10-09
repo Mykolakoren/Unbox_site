@@ -3029,10 +3029,58 @@ def test_r6_gift_survives_reschedule_and_cancel_returns_hour():
 
 
 @_scenario
+def test_r7_gift_extended_by_client_move_pays_engine_difference():
+    """ЛАЗЕЙКА круга 6 (закрыта кругом 7): клиент сам переносит «Час в подарок»
+    (1 ч, 0 ₾) с удлинением до 3 ч — раньше получал 3 ч за 0 ₾. Теперь платит
+    разницу движка: цена(3 ч) − цена(1 ч); метка подарка остаётся, отмена
+    возвращает и подарочный час, и доплату. Смена формата подарка на группу —
+    тоже разница движка (35 − 20 = 15)."""
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.services.pricing import PricingService
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=200.0)
+    b = _gift(s, admin, u, _book(s, admin, u, days=3, start="14:00", minutes=60, method="balance"))
+    assert (float(b.final_price), b.applied_rule) == (0.0, "BONUS_HOUR")
+    day = H._day(3)
+    start = day.replace(hour=14, minute=0, second=0, microsecond=0)
+    ps = PricingService(s)
+    eng = lambda mins: float(ps.calculate_price(user=u, resource_id=b.resource_id, start_time=start,
+                                                duration_minutes=mins, format_type="individual",
+                                                exclude_booking_id=str(b.id), ignore_subscription=True).final_price)
+    expected = round(eng(180) - eng(60), 2)
+    assert expected > 0, expected
+    out = H._call(routes.reschedule_booking, booking_id=str(b.id),
+                  data=routes.RescheduleRequest(new_date=day.strftime("%Y-%m-%d"), new_start_time="14:00",
+                                                new_duration=180),
+                  background_tasks=BackgroundTasks(), session=s, current_user=u)          # сам клиент
+    s.commit()
+    if isinstance(out, dict) and "http" in out:
+        raise AssertionError(out)
+    b = s.get(Booking, b.id)
+    assert (b.duration, float(b.final_price), b.applied_rule) == (180, expected, "BONUS_HOUR"), \
+        (b.duration, b.final_price, b.applied_rule, expected)
+    _cancel(s, admin, b)
+    assert (_free_hours(s, u), _bal(s, u)) == (1.0, 200.0), (_free_hours(s, u), _bal(s, u))
+    _ledger_ok(s, u, 200.0)
+
+    v = _client(s, None, balance=200.0)       # свой клиент: у u после отмены снова бонус-час (бронь ушла бы в бонус)
+    g = _gift(s, admin, v, _book(s, admin, v, days=4, start="14:00", minutes=60, method="balance", resource="room_3"))
+    _format(s, admin, s.get(Booking, g.id), "group")
+    g = s.get(Booking, g.id)
+    assert (float(g.final_price), g.format, g.applied_rule) == (15.0, "group", "BONUS_HOUR"), \
+        (g.final_price, g.format, g.applied_rule)
+    _cancel(s, admin, g)
+    assert (_free_hours(s, v), _bal(s, v)) == (1.0, 200.0), (_free_hours(s, v), _bal(s, v))
+    _ledger_ok(s, v, 200.0)
+
+
+@_scenario
 def test_r6_manual_price_survives_reschedule_and_format():
-    """Ручная цена у денежной брони — договорённость: перенос на тот же размер
-    её держит (5 → 5), перенос с другой длительностью масштабирует аренду по
-    минутам (10 за 1 ч → 15 за 1,5 ч, доплата 5 ₾), смена формата держит цену;
+    """Ручная цена у денежной брони — абсолютная скидка в лари (круг 7): перенос
+    на тот же размер её держит (5 → 5), удлинение доплачивает по движку
+    (10 за 1 ч → 20 за 1,5 ч), пик и групповой формат — тоже разницу движка;
     допы — отдельно, base − discount = аренда (оценка допов не врёт); перенос в
     кабинет без песочницы снимает её и возвращает один раз. Серия «эту и
     следующие»: встреча с ручной ценой её держит."""
@@ -3056,9 +3104,11 @@ def test_r6_manual_price_survives_reschedule_and_format():
     s.commit()
     assert not (isinstance(out, dict) and "http" in out), out
     c = s.get(Booking, c.id)
-    assert (float(c.final_price), c.duration, c.applied_rule) == (15.0, 90, "MANUAL_OVERRIDE"), \
+    # Круг 7: скидка в лари сохраняется — 10 (договор) + 30 (движок 1,5 ч) − 20 (движок 1 ч) = 20.
+    # Растягивать договорную цену по минутам (15) = дарить продление.
+    assert (float(c.final_price), c.duration, c.applied_rule) == (20.0, 90, "MANUAL_OVERRIDE"), \
         (c.final_price, c.duration, c.applied_rule)
-    assert _bal(s, u) == 180.0, _bal(s, u)
+    assert _bal(s, u) == 175.0, _bal(s, u)
 
     d = _book(s, admin, u, start="16:00", minutes=60, method="balance", resource="room_3", extras=["sandbox"])
     _set_price(s, admin, d, 12.0)                                          # аренда 7 + песочница 5
@@ -3066,10 +3116,12 @@ def test_r6_manual_price_survives_reschedule_and_format():
     d = s.get(Booking, d.id)
     got = (float(d.final_price), d.applied_rule, d.format, booking_extras_money(d),
            round(float(d.base_price) - float(d.discount_amount), 2))
-    assert got == (12.0, "MANUAL_OVERRIDE", "group", 5.0, 7.0), got
-    assert _bal(s, u) == 168.0, _bal(s, u)
+    # Круг 7: аренда 7 (скидка 13 от 20) → группа 35 − 13 = 22, + песочница 5 = 27; доплата 15.
+    assert got == (27.0, "MANUAL_OVERRIDE", "group", 5.0, 22.0), got
+    assert _bal(s, u) == 148.0, _bal(s, u)
     d = _reschedule(s, admin, d, start="16:00", resource="room_2")         # песочницы там нет
-    assert (float(d.final_price), d.extras, _bal(s, u)) == (7.0, [], 173.0), (d.final_price, d.extras, _bal(s, u))
+    # Аренда та же (22), песочница снята и возвращена один раз.
+    assert (float(d.final_price), d.extras, _bal(s, u)) == (22.0, [], 153.0), (d.final_price, d.extras, _bal(s, u))
 
     rows = _series(s, admin, u, method="balance")                          # 18:00, через 3 дня, ×3
     _set_price(s, admin, rows[1], 10.0)
@@ -3081,7 +3133,8 @@ def test_r6_manual_price_survives_reschedule_and_format():
     s.expire_all()
     got = [(s.get(Booking, r.id).start_time, float(s.get(Booking, r.id).final_price), s.get(Booking, r.id).applied_rule)
            for r in rows]
-    assert got[1] == ("20:00", 10.0, "MANUAL_OVERRIDE") and got[0][1] == got[2][1] == 25.0, got
+    # Круг 7: 10 (скидка 10 от 20 в 18:00) → в 20:00 движок 25 → 25 − 10 = 15 (пик доплачивается).
+    assert got[1] == ("20:00", 15.0, "MANUAL_OVERRIDE") and got[0][1] == got[2][1] == 25.0, got
 
     for x in s.exec(select(Booking).where(Booking.user_uuid == u.id)).all():
         if x.status != "cancelled":
