@@ -194,16 +194,17 @@ def recompute_chain_and_settle(
             charged = float(b.charge_amount if b.charge_amount is not None else old_final)
             b.charge_amount = round(charged + delta, 2)
             total_delta += delta
+            # 09.10 (Кузуб): строка ленты — на СВОЮ бронь. Раньше одна общая
+            # строка «на клиента» (ref_type=user) — раскладка «куда ушли деньги»
+            # отдавала возврат самой ранней броне (17:00 «к оплате» 10 вместо 13,
+            # а подешевевшая 18:00 — 30 вместо 27). Сумма та же, баланс тот же.
+            # Positive delta = price went UP → debit; negative = refund.
+            from app.services import wallet
+            wallet.apply(session, user, -delta, reason="consecutive_recompute",
+                         description="Пересчёт по правилу «часы подряд»",
+                         ref_type="booking", ref_id=str(b.id))
 
         session.add(b)
-
-    if abs(total_delta) >= 0.01:
-        # Positive delta = price went UP (e.g. chain shrank, lost discount) →
-        # client owes more, so debit balance. Negative = refund.
-        from app.services import wallet
-        wallet.apply(session, user, -total_delta, reason="consecutive_recompute",
-                     description="Пересчёт по правилу «часы подряд»",
-                     ref_type="user", ref_id=str(user.id))
 
     return {
         "chain_size": len(chain),
