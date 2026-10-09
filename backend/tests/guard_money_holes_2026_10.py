@@ -3365,6 +3365,41 @@ def test_r8_gift_split_cancel_first_part_passes_hour_on():
     assert p2.start_time == "17:00"
 
 
+@_scenario
+def test_r9_night_tail():
+    """Хвосты ревизоров 09.10: (а) смена формата оплаченной брони с доплатой —
+    при нехватке баланса и лимита 400, деньги не двигаются; (б) «Час в подарок»
+    к части подарочной брони — 409, второй бонус-час не списывается;
+    (в) крон и одобрение берут строку клиента под замком."""
+    from app.api.v1.bookings import routes
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=25.0)
+    b = _book(s, admin, u, start="14:00", minutes=60, method="balance")           # сегодня → списано
+    assert b.payment_status == "paid" and _bal(s, u) == 5.0, (b.payment_status, _bal(s, u))
+    out = H._call(routes.change_booking_format, booking_id=str(b.id),
+                  payload=routes.ChangeFormatRequest(new_format="group"), session=s, current_user=admin)
+    s.rollback()
+    assert out == {"http": 400}, out
+    b = s.get(Booking, b.id)
+    assert (b.format, _bal(s, u)) == ("individual", 5.0), (b.format, _bal(s, u))
+
+    v = _client(s, None, balance=300.0)
+    g = _gift(s, admin, v, _book(s, admin, v, start="15:00", minutes=120, method="balance"))
+    p1, p2 = _split(s, admin, g, [60, 60])
+    _bonus(s, v, 1.0)
+    out = H._call(routes.apply_bonus_hour, booking_id=str(p2.id), session=s, current_user=admin)
+    s.rollback()
+    assert out == {"http": 409} and _free_hours(s, v) == 1.0, (out, _free_hours(s, v))
+
+    bd = _read("backend/app/services/billing_defer.py")
+    settle = bd[bd.index("def settle_pending_charge("):]
+    assert "select(User).where(User.id == b.user_uuid).with_for_update()" in settle[:6000]
+    rt = _read("backend/app/api/v1/bookings/routes.py")
+    core = rt[rt.index("def charge_hot_booking_on_approval("):rt.index("def recompute_chain_after_approval(")]
+    assert "select(User).where(User.id == owner.id).with_for_update()" in core
+
+
 def test_r6_c_mobile_sheet_no_minus_zero_percent():
     sheet = _read("src/pages/mobile/admin/bookingSheets.tsx")
     assert "· −${b.discountPercent ?? 0}%" not in sheet, "мобильная шторка снова пишет «−0 %»"

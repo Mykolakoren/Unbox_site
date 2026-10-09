@@ -452,6 +452,13 @@ def charge_hot_booking_on_approval(
     method = (booking.payment_method or "balance").lower()
     info = {"method": method, "hours": 0.0, "money": 0.0, "fallback": False}
     ref = str(booking.id)
+    # Строка клиента под замком и свежая из базы (ревизор денег 09.10): пул
+    # часов и баланс не затрёт параллельный крон / «Снять паузу».
+    if owner is not None and getattr(owner, "id", None) is not None:
+        owner = session.exec(
+            select(User).where(User.id == owner.id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).first() or owner
     charge_snapshot = float(booking.final_price or 0)
     if owner is not None:
         if method == "subscription":
@@ -5981,6 +5988,10 @@ def change_booking_format(
         # bookings get the new price stamped and the cron will charge the
         # right amount when T-24h hits.
         if booking.payment_status == "paid":
+            # Доплата — только если хватает баланса и лимита, как у переноса
+            # (ревизор денег 09.10: смена формата уводила баланс ниже лимита).
+            if delta_price > 0:
+                _move_funds_check(booking_owner, delta_price)
             # delta_price знаковая: >0 — доплата, <0 — возврат.
             wallet.apply(session, booking_owner, -delta_price, reason="format_change",
                          description="Пересчёт при смене формата брони",
@@ -6273,6 +6284,10 @@ def apply_bonus_hour(
     # скидку (18 → 9 → 4.5…) и сжигало бонусы клиента почти без эффекта.
     if (booking.applied_rule or "") == "BONUS_HOUR":
         raise HTTPException(409, "«Час в подарок» уже применён к этой брони")
+    # Часть подарочной брони (после «Разделить» / вырезки) — подарок уже у всей
+    # брони; второй подарок списал бы ещё бонус-час (ревизор регрессий 09.10).
+    if (booking.applied_rule or "") == "BONUS_HOUR_PART":
+        raise HTTPException(409, "Это часть брони с «Часом в подарок» — подарок уже применён")
     method = (booking.payment_method or "balance").lower()
     # Только balance: у cash/service деньги в кассе, возврат на баланс
     # раздвоил бы учёт; абонемент/бонус — свои механики.

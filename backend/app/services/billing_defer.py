@@ -258,7 +258,13 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     if b.payment_status != "pending":
         return False, f"not_pending(status={b.payment_status!r})"
 
-    user = session.get(User, b.user_uuid) if b.user_uuid else None
+    # Строка клиента под замком (ревизор денег 09.10): крон, «Снять паузу»
+    # админа и бронь клиента в ту же секунду иначе затирают пул часов /
+    # баланс друг друга. Порядок замков — бронь, потом клиент (как в одобрении).
+    user = session.exec(
+        select(User).where(User.id == b.user_uuid).with_for_update()
+        .execution_options(populate_existing=True)
+    ).first() if b.user_uuid else None
     if not user:
         return False, "user_missing"
 
