@@ -379,7 +379,8 @@ export function MobileCrmToday() {
                     />
                 )}
 
-                {dayLoaded && !loading && shelves.total === 0 && shelves.cancelled.length === 0 && (
+                {dayLoaded && !loading && shelves.total === 0 && shelves.cancelled.length === 0
+                    && (viewingOther || rentalsWithoutSession(bookings, myEmail, dateStr, sessions).length === 0) && (
                     <EmptyState
                         compact
                         title="Сессий на эту дату нет"
