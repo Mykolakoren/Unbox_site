@@ -5852,7 +5852,11 @@ def change_booking_format(
     except ValueError:
         raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
+    # Замки брони и клиента (ревизор денег 10.10): проверка средств и списание без гонки.
     booking = session.get(Booking, b_uuid)
+    if booking is not None:
+        booking = session.exec(select(Booking).where(Booking.id == booking.id).with_for_update()
+                               .execution_options(populate_existing=True)).first() or booking
     if not booking:
         raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     from app.services.billing_defer import heal_legacy_subscription_hours
@@ -5881,6 +5885,11 @@ def change_booking_format(
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     booking_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
+    if booking_owner is not None:
+        booking_owner = session.exec(
+            select(User).where(User.id == booking_owner.id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).first() or booking_owner
     if not booking_owner:
         raise HTTPException(status_code=404, detail="Не найден владелец брони")
 
