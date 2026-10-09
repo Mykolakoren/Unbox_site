@@ -984,6 +984,26 @@ def test_weekly_rebate_extras_not_rebated():
     assert estimate_booking_rebate(s, free)["booking_rebate"] == 0.0
 
 
+def test_weekly_rebate_skips_manual_price():
+    """Решение владельца 09.10: брони с ручной ценой («Цена», «Час в подарок» и
+    его части) в недельный возврат не входят — иначе цена выше движка (35 при
+    20) «возвращала» клиенту наценку. Часы таких броней — в объёме недели."""
+    from app.services.weekly_rebate import estimate_booking_rebate, run_weekly_rebates
+    ma = _audit()
+    s = _db()
+    u = _user(s, "manual@x.ge", "Клиент с ручной ценой")
+    for i in range(5):
+        _bk(s, u, datetime.combine(WEEK + timedelta(days=i), time.min), price=20.0)
+    m = _bk(s, u, datetime.combine(WEEK + timedelta(days=5), time.min), price=35.0)
+    m.applied_rule = "MANUAL_OVERRIDE"
+    s.add(m); s.commit()
+    assert estimate_booking_rebate(s, m)["booking_rebate"] == 0.0
+    # 6 ч → тир 10 %: возврат только за 5 обычных броней (5 × 2), наценка 35 − 20 не возвращается.
+    assert [d["rebate"] for d in run_weekly_rebates(s, WEEK, dry_run=True)["details"]] == [10.0]
+    run_weekly_rebates(s, WEEK, dry_run=False)
+    assert ma.run_check(s, _check(ma, "weekly_rebate_recheck"), ma.audit_params(NOW)) == []
+
+
 def _strip_py_comment(line: str) -> str:
     quote = None
     for i, ch in enumerate(line):

@@ -32,7 +32,7 @@ from app.models.booking import Booking
 from app.models.user import User
 from app.models.weekly_rebate import WeeklyRebate
 from app.models.cashbox_transaction import CashboxTransaction
-from app.services.pricing import PricingService
+from app.services.pricing import PricingService, MANUAL_PRICE_RULES
 from app.services import subscription_pool
 
 # Минимальный кредит — мелочь не начисляем (шум в кассе/балансе).
@@ -147,6 +147,12 @@ def run_weekly_rebates(
             # потом отменят, деньги останутся у клиента насовсем.
             # None — старые брони до отложенного списания, они оплачены сразу.
             if b.payment_status in ("pending", "waived"):
+                continue
+            # Ручная цена («Цена», «Час в подарок» и его части) — договорная, в
+            # возврат не входит: иначе цена выше движка (35 при 20) «возвращала»
+            # клиенту наценку (решение владельца 09.10). Часы брони при этом
+            # считаются в объём недели (total_hours выше).
+            if (b.applied_rule or "") in MANUAL_PRICE_RULES:
                 continue
             try:
                 # Время старта — из date + start_time, КАК в create_booking.
@@ -310,6 +316,9 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
 
     def _rebate_for(b: Booking) -> float:
         if b.payment_method != "balance" or b.payment_status == "waived" or tier == 0:
+            return 0.0
+        # Ручная цена — в возврат не входит (как в run_weekly_rebates, 09.10).
+        if (b.applied_rule or "") in MANUAL_PRICE_RULES:
             return 0.0
         try:
             try:

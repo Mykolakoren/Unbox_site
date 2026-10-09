@@ -457,12 +457,21 @@ def charge_hot_booking_on_approval(
         if method == "subscription":
             hrs = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
             split = None
-            if hrs > 0 and subscription_pool.is_active(owner.subscription, datetime.utcnow()):
+            # Пауза — не повод брать деньги: бронь часами снимает паузу (правило
+            # владельца 03.10, одно с кроном T-24ч — billing_defer, ревизия 09.10).
+            # Истёкший абонемент — деньгами, как и раньше.
+            from app.services.billing_defer import subscription_valid_for_booking
+            _frozen = bool(subscription_pool.get(owner.subscription, "is_frozen", False))
+            if hrs > 0 and subscription_valid_for_booking(owner.subscription, booking):
                 split = subscription_pool.plan_split(
                     owner.subscription, hrs,
                     resource_type=_res_type(session, booking.resource_id), format_type=booking.format,
                 )
             if split is not None:
+                if _frozen:
+                    from app.services.billing_defer import lift_pause_for_hours_charge
+                    lift_pause_for_hours_charge(session, owner, booking, via=f"подтверждение срочной брони, {via}",
+                                                actor=actor)
                 owner.subscription = subscription_pool.debit_hours(owner.subscription, hrs, extra=split)
                 booking.hours_deducted = hrs
                 subscription_pool.stamp_booking(booking, hrs, split)

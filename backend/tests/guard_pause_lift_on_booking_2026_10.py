@@ -111,6 +111,10 @@ def _admin(s):
     return H._user(s, role="owner", name="Админ", balance=0.0)
 
 
+def _bal(s, u) -> float:
+    return round(float(s.get(User, u.id).balance or 0), 2)
+
+
 def _pool(s, u) -> dict:
     s.expire_all()
     return s.get(User, u.id).subscription
@@ -274,6 +278,105 @@ def test_pause_30_days_booking_after_10_lifts_and_keeps_20():
     assert tg.sent == [("777", "Ваш абонемент снова активен: пауза снята, потому что на вас забронировано "
                                "08.10 12:00. Неиспользованные дни паузы (20) сохранились — их можно "
                                "взять позже через администратора.")], tg.sent
+
+
+@_scenario
+def test_cron_charge_during_later_pause_lifts_it_and_uses_hours():
+    """Ревизия 09.10 («одобрение и крон по-разному при паузе»): клиент сначала
+    забронировал (абонемент действовал), ПОТОМ поставил паузу и бронь не отменил.
+    Крон T-24ч раньше молча списывал часы с пула на паузе (пауза шла дальше);
+    одобрение срочной брони в той же ситуации брало деньги. Теперь одно правило:
+    бронь часами → пауза снимается (end_freeze), дни паузы остаются."""
+    from app.services import billing_defer
+    from app.services import subscription_perks as perks
+    from app.services.subscription_sale import build_subscription
+    s = H._db()
+    u = _client(s, build_subscription("PRO_PLUS", _now() - timedelta(days=15)))
+    b = _book(s, u, u, days=3, start="12:00")
+    assert not isinstance(b, dict) and (b.payment_method, b.payment_status) == ("subscription", "pending")
+    u = s.get(User, u.id)
+    u.subscription = perks.start_freeze(u.subscription, _now() - timedelta(days=2))      # пауза ПОСЛЕ брони
+    s.add(u); s.commit()
+    assert _frozen(s, u)
+    ok, _reason = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok, _reason
+    pool = _pool(s, u)
+    assert not _frozen(s, u), "пауза осталась — часы списаны с пула на паузе"
+    assert P.get_float(pool, "remaining_hours") == 41.0 and _bal(s, u) == 500.0, (pool, _bal(s, u))
+    from app.models.timeline import TimelineEvent
+    ev = [e for e in s.exec(select(TimelineEvent).where(TimelineEvent.target_id == str(u.id))).all()
+          if (e.metadata_dump or {}).get("action") == "AutoUnfreezeOnCharge"]
+    assert len(ev) == 1 and "списана часами" in ev[0].description, ev
+    src = H._read("backend/app/services/billing_defer.py") if hasattr(H, "_read") else open(
+        os.path.join(os.path.dirname(__file__), "..", "app", "services", "billing_defer.py"), encoding="utf-8").read()
+    body = src[src.index("def lift_pause_for_hours_charge"):src.index("GIFT_LIVE_STATUSES =")]
+    assert "commit=False" in body, "запись истории не должна коммитить посреди списания"
+
+
+@_scenario
+def test_cron_expired_subscription_charges_money_not_hours():
+    """Абонемент истёк, часы на пуле остались (ежедневная зачистка ещё не прошла):
+    крон раньше брал часы из истёкшего пула; одобрение — деньги. Теперь крон —
+    тоже деньгами, часы не трогает."""
+    from app.services import billing_defer
+    from app.services.subscription_sale import build_subscription
+    s = H._db()
+    u = _client(s, build_subscription("PRO_PLUS", _now() - timedelta(days=15)))
+    b = _book(s, u, u, days=3, start="12:00")
+    assert not isinstance(b, dict) and b.payment_method == "subscription"
+    u = s.get(User, u.id)
+    u.subscription = P.update(u.subscription, expiry_date=(_now() - timedelta(hours=1)).isoformat())
+    s.add(u); s.commit()
+    ok, _reason = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok, _reason
+    b = s.get(Booking, b.id)
+    assert P.get_float(_pool(s, u), "remaining_hours") == 42.0, "часы истёкшего абонемента списаны"
+    assert float(b.hours_deducted or 0) == 0.0 and _bal(s, u) < 500.0, (b.hours_deducted, _bal(s, u))
+
+
+@_scenario
+def test_pause_over_expired_subscription_does_not_revive_hours():
+    """Ревизор денег 09.10: админ поставил паузу абонементу, срок которого уже
+    вышел. Снятие паузы не должно воскрешать часы: крон примеряет снятие на
+    копии, видит «истёк» → бронь деньгами, пауза остаётся."""
+    from app.services import billing_defer
+    from app.services import subscription_perks as perks
+    from app.services.subscription_sale import build_subscription
+    s = H._db()
+    u = _client(s, build_subscription("PRO_PLUS", _now() - timedelta(days=15)))
+    b = _book(s, u, u, days=3, start="12:00")
+    assert not isinstance(b, dict) and b.payment_method == "subscription"
+    u = s.get(User, u.id)
+    sub = P.update(u.subscription, expiry_date=(_now() - timedelta(days=5)).isoformat())
+    u.subscription = perks.start_freeze(sub, _now() - timedelta(days=1))
+    s.add(u); s.commit()
+    ok, _reason = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok, _reason
+    assert _frozen(s, u), "пауза снята ради истёкшего абонемента"
+    assert P.get_float(_pool(s, u), "remaining_hours") == 42.0 and _bal(s, u) < 500.0
+
+
+@_scenario
+def test_hot_approval_during_pause_lifts_and_uses_hours():
+    """Одобрение срочной брони, когда абонемент на паузе (поставили между
+    созданием и одобрением): часы + снятие паузы, а не деньги."""
+    from app.api.v1.bookings import routes
+    from app.services import subscription_perks as perks
+    from app.services.subscription_sale import build_subscription
+    s = H._db()
+    admin = _admin(s)
+    u = _client(s, build_subscription("PRO_PLUS", _now() - timedelta(days=15)))
+    b = _book(s, u, u, days=0, start="16:00")
+    assert not isinstance(b, dict) and b.status == "pending_approval"
+    u = s.get(User, u.id)
+    u.subscription = perks.start_freeze(u.subscription, _now() - timedelta(hours=1))
+    s.add(u); s.commit()
+    routes.approve_booking(booking_id=str(b.id), session=s, current_user=admin)
+    s.commit()
+    assert not _frozen(s, u) and P.get_float(_pool(s, u), "remaining_hours") == 41.0 and _bal(s, u) == 500.0
 
 
 @_scenario

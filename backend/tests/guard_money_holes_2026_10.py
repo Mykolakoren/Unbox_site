@@ -374,25 +374,37 @@ def test_2_approve_without_hours_falls_back_to_money_like_cron():
 
 @_scenario
 def test_2_approve_with_paused_subscription_charges_money_with_extras():
-    """После создания брони абонемент поставили на паузу. Одобрение: абонемент
-    не действует → деньги: аренда 20 ₾ (без скидки тарифа — он не действует) +
-    песочница 5 ₾ = 25 ₾, часы не трогаем. Отмена возвращает 25 ₾."""
-    s = _db()
-    admin = _admin(s)
-    u = _client(s, _sub("WARM_START"))
-    b = _book(s, u, u, start="16:00", extras=["sandbox"])
-    assert b.status == "pending_approval" and float(b.final_price) == 5.0
-    uu = s.get(User, u.id)
-    uu.subscription = P.update(uu.subscription, is_frozen=True, frozen_at=H.FakeDatetime.utcnow().isoformat())
-    s.add(uu)
-    s.commit()
-    b = _approve(s, admin, b)
-    assert float(b.hours_deducted or 0) == 0.0 and round(float(b.charge_amount), 2) == 25.0, \
-        (b.hours_deducted, b.charge_amount)
-    assert (_bal(s, u), _rem(s, u)) == (75.0, 10.0), f"{_bal(s, u)} ₾ / {_rem(s, u)} ч"
-    _cancel(s, admin, b)
-    assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0)
-    _ledger_ok(s, u, 100.0)
+    """После создания брони абонемент поставили на паузу. Одобрение (правило
+    владельца 03.10 «бронь снимает паузу», ревизия 09.10 — одно с кроном):
+    часы покрывают бронь → пауза снимается, −1 ч, денежная часть (песочница 5 ₾)
+    — с баланса. Истёкший абонемент — по-прежнему деньгами: аренда 20 ₾ (без
+    скидки тарифа) + песочница 5 = 25 ₾, часы не трогаем. Отмена возвращает всё."""
+    for state in ("paused", "expired"):
+        s = _db()
+        admin = _admin(s)
+        u = _client(s, _sub("WARM_START"))
+        b = _book(s, u, u, start="16:00", extras=["sandbox"])
+        assert b.status == "pending_approval" and float(b.final_price) == 5.0
+        uu = s.get(User, u.id)
+        if state == "paused":
+            uu.subscription = P.update(uu.subscription, is_frozen=True, frozen_at=H.FakeDatetime.utcnow().isoformat())
+        else:
+            uu.subscription = P.update(uu.subscription,
+                                       expiry_date=(H.FakeDatetime.utcnow() - timedelta(hours=1)).isoformat())
+        s.add(uu)
+        s.commit()
+        b = _approve(s, admin, b)
+        if state == "paused":
+            assert float(b.hours_deducted or 0) == 1.0, b.hours_deducted
+            assert (_bal(s, u), _rem(s, u)) == (95.0, 9.0), f"{_bal(s, u)} ₾ / {_rem(s, u)} ч"
+            assert not P.get(s.get(User, u.id).subscription, "is_frozen", False), "пауза не снята"
+        else:
+            assert float(b.hours_deducted or 0) == 0.0 and round(float(b.charge_amount), 2) == 25.0, \
+                (b.hours_deducted, b.charge_amount)
+            assert (_bal(s, u), _rem(s, u)) == (75.0, 10.0), f"{_bal(s, u)} ₾ / {_rem(s, u)} ч"
+        _cancel(s, admin, b)
+        assert (_bal(s, u), _rem(s, u)) == (100.0, 10.0), (state, _bal(s, u), _rem(s, u))
+        _ledger_ok(s, u, 100.0)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -748,15 +760,16 @@ def test_6_reschedule_subscription_booking_dropping_sandbox_refunds_money_part()
 
 @_scenario
 def test_6_dropped_sandbox_on_money_subscription_row_not_refunded_twice():
-    """Бронь по абонементу ушла в деньги при одобрении (пауза): 20 + песочница 5 =
-    25 ₾. Перенос в кабинет без песочницы: +5 ₾ сейчас, charge_amount 20 →
-    отмена +20 ₾. Итого клиент при своих — песочница не вернулась дважды."""
+    """Бронь по абонементу ушла в деньги при одобрении (абонемент истёк; на паузе
+    с 09.10 — часы и снятие паузы): 20 + песочница 5 = 25 ₾. Перенос в кабинет без
+    песочницы: +5 ₾ сейчас, charge_amount 20 → отмена +20 ₾. Итого клиент при
+    своих — песочница не вернулась дважды."""
     s = _db()
     admin = _admin(s)
     u = _client(s, _sub("WARM_START"))
     b = _book(s, u, u, start="16:00", extras=["sandbox"])
     uu = s.get(User, u.id)
-    uu.subscription = P.update(uu.subscription, is_frozen=True, frozen_at=H.FakeDatetime.utcnow().isoformat())
+    uu.subscription = P.update(uu.subscription, expiry_date=(H.FakeDatetime.utcnow() - timedelta(hours=1)).isoformat())
     s.add(uu)
     s.commit()
     b = _approve(s, admin, b)
@@ -1136,8 +1149,11 @@ def test_rule_helper_documented_and_used():
     settle = _body(bd, "def settle_pending_charge(", "\ndef ")
     assert "subscription_cash_price(" in settle, "крон считает запасной путь мимо общей функции"
     core = _body(routes, "def charge_hot_booking_on_approval(", "\ndef ")
-    assert "subscription_cash_price(" in core and "subscription_pool.is_active(" in core \
+    # 09.10: статус пула (срок к началу брони, пауза — примеркой снятия) — одна
+    # функция subscription_valid_for_booking у одобрения и у крона.
+    assert "subscription_cash_price(" in core and "subscription_valid_for_booking(" in core \
         and "subscription_pool.plan_split(" in core, "одобрение не перепроверяет часы как крон"
+    assert "subscription_valid_for_booking(" in settle, "крон проверяет срок/паузу мимо общей функции"
     assert "charge_hot_booking_on_approval(" in _body(routes, "def approve_booking(")
     tg = _read("backend/app/api/v1/telegram.py")
     assert "charge_hot_booking_on_approval(" in _body(tg, "def _handle_hot_booking_callback(", "\ndef "), \

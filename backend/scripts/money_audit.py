@@ -524,7 +524,7 @@ def _weekly_rebate_recheck(session: Session, rows: list[dict], params: dict) -> 
     from app.models.user import User
     from app.models.weekly_rebate import WeeklyRebate
     from app.services import subscription_pool
-    from app.services.pricing import PricingService
+    from app.services.pricing import PricingService, MANUAL_PRICE_RULES
     from app.services.weekly_rebate import MIN_REBATE_GEL
 
     week_start = params["rebate_week"]
@@ -620,6 +620,9 @@ def _weekly_rebate_recheck(session: Session, rows: list[dict], params: dict) -> 
             if b.payment_method != "balance":
                 continue
             if b.payment_status in ("pending", "waived"):
+                continue
+            # Ручная цена — в возврат не входит (копия run_weekly_rebates, 09.10).
+            if (b.applied_rule or "") in MANUAL_PRICE_RULES:
                 continue
             try:
                 try:

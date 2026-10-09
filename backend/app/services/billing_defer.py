@@ -291,7 +291,12 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             extra = _x or 0.0
         else:
             covered = rem >= hrs > 0
+        # Истёкший к началу брони абонемент часами не платит — бронь деньгами
+        # (как одобрение срочной); на паузе — примерка снятия паузы на копии.
+        if covered and not subscription_valid_for_booking(user.subscription, b):
+            covered = False
         if covered:
+            lift_pause_for_hours_charge(session, user, b, via="списание за сутки")
             user.subscription = subscription_pool.debit_hours(user.subscription, hrs, extra=extra)
             # Ревизия 03.10: снятые часы — в бронь ВСЕГДА. Раньше у старых броней
             # серий hours_deducted был 0/None (часы брались из длительности), он
@@ -476,6 +481,68 @@ def _left_after_cancel(hours: float, share_returned: float) -> float:
     411): 0,67 ч при отмене 50 % — 0,34 отмена + 0,34 waive = 0,68."""
     h = float(hours or 0)
     return round(max(0.0, h - round(h * share_returned, 2)), 2)
+
+
+def subscription_valid_for_booking(sub: Optional[dict], b: Booking, now: Optional[datetime] = None) -> bool:
+    """Может ли абонемент покрыть ЭТУ бронь часами (крон T-24ч и одобрение
+    срочной — одно правило, ревизия 09.10):
+      • срок сверяем с НАЧАЛОМ брони, а не с моментом списания — сессия в срок
+        идёт часами, даже если крон опоздал; сессия после конца абонемента —
+        деньгами;
+      • на паузе — примеряем снятие паузы на КОПИИ пула (end_freeze продлевает
+        срок): пауза поверх уже истёкшего абонемента часы не воскрешает.
+    Остаток часов и формат — отдельно (plan_split / remaining_hours)."""
+    import copy
+    if not sub:
+        return False
+    now = now or datetime.utcnow()
+    trial = sub
+    if subscription_pool.get(sub, "is_frozen", False):
+        from app.services import subscription_perks
+        try:
+            trial, _fact, _ext = subscription_perks.end_freeze(copy.deepcopy(sub), now)
+        except Exception:  # noqa: BLE001 — не смогли примерить: часами не платим
+            return False
+    start_tb = booking_start_dt_tbilisi(b)
+    at = (start_tb - timedelta(hours=4)) if start_tb is not None else now
+    return not subscription_pool.is_expired(trial, at)
+
+
+def lift_pause_for_hours_charge(session: Session, user: User, b: Booking, *, via: str,
+                                actor: Optional[User] = None) -> Optional[dict]:
+    """Бронь по абонементу списывается часами, а абонемент на паузе (клиент
+    поставил паузу ПОСЛЕ того, как забронировал, и бронь не отменил) — правило
+    владельца 03.10 «бронь снимает паузу, неизрасходованные дни остаются»:
+    паузу снимаем тем же subscription_perks.end_freeze, что и при создании
+    брони и кнопкой «Снять паузу». Зовут крон T-24ч и одобрение срочной брони —
+    ТОЛЬКО когда часы её покрывают (иначе бронь уходит в деньги, пауза
+    остаётся). Ревизия 09.10: крон списывал часы с пула на паузе (пауза шла
+    дальше и продлевала срок), а одобрение в той же ситуации брало деньги.
+    Не коммитит. Возвращает сведения о снятии или None (паузы не было)."""
+    if not subscription_pool.get(user.subscription, "is_frozen", False):
+        return None
+    from app.services import subscription_perks
+    from app.services.timeline import timeline_service
+    now = datetime.utcnow()
+    new_sub, fact, extend = subscription_perks.end_freeze(user.subscription, now)
+    user.subscription = new_sub
+    session.add(user)
+    days_left = subscription_pool.get(new_sub, "freeze_days_left")
+    when = f"{b.date:%d.%m} {b.start_time}"
+    timeline_service.log_event(
+        session=session,
+        actor_id=(actor.id if actor is not None else None),
+        actor_role=(getattr(actor, "role", None) or "system"),
+        target_id=str(user.id),
+        target_type="user",
+        event_type="subscription_freeze",
+        description=(f"Пауза снята: бронь {when} списана часами абонемента ({via}). "
+                     f"Срок +{extend:g} дн., осталось дней паузы {float(days_left or 0):g}"),
+        metadata={"action": "AutoUnfreezeOnCharge", "booking_id": str(b.id), "fact_days": fact,
+                  "extended_days": extend, "freeze_days_left": days_left, "via": via},
+        commit=False,   # одним коммитом со списанием (вызывающий коммитит; лок брони держим)
+    )
+    return {"fact_days": fact, "extended_days": extend, "freeze_days_left": days_left}
 
 
 GIFT_LIVE_STATUSES = ("confirmed", "pending_approval", "completed")
