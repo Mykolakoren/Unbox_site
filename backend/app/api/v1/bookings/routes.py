@@ -4451,7 +4451,9 @@ def reschedule_booking(
     # переходит к живой части ТОГО ЖЕ дня (billing_defer.pass_gift_on). Перенос
     # части на другой день оставлял бы её со скидкой подарка, а отмена первой —
     # возвращала бы час целиком (ревизор денег 09.10).
-    if new_date.date() != booking.date.date() and (booking.applied_rule or "") in ("BONUS_HOUR", "BONUS_HOUR_PART"):
+    _gift_room_change = bool(data.new_resource_id) and data.new_resource_id != booking.resource_id
+    if (new_date.date() != booking.date.date() or _gift_room_change) \
+            and (booking.applied_rule or "") in ("BONUS_HOUR", "BONUS_HOUR_PART"):
         _gift_parts = session.exec(
             select(Booking).where(
                 Booking.id != booking.id,
@@ -4464,8 +4466,8 @@ def reschedule_booking(
         if _gift_parts is not None or (booking.applied_rule or "") == "BONUS_HOUR_PART":
             raise HTTPException(
                 status_code=409,
-                detail="Это часть брони с «Часом в подарок» — её можно перенести только в пределах того же дня. "
-                       "Для другого дня отмените части и создайте новую бронь.",
+                detail="Это часть брони с «Часом в подарок» — её можно перенести только в пределах того же дня "
+                       "и в том же кабинете. Для другого дня или кабинета отмените части и создайте новую бронь.",
             )
 
     free_reschedule_used = False
@@ -6185,7 +6187,9 @@ def set_booking_price(
     # «Час в подарок» (BONUS_HOUR) — тоже ручная цена, но с погашенным бонус-
     # часом: метку не стираем, иначе отмена не вернула бы бонус-час, а подарок
     # можно было бы применить второй раз (ревизия 04.10).
-    if (booking.applied_rule or "") != "BONUS_HOUR":
+    # Часть подарочной брони (BONUS_HOUR_PART) — тоже держим: иначе «Цена» выводила
+    # её из подарка, и отмена головной части возвращала час целиком (10.10).
+    if (booking.applied_rule or "") not in ("BONUS_HOUR", "BONUS_HOUR_PART"):
         booking.applied_rule = "MANUAL_OVERRIDE"
     # Аренда в цене денежной брони = base_price − discount_amount (по ним
     # booking_extras_money отделяет допы при пересчётах): ручная цена меняет

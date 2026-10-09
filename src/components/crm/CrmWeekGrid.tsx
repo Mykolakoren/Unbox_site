@@ -195,6 +195,10 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
 
     const now = tbilisiNow();
     const isPast = (day: string, min: number) => day < now.ymd || (day === now.ymd && min < now.totalMins);
+    /** Время по умолчанию для «+»: сегодня — ближайшие полчаса, иначе 10:00. */
+    const defaultTime = (day: string) => day === now.ymd
+        ? toHM(Math.min(21 * 60, Math.ceil((now.totalMins + 1) / SLOT) * SLOT))
+        : '10:00';
 
     // ── Перетаскивание (4.3) ────────────────────────────────────────────
     // grab — на сколько слотов ниже начала плитки её схватили (двигаем верх, а не курсор).
@@ -219,6 +223,9 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
             if (!d) return;
             if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
             d.moved = true;
+            // Планшет / длинная неделя: у края окна страница сама подкручивается.
+            if (e.clientY > window.innerHeight - 48) window.scrollBy(0, 14);
+            else if (e.clientY < 48) window.scrollBy(0, -14);
             const at = slotAt(e.clientX, e.clientY, d.grab);
             if (at) setPreview(at);
         };
@@ -353,10 +360,18 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
             <div style={{ display: 'grid', gridTemplateColumns: '48px repeat(7, minmax(96px, 1fr))', border: '1px solid var(--color-ink-10)', borderRadius: 8, overflowX: 'auto' }}>
                 <div />
                 {days.map(d => (
-                    <div key={d} style={{ padding: '6px 4px', fontSize: 12, fontWeight: d === now.ymd ? 700 : 600, textAlign: 'center',
+                    <div key={d} style={{ padding: '4px', fontSize: 12, fontWeight: d === now.ymd ? 700 : 600, textAlign: 'center',
                         borderLeft: '1px solid var(--color-ink-10)', borderBottom: '1px solid var(--color-ink-10)',
-                        color: d === now.ymd ? 'var(--color-accent-ink, inherit)' : 'var(--color-ink)' }}>
-                        {formatDateLabel(d)}
+                        color: d === now.ymd ? 'var(--color-accent-ink, inherit)' : 'var(--color-ink)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        <span>{formatDateLabel(d)}</span>
+                        {/* С клавиатуры и без мыши: новая встреча на этот день. */}
+                        <button type="button" data-week-add={d} aria-label={`Новая встреча, ${formatDateLabel(d)}`} title="Новая встреча"
+                            onClick={() => setNewSlot({ day: d, time: defaultTime(d) })}
+                            style={{ minWidth: 24, minHeight: 24, border: '1px solid var(--color-ink-10)', borderRadius: 6, background: 'transparent',
+                                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-ink-60)' }}>
+                            <Plus size={12} aria-hidden="true" />
+                        </button>
                     </div>
                 ))}
                 <div style={{ position: 'relative', height: rows * ROW_H }}>
@@ -446,6 +461,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
                     onOpenClient={(id) => navigate(`/crm/clients/${id}`)}
                     onOpenBookings={() => navigate('/crm/bookings')}
                     onDone={async () => { setOpenItem(null); await reloadAll(); }}
+                    onMove={(day, start) => { const it = openItem; setOpenItem(null); void moveItem(it, day, start); }}
                 />
             )}
         </div>
@@ -635,10 +651,14 @@ function NewMeetingSheet({ slot, clients, bookings, resources, past, onClose, on
 }
 
 // ── Плитка: подробности и действия ─────────────────────────────────────────
-function ItemSheet({ item, client, clients, bookings, resources, past, onClose, onOpenClient, onOpenBookings, onDone }: {
+function ItemSheet({ item, client, clients, bookings, resources, past, onClose, onOpenClient, onOpenBookings, onDone, onMove }: {
     item: Item; client?: CrmClient; clients: CrmClient[]; bookings: BookingHistoryItem[]; resources: Res[]; past: boolean;
     onClose: () => void; onOpenClient: (id: string) => void; onOpenBookings: () => void; onDone: () => Promise<void>;
+    /** Перенос без мыши (клавиатура, планшет) — тот же путь, что перетаскивание. */
+    onMove?: (day: string, start: number) => void;
 }) {
+    const [moveDay, setMoveDay] = useState(item.day);
+    const [moveTime, setMoveTime] = useState(toHM(item.start));
     const { createSession, updateSession } = useCrmStore();
     const [busy, setBusy] = useState(false);
     const [mode, setMode] = useState<'main' | 'room' | 'link'>('main');
@@ -710,7 +730,21 @@ function ItemSheet({ item, client, clients, bookings, resources, past, onClose, 
                         {item.kind === 'rental' && <Button variant="primary" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setMode('link')}>Записать сессию на эту аренду</Button>}
                         {item.booking && <Button variant="quiet" onClick={onOpenBookings}>Открыть «Бронирования» (отмена, деление, серия)</Button>}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6 }}>Перенести — перетащите плитку на сетке.</div>
+                    {onMove && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }} data-move-form>
+                            <Field label="Перенести на">
+                                <Input type="date" value={moveDay} onChange={e => setMoveDay(e.target.value)} />
+                            </Field>
+                            <Field label="Время">
+                                <select className="ui-input" value={moveTime} onChange={e => setMoveTime(e.target.value)} aria-label="Время">
+                                    {Array.from({ length: 28 }, (_, i) => toHM(8 * 60 + i * SLOT)).map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                            </Field>
+                            <Button variant="secondary" disabled={!moveDay || (moveDay === item.day && moveTime === toHM(item.start))}
+                                onClick={() => onMove(moveDay, toMin(moveTime))}>Перенести</Button>
+                        </div>
+                    )}
+                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6 }}>Или перетащите плитку на сетке.</div>
                 </div>
             )}
             {mode === 'room' && <RoomPicker rooms={rooms} value={roomId} onChange={setRoomId} location={location} setLocation={setLocation} />}

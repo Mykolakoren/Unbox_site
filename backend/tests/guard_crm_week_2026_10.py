@@ -33,6 +33,14 @@ def test_week_grid_uses_existing_requests_only():
     assert "Math.max(60, Math.ceil(sessionMin / SLOT) * SLOT)" in s, "аренда под сессию — полчасами, не меньше часа"
 
 
+def test_keyboard_and_tablet():
+    s = _read("src/components/crm/CrmWeekGrid.tsx")
+    assert "data-week-add" in s and "aria-label={`Новая встреча, ${formatDateLabel(d)}`}" in s, "создать встречу без мыши"
+    assert "data-move-form" in s and "onMove(moveDay, toMin(moveTime))" in s, "перенести без мыши"
+    assert "window.scrollBy(0, 14)" in s, "автопрокрутка у края при перетаскивании"
+    assert "pointercancel" in s and "justDragged" in s
+
+
 def test_wired_into_sessions_and_phone():
     p = _read("src/pages/crm/CrmSessions.tsx")
     assert "p.view === 'week' && !ghNarrow && p.onNewSession ?" in p and "<CrmWeekGrid onChanged={p.onReload} />" in p

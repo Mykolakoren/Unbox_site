@@ -577,6 +577,18 @@ def pass_gift_on(session: Session, b: Booking) -> bool:
     q = q.where(Booking.user_uuid == b.user_uuid) if b.user_uuid else q.where(Booking.user_id == b.user_id)
     nxt = sorted((x for x in session.exec(q).all() if (x.payment_status or "") != "waived"),
                  key=lambda x: (x.start_time or "", str(x.id)))
+    # Два подарка у клиента в один день (10.10, ревизор): если есть ещё одна
+    # «головная» подарочная бронь, чужая группа могла бы забрать час. Тогда
+    # «сестра» — только в том же кабинете; не нашли — час возвращаем клиенту.
+    other_heads = session.exec(
+        select(Booking.id).where(
+            Booking.id != b.id, Booking.applied_rule == "BONUS_HOUR", Booking.date == b.date,
+            Booking.status.in_(GIFT_LIVE_STATUSES),  # type: ignore[attr-defined]
+            (Booking.user_uuid == b.user_uuid) if b.user_uuid else (Booking.user_id == b.user_id),
+        )
+    ).first()
+    if other_heads is not None:
+        nxt = [x for x in nxt if x.resource_id == b.resource_id]
     if not nxt:
         return False
     nxt[0].applied_rule = "BONUS_HOUR"

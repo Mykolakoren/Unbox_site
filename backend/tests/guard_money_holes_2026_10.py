@@ -3361,7 +3361,13 @@ def test_r8_gift_split_cancel_first_part_passes_hour_on():
                       background_tasks=BackgroundTasks(), session=s, current_user=admin)
         s.rollback()
         assert out == {"http": 409}, (part.applied_rule, out)
-    p2 = _reschedule(s, admin, s.get(Booking, p2.id), start="17:00")          # тот же день — можно
+    out = H._call(routes.reschedule_booking, booking_id=str(p2.id),
+                  data=routes.RescheduleRequest(new_date=H._day(0).strftime("%Y-%m-%d"), new_start_time="17:00",
+                                                new_resource_id="room_3"),
+                  background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    s.rollback()
+    assert out == {"http": 409}, ("часть подарка в другой кабинет", out)
+    p2 = _reschedule(s, admin, s.get(Booking, p2.id), start="17:00")          # тот же день и кабинет — можно
     assert p2.start_time == "17:00"
 
 
@@ -3404,6 +3410,33 @@ def test_r9_night_tail():
     adm = _read("src/components/admin/AdminChessboardView.tsx")
     assert adm.count("selectedBooking.appliedRule !== 'BONUS_HOUR' && selectedBooking.appliedRule !== 'BONUS_HOUR_PART'") == 2, \
         "кнопка «Час в подарок» у брони, где подарок уже применён"
+
+
+@_scenario
+def test_r10_two_gifts_same_day_and_price_on_part():
+    """10.10: (а) два подарка у клиента в один день, второй разделён: отмена
+    первого (неразделённого) возвращает ЕГО час, чужая группа его не забирает;
+    (б) «Цена» на части подарочной брони не выводит её из подарка — отмена
+    головной части передаёт час ей, а не возвращает."""
+    s = _db()
+    admin = _admin(s)
+    u = _client(s, None, balance=400.0)
+    x = _gift(s, admin, u, _book(s, admin, u, start="10:00", minutes=60, method="balance"))
+    y = _gift(s, admin, u, _book(s, admin, u, start="14:00", minutes=120, method="balance", resource="room_3"))
+    y1, y2 = _split(s, admin, y, [60, 60])
+    _cancel(s, admin, s.get(Booking, x.id))
+    assert _free_hours(s, u) == 1.0, ("час первого подарка не вернулся", _free_hours(s, u))
+    assert (s.get(Booking, y1.id).applied_rule, s.get(Booking, y2.id).applied_rule) == ("BONUS_HOUR", "BONUS_HOUR_PART")
+
+    v = _client(s, None, balance=400.0)
+    g = _gift(s, admin, v, _book(s, admin, v, start="16:00", minutes=120, method="balance"))
+    p1, p2 = _split(s, admin, g, [60, 60])
+    _set_price(s, admin, s.get(Booking, p2.id), 5.0)
+    assert s.get(Booking, p2.id).applied_rule == "BONUS_HOUR_PART", s.get(Booking, p2.id).applied_rule
+    _cancel(s, admin, s.get(Booking, p1.id))
+    assert _free_hours(s, v) == 0.0 and s.get(Booking, p2.id).applied_rule == "BONUS_HOUR"
+    _cancel(s, admin, s.get(Booking, p2.id))
+    assert _free_hours(s, v) == 1.0
 
 
 def test_r6_c_mobile_sheet_no_minus_zero_percent():
