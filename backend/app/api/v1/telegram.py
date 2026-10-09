@@ -623,6 +623,11 @@ def telegram_webhook(
     if callback:
         return _handle_callback(session, callback)
 
+    # 09.10: архив чата админов — молча, до любой обработки (и для фото без текста).
+    from app.services import tg_archive
+    tg_archive.maybe_archive(update)
+    in_group = tg_archive.is_group_update(update)
+
     message = update.get("message") or update.get("edited_message") or {}
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
@@ -660,6 +665,12 @@ def telegram_webhook(
 
     # Normalise — strip "/foo@BotName" suffix that Telegram adds in groups
     first_word = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
+
+    # 09.10: в группах бот на обычный текст НЕ отвечает (с выключенным режимом
+    # приватности он видит каждое сообщение — иначе ответил бы на каждое
+    # «Привет! Я бот уведомлений…» и слал «бот не понял» в ленту).
+    if in_group and not first_word:
+        return {"ok": True}
 
     # ── /start [token] — deep-link binding ────────────────────────────────
     if first_word == "/start":

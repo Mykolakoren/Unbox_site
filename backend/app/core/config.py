@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # summary). Create the group, add @Unbox_Booking_G_Bot as admin,
     # /chatid in the group → paste the number here (e.g. -1001234567890).
     TELEGRAM_ADMIN_CHAT_ID: Optional[str] = None
+    # 09.10: архив рабочего чата админов (services/tg_archive.py) — id групп через запятую.
+    TELEGRAM_ARCHIVE_CHAT_IDS: Optional[str] = None
+    TELEGRAM_ARCHIVE_DIR: str = "/var/lib/unbox/tg_archive"
     # Owner-only chat (Микола). Daily summary posts here instead of the
     # busy admin group so the founder gets the once-a-day money/hours
     # roll-up without the per-event noise. If unset, daily summary
