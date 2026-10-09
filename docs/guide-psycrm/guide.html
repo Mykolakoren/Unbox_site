@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Psy-CRM Unbox — гайд</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm 16mm; }
+  :root {
+    color-scheme: light;
+    --ink: #1c2723;
+    --muted: #55645e;
+    --faint: #87938d;
+    --line: #dfe6e2;
+    --tint: #eef5f1;
+    --tint2: #f6f8f7;
+    --accent: #2e7a5c;
+    --accent-ink: #23604a;
+    --warn-bg: #fdf6e7;
+    --warn-line: #ecd9ae;
+    --warn-ink: #8a5a10;
+    --danger: #b3453a;
+    --danger-bg: #fbecea;
+    --code: #f2f5f3;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: #fff; }
+  body {
+    margin: 0; color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 10pt; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page { page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+
+  h1 { font-size: 30pt; line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 12px; font-weight: 800; }
+  h3 { break-after: avoid; page-break-after: avoid; }
+  h2 { font-size: 17pt; letter-spacing: -0.01em; margin: 0 0 4px; font-weight: 780; }
+  h3 { font-size: 11.4pt; margin: 12px 0 5px; font-weight: 720; }
+  p { margin: 0 0 8px; }
+  .lede { color: var(--muted); font-size: 10.8pt; margin-bottom: 10px; }
+  .kicker { font-size: 8.6pt; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-ink); margin-bottom: 6px; }
+  .secnum { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11pt; font-weight: 800; align-items: center; justify-content: center; margin-right: 8px; vertical-align: 3px; }
+  .muted { color: var(--muted); }
+  strong { font-weight: 680; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; background: var(--code); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .ui { font-weight: 650; color: var(--accent-ink); white-space: nowrap; }
+  ul.clean { margin: 4px 0 8px; padding-left: 18px; }
+  ul.clean li { margin: 2px 0; }
+  .avoid { break-inside: avoid; page-break-inside: avoid; }
+
+  /* обложка */
+  .cover { display: flex; flex-direction: column; min-height: 262mm; }
+  .cover-top { background: linear-gradient(135deg, #2e7a5c 0%, #1f5a43 100%); color: #fff; border-radius: 16px; padding: 34px 32px 30px; }
+  .cover-top .kicker { color: #bfe3d2; }
+  .cover-top h1 { color: #fff; }
+  .cover-top p { color: #d9efe5; font-size: 12pt; max-width: 60ch; margin: 0; }
+  .benefits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0 20px; }
+  .benefit { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--tint2); }
+  .benefit .ic { width: 30px; height: 30px; border-radius: 8px; background: var(--tint); display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+  .benefit b { display: block; font-size: 11pt; margin-bottom: 3px; }
+  .benefit span { font-size: 9.6pt; color: var(--muted); line-height: 1.42; display: block; }
+  .toc { columns: 2; column-gap: 26px; margin: 4px 0 0; padding: 0; list-style: none; }
+  .toc li { break-inside: avoid; display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 10.4pt; }
+  .toc li b { color: var(--accent-ink); min-width: 18px; }
+  .cover-foot { margin-top: auto; color: var(--faint); font-size: 9pt; display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; }
+
+  /* карта разделов */
+  .map { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 6px; }
+  .mapcol { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .mapcol .h { background: var(--tint); padding: 8px 10px; font-weight: 750; font-size: 9.4pt; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-ink); }
+  .mapcol .i { padding: 7px 10px; border-top: 1px solid var(--line); font-size: 9.6pt; }
+  .mapcol .i b { display: block; font-size: 10pt; }
+  .mapcol .i span { color: var(--muted); font-size: 8.8pt; line-height: 1.35; display: block; }
+
+  /* кто что видит */
+  .who { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 10px 0; }
+  .who-row { display: grid; grid-template-columns: 170px 1fr; border-top: 1px solid var(--line); }
+  .who-row:first-child { border-top: none; }
+  .who-name { padding: 9px 12px; font-weight: 700; background: var(--tint2); }
+  .who-what { padding: 9px 12px; color: var(--muted); }
+  .ok { color: var(--accent-ink); font-weight: 800; }
+  .no { color: var(--danger); font-weight: 800; }
+
+  /* шаги */
+  .steps { margin: 6px 0; }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
+  .step:last-child { border-bottom: none; }
+  .num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 11pt; }
+  .step h3 { margin: 3px 0 4px; }
+  .step p { color: var(--muted); margin-bottom: 4px; }
+  .step-grid { display: grid; grid-template-columns: 1fr 250px; gap: 14px; align-items: start; }
+
+  /* макеты экранов */
+  .shot { border: 1px solid #cfd8d3; border-radius: 10px; overflow: hidden; background: #fff; font-size: 9.2pt; box-shadow: 0 1px 0 rgba(0,0,0,.03); break-inside: avoid; }
+  .shot-bar { background: var(--code); border-bottom: 1px solid var(--line); padding: 5px 10px; font-size: 8.2pt; color: var(--faint); font-weight: 650; letter-spacing: .03em; display: flex; gap: 6px; align-items: center; }
+  .dots { display: inline-flex; gap: 3px; margin-right: 4px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: #d5dcd8; display: block; }
+  .srow { padding: 6px 10px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .srow:last-child { border-bottom: none; }
+  .srow.hl { background: var(--tint); color: var(--ink); font-weight: 650; box-shadow: inset 3px 0 0 var(--accent); }
+  .tap { margin-left: auto; background: var(--accent); color: #fff; font-size: 7.8pt; font-weight: 750; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .sfield { border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-family: ui-monospace, Menlo, monospace; font-size: 8.4pt; color: var(--ink); background: var(--code); margin: 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sbtn { display: inline-block; border-radius: 7px; padding: 3px 9px; font-size: 8.4pt; font-weight: 700; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+  .sbtn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sbtn.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+  .okline { color: var(--accent-ink); font-weight: 650; }
+
+  /* выноски */
+  .callout { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 10px 14px; margin: 10px 0; break-inside: avoid; }
+  .callout strong { color: var(--warn-ink); }
+  .callout p { margin: 0; }
+  .tip { background: var(--tint); border: 1px solid #d3e6dc; border-radius: 10px; padding: 10px 14px; margin: 10px 0; break-inside: avoid; }
+  .tip strong { color: var(--accent-ink); }
+  .tip p { margin: 0; }
+
+  /* две колонки */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .two > div { break-inside: avoid; }
+
+  /* поток синка */
+  .flow { display: grid; grid-template-columns: 1fr 120px 1fr; gap: 8px; align-items: center; margin: 10px 0 12px; break-inside: avoid; }
+  .flow-box { border: 1.5px solid var(--ink); border-radius: 12px; padding: 10px; text-align: center; }
+  .flow-box b { display: block; font-size: 11pt; }
+  .flow-box span { font-size: 9pt; color: var(--muted); }
+  .flow-mid { text-align: center; }
+  .flow-mid .a { font-size: 20pt; color: var(--accent-ink); font-weight: 800; line-height: 1; }
+  .flow-mid span { display: block; font-size: 8.4pt; color: var(--faint); }
+
+  /* таблица */
+  table.t { width: 100%; border-collapse: collapse; margin: 8px 0 10px; font-size: 9.8pt; break-inside: avoid; }
+  table.t th { text-align: left; font-size: 8.4pt; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 700; padding: 6px 8px; border-bottom: 1.5px solid var(--ink); }
+  table.t td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.t td:first-child { font-weight: 650; white-space: nowrap; }
+
+  /* чипы событий */
+  .titles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 8px 0; }
+  .titles .title-row { grid-template-columns: 1fr; gap: 3px; }
+  .title-row { display: grid; grid-template-columns: 190px 1fr; gap: 12px; align-items: center; }
+  .chip { font-family: ui-monospace, Menlo, monospace; font-size: 9.4pt; border: 1px solid var(--line); background: var(--code); border-radius: 7px; padding: 6px 10px; white-space: nowrap; justify-self: start; }
+  .title-row span { color: var(--muted); font-size: 9.8pt; }
+  .chip.bad { background: var(--danger-bg); border-color: #efc9c4; text-decoration: line-through; color: var(--danger); }
+
+  /* статусы */
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+  .badge { font-size: 8.8pt; font-weight: 700; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--line); }
+  .b-plan { background: #eef2fb; color: #2f4f8f; border-color: #d3dcf1; }
+  .b-done { background: var(--tint); color: var(--accent-ink); border-color: #cfe4d9; }
+  .b-cc { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-line); }
+  .b-ct { background: var(--danger-bg); color: var(--danger); border-color: #efc9c4; }
+
+  /* шахматка-макет */
+  .chess { width: 100%; border-collapse: separate; border-spacing: 3px; font-size: 8.4pt; }
+  .chess th { color: var(--faint); font-weight: 650; font-size: 7.8pt; text-align: center; }
+  .chess td.room { color: var(--muted); font-weight: 650; white-space: nowrap; padding-right: 4px; font-size: 8.2pt; }
+  .cell { border-radius: 5px; min-height: 26px; line-height: 1.2; font-size: 7.6pt; background: var(--tint2); border: 1px solid #edf1ef; }
+  .cell.mine { background: #d8ecdf; border-color: #a9d0b9; color: var(--accent-ink); font-weight: 700; padding: 3px 5px; }
+  .cell.other { background: #eceeed; border-color: #e0e4e2; color: var(--faint); padding: 3px 5px; }
+  .cell.ghost { background: repeating-linear-gradient(45deg, #fff, #fff 4px, #f3f6f4 4px, #f3f6f4 8px); border: 1.5px dashed #9cc2ad; color: var(--accent-ink); padding: 3px 5px; font-weight: 650; }
+  .cell.nosess { background: #eef6f1; border: 1.5px dashed #a9d0b9; color: var(--muted); padding: 3px 5px; opacity: .85; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 8.6pt; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+
+  /* метрики */
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 10px 0; }
+  .metric { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; break-inside: avoid; }
+  .metric .lbl { font-size: 8.4pt; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 700; }
+  .metric .val { font-size: 18pt; font-weight: 800; margin: 2px 0 2px; font-variant-numeric: tabular-nums; }
+  .metric p { color: var(--muted); font-size: 9.6pt; margin: 0; }
+
+  /* ритуал */
+  .ritual { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+  .rcard { border: 1px solid var(--line); border-radius: 12px; padding: 12px; break-inside: avoid; }
+  .rcard .h { font-weight: 800; font-size: 11pt; margin-bottom: 2px; }
+  .rcard .s { font-size: 8.6pt; color: var(--faint); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; margin-bottom: 6px; }
+  .rcard ul { margin: 0; padding-left: 16px; font-size: 9.6pt; }
+  .rcard li { margin: 3px 0; }
+
+  .faq { break-inside: avoid; margin: 0 0 9px; }
+  .faq b { display: block; font-size: 10.6pt; margin-bottom: 2px; }
+  .faq span { color: var(--muted); }
+
+  .phone { width: 190px; border: 2px solid #c9d3ce; border-radius: 22px; padding: 10px 8px; background: #fff; break-inside: avoid; }
+  .phone .scr { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  .phone .tabs { display: flex; justify-content: space-around; font-size: 7pt; color: var(--faint); padding: 6px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
+  .phone .tabs b { color: var(--accent-ink); }
+
+  .pagefoot { color: var(--faint); font-size: 8.4pt; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ═════════ 1. ОБЛОЖКА ═════════ -->
+<section class="page cover">
+  <div class="cover-top">
+    <div class="kicker">Unbox · для специалистов</div>
+    <h1>Psy-CRM: ваша практика<br>в одном месте</h1>
+    <p>Как подключить Google Календарь и вести клиентов, сессии, кабинеты, деньги и заметки — так, чтобы на учёт уходило несколько минут в день.</p>
+  </div>
+
+  <div class="benefits">
+    <div class="benefit">
+      <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#23604a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+      <b>Календарь работает за вас</b>
+      <span>Поставили встречу в Google — через 20 минут она уже сессия в CRM, а новый клиент — карточка.</span>
+    </div>
+    <div class="benefit">
+      <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#23604a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+      <b>Деньги без таблиц</b>
+      <span>Оплата — одной кнопкой. Долги, заработок месяца и касса считаются сами.</span>
+    </div>
+    <div class="benefit">
+      <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#23604a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <b>Тайна терапии</b>
+      <span>Ваших клиентов не видит никто — ни админы, ни владелец центра. Заметки шифруются.</span>
+    </div>
+  </div>
+
+  <div class="kicker" style="margin-top:4px">Содержание</div>
+  <ul class="toc">
+    <li><b>1</b> Как устроена CRM и кто что видит</li>
+    <li><b>2</b> Быстрый старт за 15 минут</li>
+    <li><b>3</b> Подключение Google Календаря</li>
+    <li><b>4</b> Как называть события и как работает синхронизация</li>
+    <li><b>5</b> Клиенты</li>
+    <li><b>6</b> Сессии и оплаты</li>
+    <li><b>7</b> Кабинеты: бронь прямо из CRM</li>
+    <li><b>★</b> Новое: неделя — всё в одном календаре</li>
+    <li><b>8</b> Деньги: заработано, касса, долги</li>
+    <li><b>9</b> Заметки и телефон</li>
+    <li><b>10</b> Привычки, которые экономят время · Вопросы</li>
+  </ul>
+
+  <div class="cover-foot"><span>unbox.com.ge/crm</span><span>Октябрь 2026</span></div>
+</section>
+
+<!-- ═════════ 2. УСТРОЙСТВО + ПРИВАТНОСТЬ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 1</div>
+  <h2><span class="secnum">1</span>Как устроена CRM и кто что видит</h2>
+  <p class="lede">Откройте <span class="mono">unbox.com.ge/crm</span> — это «Кабинет специалиста». Слева меню из четырёх групп. С телефона CRM открывается в мобильном виде сама.</p>
+
+  <div class="map">
+    <div class="mapcol">
+      <div class="h">Работа</div>
+      <div class="i"><b>Дашборд</b><span>Сегодня, долги, кого пора записать</span></div>
+      <div class="i"><b>Клиенты</b><span>Карточки, коды, ставки</span></div>
+      <div class="i"><b>Сессии</b><span>Список, неделя, синхронизация</span></div>
+      <div class="i"><b>Заметки</b><span>Шифруются, видите только вы</span></div>
+    </div>
+    <div class="mapcol">
+      <div class="h">Кабинеты</div>
+      <div class="i"><b>Бронирования</b><span>Список, шахматка, серии</span></div>
+      <div class="i"><b>Слежу за слотами</b><span>Сообщим, когда занятое время освободится</span></div>
+      <div class="i"><b>Правила</b><span>Отмены, переносы, оплата</span></div>
+    </div>
+    <div class="mapcol">
+      <div class="h">Деньги</div>
+      <div class="i"><b>Финансы</b><span>Платежи за период, долги</span></div>
+      <div class="i"><b>Абонемент</b><span>Часы аренды со скидкой</span></div>
+      <div class="i"><b>Бонусы</b><span>Подарочные часы</span></div>
+    </div>
+    <div class="mapcol">
+      <div class="h">Я</div>
+      <div class="i"><b>Анкета</b><span>Как вас видят клиенты в каталоге</span></div>
+      <div class="i"><b>Часы приёма</b><span>Недельный шаблон, отпуск</span></div>
+      <div class="i"><b>Настройки</b><span>Календарь, счета оплаты</span></div>
+      <div class="i"><b>Личные данные</b><span>Ваш профиль и вход</span></div>
+    </div>
+  </div>
+  <p class="muted" style="font-size:9.6pt">Внизу справа — круглая кнопка быстрых действий: <span class="ui">Новый клиент</span>, <span class="ui">Новая сессия</span>, <span class="ui">Забронировать кабинет</span>, <span class="ui">Открыть Google Календарь</span>.</p>
+
+  <h3>Защита — главный принцип</h3>
+  <div class="who avoid">
+    <div class="who-row"><div class="who-name"><span class="ok">✓</span> Вы</div><div class="who-what">Всё: клиенты, сессии, оплаты, заметки.</div></div>
+    <div class="who-row"><div class="who-name"><span class="no">✕</span> Админы и владелец</div><div class="who-what">Ничего. Доступ к вашей CRM закрыт на уровне системы. Даже объединить карточки клиентов можете только вы.</div></div>
+    <div class="who-row"><div class="who-name"><span class="ok">✓</span> Бот Unbox</div><div class="who-what">Только события календаря, которым вы с ним поделились, — ровно то, что в них написано.</div></div>
+    <div class="who-row"><div class="who-name"><span class="ok">✓</span> Google и те, с кем поделён календарь</div><div class="who-what">Названия и время событий. Поэтому в событии — только имя или код клиента, без тем и диагнозов.</div></div>
+  </div>
+
+  <div class="two" style="margin-top:6px">
+    <div class="tip"><p><strong>Заметки шифруются.</strong> Текст заметок хранится в базе в зашифрованном виде и никогда не уходит в Google Календарь.</p></div>
+    <div class="tip"><p><strong>Коды вместо имён.</strong> У каждого клиента есть код вида <span class="mono">#4821</span>. Можно вести календарь вообще без имён — только кодами.</p></div>
+  </div>
+
+  <div class="callout"><p><strong>Одно правило вместо десяти:</strong> в календаре — имя (или код) и время. Всё содержательное — внутри CRM: в карточке и в «Заметках».</p></div>
+</section>
+
+<!-- ═════════ 3. БЫСТРЫЙ СТАРТ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 2</div>
+  <h2><span class="secnum">2</span>Быстрый старт за 15 минут</h2>
+  <p class="lede">Новый кабинет встречает вас чек-листом на «Дашборде». Пройдите его по порядку — и CRM готова к работе.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div>
+        <h3>Проверьте счета для оплаты</h3>
+        <p><span class="ui">Настройки → Счета для оплаты</span>. По умолчанию есть «Наличные», «TBC», «BOG» — добавьте свои, если нужно. Сюда будут записываться оплаты в один тап.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div>
+        <h3>Подключите Google Календарь</h3>
+        <p>10 минут, один раз. Пошагово — в разделе 3. После этого клиенты и сессии будут подтягиваться сами.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div>
+        <h3>Добавьте клиентов</h3>
+        <p>Либо вручную: <span class="ui">Клиенты → + Клиент</span> (имя, ставка за сессию, валюта — код подставится сам). Либо пусть их создаст календарь: каждое новое имя в календаре станет карточкой.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">4</div>
+      <div>
+        <h3>Заполните анкету и часы приёма</h3>
+        <p><span class="ui">Анкета</span> — так вас видят клиенты в каталоге специалистов Unbox. <span class="ui">Часы приёма</span> — недельный шаблон и исключения (отпуск): CRM предупредит, если вы записываете клиента на время отпуска.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">5</div>
+      <div>
+        <h3>Забронируйте кабинет</h3>
+        <p>Прямо из CRM: <span class="ui">Бронирования → Шахматка</span>, выделите свободное время — и сразу привяжите клиента. Подробно — в разделе 7.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tip" style="margin-top:12px"><p><strong>Если уже ведёте клиентов в таблице или блокноте:</strong> не переносите историю руками. Подключите календарь, нажмите <span class="ui">Сессии → Синхронизация</span>, выберите «Период назад: 3 мес.» — прошлые встречи подтянутся сессиями. Останется отметить, какие из них оплачены (раздел 6).</p></div>
+
+  <h3>Как выглядит день в CRM</h3>
+  <div class="flow" style="grid-template-columns: 1fr 34px 1fr 34px 1fr 34px 1fr;">
+    <div class="flow-box"><b>Записали</b><span>в Google или «Новая сессия»</span></div>
+    <div class="flow-mid"><div class="a">→</div></div>
+    <div class="flow-box"><b>Сняли кабинет</b><span>в шахматке, с клиентом</span></div>
+    <div class="flow-mid"><div class="a">→</div></div>
+    <div class="flow-box"><b>Провели</b><span>сессия сама станет «Прошла»</span></div>
+    <div class="flow-mid"><div class="a">→</div></div>
+    <div class="flow-box"><b>Отметили оплату</b><span>одной кнопкой</span></div>
+  </div>
+</section>
+
+<!-- ═════════ 4. КАЛЕНДАРЬ: ПОДКЛЮЧЕНИЕ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 3</div>
+  <h2><span class="secnum">3</span>Подключение Google Календаря</h2>
+  <p class="lede">Делается один раз, с компьютера. На телефоне экрана настроек календаря нет.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div class="step-grid">
+        <div>
+          <h3>Заведите отдельный календарь «Клиенты»</h3>
+          <p>В Google Календаре слева: <span class="ui">Другие календари → ＋ → Создать календарь</span>.</p>
+          <p><strong>Это обязательно.</strong> Из каждого события подключённого календаря CRM делает сессию, а из нового названия — карточку клиента. Подключите личный календарь — и «Стоматолог» или приглашение на рабочую встречу станут «клиентами».</p>
+        </div>
+        <div class="shot">
+          <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Google Календарь · слева</div>
+          <div class="srow">Мои календари ▾</div>
+          <div class="srow">☑ Анна Смирнова</div>
+          <div class="srow hl">Другие календари ＋<span class="tap">Создать календарь</span></div>
+          <div class="sfield">Название: Клиенты</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div class="step-grid">
+        <div>
+          <h3>Поделитесь им с ботом Unbox</h3>
+          <p>Три точки у календаря «Клиенты» → <span class="ui">Настройки и общий доступ</span> → <span class="ui">Доступ для отдельных пользователей</span> → добавьте адрес (его же можно скопировать кнопкой в <span class="ui">CRM → Настройки</span>):</p>
+          <p><span class="mono" style="font-size:8.6pt">psycrm-bot@psycrm-calendar.iam.gserviceaccount.com</span></p>
+          <p>Права — <strong>«Внесение изменений в события»</strong>. С правом «только просмотр» CRM не сможет добавлять ваши сессии в календарь.</p>
+        </div>
+        <div class="shot">
+          <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Настройки календаря «Клиенты»</div>
+          <div class="srow">Настройки и общий доступ</div>
+          <div class="srow hl">Доступ для отдельных пользователей<span class="tap">＋ Добавить</span></div>
+          <div class="sfield">psycrm-bot@psycrm-calendar.iam…</div>
+          <div class="srow hl">Внесение изменений в события<span class="tap">выберите</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div class="step-grid">
+        <div>
+          <h3>Скопируйте идентификатор календаря</h3>
+          <p>Там же, ниже по странице: <span class="ui">Интеграция календаря → Идентификатор календаря</span>. Он выглядит как длинный адрес, заканчивающийся на <span class="mono">@group.calendar.google.com</span>.</p>
+        </div>
+        <div class="shot">
+          <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Настройки · ниже по странице</div>
+          <div class="srow">Интеграция календаря</div>
+          <div class="srow hl">Идентификатор календаря<span class="tap">скопируйте</span></div>
+          <div class="sfield">c_1a2b3c…@group.calendar.google.com</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">4</div>
+      <div class="step-grid">
+        <div>
+          <h3>Вставьте его в CRM и проверьте</h3>
+          <p><span class="ui">CRM → Настройки → Google Календарь</span>: вставьте в поле «ID календаря», нажмите <span class="ui">Сохранить</span>, затем <span class="ui">Проверить подключение</span>. CRM попробует прочитать календарь и записать в него пробное событие.</p>
+          <p>Зелёное «Подключение … работает» — готово. Красная ошибка — см. «Частые вопросы» в конце гайда.</p>
+        </div>
+        <div class="shot">
+          <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Psy-CRM · Настройки</div>
+          <div class="srow">ID календаря</div>
+          <div class="sfield">c_1a2b3c…@group.calendar.google.com</div>
+          <div class="srow"><span class="sbtn pri">Сохранить</span><span class="sbtn">Проверить подключение</span></div>
+          <div class="srow okline">✓ Подключение работает: CRM видит календарь и может добавлять события</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ═════════ 5. НАЗВАНИЯ + СИНХРОНИЗАЦИЯ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 4</div>
+  <h2><span class="secnum">4</span>Как называть события и как работает синхронизация</h2>
+
+  <h3>Название события = клиент</h3>
+  <p>CRM узнаёт клиента сначала по коду <span class="mono">#XXXX</span>, потом — по точному имени из карточки. Выберите свой уровень приватности:</p>
+  <div class="titles">
+    <div class="title-row"><div class="chip">Анна Смирнова #4821</div><span><strong>Обычный.</strong> Имя как в карточке; код CRM допишет сама.</span></div>
+    <div class="title-row"><div class="chip">Анна С. #4821</div><span><strong>Сдержанный.</strong> Так названа сама карточка — это имя и уйдёт в Google.</span></div>
+    <div class="title-row"><div class="chip">#4821</div><span><strong>Псевдонимный.</strong> Только код — CRM узнает клиента, имя не допишет.</span></div>
+    <div class="title-row"><div class="chip bad">Анна — тревога, развод</div><span><strong>Нельзя:</strong> название видят все, с кем поделён календарь.</span></div>
+  </div>
+  <div class="callout"><p><strong>Пишите имя всегда одинаково — а лучше с кодом.</strong> «Анна С.» и «Анна Смирнова» без кода — для системы два разных человека, получатся две карточки. Если дубль появился — <span class="ui">Клиенты → Слить дубли</span>.</p></div>
+
+  <h3>Что происходит само</h3>
+  <p>Бот Unbox сверяет календарь «Клиенты» и CRM <strong>каждые 20 минут</strong>, в обе стороны.</p>
+  <table class="t">
+    <tr><th style="width:38%">Вы сделали</th><th>Что произойдёт</th></tr>
+    <tr><td>Поставили встречу в Google</td><td>Появится сессия. Новое имя — новая карточка клиента.</td></tr>
+    <tr><td>Перенесли встречу в Google</td><td>Сессия переедет. Бронь кабинета сама <strong>не двигается</strong> — придёт уведомление «перенесите бронь».</td></tr>
+    <tr><td>Создали или перенесли сессию в CRM</td><td>Событие в Google появится или передвинется (галочка «Добавить в Google Календарь» включена по умолчанию).</td></tr>
+    <tr><td>Удалили встречу в Google<br><span class="muted" style="font-weight:400">защитный режим — по умолчанию</span></td><td>Сессия и бронь остаются, приходит уведомление — решаете вы.</td></tr>
+    <tr><td>Удалили встречу в Google<br><span class="muted" style="font-weight:400">режим «Google Календарь главный»</span></td><td>Включается в <span class="ui">Настройках</span>. Пустая сессия удалится; сессия с оплатой или заметкой станет «Отменил специалист». Деньги и брони не трогаются.</td></tr>
+  </table>
+
+  <h3>Синхронизировать прямо сейчас</h3>
+  <div class="step-grid" style="grid-template-columns: 1fr 260px;">
+    <div>
+      <p><span class="ui">Сессии → Синхронизация</span>. Выберите период назад и вперёд и нажмите <span class="ui">Предпросмотр</span> — CRM покажет, кто станет новой карточкой клиента.</p>
+      <p><strong>Снимите галочку с того, что не клиент</strong> (например, «Координация команды») — такие названия больше никогда не станут карточками, в том числе при автосинхронизации. Явно личное («Отпуск», «Супервизия», «Созвон») CRM пропускает сама.</p>
+    </div>
+    <div class="shot">
+      <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Сессии · Синхронизация · Предпросмотр</div>
+      <div class="srow">Кто станет новой карточкой клиента:</div>
+      <div class="srow hl">☑ Ирина Котова</div>
+      <div class="srow">☐ Координация команды<span class="tap">не клиент</span></div>
+      <div class="srow" style="color:var(--faint)">Отпуск (похоже не клиент, пропустим)</div>
+      <div class="srow"><span class="sbtn pri">Синхронизировать</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ 6. КЛИЕНТЫ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 5</div>
+  <h2><span class="secnum">5</span>Клиенты</h2>
+  <p class="lede">Список клиентов показывает главное: когда следующая встреча, когда была прошлая, долг и ставка. Поиск — по имени, телефону, Telegram или коду.</p>
+
+  <div class="step-grid" style="grid-template-columns: 1fr 270px;">
+    <div>
+      <h3 style="margin-top:0">Новый клиент</h3>
+      <p><span class="ui">Клиенты → + Клиент</span>: имя, телефон, Telegram, <strong>ставка за сессию</strong> и валюта (GEL, USD, EUR, RUB, USDT). Код для календаря подставится сам — можно взять другой.</p>
+      <p>Под «Ещё» — e-mail, теги и <strong>счёт по умолчанию</strong>: туда будет записываться оплата в один тап (например, клиент всегда платит переводом на TBC).</p>
+      <div class="tip"><p><strong>Ставка экономит время:</strong> у каждой новой сессии цена подставится из карточки. Менять её руками нужно только для исключений.</p></div>
+    </div>
+    <div class="shot">
+      <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Новый клиент</div>
+      <div class="srow">Имя</div><div class="sfield">Анна Смирнова</div>
+      <div class="srow">Код для календаря</div><div class="sfield">#4821 &nbsp;·&nbsp; Другой код</div>
+      <div class="srow">Ставка за сессию</div><div class="sfield">120 ₾</div>
+      <div class="srow" style="color:var(--faint); font-size:8.4pt">В Google Календаре пишите «Анна #4821» — так сессия попадёт к этому клиенту</div>
+    </div>
+  </div>
+
+  <h3>Карточка клиента — всё на одной странице</h3>
+  <table class="t">
+    <tr><th style="width:30%">Блок</th><th>Что даёт</th></tr>
+    <tr><td>Следующая встреча</td><td>Дата, время, есть ли кабинет. Кнопки <span class="ui">Перенести</span> и <span class="ui">Кабинет</span>. Если встречи нет — кнопка «Записать на …» в тот же день недели и время, что в прошлый раз.</td></tr>
+    <tr><td>Долг</td><td>Сумма и число неоплаченных сессий. <span class="ui">Отметить оплату</span> — закрыть одну или все сразу.</td></tr>
+    <tr><td>История</td><td>Прошлые сессии и заметки одной лентой. Карандаш у сессии — цена, валюта, счёт, статус. «Заметка к сессии» — прямо под ней.</td></tr>
+    <tr><td>Деньги</td><td>Ставка, сколько оплачено всего, последние оплаты (можно исправить или удалить).</td></tr>
+    <tr><td>Из календаря</td><td>Подтянуть сессии этого клиента из Google за любой период — удобно при переносе старой истории.</td></tr>
+  </table>
+
+  <div class="two">
+    <div>
+      <h3>Пауза вместо удаления</h3>
+      <p>Клиент ушёл на перерыв — <span class="ui">Поставить на паузу</span>. Он пропадёт из списка «В работе» и из общего долга на дашборде, но вся история сохранится. Вернуть — одной кнопкой.</p>
+    </div>
+    <div>
+      <h3>Поменяли ставку?</h3>
+      <p>При изменении ставки CRM спросит, к чему её применить: только к новым сессиям, ко всем запланированным или ко всем неоплаченным. Прошлые оплаты не пересчитываются.</p>
+    </div>
+  </div>
+
+  <div class="callout"><p><strong>Слить дубли.</strong> <span class="ui">Клиенты → Слить дубли</span>: выберите основную карточку, какие имя и контакты оставить. Сессии, оплаты и заметки соберутся в одной карточке, старый код тоже продолжит узнаваться в календаре. Объединение отменить нельзя — проверьте, что это один человек.</p></div>
+</section>
+
+<!-- ═════════ 7. СЕССИИ И ОПЛАТЫ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 6</div>
+  <h2><span class="secnum">6</span>Сессии и оплаты</h2>
+
+  <div class="step-grid" style="grid-template-columns: 1fr 260px;">
+    <div>
+      <h3 style="margin-top:0">Записать клиента</h3>
+      <p><span class="ui">Новая сессия</span> (на дашборде, в «Сессиях» или круглой кнопкой): найдите клиента по имени или коду, нажмите <span class="ui">+1 нед</span> или <span class="ui">+2 нед</span> — дата и время подставятся «как в прошлый раз». Цену можно не трогать — возьмётся ставка клиента.</p>
+      <p>CRM мягко предупредит, если на это время уже что-то стоит, вы в отпуске или время уже прошло. Если в календаре уже есть встреча с этим клиентом в пределах 3 часов, спросит: <span class="ui">Перенести существующую</span> или <span class="ui">Всё равно создать</span> — так не появляются дубли.</p>
+      <div class="tip"><p><strong>Постоянный клиент?</strong> Серию (каждую неделю, раз в 2 или 4 недели) удобнее всего создать вместе с бронью кабинета в шахматке — раздел 7. Сессия и событие в Google создадутся на все даты сразу.</p></div>
+    </div>
+    <div class="shot">
+      <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Новая сессия</div>
+      <div class="sfield">Анна Смирнова #4821</div>
+      <div class="srow"><span class="sbtn pri">+1 нед</span><span class="sbtn">+2 нед</span><span class="sbtn">Другая дата</span></div>
+      <div class="srow" style="font-size:8.4pt">вт, 14 окт · 19:00 · 50 мин · как в прошлый раз</div>
+      <div class="srow">☑ Добавить в Google Календарь</div>
+      <div class="srow"><span class="sbtn pri" style="width:100%; text-align:center">Записать на вт, 14 окт., 19:00</span></div>
+    </div>
+  </div>
+
+  <h3>Статусы сессии</h3>
+  <div class="badges">
+    <span class="badge b-plan">Запланирована</span>
+    <span class="badge b-done">Прошла</span>
+    <span class="badge b-cc">Отменил клиент</span>
+    <span class="badge b-ct">Отменил специалист</span>
+  </div>
+  <p>Прошедшие сессии сами становятся «Прошла», когда вы открываете дашборд или «Сессии» — отмечать руками не нужно. Отменённые не считаются долгом. На экране «Сессии» — вид <span class="ui">Список</span> или <span class="ui">Неделя</span> и фильтр по статусам.</p>
+
+  <h3>Оплата — одной кнопкой</h3>
+  <table class="t">
+    <tr><th style="width:34%">Где</th><th>Как</th></tr>
+    <tr><td>У любой сессии</td><td><span class="ui">Отметить оплату · 120 ₾</span> — оплата записывается на счёт сессии или клиента. Ошиблись — 5 секунд на «Вернуть».</td></tr>
+    <tr><td>Заплатили часть</td><td>Кнопка сама станет <span class="ui">Доплатить · 40 ₾</span>.</td></tr>
+    <tr><td>Клиент закрыл весь долг</td><td>В карточке: <span class="ui">Отметить оплату → Отметить все</span>. Будущие сессии не трогаются — только прошедшие.</td></tr>
+    <tr><td>Снять ошибочную оплату</td><td>Значок «Оплачено» → ✕ → подтвердить.</td></tr>
+  </table>
+
+  <div class="two">
+    <div class="tip"><p><strong>Дата оплаты — день, когда вы её отметили,</strong> а не день сессии. Так «Касса» месяца совпадает с реальными деньгами.</p></div>
+    <div class="callout" style="margin-top:10px"><p><strong>«Отменить» ≠ «Удалить».</strong> Отменённая сессия остаётся в истории со статусом и не считается долгом. Удалять — только ошибочные записи: на телефоне это «Записали по ошибке — удалить совсем».</p></div>
+  </div>
+
+</section>
+
+<!-- ═════════ 8. КАБИНЕТЫ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 7</div>
+  <h2><span class="secnum">7</span>Кабинеты: бронь прямо из CRM</h2>
+  <p class="lede"><span class="ui">Бронирования → Шахматка</span> — те же кабинеты Unbox One, Uni и Neo, что на сайте, но со своими клиентами и сессиями рядом.</p>
+
+  <div class="shot" style="margin:6px 0 4px">
+    <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Бронирования · Шахматка · вторник, 14 октября &nbsp;&nbsp; [Все филиалы] [Сессии без кабинета · 2]</div>
+    <div style="padding:8px 8px 4px">
+      <table class="chess">
+        <tr><th></th><th>10:00</th><th>11:00</th><th>12:00</th><th>13:00</th><th>14:00</th><th>15:00</th><th>16:00</th></tr>
+        <tr><td class="room">Сессии без кабинета</td><td></td><td><div class="cell ghost">11:00 Ирина · нет кабинета</div></td><td></td><td></td><td></td><td><div class="cell ghost">15:00 #2710 · есть аренда</div></td><td></td></tr>
+        <tr><td class="room">Кабинет 1</td><td><div class="cell other">занято</div></td><td><div class="cell"></div></td><td><div class="cell mine">Анна #4821</div></td><td><div class="cell"></div></td><td><div class="cell"></div></td><td><div class="cell nosess">#2710 · нет сессии</div></td><td><div class="cell"></div></td></tr>
+        <tr><td class="room">Кабинет 2</td><td><div class="cell"></div></td><td><div class="cell other">занято</div></td><td><div class="cell other">занято</div></td><td><div class="cell"></div></td><td><div class="cell mine">Олег #1190</div></td><td><div class="cell"></div></td><td><div class="cell"></div></td></tr>
+      </table>
+      <div class="legend">
+        <span><i style="background:#d8ecdf;border:1px solid #a9d0b9"></i>Мои брони</span>
+        <span><i style="background:#eceeed"></i>Чужие — нажмите, чтобы следить</span>
+        <span><i style="background:#fff;border:1.5px dashed #9cc2ad"></i>Сессия без кабинета</span>
+        <span><i style="background:#eef6f1;border:1.5px dashed #a9d0b9"></i>Аренда без сессии</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div><h3>Снять кабинет с клиентом</h3><p>Проведите мышью по свободному времени → <span class="ui">Забронировать кабинет</span>. Выберите длительность, <strong>клиента</strong> и стоимость сессии — кнопка станет <span class="ui">Забронировать + сессия</span>: бронь, сессия в CRM и событие в Google появятся одновременно.</p></div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div><h3>Постоянное время — серией</h3><p>В том же окне <span class="ui">Повторение</span>: каждую неделю, раз в 2 или раз в 4 недели, и сколько раз. Получится <span class="ui">Создать серию · N броней</span> — все даты с сессиями сразу. Серии видны во вкладке <span class="ui">Серии</span>, там же — <span class="ui">Продлить серию</span>.</p></div>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div><h3>«Сессии без кабинета» — ничего не забыть</h3><p>Верхняя пунктирная строка — встречи из календаря, под которые кабинет не снят. Нажмите на плитку: <span class="ui">Снять кабинет на это время</span> или, если аренда уже есть, <span class="ui">Привязать к вашей аренде</span>. Онлайн-сессии кабинета не требуют — строку можно скрыть переключателем.</p></div>
+    </div>
+    <div class="step">
+      <div class="num">4</div>
+      <div><h3>«Нет сессии» — аренда без клиента</h3><p>Ваша бронь без привязанной сессии выглядит полупрозрачной. Нажмите на неё → <span class="ui">Распределить клиентов</span>: по клиенту на каждый час, можно с повторением.</p></div>
+    </div>
+  </div>
+
+  <div class="tip"><p><strong>Занято нужное время?</strong> Нажмите на чужую бронь — <span class="ui">Слежу за слотами</span>: если она освободится, придёт уведомление. Брони «На пересдаче» можно забрать себе.</p></div>
+</section>
+
+<!-- ═════════ НОВОЕ: НЕДЕЛЯ ═════════ -->
+<section class="page">
+  <div class="kicker">Новое · октябрь 2026</div>
+  <h2><span class="secnum">★</span>Неделя — всё в одном календаре</h2>
+  <p class="lede"><span class="ui">Сессии → Неделя</span>: ваши встречи и аренды кабинетов на одной сетке. Сразу видно, где кабинет не снят, а где аренда стоит без клиента.</p>
+  <img src="week.png" alt="Неделя в Psy-CRM (демо-данные)" style="width:100%; max-height:300px; object-fit:contain; object-position:left top; border:1px solid var(--line); border-radius:10px; display:block; margin:4px 0 4px">
+  <p class="muted" style="font-size:8.4pt; margin:0 0 4px">Пример на демо-данных, имена выдуманные.</p>
+
+  <p style="font-size:9.6pt; margin:0 0 6px"><strong>Сплошная зелёная</strong> — сессия с кабинетом. <strong>Зелёный пунктир</strong> — сессия без кабинета (онлайн — всё в порядке). <strong>Серый пунктир</strong> — аренда без сессии.</p>
+
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div><h3>Новая встреча — нажмите на пустое время</h3><p>Выберите клиента и длительность, при желании отметьте «Снять кабинет» — сайт покажет только свободные в это время кабинеты. Сессия, событие в Google и аренда появятся одним действием. Аренда оплачивается как обычно: бонусные часы → абонемент → баланс.</p></div></div>
+    <div class="step"><div class="num">2</div><div><h3>Перенос — перетащите плитку</h3><p>Сайт переспросит и перенесёт встречу вместе с арендой и событием в Google. Если новое время дороже (пиковые часы), разница спишется с баланса по обычным правилам переноса. Из серии переносится только эта встреча; всю серию — в «Бронированиях».</p></div></div>
+    <div class="step"><div class="num">3</div><div><h3>Нажмите на плитку</h3><p>Карточка клиента, «Снять кабинет», «Отметить оплату», «Записать сессию на эту аренду».</p></div></div>
+  </div>
+
+  <div class="two">
+    <div class="tip"><p><strong>Само привязывается.</strong> Если время сессии и вашей аренды совпадает минута в минуту, CRM свяжет их сама при открытии — «нет кабинета» исчезнет.</p></div>
+    <div style="display:flex; gap:12px; align-items:flex-start">
+      <img src="phone.png" alt="Телефон: Аренда без сессии" style="width:150px; border:1px solid var(--line); border-radius:12px">
+      <p style="font-size:9.6pt; color:var(--muted); margin:0"><strong style="color:var(--ink)">На телефоне</strong> в «Сегодня» есть полка «Аренда без сессии» с кнопкой «Записать сессию».</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ 9. ДЕНЬГИ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 8</div>
+  <h2><span class="secnum">8</span>Деньги: заработано, касса, долги</h2>
+  <p class="lede">CRM различает «сколько я заработал» и «сколько денег пришло» — это разные числа, и оба полезны.</p>
+
+  <div class="metrics">
+    <div class="metric"><div class="lbl">Заработано</div><div class="val">4 680 ₾</div><p>Оплаченные сессии, <strong>которые прошли в этом месяце</strong> (по дате сессии). Ответ на вопрос «сколько я заработал работой в октябре». Экран «Сессии».</p></div>
+    <div class="metric"><div class="lbl">Касса · с долгами</div><div class="val">5 040 ₾</div><p>Все деньги, <strong>полученные в этом месяце</strong>, — включая оплату старых долгов. Ответ на «сколько денег пришло». Дашборд, «Сессии», «Финансы».</p></div>
+    <div class="metric"><div class="lbl">Долги сейчас</div><div class="val">360 ₾</div><p>Прошедшие неоплаченные сессии за всё время, независимо от выбранного периода. Клиенты на паузе в общий долг дашборда не входят.</p></div>
+    <div class="metric"><div class="lbl">Не оплачено</div><div class="val">3</div><p>Сколько прошедших сессий ждут оплаты. Будущие сессии долгом не считаются.</p></div>
+  </div>
+
+  <div class="tip"><p><strong>Пример.</strong> В октябре вы провели 39 оплаченных сессий на 4 680 ₾, а клиент ещё вернул 360 ₾ долга за сентябрь. «Заработано» — 4 680 ₾, «Касса» — 5 040 ₾.</p></div>
+
+  <h3>Экран «Финансы»</h3>
+  <p>Период «День / Неделя / Месяц», список платежей и блок <strong>«Долги»</strong>: у каждого должника — <span class="ui">Написать</span> и <span class="ui">Отметить оплату</span>. <span class="ui">Новый платёж</span> — записать оплату вручную.</p>
+
+  <h3>Дашборд подсказывает сам</h3>
+  <ul class="clean">
+    <li><strong>«Долги»</strong> — кому напомнить об оплате.</li>
+    <li><strong>«Без следующей встречи»</strong> — клиенты, которых пора записать: кнопка <span class="ui">Записать</span> прямо там.</li>
+    <li><strong>«Совпадения по времени»</strong> — если бронь и сессия в одно время существуют отдельно, CRM предложит <span class="ui">Объединить</span>.</li>
+    <li><strong>«Доход по месяцам»</strong> — график «Получено» и «Ожидалось».</li>
+  </ul>
+
+  <div class="callout"><p><strong>Аренда кабинетов — отдельно.</strong> Ваши брони кабинетов оплачиваются центру через баланс на сайте, абонемент или бонусы (<span class="ui">Деньги → Абонемент / Бонусы</span>). В «Кассу» CRM они не попадают: CRM считает только деньги ваших клиентов.</p></div>
+</section>
+
+<!-- ═════════ 10. ЗАМЕТКИ + ТЕЛЕФОН ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 9</div>
+  <h2><span class="secnum">9</span>Заметки и телефон</h2>
+
+  <div class="two">
+    <div>
+      <h3 style="margin-top:4px">Заметки</h3>
+      <p><span class="ui">Заметки → + Заметка</span>: клиент, текст, теги. Или «Заметка к сессии» прямо в карточке клиента под нужной встречей.</p>
+      <ul class="clean">
+        <li>Видите только вы, хранятся зашифрованными.</li>
+        <li>В Google Календарь не передаются никогда.</li>
+        <li><span class="ui">Скрывать текст</span> — заметки открываются по одной, удобно, если рядом кто-то есть.</li>
+        <li>Поиск по тексту и фильтр по клиенту.</li>
+        <li>Заметку нельзя изменить, только удалить — пишите дополнение новой заметкой.</li>
+      </ul>
+      <div class="tip"><p><strong>Где что писать:</strong> контекст и динамику — в заметки; в календаре — только имя или код.</p></div>
+    </div>
+    <div>
+      <h3 style="margin-top:4px">CRM в телефоне</h3>
+      <p>С телефона CRM открывается в мобильном виде сама. Внизу пять вкладок: <strong>Сегодня, Клиенты, Сессии, Финансы, Заметки</strong>.</p>
+      <div style="display:flex; gap:12px; align-items:flex-start">
+        <div class="phone">
+          <div class="scr">
+            <div class="srow" style="font-weight:750;color:var(--ink)">Сегодня · вт 14</div>
+            <div class="srow" style="font-size:8pt">пн &nbsp;<b style="color:var(--accent-ink)">вт</b>&nbsp; ср &nbsp;чт &nbsp;пт</div>
+            <div class="srow hl" style="font-size:8.4pt">12:00 Анна #4821</div>
+            <div class="srow" style="font-size:8.4pt">14:00 Олег #1190</div>
+            <div class="srow" style="font-size:8pt">Закрыть день<span class="tap">Оплата · 120 ₾</span></div>
+          </div>
+          <div class="tabs"><b>Сегодня</b><span>Клиенты</span><span>Сессии</span><span>₾</span></div>
+        </div>
+        <ul class="clean" style="font-size:9.6pt; margin-top:0">
+          <li>Листайте дни свайпом.</li>
+          <li><strong>«Закрыть день»</strong> — оплаты сегодняшних встреч в одном месте.</li>
+          <li>Нажмите на сессию: записать следующую, перенести, отметить оплату, привязать кабинет, заметка.</li>
+          <li>Значок синхронизации — подтянуть календарь сразу.</li>
+        </ul>
+      </div>
+      <p class="muted" style="font-size:9.4pt; margin-top:8px">Подключать календарь нужно с компьютера — на телефоне этого экрана нет.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ 11. ПРИВЫЧКИ + FAQ ═════════ -->
+<section class="page">
+  <div class="kicker">Раздел 10</div>
+  <h2><span class="secnum">10</span>Привычки, которые экономят время</h2>
+  <div class="ritual">
+    <div class="rcard">
+      <div class="s">1 минута</div><div class="h">После сессии</div>
+      <ul>
+        <li><span class="ui">Отметить оплату</span> — сразу, пока помните.</li>
+        <li><span class="ui">Записать следующую</span> — +1 нед.</li>
+        <li>Короткая заметка к сессии.</li>
+      </ul>
+    </div>
+    <div class="rcard">
+      <div class="s">5 минут</div><div class="h">Раз в неделю</div>
+      <ul>
+        <li>Дашборд → «Без следующей встречи»: кого записать.</li>
+        <li>Шахматка → «Сессии без кабинета»: под всё ли снят кабинет.</li>
+        <li>«Долги»: кому напомнить.</li>
+      </ul>
+    </div>
+    <div class="rcard">
+      <div class="s">10 минут</div><div class="h">Раз в месяц</div>
+      <ul>
+        <li>«Заработано» и «Касса» в «Сессиях».</li>
+        <li>«Слить дубли», если появились.</li>
+        <li>Пауза для тех, кто ушёл на перерыв.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Частые вопросы</h3>
+  <div class="two">
+    <div>
+      <div class="faq"><b>Проверка пишет «Календарь недоступен сервисному аккаунту»</b><span>Календарь не поделён с ботом или в ID опечатка — повторите шаги 2–4 раздела 3.</span></div>
+      <div class="faq"><b>Встреча из календаря не появилась в CRM</b><span>Подождите до 20 минут или нажмите <span class="ui">Сессии → Синхронизация</span>. Проверьте, что событие в календаре «Клиенты», а не в личном.</span></div>
+      <div class="faq"><b>Сессия из CRM не появилась в Google</b><span>У бота доступ «только просмотр». Смените на «Внесение изменений в события» и нажмите «Проверить подключение».</span></div>
+      <div class="faq"><b>У клиента две карточки</b><span>Имя в календаре написано иначе, чем в карточке. Дальше пишите с кодом, а дубль объедините: <span class="ui">Клиенты → Слить дубли</span>.</span></div>
+      <div class="faq"><b>Рабочая встреча стала «клиентом»</b><span>Поставьте карточку на паузу, а в предпросмотре синхронизации снимите галочку с этого названия — новые такие события клиентами не станут. Надёжнее всего — не ставить такое в календарь «Клиенты».</span></div>
+    </div>
+    <div>
+      <div class="faq"><b>Перенесла встречу в Google, а бронь кабинета осталась</b><span>Так задумано: бронь сама не двигается, чтобы не потерять оплату. Придёт уведомление — перенесите бронь в шахматке.</span></div>
+      <div class="faq"><b>Удалила событие в Google, а сессия в CRM осталась</b><span>Включён защитный режим — придёт уведомление. Удалите сессию сами или включите «Google Календарь главный» в Настройках.</span></div>
+      <div class="faq"><b>Клиент заплатил сразу за несколько прошедших сессий</b><span>Карточка клиента → <span class="ui">Отметить оплату → Отметить все</span>. Будущие сессии отмечайте, когда они пройдут.</span></div>
+      <div class="faq"><b>Видит ли администратор моих клиентов?</b><span>Нет. Ни администраторы, ни владелец центра не имеют доступа к вашей CRM.</span></div>
+    </div>
+  </div>
+
+  <div class="tip" style="margin-top:12px"><p><strong>Остались вопросы?</strong> Пишите в Telegram <strong>@UnboxCenter</strong> или звоните <strong>+995 599 324 668</strong> — поможем подключиться.</p></div>
+  <div class="pagefoot">Unbox · Psy-CRM · гайд для специалистов · октябрь 2026</div>
+</section>
+
+</body>
+</html>
