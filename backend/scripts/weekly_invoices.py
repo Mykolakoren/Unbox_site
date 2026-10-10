@@ -70,19 +70,40 @@ def invoice(session: Session, u, start: date, end: date) -> str | None:
     if not rows:
         return None
     rows.sort(key=lambda b: (b.date, b.start_time or ""))
+    # Сколько по каждой брони ещё должны — по раскладке ленты баланса (та же, что
+    # «к оплате» на сайте): оплаченное (пополнения, скидка за неделю) вычтено
+    # (просьба Вали 09.10: «вычти то, что она уже оплатила»).
+    from app.services.balance_allocation import client_allocation
+    debt_by_id: dict[str, float] = {}
+    try:
+        alloc = client_allocation(session, u)
+        if alloc.get("consistent"):
+            for m in alloc.get("bookings") or []:
+                debt_by_id[str(m["bookingId"])] = float(m.get("debt") or 0)
+    except Exception:  # noqa: BLE001 — без раскладки счёт всё равно уходит, но без «к оплате»
+        alloc = None
     lines = []
-    total = 0.0
+    total = due = 0.0
     for b in rows:
         price = round(float(b.final_price or 0), 2)
         total += price
         branch = BRANCH.get(b.location_id or "", "")
-        lines.append(f"{b.date:%d.%m} {b.start_time} — {_hours(b.duration)}, {branch} — {_num(price)} ₾")
+        owe = round(debt_by_id.get(str(b.id), 0.0), 2) if alloc else None
+        if owe is not None and b.payment_status == "pending":
+            owe = price                                   # ещё не списана — вся к оплате
+        mark = "" if owe is None else (" ✓ оплачено" if owe <= 0.004 else f" — к оплате {_num(owe)} ₾" if owe < price - 0.004 else "")
+        if owe is not None:
+            due += owe
+        lines.append(f"{b.date:%d.%m} {b.start_time} — {_hours(b.duration)}, {branch} — {_num(price)} ₾{mark}")
     bal = round(float(u.balance or 0), 2)
+    paid = round(total - due, 2)
+    summary = (f"\n\n<b>Итого за неделю: {_num(round(total, 2))} ₾</b>"
+               + (f"\nУже оплачено: {_num(paid)} ₾\n<b>К оплате: {_num(round(due, 2))} ₾</b>" if alloc else ""))
     return (
         f"🧾 <b>Счёт за неделю {start:%d.%m}–{end:%d.%m}</b> — {escape(u.name or u.email or '')}\n\n"
         + "\n".join(escape(x) for x in lines)
-        + f"\n\n<b>Итого за неделю: {_num(round(total, 2))} ₾</b>"
-        + f"\nБаланс на сайте сейчас: {_num(bal)} ₾ (уже с бронями, списанными на эту неделю)"
+        + summary
+        + f"\nБаланс на сайте сейчас: {_num(bal)} ₾ (с бронями, уже списанными на следующие дни)"
         + "\n\nМожно переслать клиенту."
     )
 
