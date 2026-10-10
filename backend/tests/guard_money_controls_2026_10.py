@@ -155,10 +155,11 @@ def _user(s, email, name=None, pricing_system="standard", pdp=0, sub=None):
 
 
 def _bk(s, user, day, *, price=0.0, method="balance", pay="paid", rule="NONE", status="confirmed",
-        start="12:00", duration=60, user_id=None, hours=None, charge=None, extras=None):
+        start="12:00", duration=60, user_id=None, hours=None, charge=None, extras=None,
+        resource="room_1"):
     from app.models.booking import Booking
     b = Booking(
-        resource_id="room_1", location_id="unbox_uni", date=day, start_time=start,
+        resource_id=resource, location_id="unbox_uni", date=day, start_time=start,
         duration=duration, status=status, final_price=price, base_price=20.0,
         applied_rule=rule, payment_method=method, payment_status=pay,
         user_id=user_id or (user.email if user else ""), user_uuid=(user.id if user else None),
@@ -743,8 +744,8 @@ def test_free_booking_sql():
     _bk(s, u, d, method="bonus")
     _bk(s, u, d, method="service", pay="waived")
     _bk(s, u, d, pay="waived")
-    _bk(s, u, d, rule="BONUS_HOUR")                                           # «Час в подарок»
-    _bk(s, u, d, rule="BONUS_HOUR_PART")                                      # часть подарочной брони после «Разделить»
+    _bk(s, u, d, rule="BONUS_HOUR", duration=30)                              # «Час в подарок»
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="12:30")          # часть подарочной брони после «Разделить»
     _bk(s, u, d, status="cancelled")
     _bk(s, u, datetime(2026, 8, 20), rule="MANUAL_OVERRIDE")                  # старше 30 дней
     _bk(s, owner, d, rule="COMP_ACCOUNT")
@@ -779,8 +780,8 @@ def test_gift_zero_long_sql():
     d = datetime(2026, 9, 30)
     _bk(s, u, d, rule="BONUS_HOUR", duration=180)                             # ✓ подарок 1 ч → 3 ч за 0
     _bk(s, u, d, rule="BONUS_HOUR_PART", duration=90, start="16:00")         # ✓ часть такой брони
-    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00")              # законно: подарок на час
-    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00")         # законно: часть подарка
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00", resource="room_2")       # законно: подарок на час
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00", resource="room_3")  # законно: часть подарка
     _bk(s, u, d, rule="BONUS_HOUR", duration=120, price=18.0, start="18:00") # 2 ч с подарком за 18 ₾
     _bk(s, u, d, rule="MANUAL_OVERRIDE", duration=120, start="20:00")         # ручная 0 — это free_booking
     _bk(s, u, d, rule="BONUS_HOUR", duration=180, status="cancelled", start="08:00")
@@ -789,6 +790,42 @@ def test_gift_zero_long_sql():
     got = sorted((r["date"], r["start_time"], r["duration"], r["applied_rule"]) for r in rows)
     assert got == [("2026-09-30", "12:00", 180, "BONUS_HOUR"), ("2026-09-30", "16:00", 90, "BONUS_HOUR_PART"),
                    ("2026-09-30", "20:00", 120, "MANUAL_OVERRIDE")], got
+
+
+def test_gift_part_zero_sql():
+    """10.10 «Бронь за 0 ₾»: подарочная бронь за 0 ₾ целиком (голова + части в
+    том же кабинете в тот же день) — не дольше часа на подарок. Часть 30 мин от
+    брони 1,5 ч, которой вручную поставили «Цену» 0 ₾, раньше проходила как
+    «часть подарка»."""
+    ma = _audit()
+    s = _db()
+    u = _user(s, "client@x.ge")
+    v = _user(s, "other@x.ge")
+    d = datetime(2026, 9, 30)
+    # ✓ бронь 1,5 ч с подарком, разделена 60/30: голова платная, часть вручную 0 ₾
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, price=13.33, start="10:00", resource="r1")
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00", resource="r1")
+    # ✓ обе части той же брони вручную 0 ₾ — 1,5 ч за 0 при одном подарке
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00", resource="r2")
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00", resource="r2")
+    # законно: подарок на час разделён 30/30, обе части 0 ₾
+    _bk(s, u, d, rule="BONUS_HOUR", duration=30, start="10:00", resource="r3")
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="10:30", resource="r3")
+    # законно: два подарка в один день в одном кабинете
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00", resource="r4")
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="15:00", resource="r4")
+    # законно: часть без головы (голову отменили до 10.10) — не дольше часа
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="10:00", resource="r5")
+    # чужой подарок в том же кабинете не считается в группу
+    _bk(s, v, d, rule="BONUS_HOUR", duration=60, start="10:00", resource="r6")
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="12:00", resource="r6")
+    # отменённая часть не считается
+    _bk(s, u, d, rule="BONUS_HOUR", duration=60, start="10:00", resource="r7")
+    _bk(s, u, d, rule="BONUS_HOUR_PART", duration=30, start="11:00", resource="r7", status="cancelled")
+    rows = ma.run_check(s, _check(ma, "free_booking"), ma.audit_params(NOW))
+    got = sorted((r["resource_id"], r["start_time"], r["applied_rule"]) for r in rows)
+    assert got == [("r1", "11:00", "BONUS_HOUR_PART"),
+                   ("r2", "10:00", "BONUS_HOUR"), ("r2", "11:00", "BONUS_HOUR_PART")], got
 
 
 def test_repeat_income_same_day_sql():

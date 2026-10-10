@@ -453,9 +453,31 @@ def _free_booking_sql() -> str:
                     -- Законно бесплатной подарочная бронь бывает только не длиннее
                     -- часа: дольше часа за 0 ₾ — след лазейки (удлинили переносом или
                     -- сменой формата без доплаты, закрыто 04.10) — показываем.
+                    -- 10.10: и вся подарочная бронь (голова + части в том же кабинете
+                    -- в тот же день, с любой ценой) — не дольше часа на каждый подарок.
+                    -- Дольше — цена делится по времени и ни одна часть не бывает 0 ₾;
+                    -- раньше часть 30 мин от брони 1,5 ч с ручной «Ценой» 0 ₾
+                    -- проходила как «часть подарка».
                     (coalesce(b.payment_method, '') NOT IN ('subscription', 'bonus', 'service')
                      AND NOT (coalesce(b.applied_rule, '') IN ('BONUS_HOUR', 'BONUS_HOUR_PART')
-                              AND coalesce(b.duration, 0) <= 60))
+                              AND coalesce(b.duration, 0) <= 60
+                              AND (SELECT coalesce(sum(g.duration), 0) FROM booking g
+                                   WHERE g.status = 'confirmed'
+                                     AND coalesce(g.payment_status, '') <> 'waived'
+                                     AND g.applied_rule IN ('BONUS_HOUR', 'BONUS_HOUR_PART')
+                                     AND g.date = b.date AND g.resource_id = b.resource_id
+                                     AND (g.user_uuid = b.user_uuid
+                                          OR (g.user_uuid IS NULL AND b.user_uuid IS NULL
+                                              AND lower(g.user_id) = lower(b.user_id))))
+                                  <= 60 * (SELECT CASE WHEN count(*) > 0 THEN count(*) ELSE 1 END
+                                           FROM booking h
+                                           WHERE h.status = 'confirmed'
+                                             AND coalesce(h.payment_status, '') <> 'waived'
+                                             AND h.applied_rule = 'BONUS_HOUR'
+                                             AND h.date = b.date AND h.resource_id = b.resource_id
+                                             AND (h.user_uuid = b.user_uuid
+                                                  OR (h.user_uuid IS NULL AND b.user_uuid IS NULL
+                                                      AND lower(h.user_id) = lower(b.user_id))))))
                     -- скрытая утечка: «по абонементу», оплачена, но не списано ни часов,
                     -- ни денег. charge_amount — снимок списанного: часы (нашлись в пуле)
                     -- или лари (абонемент исчерпан → с баланса); 0 — не списано ничего
