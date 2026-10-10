@@ -147,8 +147,24 @@ def update_specialist_admin(
             existing.user_id = None  # type: ignore
             session.add(existing)
 
+    # 10.10 (Егор: «почему часть специалистов скрыта?»): показ в каталоге
+    # меняют кнопкой «Виден/Скрыт» — пишем в историю, кто и когда.
+    _was = (bool(specialist.is_verified), bool(specialist.is_public))
     for key, value in update_data.items():
         setattr(specialist, key, value)
+    _now = (bool(specialist.is_verified), bool(specialist.is_public))
+    if _was != _now:
+        from app.services.timeline import timeline_service
+        _name = f"{specialist.first_name} {specialist.last_name}".strip()
+        _shown = _now[0] and _now[1]
+        timeline_service.log_event(
+            session=session, actor_id=_admin.id, actor_role=_admin.role,
+            target_id=str(specialist.id), target_type="specialist", event_type="specialist_visibility",
+            description=f"{_name}: {'показан в каталоге' if _shown else 'скрыт из каталога'} ({_admin.name or _admin.email})",
+            metadata={"before": {"is_verified": _was[0], "is_public": _was[1]},
+                      "after": {"is_verified": _now[0], "is_public": _now[1]}},
+            commit=False,
+        )
 
     session.add(specialist)
     session.commit()
