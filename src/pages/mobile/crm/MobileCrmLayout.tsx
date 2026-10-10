@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     CalendarDays, Check, ChevronDown, ClipboardList, FileText, Users, Wallet,
@@ -140,8 +140,8 @@ export function MobileCrmLayout() {
         // (десктоп-в-мобиле) — последовательно с тем, что /m теперь основной
         // на телефоне для всех ролей.
         // Админ без Psy-CRM — в свою мобильную админку, остальные — на /m.
-        navigate(isBookingAdmin(currentUser) ? '/m/admin' : '/m', { replace: true });
-        return null;
+        // <Navigate>, а не navigate() во время отрисовки (обход 10.10).
+        return <Navigate to={isBookingAdmin(currentUser) ? '/m/admin' : '/m'} replace />;
     }
 
     return (

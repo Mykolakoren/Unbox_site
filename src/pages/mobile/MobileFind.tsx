@@ -24,6 +24,7 @@ import { Button } from '../../components/ui/Button';
 import { Field, Select } from '../../components/ui/Field';
 import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeModal';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { catalogPath } from '../../utils/catalogPath';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
@@ -86,6 +87,7 @@ function pluralWindows(n: number): string {
 export function MobileFind() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { confirm: askConfirm } = useConfirmDialog();
     // Селективные селекторы — ре-рендер только на изменение нужных полей.
     const currentUser = useUserStore(s => s.currentUser);
     const bookings = useUserStore(s => s.bookings);
@@ -145,15 +147,18 @@ export function MobileFind() {
     // it to the CRM session via crmApi.updateSession({ bookingId }). Default
     // date/duration come from the session — usually pre-filled correctly.
     const linkSessionId = searchParams.get('linkSession');
+    // Снимок при входе: экран сам переписывает ?date= в ?day=N, и дата сессии
+    // терялась — после брони возвращались на «Сегодня», а не на день сессии.
+    const [linkSessionDate] = useState(() => searchParams.get('date') || '');
     const linkSessionMeta = useMemo(() => {
         if (!linkSessionId) return null;
         return {
             id: linkSessionId,
-            date: searchParams.get('date') || '',
+            date: linkSessionDate,
             time: searchParams.get('time') || '',
             duration: parseInt(searchParams.get('duration') || '60', 10) || 60,
         };
-    }, [linkSessionId, searchParams]);
+    }, [linkSessionId, linkSessionDate, searchParams]);
     const [linking, setLinking] = useState(false);
 
     // Persist date / duration in URL so navigating away (booking flow,
@@ -368,7 +373,9 @@ export function MobileFind() {
                 const created = await bookingsApi.createBooking({
                     resourceId,
                     locationId: resource?.locationId || 'unbox_one',
-                    date: targetDate,
+                    // Строкой «ГГГГ-ММ-ДД», как в оформлении: объект Date уходил
+                    // отметкой UTC с поясом, и сервер падал 500 (обход 10.10).
+                    date: fmtDate(targetDate, 'yyyy-MM-dd') as unknown as Date,
                     startTime: minsToHHMM(startMin),
                     duration,
                     format: (resource?.formats?.[0] as 'individual' | 'group' | 'intervision') || 'individual',
@@ -376,7 +383,11 @@ export function MobileFind() {
                     extras: [],
                 });
                 try {
-                    await crmApi.updateSession(linkSessionMeta.id, { bookingId: created.id });
+                    // Та же привязка, что «Объединить» на компьютере: booking_id +
+                    // is_booked + клиент в брони. Раньше слали только bookingId —
+                    // телефон смотрит на is_booked и показывал «Без кабинета» с
+                    // кнопкой «Забронировать кабинет» (вторая бронь; обход 10.10).
+                    await crmApi.acceptMergeSuggestion(linkSessionMeta.id, created.id);
                 } catch (linkErr) {
                     console.warn('CRM link failed (booking created)', linkErr);
                     toast.warning('Бронь создана, но привязать к сессии не получилось');
@@ -400,7 +411,33 @@ export function MobileFind() {
         // new one. Backend handles GCal sync, balance reconciliation, and
         // (if applicable) propagation through a series.
         if (rescheduleBooking) {
+            // Обход мобильной версии 10.10: перенос шёл с одного касания — случайный
+            // тап по соседнему кабинету (зал 30 ₾/ч вместо 20) переносил бронь
+            // молча. Теперь — короткое «было → станет».
             inFlightRef.current = true;
+            const oldRes = RESOURCES.find(r => r.id === rescheduleBooking.resourceId);
+            const newRes = RESOURCES.find(r => r.id === resourceId);
+            const oldStart = rescheduleBooking.startTime || '';
+            const oldDay = rescheduleBooking.date ? formatDayMonth(rescheduleBooking.date) : '';
+            const rateNote = oldRes && newRes && oldRes.hourlyRate !== newRes.hourlyRate
+                ? `${newRes.name} — ${formatGel(newRes.hourlyRate)}/ч (было ${formatGel(oldRes.hourlyRate)}/ч). `
+                : '';
+            const ok = await askConfirm({
+                title: 'Перенести бронь?',
+                body: (
+                    <>
+                        <div>Было: {oldDay} в {oldStart} · {oldRes?.name ?? rescheduleBooking.resourceId}</div>
+                        <div style={{ fontWeight: 600, marginTop: 4 }}>
+                            Станет: {formatDayMonth(targetDate)} в {minsToHHMM(startMin)} · {newRes?.name ?? resourceId}
+                        </div>
+                        <div style={{ marginTop: 8, color: COLOR.ink60 }}>
+                            {rateNote}Цена пересчитается по новому времени.
+                        </div>
+                    </>
+                ),
+                confirmLabel: 'Перенести',
+            });
+            if (!ok) { inFlightRef.current = false; return; }
             setPendingChip(`${startMin}|${resourceId}`);
             setRescheduling(true);
             let left = false;

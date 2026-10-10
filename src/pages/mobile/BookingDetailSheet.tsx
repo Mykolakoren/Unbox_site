@@ -7,7 +7,8 @@ import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
-import { prepareRepeat } from './repeatBooking';
+import { prepareRepeat, repeatTargetDate } from './repeatBooking';
+import { EXTRAS } from '../../utils/data';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
@@ -63,14 +64,21 @@ export function BookingDetailSheet({ booking, onClose }: {
     // видел «Привязать CRM-клиента» и не понимал, что это.
     const showCrm = canUsePsyCrm(currentUser);
     const isAdmin = isBookingAdmin(currentUser);
+    // sandbox_toys — старый id песочницы (снят с витрины, но живёт в старых бронях).
+    const extrasNames = (booking.extras || [])
+        .map(id => EXTRAS.find(e => e.id === id)?.name ?? (id === 'sandbox_toys' ? 'Песочница с игрушками' : null))
+        .filter(Boolean)
+        .join(', ');
 
     useEffect(() => {
-        // Lazy-load CRM clients only when the user opens the picker. Avoids
-        // hammering /crm/clients every time someone opens a detail sheet.
-        if (mode === 'pickClient' && crmClients.length === 0) {
+        // Lazy-load CRM clients only when the user opens the picker — или когда
+        // к брони уже привязан клиент: без списка карточка писала «Клиент
+        // привязан» вместо имени (обход мобильной версии 10.10). Список один
+        // на все экраны (store), повторно не грузится.
+        if (showCrm && (mode === 'pickClient' || booking.crmClientId) && crmClients.length === 0) {
             fetchCrmClients(true).catch(() => {});
         }
-    }, [mode, crmClients.length, fetchCrmClients]);
+    }, [showCrm, mode, booking.crmClientId, crmClients.length, fetchCrmClients]);
 
     async function doLinkClient(crmClientId: string | null) {
         setBusy('link');
@@ -350,10 +358,20 @@ export function BookingDetailSheet({ booking, onClose }: {
                         {booking.paymentMethod === 'balance' && booking.finalPrice != null && (
                             <span style={{ color: COLOR.ink60, marginLeft: 8 }}>с баланса</span>
                         )}
+                        {extrasNames && (
+                            // Допуслуги входят в цену — раньше на телефоне их не было видно (обход 10.10).
+                            <div style={{ fontSize: TEXT.small, color: COLOR.ink80, marginTop: 4 }}>
+                                в т.ч. допуслуги: {extrasNames}
+                            </div>
+                        )}
                         {booking.paymentStatus === 'pending' && dt && (
                             // Обычное состояние будущей брони — нейтрально, не янтарём (G4-08).
+                            // Срочная бронь списывается при подтверждении админом
+                            // (charge_hot_booking_on_approval), не «за сутки» (обход 10.10).
                             <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
-                                Спишем {formatChargeAt(dt)} — за сутки до начала
+                                {booking.status === 'pending_approval'
+                                    ? 'Спишем, когда администратор подтвердит бронь'
+                                    : `Спишем ${formatChargeAt(dt)} — за сутки до начала`}
                             </div>
                         )}
                     </Field>
@@ -491,7 +509,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                             primary={!!isPast}
                             icon={<Repeat size={18} />}
                             label="Повторить"
-                            sub={`${nextWeekdayPhrase(dt)} в ${booking.startTime}`}
+                            sub={`${repeatDayLabel(repeatTargetDate(booking))} в ${booking.startTime}`}
                             onClick={doRepeat}
                         />
 
@@ -771,13 +789,11 @@ const inlineLink: React.CSSProperties = {
 
 /** «В следующий вторник» / «В следующую среду» / «В следующее воскресенье».
  *  Раньше писали «На следующий среда» — без падежа и рода. */
-function nextWeekdayPhrase(d: Date | null): string {
-    if (!d) return 'Через неделю';
-    const phrases = [
-        'В следующее воскресенье', 'В следующий понедельник', 'В следующий вторник',
-        'В следующую среду', 'В следующий четверг', 'В следующую пятницу', 'В следующую субботу',
-    ];
-    return phrases[d.getDay()];
+/** «Среда, 21 октября» — точная дата повтора (раньше «В следующую среду» без
+ *  даты, и для будущей брони это была её же среда). */
+function repeatDayLabel(d: Date): string {
+    const s = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatLabel(f: string | undefined): string {

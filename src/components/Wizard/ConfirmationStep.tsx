@@ -39,6 +39,7 @@ import {
     resolveFinalMethod, subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 import { cartResourceKind } from '../../utils/subscriptionHours';
+import { canUsePsyCrm } from '../../pages/mobile/crmAccess';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
@@ -117,8 +118,10 @@ export function ConfirmationStep() {
 
     // Fetch CRM clients (scoped to target specialist when in proxy mode).
     // Бонусы читает useActiveBonusHours ниже — для того, ЗА КОГО бронь.
+    // Только тем, кого сервер пускает в Psy-CRM (deps.require_specialist) —
+    // остальным /crm/clients отвечает 403 (обход 10.10).
     useEffect(() => {
-        if (currentUser) {
+        if (canUsePsyCrm(currentUser)) {
             fetchCrmClients(true, false, targetSpecialistUuid).catch(() => {});
         }
     }, [currentUser, fetchCrmClients, targetSpecialistUuid]);

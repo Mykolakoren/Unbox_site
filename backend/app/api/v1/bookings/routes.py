@@ -1617,6 +1617,13 @@ def create_booking(
 
         # Normalize date — strip time component to avoid timezone shift issues
         if booking_in.date:
+            # Дата с поясом («2026-10-16T20:00:00Z» — полночь 17.10 по Тбилиси):
+            # приводим к дню по Тбилиси без пояса. Иначе ниже «start_dt − сейчас»
+            # падал TypeError → 500 («Забронировать кабинет» из сессии на телефоне,
+            # обход мобильной версии 10.10), а день съезжал на вчерашний.
+            if booking_in.date.tzinfo is not None:
+                from datetime import timezone as _tz_utc, timedelta as _td_tb
+                booking_in.date = (booking_in.date.astimezone(_tz_utc.utc) + _td_tb(hours=4)).replace(tzinfo=None)
             booking_in.date = booking_in.date.replace(
                 hour=0, minute=0, second=0, microsecond=0
             )

@@ -26,6 +26,8 @@ import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime, formatTimeRange } from '../../../utils/format';
 import { SessionActionSheet } from './SessionActionSheet';
+import { ClientEditSheet } from './ClientEditSheet';
+import { undoToast } from '../../../components/ui/undoToast';
 import { linkCabinetPath, nextSessionLabel, useBookNext } from './crmFlows';
 import { sessionDebt } from '../../../utils/sessionMoney';
 
@@ -98,6 +100,8 @@ export function MobileCrmClient() {
     // Платёж, который правят карандашом в ленте (то же окно, что в блоке «Оплата» сессии).
     const [editingPayment, setEditingPayment] = useState<CrmPayment | null>(null);
     const [noteOpen, setNoteOpen] = useState(false);
+    const [editOpen, setEditOpen] = useState(false);
+    const [pausing, setPausing] = useState(false);
     // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
     useDocumentTitle('Клиент · Psy-CRM');
 
@@ -228,6 +232,30 @@ export function MobileCrmClient() {
         return res ? (loc ? `${res.name} · ${loc.name}` : res.name) : 'Кабинет забронирован';
     };
 
+    // Пауза — как на компьютере (CrmClientDetail): мягко, is_active=false,
+    // ничего не удаляется; «Вернуть» в тосте — 5 секунд передумать.
+    const togglePause = async () => {
+        if (pausing) return;
+        const wasActive = client.isActive;
+        const setActive = async (active: boolean) => {
+            if (active) await crmApi.updateClient(client.id, { isActive: true });
+            else await crmApi.deleteClient(client.id); // без permanent — только пауза
+            setClient(c => (c ? { ...c, isActive: active } : c));
+        };
+        setPausing(true);
+        try {
+            await setActive(!wasActive);
+            undoToast(
+                wasActive ? `${client.name} на паузе` : `${client.name} снова в работе`,
+                () => setActive(wasActive).catch(e => toastApiError(e, 'Не удалось вернуть как было')),
+            );
+        } catch (e) {
+            toastApiError(e, wasActive ? 'Не удалось поставить на паузу' : 'Не удалось вернуть в работу');
+        } finally {
+            setPausing(false);
+        }
+    };
+
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -255,7 +283,36 @@ export function MobileCrmClient() {
                         </span>
                     )}
                 </h1>
+                {!viewingOther && (
+                    <button
+                        onClick={() => setEditOpen(true)}
+                        aria-label="Изменить клиента"
+                        style={{
+                            background: 'var(--color-sunken)', border: 'none', borderRadius: 10,
+                            width: 44, height: 44, display: 'grid', placeItems: 'center',
+                            cursor: 'pointer', color: 'var(--color-ink)', flexShrink: 0,
+                        }}
+                    >
+                        <Pencil size={18} aria-hidden="true" />
+                    </button>
+                )}
             </div>
+
+            {!client.isActive && (
+                <div style={{
+                    margin: '0 16px', padding: '10px 12px', borderRadius: 10,
+                    background: 'var(--color-sunken)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                }}>
+                    <span style={{ flex: 1, minWidth: 160, fontSize: 14, lineHeight: 1.4 }}>
+                        <b>На паузе.</b> Сессии, оплаты и заметки сохранены; в списке «Активные» клиента не видно.
+                    </span>
+                    {!viewingOther && (
+                        <Button variant="secondary" size="touch" loading={pausing} onClick={togglePause}>
+                            Вернуть в работу
+                        </Button>
+                    )}
+                </div>
+            )}
 
             {/* Contacts row */}
             {(telHref || tgHref || client.email) && (
@@ -420,6 +477,14 @@ export function MobileCrmClient() {
                 )}
             </div>
 
+            {client.isActive && !viewingOther && (
+                <div style={{ padding: '0 16px' }}>
+                    <Button variant="quiet" size="touch" loading={pausing} onClick={togglePause}>
+                        Поставить на паузу
+                    </Button>
+                </div>
+            )}
+
             {activeSheet && (
                 <SessionActionSheet
                     session={activeSheet}
@@ -457,6 +522,16 @@ export function MobileCrmClient() {
                     onSaved={() => { setEditingPayment(null); refresh(); }}
                 />
             )}
+            <ClientEditSheet
+                open={editOpen}
+                client={client}
+                onClose={() => setEditOpen(false)}
+                onSaved={(updated, reloadSessions) => {
+                    setClient(updated);
+                    setEditOpen(false);
+                    if (reloadSessions) refresh();
+                }}
+            />
             <NewNoteSheet
                 open={noteOpen}
                 clientId={client.id}

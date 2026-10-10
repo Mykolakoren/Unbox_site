@@ -108,7 +108,8 @@ def test_no_payment_via_update_session():
 
 def test_today_three_shelves():
     today = _code("MobileCrmToday.tsx")
-    for text in (">Дальше<", ">Закрыть день<", ">Без следующей встречи<", "bookNext.open()",
+    # 10.10: «+ Сессия» передаёт открытый день — bookNext.open(…, dateStr).
+    for text in (">Дальше<", ">Закрыть день<", ">Без следующей встречи<", "bookNext.open(",
                  "formatStartsIn(", "nextSessionLabel(last, client)"):
         assert text in today, f"«Сегодня» V2: нет {text}"
     assert "display: 'none'" not in today, "вернулся мёртвый скрытый span"

@@ -608,7 +608,10 @@ function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
             </Field>
             <Field label="Длительность">
                 <Select value={dur} onChange={e => onDur(parseInt(e.target.value))}>
-                    {[30, 45, 60, 75, 90, 120].map(n => <option key={n} value={n}>{n} мин</option>)}
+                    {/* 50 мин — обычная сессия; и всегда текущая длительность: без неё
+                        сессия на 50 мин показывалась «30 мин» (обход 10.10). */}
+                    {Array.from(new Set([30, 45, 50, 60, 75, 90, 120, dur])).sort((a, b) => a - b)
+                        .map(n => <option key={n} value={n}>{n} мин</option>)}
                 </Select>
             </Field>
         </FormShell>

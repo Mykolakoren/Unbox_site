@@ -54,6 +54,8 @@ interface BookNextState {
     client: CrmClient | null;
     /** undefined — шторка найдёт прошлую сессию сама. */
     lastSession?: CrmSession | null;
+    /** День с экрана (ГГГГ-ММ-ДД) — дата новой сессии по умолчанию. */
+    presetDate?: string;
 }
 
 /**
@@ -65,8 +67,8 @@ export function useBookNext(onCreated: (session: CrmSession) => void, clients?: 
     const navigate = useNavigate();
     const [state, setState] = useState<BookNextState | null>(null);
 
-    const open = useCallback((client?: CrmClient | null, lastSession?: CrmSession | null) => {
-        setState({ client: client ?? null, lastSession });
+    const open = useCallback((client?: CrmClient | null, lastSession?: CrmSession | null, presetDate?: string) => {
+        setState({ client: client ?? null, lastSession, presetDate });
     }, []);
 
     const handleCreated = (session: CrmSession) => {
@@ -90,6 +92,7 @@ export function useBookNext(onCreated: (session: CrmSession) => void, clients?: 
             clients={clients}
             lastSession={state?.client ? state.lastSession : undefined}
             successToast={false}
+            presetDate={state?.presetDate}
         />
     );
 

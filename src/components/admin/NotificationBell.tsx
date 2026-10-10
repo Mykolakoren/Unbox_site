@@ -1,21 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-    Bell, UserPlus, CalendarX, AlertTriangle, Clock,
-    CheckCheck, Loader2, ListTodo,
-} from 'lucide-react';
+import { Bell, CheckCheck, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { notificationsApi, type AppNotification } from '../../api/notifications';
 import { useAdminTaskStore } from '../../store/adminTaskStore';
-
-// Icon mapping
-const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
-    UserPlus, CalendarX, AlertTriangle, Clock, ListTodo, Bell,
-    // Lowercase aliases for backend icon names
-    clock: Clock,
-    userPlus: UserPlus,
-    alertTriangle: AlertTriangle,
-};
+// Значок по имени с сервера — общий с телефоном (utils/notificationIcon).
+import { notificationIcon } from '../../utils/notificationIcon';
 
 function timeAgo(dateStr: string): string {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -194,7 +184,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                 </div>
                             ) : (
                                 allNotifications.map(n => {
-                                    const IconComp = ICON_MAP[n.icon || ''] || Bell;
+                                    const IconComp = notificationIcon(n.icon);
                                     return (
                                         <button
                                             key={n.id}

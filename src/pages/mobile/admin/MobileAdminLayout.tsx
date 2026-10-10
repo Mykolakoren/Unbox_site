@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CalendarClock, CalendarDays, Check, CheckSquare, ChevronDown, Inbox, Users, Wallet } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
@@ -7,7 +7,7 @@ import { specialistsApi } from '../../../api/specialists';
 import { hasCompletedTour } from '../OnboardingTour';
 import { MobileAdminTour, ADMIN_TOUR_PREFIX } from './MobileAdminTour';
 import { NotificationsBell } from '../NotificationsBell';
-import { Z_TABBAR } from './sheetLayers';
+import { ADMIN_REQUESTS_CHANGED, Z_TABBAR } from './sheetLayers';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
 import { forceUnlockScroll } from '../useScrollLock';
 import { canUsePsyCrm } from '../crmAccess';
@@ -44,6 +44,12 @@ export function MobileAdminLayout() {
     const [tourOpen, setTourOpen] = useState(false);
     const [switcherOpen, setSwitcherOpen] = useState(false);
     useTouchDensity();
+    const isAdmin = !!currentUser && (
+        currentUser.role === 'owner'
+        || currentUser.role === 'senior_admin'
+        || currentUser.role === 'admin'
+        || currentUser.isAdmin
+    );
 
     // X5-08: прокручивается документ. Новый экран — сверху, «назад» — туда, где был.
     const navType = useNavigationType();
@@ -70,21 +76,28 @@ export function MobileAdminLayout() {
     }, [currentUser, fetchCurrentUser, navigate, location.pathname, location.search]);
 
     useEffect(() => {
-        if (!currentUser) return;
+        if (!currentUser || !isAdmin) return;
         const forced = new URLSearchParams(location.search).get('tour') === '1';
         if (forced) { setTourOpen(true); return; }
         if (!hasCompletedTour(currentUser.id, ADMIN_TOUR_PREFIX)) {
             const t = setTimeout(() => setTourOpen(true), 350);
             return () => clearTimeout(t);
         }
-    }, [currentUser, location.search]);
+    }, [currentUser, isAdmin, location.search]);
 
     // Счётчик на вкладке «Заявки»: срочные брони + анкеты на проверке.
     // Обновляем при смене экрана, не чаще раза в минуту.
     const [requests, setRequests] = useState<number | null>(null);
     const requestsAt = useRef(0);
+    const [requestsTick, setRequestsTick] = useState(0);
     useEffect(() => {
-        if (!currentUser) return;
+        const onChanged = () => { requestsAt.current = 0; setRequestsTick(t => t + 1); };
+        window.addEventListener(ADMIN_REQUESTS_CHANGED, onChanged);
+        return () => window.removeEventListener(ADMIN_REQUESTS_CHANGED, onChanged);
+    }, []);
+    useEffect(() => {
+        // Не админу эти запросы сервер отклоняет (403) — он и так уйдёт на /m.
+        if (!currentUser || !isAdmin) return;
         if (Date.now() - requestsAt.current < 60_000 && !location.pathname.startsWith('/m/admin/inbox')) return;
         requestsAt.current = Date.now();
         let alive = true;
@@ -98,7 +111,7 @@ export function MobileAdminLayout() {
             setRequests(a + b);
         });
         return () => { alive = false; };
-    }, [currentUser, location.pathname]);
+    }, [currentUser, isAdmin, location.pathname, requestsTick]);
 
     if (!currentUser) {
         return (
@@ -108,14 +121,9 @@ export function MobileAdminLayout() {
         );
     }
 
-    const isAdmin = currentUser.role === 'owner'
-        || currentUser.role === 'senior_admin'
-        || currentUser.role === 'admin'
-        || currentUser.isAdmin;
-    if (!isAdmin) {
-        navigate('/m', { replace: true });
-        return null;
-    }
+    // <Navigate>, а не navigate() во время отрисовки — React ругался
+    // «Cannot update a component while rendering» (обход 10.10).
+    if (!isAdmin) return <Navigate to="/m" replace />;
     // Вкладка «Касса» — только с правом на кассу (как «Финансы» на компьютере).
     const canCash = userCanAccessFinance(currentUser);
 

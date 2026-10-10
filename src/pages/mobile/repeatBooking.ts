@@ -11,19 +11,33 @@ import type { BookingHistoryItem } from '../../store/types';
  *
  * Returns null if the source booking lacks `resourceId` or `startTime`.
  */
-export function prepareRepeat(source: BookingHistoryItem): Date | null {
-    if (!source.resourceId || !source.startTime) return null;
-
+/** День повтора: тот же день недели — после завтрашнего дня И после дня самой
+ *  брони. Обход мобильной версии 10.10: для будущей брони (ср 14.10) «Повторить»
+ *  открывал оформление на ту же ср 14.10 — кабинет занят этой же бронью. */
+export function repeatTargetDate(source: BookingHistoryItem): Date {
     const sourceDt = bookingStartDate(source);
     const targetWeekday = sourceDt ? sourceDt.getDay() : new Date().getDay();
 
-    let pick = new Date();
+    const pick = new Date();
     pick.setDate(pick.getDate() + 1);
     pick.setHours(0, 0, 0, 0);
+    if (sourceDt) {
+        const afterSource = new Date(sourceDt);
+        afterSource.setHours(0, 0, 0, 0);
+        afterSource.setDate(afterSource.getDate() + 1);
+        if (afterSource > pick) pick.setTime(afterSource.getTime());
+    }
     for (let i = 0; i < 14; i++) {
         if (pick.getDay() === targetWeekday) break;
         pick.setDate(pick.getDate() + 1);
     }
+    return pick;
+}
+
+export function prepareRepeat(source: BookingHistoryItem): Date | null {
+    if (!source.resourceId || !source.startTime) return null;
+
+    const pick = repeatTargetDate(source);
 
     const duration = source.duration ?? 60;
     const [h, m] = source.startTime.split(':').map(Number);

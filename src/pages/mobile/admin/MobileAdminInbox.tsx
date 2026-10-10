@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { bookingsApi } from '../../../api/bookings';
 import { specialistsApi, type SpecialistProfile } from '../../../api/specialists';
+import { ADMIN_REQUESTS_CHANGED } from './sheetLayers';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES } from '../../../utils/data';
 import { formatBookingDuration } from '../../../utils/bookingHelpers';
@@ -73,6 +74,7 @@ export function MobileAdminInbox() {
         try {
             const res = await bookingsApi.approveBooking(b.id);
             setItems(prev => prev.filter(x => x.id !== b.id));
+            window.dispatchEvent(new Event(ADMIN_REQUESTS_CHANGED));
             toast.success(res.approvalNote || 'Бронь одобрена');
         } catch {
             toast.error('Не удалось одобрить бронь. Попробуйте ещё раз');
@@ -91,6 +93,7 @@ export function MobileAdminInbox() {
         try {
             await bookingsApi.rejectBooking(rejecting.id, reason);
             setItems(prev => prev.filter(x => x.id !== rejecting.id));
+            window.dispatchEvent(new Event(ADMIN_REQUESTS_CHANGED));
             toast.success('Бронь отклонена');
             setRejecting(null);
             setRejectReason('');

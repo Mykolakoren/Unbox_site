@@ -181,7 +181,10 @@ function UserTable({ caption, rows, onOpen, empty }: {
         textTransform: 'uppercase', color: GH.ink60,
     };
     return (
-        <div style={{ border: `1px solid ${GH.ink10}`, background: GH.card, overflowX: 'auto' }}>
+        // position: relative — опора для невидимой подписи «Открыть» (sr-only,
+        // position: absolute): без неё подпись выходила из прокрутки таблицы и
+        // растягивала телефонный экран до 545 px (обход мобильной версии 10.10).
+        <div style={{ border: `1px solid ${GH.ink10}`, background: GH.card, overflowX: 'auto', position: 'relative' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 560 }}>
                 <caption style={{ textAlign: 'left', padding: '12px 16px', fontWeight: 600, fontSize: 16, borderBottom: `1px solid ${GH.ink10}` }}>
                     {caption}

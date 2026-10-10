@@ -9,6 +9,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { DesktopLink } from './DesktopLink';
+import { ADMIN_REQUESTS_CHANGED } from './sheetLayers';
 import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 
@@ -119,6 +120,7 @@ export function MobileAdminSpecialists() {
                 : { is_verified: next };
             await (api as any)[method](endpoint, body);
             await load();
+            window.dispatchEvent(new Event(ADMIN_REQUESTS_CHANGED));
             toast.success(next ? 'Анкета опубликована' : 'Анкета скрыта с сайта');
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось изменить анкету. Попробуйте ещё раз');

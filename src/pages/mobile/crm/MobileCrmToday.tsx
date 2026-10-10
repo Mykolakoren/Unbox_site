@@ -289,7 +289,7 @@ export function MobileCrmToday() {
                         <Button
                             size="touch"
                             icon={<Plus size={16} aria-hidden="true" />}
-                            onClick={() => bookNext.open()}
+                            onClick={() => bookNext.open(undefined, undefined, isToday ? undefined : dateStr)}
                         >
                             Сессия
                         </Button>
@@ -348,7 +348,9 @@ export function MobileCrmToday() {
                     )}
                     <label style={pickerStyle}>
                         <Calendar size={16} aria-hidden="true" />
-                        <span>Другая дата · {formatDayMonth(dateStr, { withYear: 'auto' })}</span>
+                        {/* Рядом с «К сегодня» кнопка в полширины, и дата переносилась на
+                            вторую строку; день и так в заголовке (обход 10.10). */}
+                        <span>{isToday ? `Другая дата · ${formatDayMonth(dateStr, { withYear: 'auto' })}` : 'Другая дата'}</span>
                         <input
                             type="date"
                             aria-label="Выбрать дату"
@@ -385,7 +387,7 @@ export function MobileCrmToday() {
                         compact
                         title="Сессий на эту дату нет"
                         hint="Листайте дни свайпом или выберите день в ленте недели."
-                        action={viewingOther ? undefined : { label: 'Записать сессию', onClick: () => bookNext.open() }}
+                        action={viewingOther ? undefined : { label: 'Записать сессию', onClick: () => bookNext.open(undefined, undefined, isToday ? undefined : dateStr) }}
                     />
                 )}
 

@@ -33,7 +33,7 @@ import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { Field as FormField, Input, Select } from '../../components/ui/Field';
 import { markErrorToastShown, toastApiError } from '../../utils/errors';
 import { catalogPath } from '../../utils/catalogPath';
-import { isBookingAdmin } from './crmAccess';
+import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -70,6 +70,8 @@ export function MobileCheckout() {
     // Волна 2 (вёрстка V1): экран подтверждения после брони и шторки
     // «Время», «Чем платите», раскрытые «Допуслуги».
     const [done, setDone] = useState<{ pending: boolean } | null>(null);
+    // Бронь админа «за другого»: экран успеха говорит, чья она (обход 10.10).
+    const [doneFor, setDoneFor] = useState<string | null>(null);
     const [timeOpen, setTimeOpen] = useState(false);
     const [payOpen, setPayOpen] = useState(false);
     const [extrasOpen, setExtrasOpen] = useState(false);
@@ -101,8 +103,10 @@ export function MobileCheckout() {
     // то же поведение, что на компьютере, без нового риска дублей.
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
     const [selectedCrmClientId, setSelectedCrmClientId] = useState<string>('');
+    // Только тем, кого сервер пускает в Psy-CRM: клиенту /crm/clients отвечает
+    // 403 (обход мобильной версии 10.10).
     useEffect(() => {
-        if (currentUser) fetchCrmClients(true, false).catch(() => {});
+        if (canUsePsyCrm(currentUser)) fetchCrmClients(true, false).catch(() => {});
     }, [currentUser, fetchCrmClients]);
     // Занятые даты серии — показываем списком с выбором «создать остальные».
     const [seriesConflicts, setSeriesConflicts] = useState<Array<{ date: string; reason?: string }> | null>(null);
@@ -139,6 +143,7 @@ export function MobileCheckout() {
         const u = users?.find(x => x.email === state.bookingForUser || x.id === state.bookingForUser);
         return u ?? currentUser;
     }, [state.bookingForUser, users, currentUser]);
+    const proxyName = state.bookingForUser ? (effectiveUser?.name || state.bookingForUser) : null;
 
     // Активные бонусные часы того, ЗА КОГО бронь (сервер тратит именно их).
     // Тип 'free_hour' и срок годности учитывает activeBonusHours.
@@ -539,6 +544,7 @@ export function MobileCheckout() {
                 // Волна 2: экран подтверждения вместо уведомления (решение
                 // владельца). Статус — из ответа сервера на ЭТУ бронь:
                 // на одобрении — «Ждём подтверждения администратора».
+                setDoneFor(proxyName);
                 setDone({ pending: (created as any).status === 'pending_approval' });
             } else {
                 // Multi-slot batch — addBookings handles its own toasts/errors.
@@ -548,6 +554,7 @@ export function MobileCheckout() {
                 // Мультислот (POST /bookings/multi-slot) сервер не отправляет
                 // на одобрение — брони сразу подтверждены; ответ addBookings
                 // сюда не приходит, поэтому «на одобрении» не обещаем.
+                setDoneFor(proxyName);
                 setDone({ pending: false });
             }
         } catch (e: any) {
@@ -580,9 +587,10 @@ export function MobileCheckout() {
         return (
             <DoneScreen
                 pending={done.pending}
+                forName={doneFor}
                 summary={summaryRef.current}
-                onBookings={() => navigate('/m/bookings', { replace: true })}
-                onHome={() => navigate('/m/today', { replace: true })}
+                onBookings={() => navigate(doneFor ? '/m/admin/bookings' : '/m/bookings', { replace: true })}
+                onHome={() => navigate(doneFor ? '/m/admin/dashboard' : '/m/today', { replace: true })}
             />
         );
     }
@@ -1063,7 +1071,9 @@ export function MobileCheckout() {
                 )}
             </div>
 
-            {/* Закреплённая кнопка над нижним меню. */}
+            {/* Закреплённая кнопка над нижним меню. Меню ниже 72 px (≈61), и в
+                щели просвечивал текст страницы (обход мобильной версии 10.10) —
+                сплошная «юбка» тенью уходит под меню (оно выше по z-index). */}
             <div style={{
                 position: 'fixed',
                 bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
@@ -1074,6 +1084,7 @@ export function MobileCheckout() {
                 padding: '12px 16px',
                 background: COLOR.card,
                 borderTop: `1px solid ${COLOR.ink10}`,
+                boxShadow: `0 24px 0 0 ${COLOR.card}`,
                 zIndex: Z.sticky,
             }}>
                 <Button
@@ -1423,8 +1434,11 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
 
 /** Экран после брони (решение владельца): бронь на одобрении —
  *  «Ждём подтверждения администратора», обычная — «Бронь ваша». */
-function DoneScreen({ pending, summary, onBookings, onHome }: {
+function DoneScreen({ pending, forName, summary, onBookings, onHome }: {
     pending: boolean;
+    /** Бронь админа за другого: «Бронь создана: …», кнопка — в брони центра (обход 10.10:
+     *  писали «Бронь ваша… уже в «Моих бронях»», а у админа её там нет). */
+    forName?: string | null;
     summary: { day: string; time: string; place: string; more: number } | null;
     onBookings: () => void;
     onHome: () => void;
@@ -1440,12 +1454,16 @@ function DoneScreen({ pending, summary, onBookings, onHome }: {
                 {pending ? <Hourglass size={28} /> : <Check size={30} strokeWidth={2.5} />}
             </div>
             <h1 role="status" style={{ margin: 0, fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2 }}>
-                {pending ? 'Ждём подтверждения администратора' : 'Бронь ваша'}
+                {pending ? 'Ждём подтверждения администратора' : forName ? `Бронь создана: ${forName}` : 'Бронь ваша'}
             </h1>
             <p style={{ margin: 0, fontSize: TEXT.body, color: COLOR.ink80, lineHeight: 1.5, maxWidth: 340 }}>
                 {pending
-                    ? 'Слот закрепится за вами после подтверждения. Пришлём уведомление, как только администратор ответит.'
-                    : 'Всё готово — бронь уже в «Моих бронях».'}
+                    ? (forName
+                        ? 'Бронь ждёт подтверждения в «Заявках».'
+                        : 'Слот закрепится за вами после подтверждения. Пришлём уведомление, как только администратор ответит.')
+                    : forName
+                        ? 'Бронь уже видна в «Бронях» админки и у специалиста в «Моих бронях».'
+                        : 'Всё готово — бронь уже в «Моих бронях».'}
             </p>
             {summary && (
                 <div style={{ ...card, width: '100%', padding: 16, textAlign: 'left' }}>
@@ -1458,7 +1476,9 @@ function DoneScreen({ pending, summary, onBookings, onHome }: {
                 </div>
             )}
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                <Button block size="touch" onClick={onBookings}>Мои брони</Button>
+                {forName
+                    ? <Button block size="touch" onClick={onBookings}>Все брони</Button>
+                    : <Button block size="touch" onClick={onBookings}>Мои брони</Button>}
                 <Button block size="touch" variant="secondary" onClick={onHome}>На главную</Button>
             </div>
         </div>

@@ -57,6 +57,10 @@ export interface NewSessionSheetProps {
     /** false — без тоста «Записали…»: родитель покажет свой (например, с
      *  действием «Забронировать кабинет»). По умолчанию true. */
     successToast?: boolean;
+    /** День, открытый на экране (ГГГГ-ММ-ДД): дата сразу он, а время, длительность
+     *  и цена — «как в прошлый раз». Нет — «+1 нед» от прошлой сессии. Обход
+     *  10.10: на телефоне смотрели вс 18.10, «+ Сессия» предлагала пт 16.10. */
+    presetDate?: string;
 }
 
 type DateMode = 'w1' | 'w2' | 'custom';
@@ -98,7 +102,7 @@ const warnStyle: CSSProperties = {
 
 export function NewSessionSheet({
     open, onClose, onCreated, client: fixedClient, clients: clientsProp, lastSession: lastProp, profileDurationMin,
-    successToast = true,
+    successToast = true, presetDate,
 }: NewSessionSheetProps) {
     const storeClients = useCrmStore(s => s.clients);
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
@@ -186,11 +190,13 @@ export function NewSessionSheet({
 
     useEffect(() => {
         if (!suggestion) return;
-        setMode('w1');
-        setDate(suggestion.w1.date);
+        const preset = presetDate && /^\d{4}-\d{2}-\d{2}$/.test(presetDate) ? presetDate : null;
+        setMode(preset ? 'custom' : 'w1');
+        setDate(preset ?? suggestion.w1.date);
         setTime(suggestion.w1.time);
         setDuration(String(suggestion.w1.durationMinutes));
         setPrice(suggestion.w1.price ? String(suggestion.w1.price) : '');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [suggestion]);
 
     // Конфликт относится к конкретному времени — сменили время, вопрос снят.

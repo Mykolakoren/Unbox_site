@@ -81,7 +81,10 @@ def test_find_protected_logic_untouched():
         "buildFreeWindows изменилась — расчёт свободных окон трогать нельзя"
     assert _sha(_block(src, "const inFlightRef", "\n    const chipsBusy")) == "fe70d7f6e804df6d", \
         "блокировка повторного тапа (inFlightRef/pendingChip) изменилась"
-    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "8869fe980be6112b", \
+    # 10.10 (обход мобильной версии, разобрано): привязка к сессии — дата строкой
+    # и acceptMergeSuggestion (is_booked); перенос — «было → станет» под тем же
+    # inFlightRef (отмена снимает блок до setPendingChip).
+    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "4521e0607ca17dc0", \
         "chooseWindow изменилась — оформление/перенос/привязка трогать нельзя"
 
 

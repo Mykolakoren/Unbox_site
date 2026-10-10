@@ -94,14 +94,20 @@ export function MobileLayout() {
             setTourOpen(true);
             return;
         }
-        if (!hasCompletedTour(currentUser.id)) {
+        // Посреди дела экскурсию не открываем: «Забронировать кабинет» из CRM
+        // (?linkSession), перенос (?reschedule) и оформление — она закрывала
+        // слоты рассказом про «Сегодня» (обход мобильной версии 10.10).
+        // Покажется при следующем обычном входе.
+        const sp = new URLSearchParams(location.search);
+        const midTask = sp.has('linkSession') || sp.has('reschedule') || location.pathname.startsWith('/m/checkout');
+        if (!midTask && !hasCompletedTour(currentUser.id)) {
             // Tiny delay so the page paints first — the tour landing on a
             // blank screen feels more abrupt than landing on the cabinet
             // with the tour gliding up from the bottom a moment later.
             const t = setTimeout(() => setTourOpen(true), 350);
             return () => clearTimeout(t);
         }
-    }, [currentUser, location.search]);
+    }, [currentUser, location.search, location.pathname]);
 
     if (!currentUser) {
         return (

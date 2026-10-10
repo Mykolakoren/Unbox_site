@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
+import { notificationIcon } from '../../utils/notificationIcon';
 import { notificationsApi, type AppNotification } from '../../api/notifications';
 import { COLOR, STATUS } from '../../design/tokens';
 import { formatDayMonth, formatTime } from '../../utils/format';
@@ -167,9 +168,10 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
                                     color: COLOR.ink,
                                 }}
                             >
-                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>
-                                    {/* Значок приходит с сервера вместе с текстом уведомления. */}
-                                    {n.icon ? `${n.icon} ` : ''}{n.title}
+                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                    {/* Сервер присылает имя значка («CheckCircle») — рисуем значок, не текст. */}
+                                    {(() => { const Icon = notificationIcon(n.icon); return <Icon size={16} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} />; })()}
+                                    <span>{n.title}</span>
                                 </div>
                                 <div style={{ fontSize: 12, color: COLOR.ink80, lineHeight: 1.35 }}>
                                     {n.description}
