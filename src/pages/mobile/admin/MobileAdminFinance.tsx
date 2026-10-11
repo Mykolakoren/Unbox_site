@@ -399,7 +399,10 @@ function MobileAdminFinanceScreen() {
             {isLoading ? (
                 <SkeletonList count={4} label="Загружаем операции" cardHeight={56} />
             ) : scopedTransactions.length === 0 ? (
-                <EmptyState compact title="В этом периоде операций нет" hint="Новую операцию можно добавить кнопкой «+»." />
+                // Отступ снизу — под круглую «+»: она закрывала подсказку (обход 10.10).
+                <div style={{ paddingBottom: 72 }}>
+                    <EmptyState compact title="В этом периоде операций нет" hint="Новую операцию можно добавить кнопкой «+»." />
+                </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {scopedTransactions.slice(0, TX_LIMIT).map(t => (
