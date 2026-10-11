@@ -177,6 +177,31 @@ def test_reschedule_into_chain_paid_settles_once():
         assert len([r for r in led if r.reason == "reschedule_diff" and r.ref_id == str(a.id)]) == 1
 
 
+def test_personal_discount_beats_smaller_plan_discount():
+    """Владелец 11.10 (Светлана Розова): личная скидка 25 % больше скидки тарифа
+    15 % — денежная бронь по личной (2 ч: 40 → 30 ₾, не 34). Личная меньше
+    тарифной — как было, скидка тарифа. Часы абонемента — по-прежнему часами."""
+    import guard_hours_pool_moves as H
+    from app.services.pricing import PricingService
+    with H.frozen_time():
+        s = H._db()
+        sub = H._sub("REGULAR_PRACTITIONER")
+
+        def quote(pdp, cover):
+            u = H._user(s, role="specialist", sub=sub, balance=0.0, name=f"П{pdp}")
+            u.pricing_system, u.personal_discount_percent = "personal", pdp
+            s.add(u); s.commit(); s.refresh(u)
+            return PricingService(s).calculate_price(
+                user=u, resource_id="room_1", start_time=H._day(2).replace(hour=14), duration_minutes=120,
+                format_type="individual", subscription_hours_cover=cover)
+        q = quote(25, False)
+        assert (q.applied_rule, round(q.final_price, 2)) == ("PERSONAL_DISCOUNT", 30.0), (q.applied_rule, q.final_price)
+        q = quote(5, False)
+        assert q.applied_rule == "SUBSCRIPTION_DISCOUNT", q.applied_rule
+        q = quote(25, True)
+        assert q.applied_rule == "SUBSCRIPTION" and q.final_price == 0.0, (q.applied_rule, q.final_price)
+
+
 def test_series_reschedule_recomputes_chains_in_code():
     r = _src("backend/app/api/v1/bookings/routes.py")
     one = r[r.index("def reschedule_booking("):r.index("def _move_funds_check(")]

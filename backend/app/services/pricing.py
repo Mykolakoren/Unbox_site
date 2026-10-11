@@ -686,6 +686,12 @@ class PricingService:
         else:
             # Hours exhausted, apply generic plan discount if any
             discount_percent = float(user.subscription.get("discount_percent", user.subscription.get("discountPercent", 0)))
+            # Личная скидка больше скидки тарифа — берём личную (владелец 11.10,
+            # Светлана Розова: личные 25 % против 15 % тарифа; пересчёт «часов
+            # подряд» поднимал её брони 30 → 34 ₾). Часы абонемента выше — не тут.
+            personal = float(user.personal_discount_percent or 0) if user.pricing_system == "personal" else 0.0
+            if personal > discount_percent:
+                return False
             if discount_percent > 0:
                 breakdown.applied_rule = "SUBSCRIPTION_DISCOUNT"
                 breakdown.subscription_plan = plan_id
