@@ -4687,6 +4687,18 @@ def reschedule_booking(
             old_resource,
         )
 
+    # «Часы подряд» — цепочки клиента на новом и старом месте (как при создании
+    # и отмене). 11.10, Дарья Ермашкевич: бронь 12:00 перенесли из 1-го кабинета
+    # во 2-й встык к своей 13:00–14:30 — перенесённая получила скидку за 2,5 ч,
+    # а соседняя осталась по полной цене; соседи на старом месте так же держали
+    # бы скидку за цепочку, которой больше нет.
+    if (booking_owner and booking.payment_method == "balance"
+            and ((old_resource, old_date, old_time, old_duration)
+                 != (new_resource, new_date, data.new_start_time, new_duration))):
+        _recompute_chains_after_move(
+            session, booking_owner, [(new_resource, new_date), (old_resource, old_date)], current_user,
+        )
+
     # ── Waitlist: notify anyone waiting on the OLD (now freed) slot ──
     # Skip if the slot didn't really move (same day + time + resource edge case).
     slot_moved = (old_resource != new_resource) or (old_date != new_date) or (old_time != data.new_start_time)
@@ -4774,6 +4786,39 @@ def reschedule_booking(
             f"with new room {new_resource}: {dropped_extras}. Refunded user balance."
         )
     return booking
+
+
+def _recompute_chains_after_move(session: Session, owner: User, places: list, actor: Optional[User]) -> None:
+    """Пересчёт «часов подряд» после переноса: каждая пара (кабинет, день) — один
+    раз. Брони с оплатой — разница через ленту на свою бронь, не списанные —
+    только цена (recompute_chain_and_settle). Ошибка пересчёта перенос не валит."""
+    from app.services.consecutive_pricing import recompute_user_chains_for_day
+    seen: set = set()
+    for resource_id, day in places:
+        if not resource_id or day is None:
+            continue
+        key = (resource_id, day.strftime("%Y-%m-%d"))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            # Замок на строке клиента до wallet.apply (ревизия денег 11.10): иначе
+            # параллельное пополнение / крон T-24 между чтением и записью баланса
+            # теряется. Замок снимает commit этого места.
+            owner = session.exec(
+                select(User).where(User.id == owner.id).with_for_update()
+                .execution_options(populate_existing=True)
+            ).first() or owner
+            recompute_user_chains_for_day(
+                session, owner, resource_id, day,
+                actor_id=str(actor.id) if actor else None,
+                actor_role=actor.role if actor else "system",
+                reason="reschedule",
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("[consecutive] recompute on reschedule failed")
 
 
 def _move_funds_check(owner: User, extra: float) -> None:
@@ -5538,6 +5583,7 @@ def reschedule_booking_series(
 
     propagated = 0
     _series_session_moves: list = []
+    _chain_places: dict = {}
     skipped: list[dict] = []
     for sib in siblings:
         # Skip rows already in the past — moving them isn't meaningful and
@@ -5646,11 +5692,19 @@ def reschedule_booking_series(
         _sib_move = _sync_linked_session_to_booking(session, sib)
         if _sib_move:
             _series_session_moves.append(_sib_move)
+        if (sib.payment_method or "") == "balance":
+            _sib_owner = _resolve_booking_owner(session, sib)
+            if _sib_owner is not None:
+                _chain_places.setdefault(str(_sib_owner.id), (_sib_owner, []))[1].extend(
+                    [(new_resource, sib.date), (old_sib_resource, sib.date)])
         propagated += 1
 
     session.commit()
     if _series_session_moves:
         background_tasks.add_task(_push_session_moves_to_gcal_bg, _series_session_moves)
+    # «Часы подряд» на днях следующих встреч — как у якоря (11.10).
+    for _owner_obj, _places in _chain_places.values():
+        _recompute_chains_after_move(session, _owner_obj, _places, current_user)
 
     # Re-fetch to get the final state of the anchor after both writes.
     session.refresh(booking)

@@ -66,6 +66,127 @@ def test_create_booking_tz_normalization_in_code():
     assert "astimezone(_tz_utc.utc) + _td_tb(hours=4)" in body
 
 
+# ── «часы подряд» после переноса (чат админов 11.10, Дарья Ермашкевич) ──
+
+def _mk(s, u, *, day, start, minutes, room):
+    from fastapi import BackgroundTasks
+    import guard_hours_pool_moves as H
+    from app.api.v1.bookings import routes
+    from app.models.booking import Booking, BookingCreate
+    bi = BookingCreate(resource_id=room, location_id="unbox_uni", date=H._day(day), start_time=start,
+                       duration=minutes, format="individual", payment_method="balance")
+    out = H._call(routes.create_booking, session=s, booking_in=bi, current_user=u,
+                  background_tasks=BackgroundTasks())
+    assert not isinstance(out, dict), out
+    s.commit()
+    return s.get(Booking, out.id)
+
+
+def _move(s, b, u, *, room, start):
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    out = routes.reschedule_booking(
+        booking_id=str(b.id),
+        data=routes.RescheduleRequest(new_date=b.date.strftime("%Y-%m-%d"), new_start_time=start,
+                                      new_resource_id=room),
+        background_tasks=BackgroundTasks(), session=s, current_user=u)
+    s.expire_all()
+    return out
+
+
+def test_reschedule_into_chain_discounts_neighbour():
+    """12:00 переносят из 1-го кабинета во 2-й встык к своей 13:00–14:30:
+    скидку «часы подряд» получают ОБЕ брони (раньше — только перенесённая)."""
+    import guard_hours_pool_moves as H
+    from app.models.booking import Booking
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, role="specialist", balance=500.0, name="Дарья")
+        a = _mk(s, u, day=3, start="12:00", minutes=60, room="room_1")
+        b = _mk(s, u, day=3, start="13:00", minutes=90, room="room_2")
+        assert (a.final_price, b.final_price) == (20.0, 30.0), (a.final_price, b.final_price)
+        _move(s, a, u, room="room_2", start="12:00")
+        a, b = s.get(Booking, a.id), s.get(Booking, b.id)
+        assert a.applied_rule == "CONSECUTIVE_HOURS" and b.applied_rule == "CONSECUTIVE_HOURS", (a.applied_rule, b.applied_rule)
+        assert a.discount_percent == b.discount_percent > 0, (a.discount_percent, b.discount_percent)
+        assert b.final_price < 30.0, b.final_price
+
+
+def test_reschedule_out_of_chain_drops_neighbour_discount():
+    """Обратный случай: из цепочки 12:00+13:00 во 2-м кабинете 12:00 уносят в 1-й —
+    оставшаяся 13:00 теряет скидку за цепочку, которой больше нет."""
+    import guard_hours_pool_moves as H
+    from app.models.booking import Booking
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, role="specialist", balance=500.0, name="Дарья")
+        a = _mk(s, u, day=3, start="12:00", minutes=60, room="room_2")
+        b = _mk(s, u, day=3, start="13:00", minutes=90, room="room_2")
+        b = s.get(Booking, b.id)
+        assert b.applied_rule == "CONSECUTIVE_HOURS", b.applied_rule
+        _move(s, s.get(Booking, a.id), u, room="room_1", start="12:00")
+        b = s.get(Booking, b.id)
+        assert b.applied_rule != "CONSECUTIVE_HOURS" and b.final_price == 30.0, (b.applied_rule, b.final_price)
+
+
+def test_reschedule_into_chain_paid_settles_once():
+    """Оплаченные брони (сегодня, бронь админа — списание сразу): разница по
+    перенесённой — одной проводкой reschedule_diff, по соседу — одной
+    consecutive_recompute; баланс = старт + лента, charge_amount = цена."""
+    import guard_hours_pool_moves as H
+    from fastapi import BackgroundTasks
+    from sqlmodel import select
+    from app.api.v1.bookings import routes
+    from app.models.balance_ledger import BalanceLedger
+    from app.models.booking import Booking, BookingCreate
+    with H.frozen_time():
+        s = H._db()
+        admin = H._user(s, role="owner", balance=0.0, name="Админ")
+        u = H._user(s, role="specialist", balance=500.0, name="Дарья")
+
+        def mk(start, minutes, room):
+            bi = BookingCreate(resource_id=room, location_id="unbox_uni", date=H._day(0), start_time=start,
+                               duration=minutes, format="individual", payment_method="balance",
+                               target_user_id=str(u.id))
+            out = H._call(routes.create_booking, session=s, booking_in=bi, current_user=admin,
+                          background_tasks=BackgroundTasks())
+            assert not isinstance(out, dict), out
+            s.commit()
+            return s.get(Booking, out.id)
+
+        a = mk("14:00", 60, "room_1")
+        b = mk("15:00", 90, "room_2")
+        assert a.payment_status == "paid" and b.payment_status == "paid", (a.payment_status, b.payment_status)
+        start_bal = 500.0
+        routes.reschedule_booking(
+            booking_id=str(a.id),
+            data=routes.RescheduleRequest(new_date=a.date.strftime("%Y-%m-%d"), new_start_time="14:00",
+                                          new_resource_id="room_2"),
+            background_tasks=BackgroundTasks(), session=s, current_user=admin)
+        s.expire_all()
+        a, b = s.get(Booking, a.id), s.get(Booking, b.id)
+        assert a.applied_rule == b.applied_rule == "CONSECUTIVE_HOURS", (a.applied_rule, b.applied_rule)
+        for x in (a, b):
+            assert abs(float(x.charge_amount) - float(x.final_price)) < 0.005, (x.charge_amount, x.final_price)
+        led = s.exec(select(BalanceLedger).where(BalanceLedger.user_id == str(u.id))).all()
+        bal = float(s.get(type(u), u.id).balance)
+        assert abs(start_bal + sum(float(r.delta) for r in led) - bal) < 0.005, (bal, [(r.reason, r.delta) for r in led])
+        assert abs(bal - (start_bal - float(a.final_price) - float(b.final_price))) < 0.005, bal
+        recomp = [r for r in led if r.reason == "consecutive_recompute"]
+        assert len(recomp) == 1 and recomp[0].ref_id == str(b.id), [(r.reason, r.ref_id) for r in led]
+        assert len([r for r in led if r.reason == "reschedule_diff" and r.ref_id == str(a.id)]) == 1
+
+
+def test_series_reschedule_recomputes_chains_in_code():
+    r = _src("backend/app/api/v1/bookings/routes.py")
+    one = r[r.index("def reschedule_booking("):r.index("def _move_funds_check(")]
+    assert "_recompute_chains_after_move(\n            session, booking_owner, [(new_resource, new_date), (old_resource, old_date)]" in one
+    ser = r[r.index("def reschedule_booking_series("):]
+    assert "_recompute_chains_after_move(session, _owner_obj, _places, current_user)" in ser
+    h = r[r.index("def _recompute_chains_after_move("):r.index("def _move_funds_check(")]
+    assert ".with_for_update()" in h and "populate_existing=True" in h, "нет замка на строке клиента"
+
+
 # ── телефон: бронь кабинета из сессии CRM ───────────────────────────────
 
 def test_link_session_booking():
