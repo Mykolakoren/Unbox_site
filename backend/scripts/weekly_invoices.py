@@ -11,17 +11,23 @@
     cd /var/www/unbox/backend && venv/bin/python3 scripts/weekly_invoices.py [--dry-run] [--week 2026-10-05]
 """
 import argparse
+import os
 import sys
 from datetime import date, datetime, timedelta
 from html import escape
 
-from sqlalchemy import or_
-from sqlmodel import Session, select
+# Крон запускает скрипт без PYTHONPATH — путь к app/ ставим сами, как соседние
+# скрипты (money_audit, expire_subscriptions). 12.10: без этого первый же
+# понедельничный запуск упал «No module named 'app'», счёт Яне не ушёл.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from app.core.config import settings
-from app.db.session import engine
-from app.models.booking import Booking
-from app.models.user import User
+from sqlalchemy import or_  # noqa: E402
+from sqlmodel import Session, select  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+from app.db.session import engine  # noqa: E402
+from app.models.booking import Booking  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 TZ = timedelta(hours=4)
 TAGS = {"счёт за неделю", "счет за неделю"}
