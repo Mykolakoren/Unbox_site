@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import get_session
 from app.models.user import User, UserCreate, UserRead
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_optional_current_user
 import hashlib
 import hmac
 import json
@@ -31,6 +31,17 @@ WELCOME_BONUS_EXPIRY_DAYS = 15  # how long the new-user "free hour" stays redeem
 NEW_CLIENT_CREDIT_LIMIT = 50.0
 
 
+# Технические адреса: аккаунты, которые админы заводят под группы/сотрудников
+# существующих клиентов (Кристина Ропель: ropel1-3@unbox.center). Приветственный
+# час им не положен (решение владельца 12.10: 3 таких часа ушли вместо денег).
+TECH_EMAIL_DOMAINS = ("@unbox.center",)
+
+
+def is_tech_email(email: Optional[str]) -> bool:
+    e = (email or "").strip().lower()
+    return any(e.endswith(d) for d in TECH_EMAIL_DOMAINS)
+
+
 def _create_welcome_bonus(session: Session, user: User) -> None:
     """Create a 1-hour free booking bonus for a new user.
 
@@ -38,7 +49,12 @@ def _create_welcome_bonus(session: Session, user: User) -> None:
     pipeline as paid top-ups. Expires WELCOME_BONUS_EXPIRY_DAYS after signup —
     short window is intentional, encourages the user to actually try the
     space rather than collecting credits.
+
+    Технический адрес (@unbox.center) — никогда, каким бы путём ни завели.
     """
+    if is_tech_email(user.email):
+        logger.info("Welcome bonus skipped for technical address %s", user.email)
+        return
     try:
         from app.models.bonus import Bonus
         bonus = Bonus(
@@ -130,9 +146,16 @@ def register_new_user(
     *,
     session: Annotated[Session, Depends(get_session)],
     user_in: UserCreate,
+    caller: Annotated[Optional[User], Depends(get_optional_current_user)] = None,
+    welcome_bonus: Optional[bool] = None,
 ) -> Any:
     """
-    Create new user without the need to be logged in
+    Create new user without the need to be logged in.
+
+    Админка («Новый клиент») зовёт этот же эндпоинт со своим токеном. 12.10
+    (решение владельца): аккаунт, заведённый админом, получает приветственный
+    час только при ?welcome_bonus=true (галочка «новый клиент»); сам
+    зарегистрировавшийся клиент — как раньше. Технический адрес — никогда.
     """
     user = session.exec(select(User).where(User.email == user_in.email)).first()
     if user:
@@ -158,7 +181,10 @@ def register_new_user(
     session.refresh(user)
 
     # Auto-create welcome bonus (1 free hour)
-    _create_welcome_bonus(session, user)
+    from app.core.permissions import ADMIN_ROLES
+    by_admin = caller is not None and caller.role in ADMIN_ROLES
+    if not by_admin or welcome_bonus is True:
+        _create_welcome_bonus(session, user)
 
     return user
 

@@ -62,6 +62,11 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
     const [password, setPassword] = useState(generatePassword());
+    // 12.10 (решение владельца): приветственный час — только новому клиенту и
+    // только по галочке. Технический адрес (@unbox.center — группы, сотрудники
+    // уже существующих клиентов) часа не получает никогда (сервер, auth.py).
+    const [welcomeHour, setWelcomeHour] = useState(false);
+    const techEmail = email.trim().toLowerCase().endsWith('@unbox.center');
     const [showPassword, setShowPassword] = useState(true);
     const [saving, setSaving] = useState(false);
     const [created, setCreated] = useState(false);
@@ -80,7 +85,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 email: email.trim().toLowerCase(),
                 phone: phone.trim() || undefined,
                 password,
-            });
+            }, { params: { welcome_bonus: welcomeHour && !techEmail } });
             toast.success('Клиент создан');
             setCreated(true);
         } catch (err: any) {
@@ -161,6 +166,23 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                                 </div>
                             </div>
                         </div>
+                        <label className={`flex items-start gap-2 text-sm ${techEmail ? 'text-ink-60' : ''}`}>
+                            <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={welcomeHour && !techEmail}
+                                disabled={techEmail}
+                                onChange={e => setWelcomeHour(e.target.checked)}
+                            />
+                            <span>
+                                Новый клиент — подарить приветственный час (1 ч, 15 дней)
+                                <span className="block text-xs text-ink-60">
+                                    {techEmail
+                                        ? 'Адрес @unbox.center — технический аккаунт, приветственный час ему не положен.'
+                                        : 'Не ставьте, если это второй аккаунт уже знакомого клиента (группа, сотрудник).'}
+                                </span>
+                            </span>
+                        </label>
                         <button
                             type="submit"
                             disabled={saving}
