@@ -142,6 +142,7 @@ def create_session(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
+    _check_session_booking_id(session, getattr(data, "booking_id", None), current_user)
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
@@ -347,6 +348,28 @@ def create_session(
     return therapy_session
 
 
+def _own_booking(bk, user: User) -> bool:
+    """Бронь кабинета принадлежит специалисту. Есть uuid — только по нему (тот же
+    ключ, что у списания, _resolve_booking_owner); старая бронь без uuid — по почте."""
+    if bk.user_uuid:
+        return bk.user_uuid == user.id
+    return bool(bk.user_id) and bool(user.email) and bk.user_id.lower() == user.email.lower()
+
+
+def _check_session_booking_id(session: Session, booking_id: Optional[str], user: User) -> None:
+    """booking_id в сессии — только своя бронь (ревизия денег 12.10)."""
+    if not booking_id:
+        return
+    from uuid import UUID as _UUID
+    from app.models.booking import Booking as _Bk
+    try:
+        bk = session.get(_Bk, _UUID(str(booking_id)))
+    except (ValueError, TypeError):
+        bk = None
+    if bk is None or not _own_booking(bk, user):
+        raise HTTPException(404, "Бронь кабинета не найдена")
+
+
 @router.patch("/sessions/{session_id}", response_model=TherapySessionUpdateResult)
 def update_session(
     session_id: str,
@@ -371,6 +394,8 @@ def update_session(
         _new_cl = session.get(TherapistClient, update_data["client_id"])
         if not _new_cl or _new_cl.specialist_id != str(current_user.id):
             raise HTTPException(404, "Клиент не найден")
+    if update_data.get("booking_id"):
+        _check_session_booking_id(session, update_data["booking_id"], current_user)
 
     # 02.10: цена, валюта и счёт сессии. Форма правки раньше слала только цену,
     # а валюта и счёт терялись. Здесь же проверяем значения: валюта — из тех, что
@@ -410,11 +435,23 @@ def update_session(
         and update_data["date"] is not None
         and update_data["date"] != ts.date
     )
+    _chain_after_move = None  # (владелец брони, места) — пересчёт «часов подряд» после commit
     if booking_date_changed:
         from app.models.booking import Booking as _Booking
         from app.api.v1.bookings.routes import check_availability as _check_avail
 
-        bk = session.get(_Booking, ts.booking_id)
+        # id брони — строкой в сессии; к UUID явно (SQLite в стороже иначе падал,
+        # Postgres принимает и строку).
+        try:
+            from uuid import UUID as _UUID
+            bk = session.get(_Booking, _UUID(str(ts.booking_id)))
+        except (ValueError, TypeError):
+            bk = None
+        # 12.10, ревизия денег: двигаем только СВОЮ бронь. booking_id можно было
+        # записать в сессию чужой брони — перенос сессии двигал чужую аренду (а с
+        # пересчётом цены — и чужие деньги).
+        if bk and not _own_booking(bk, current_user):
+            raise HTTPException(403, "Бронь кабинета у этой сессии не ваша — отвяжите её от сессии")
         if bk and bk.status == "confirmed":
             # Convert new UTC-naive session time → Tbilisi wall-clock for booking
             new_session_utc = update_data["date"]
@@ -455,6 +492,36 @@ def update_session(
                     ts.id, bk.id, bk.date, bk.start_time,
                     new_booking_date, new_start_time,
                 )
+                # 12.10 (класс ошибки Дарьи Ермашкевич): бронь ехала за сессией
+                # без пересчёта цены — 12:00 → 20:00 оставалась без пиковой
+                # надбавки, «часы подряд» на новом и старом месте не менялись.
+                # Цена — тем же помощником, что у переноса брони (оплаченная:
+                # разница через ленту на эту бронь, с проверкой средств — 400 до
+                # любых движений; не списанная — только цена). Снятый штраф
+                # (waived) — деньги улажены, цену не трогаем, как раньше.
+                # Прошедшую бронь и перенос в прошлое не переоцениваем (ревизия денег
+                # 12.10): это правка задним числом — цену «после факта» не крутим,
+                # бронь едет за сессией, как раньше.
+                from app.api.v1.bookings.routes import (
+                    _is_past as _bk_is_past, _reprice_for_move as _reprice, _resolve_booking_owner as _bk_owner,
+                )
+                _new_start_past = (new_session_utc <= datetime.utcnow())
+                _bk_owner_obj = _bk_owner(session, bk)
+                if (_bk_owner_obj is not None and bk.payment_status != "waived"
+                        and (bk.payment_method or "balance") in ("balance", "subscription")
+                        and not _bk_is_past(bk) and not _new_start_past):
+                    try:
+                        _reprice(
+                            session, bk, _bk_owner_obj, new_resource=bk.resource_id, new_date=new_booking_date,
+                            new_start_time=new_start_time, new_duration=int(bk.duration or 0), actor=current_user,
+                        )
+                    except ValueError:
+                        # кабинет удалён / движок не посчитал — перенос не валим
+                        logger.exception("[autosync] reprice failed for booking %s", bk.id)
+                    else:
+                        # «Часы подряд» — только у денежных броней (как в переносе брони).
+                        if (bk.payment_method or "balance") == "balance":
+                            _chain_after_move = (_bk_owner_obj, [(bk.resource_id, new_booking_date), (bk.resource_id, bk.date)])
                 bk.date = new_booking_date
                 bk.start_time = new_start_time
                 # Clearing gcal_event_id forces the next CRM-calendar /
@@ -552,6 +619,12 @@ def update_session(
     session.add(ts)
     session.commit()
     session.refresh(ts)
+
+    if _chain_after_move is not None:
+        from app.api.v1.bookings.routes import _recompute_chains_after_move
+        _recompute_chains_after_move(session, _chain_after_move[0], _chain_after_move[1], current_user,
+                                     reason="crm_session_move")
+        session.refresh(ts)
 
     # 01.10: у сессии НЕТ события в календаре (создана без пуша, из шахматки,
     # с сайта) — при переносе ищем её событие на СТАРОМ времени и двигаем его;

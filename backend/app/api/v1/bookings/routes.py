@@ -4788,7 +4788,8 @@ def reschedule_booking(
     return booking
 
 
-def _recompute_chains_after_move(session: Session, owner: User, places: list, actor: Optional[User]) -> None:
+def _recompute_chains_after_move(session: Session, owner: User, places: list, actor: Optional[User],
+                                 skip_ids: Optional[set] = None, reason: str = "reschedule") -> None:
     """Пересчёт «часов подряд» после переноса: каждая пара (кабинет, день) — один
     раз. Брони с оплатой — разница через ленту на свою бронь, не списанные —
     только цена (recompute_chain_and_settle). Ошибка пересчёта перенос не валит."""
@@ -4813,7 +4814,8 @@ def _recompute_chains_after_move(session: Session, owner: User, places: list, ac
                 session, owner, resource_id, day,
                 actor_id=str(actor.id) if actor else None,
                 actor_role=actor.role if actor else "system",
-                reason="reschedule",
+                reason=reason,
+                skip_ids=skip_ids,
             )
             session.commit()
         except Exception:
@@ -4935,11 +4937,13 @@ def _reprice_for_move(
             # кабинете стыковался встык со своим старым слотом и дарил
             # скидку за 2 часа подряд. Как в trim/extend/split.
             exclude_booking_id=str(booking.id),
-            # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ. Без ignore движок при
-            # свежекупленном абонементе вернул бы SUBSCRIPTION/0₾ — и родилась бы
-            # «нулёвка» balance+0 (сигнатура утечки 1630₾). Перевод на абонемент —
-            # только явной кнопкой.
-            ignore_subscription=True,
+            # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ — часами абонемента не покрываем
+            # (иначе SUBSCRIPTION/0₾, «нулёвка» balance+0, сигнатура утечки 1630₾;
+            # перевод на абонемент — только явной кнопкой). Но скидку тарифа
+            # (SUBSCRIPTION_DISCOUNT) не теряем — как пересчёт «часов подряд»
+            # (ревизия 01.10, B1). 12.10, ревизия денег: ignore_subscription=True
+            # снимал −10…−25 % при переносе (17 → 20 ₾).
+            subscription_hours_cover=False,
         )
         # Ручная цена («Цена», «Час в подарок») у денежной брони — договорённость
         # об АБСОЛЮТНОЙ скидке в лари (цена движка − цена брони): перенос её не
@@ -4960,7 +4964,7 @@ def _reprice_for_move(
             _old_slot = PricingService(session).calculate_price(
                 user=owner, resource_id=booking.resource_id, start_time=old_start_dt,
                 duration_minutes=min(_d0, _d1) if _d0 > 0 else _d1, format_type=booking.format,
-                exclude_booking_id=str(booking.id), ignore_subscription=True,
+                exclude_booking_id=str(booking.id), subscription_hours_cover=False,
             )
             _rent = max(0.0, _rent + float(new_quote.final_price or 0) - float(_old_slot.final_price or 0))
             new_price = round(round(_rent, 2) + kept_extras_money, 2)
@@ -5704,7 +5708,7 @@ def reschedule_booking_series(
         background_tasks.add_task(_push_session_moves_to_gcal_bg, _series_session_moves)
     # «Часы подряд» на днях следующих встреч — как у якоря (11.10).
     for _owner_obj, _places in _chain_places.values():
-        _recompute_chains_after_move(session, _owner_obj, _places, current_user)
+        _recompute_chains_after_move(session, _owner_obj, _places, current_user, reason="reschedule_series")
 
     # Re-fetch to get the final state of the anchor after both writes.
     session.refresh(booking)
@@ -6571,8 +6575,9 @@ def extend_booking(
             # посчитал бы её соседом самой себе и задвоил часы в цепочке.
             exclude_booking_id=str(booking.id),
             # Аудит 2026-08-27: ветка только для денежных броней (гейт
-            # not _is_subscription выше) — абонемент не должен занулять доплату.
-            ignore_subscription=True,
+            # not _is_subscription выше) — абонемент не должен занулять доплату:
+            # часами не покрываем, скидку тарифа оставляем (12.10, ревизия денег).
+            subscription_hours_cover=False,
         )
         old_quote = pricing.calculate_price(duration_minutes=booking.duration, **_quote_args)
         new_quote = pricing.calculate_price(duration_minutes=new_duration, **_quote_args)
@@ -6651,6 +6656,16 @@ def extend_booking(
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # «Часы подряд» у соседей — как при переносе (12.10, тот же класс, что у Дарьи
+    # Ермашкевич): продление встык к своей соседней брони давало
+    # скидку только продлённой, соседняя оставалась по полной цене.
+    if booking.payment_method == "balance":
+        _chain_owner = _resolve_booking_owner(session, booking)
+        if _chain_owner is not None:
+            _recompute_chains_after_move(session, _chain_owner, [(booking.resource_id, booking.date)], current_user,
+                                         reason="extend_booking")
+            session.refresh(booking)
 
     # R33 fix — extend changes the booking duration so the Google Calendar
     # event needs its endTime updated. We don't have an `update_event`
@@ -7253,6 +7268,18 @@ def shorten_booking(
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # «Часы подряд» у соседей — как при переносе (12.10, тот же класс, что у Дарьи
+    # Ермашкевич): сокращение разрывало цепочку, а соседи сохраняли
+    # скидку за часы подряд, которых больше нет.
+    if booking.payment_method == "balance":
+        _chain_owner = _resolve_booking_owner(session, booking)
+        if _chain_owner is not None:
+            # Сама сокращённая — своей ценой (доля по минутам, как ждут сторожа
+            # r2_1/r3_6: допы и «уравнение аренды»), пересчитываем только соседей.
+            _recompute_chains_after_move(session, _chain_owner, [(booking.resource_id, booking.date)], current_user,
+                                         skip_ids={str(booking.id)}, reason="shorten_booking")
+            session.refresh(booking)
 
     # GCal: тот же паттерн что в extend — delete + create заново.
     if booking.gcal_event_id:

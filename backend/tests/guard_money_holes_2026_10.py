@@ -2620,8 +2620,10 @@ def test_r5_2_extend_keeps_rent_equation_and_manual_label():
     _shorten(s, admin, b)
     _extend(s, admin, s.get(Booking, b.id))
     b = s.get(Booking, b.id)
-    assert (float(b.final_price), booking_extras_money(b)) == (31.0, 3.0), (b.final_price, booking_extras_money(b))
-    assert round(float(b.base_price) - float(b.discount_amount), 2) == 28.0, (b.base_price, b.discount_amount)
+    # 12.10 (ревизия денег): после «Продлить» цепочка дня пересчитывается целиком —
+    # 1,5 ч одной бронью = 30 ₾ + кофе 3 (было 31: остаток скидки «Сократить»).
+    assert (float(b.final_price), booking_extras_money(b)) == (33.0, 3.0), (b.final_price, booking_extras_money(b))
+    assert round(float(b.base_price) - float(b.discount_amount), 2) == 30.0, (b.base_price, b.discount_amount)
     b = _reschedule(s, admin, b, start="15:00")
     assert float(b.final_price) == 33.0, b.final_price            # 90 мин × 20 + кофе 3
 

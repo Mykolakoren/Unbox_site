@@ -962,8 +962,15 @@ def test_reschedule_recomputes_price_on_time_change():
               and isinstance(c.func, ast.Attribute) and c.func.attr == "calculate_price"]
     assert quotes and all(_kw(q, "exclude_booking_id") is not None for q in quotes), \
         "бронь снова считает себя своим соседом — фантомная скидка за часы подряд"
-    assert any(isinstance(_kw(q, "ignore_subscription"), ast.Constant) and _kw(q, "ignore_subscription").value is True
-               for q in quotes), "денежная бронь при переносе снова котируется с абонементом"
+    # Денежная бронь не покрывается часами абонемента: ignore_subscription=True
+    # или (с 12.10, ревизия денег) subscription_hours_cover=False — второй
+    # вариант оставляет скидку тарифа SUBSCRIPTION_DISCOUNT (перенос 17 → 20 ₾).
+    def _no_hours_cover(q):
+        ig, hc = _kw(q, "ignore_subscription"), _kw(q, "subscription_hours_cover")
+        return ((isinstance(ig, ast.Constant) and ig.value is True)
+                or (isinstance(hc, ast.Constant) and hc.value is False))
+    assert quotes and all(_no_hours_cover(q) for q in quotes), \
+        "денежная бронь при переносе снова котируется с абонементом"
     # Ревизия денег 17.09: перенос waived-брони не двигает деньги от стухшей цены.
     assert 'booking.payment_status == "waived"' in body, \
         "перенос waived-брони снова двигает деньги от стухшей цены"

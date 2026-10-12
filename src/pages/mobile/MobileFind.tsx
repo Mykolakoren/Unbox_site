@@ -13,6 +13,7 @@ import { getFavoriteCabinet } from './favoriteCabinet';
 import { LoadErrorCard, SkeletonRows } from './LoadStates';
 import type { BookingHistoryItem } from '../../store/types';
 import { canBookCabinets } from '../../utils/permissions';
+import { isBookingAdmin } from './crmAccess';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { COLOR, STATUS, Z } from '../../design/tokens';
@@ -83,6 +84,9 @@ function pluralWindows(n: number): string {
     if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'окна';
     return 'окон';
 }
+
+/** Окно «задним числом» для админа — как на сервере (12 ч). */
+const BACKDATE_MIN = 12 * 60;
 
 export function MobileFind() {
     const navigate = useNavigate();
@@ -295,12 +299,18 @@ export function MobileFind() {
         return d;
     }, [dayOffset, customDate]);
 
+    // Админ может бронировать задним числом до 12 ч (сервер: _assert_start_not_past,
+    // шахматка — то же окно). 12.10, чат админов: с телефона прошедшее время
+    // было не выбрать вовсе. По умолчанию список с «сейчас», прошлое — по кнопке.
+    const canBackdate = isBookingAdmin(currentUser) && !rescheduleId && !linkSessionId;
+    const [showPast, setShowPast] = useState(false);
     const slots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
-        () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab, dayOffset === 0),
-        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset],
+        () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
+                               canBackdate && showPast ? BACKDATE_MIN : 0),
+        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast],
     );
 
     const toggleLoc = (id: string) => {
@@ -690,6 +700,12 @@ export function MobileFind() {
                             ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
                             : slots.length === 0 ? 'Свободных окон нет' : `Найдено: ${slots.length}`}
                     </SectionTitle>
+                    {canBackdate && dayOffset === 0 && (
+                        <Button variant="secondary" size="touch" onClick={() => setShowPast(v => !v)}
+                                style={{ marginBottom: 10 }}>
+                            {showPast ? 'Скрыть прошедшее время' : 'Показать прошедшее время (до 12 ч назад)'}
+                        </Button>
+                    )}
                     {/* Статус запроса — рядом со списком, а не над «Когда»:
                         чипы обычно ниже первого экрана, и надпись вверху
                         никто не видел. */}
@@ -1279,6 +1295,8 @@ function buildFreeWindows(
     spaces: Set<SpaceType>,
     favCab: string | null,
     isToday: boolean,
+    /** Сколько минут назад ещё можно начинать (админ, задним числом). */
+    backMin = 0,
 ): FreeWindow[] {
     if (locs.size === 0 || spaces.size === 0) return [];
 
@@ -1346,7 +1364,7 @@ function buildFreeWindows(
     // показывал 9:00 как «свободный» в 15:56 — пользователь жал, потом
     // не мог забронировать. tbilisiNow() не зависит от браузерного TZ
     // (важно — клиент может быть на UK VPN).
-    const minStartMin = isToday ? tbilisiNow().totalMins : 0;
+    const minStartMin = isToday ? Math.max(0, tbilisiNow().totalMins - backMin) : 0;
     // Step by 30 minutes — owner 2026-05-31 (Микола): нужны полу-часовые
     // старты (19:30 на 1.5ч). Раньше шаг был 60 «для коротких списков»,
     // но это резало половину легальных слотов. Список вырос вдвое, но

@@ -100,6 +100,7 @@ def recompute_chain_and_settle(
     session: Session,
     user: User,
     chain: List[Booking],
+    skip_ids: Optional[set] = None,
 ) -> dict:
     """Recompute every booking in the chain at the chain-total tier and
     settle the price delta on user.balance. Positive delta = client
@@ -130,6 +131,11 @@ def recompute_chain_and_settle(
         # сгорал (18 → 34 ₾, списано 16 ₾, метка BONUS_HOUR стёрта, и подарок
         # можно было применить второй раз), «Цена» 10 ₾ становилась 18 ₾.
         if (b.applied_rule or "") in MANUAL_PRICE_RULES:
+            continue
+        # Бронь, которую только что переносили / продлевали / сокращали, уже
+        # оценена своим путём (допы, «уравнение аренды», ручные доли) — здесь
+        # только её соседи; её часы при этом входят в длину цепочки.
+        if skip_ids and str(b.id) in skip_ids:
             continue
         try:
             h, m = map(int, b.start_time.split(":"))
@@ -222,6 +228,7 @@ def recompute_user_chains_for_day(
     actor_id: Optional[str] = None,
     actor_role: str = "system",
     reason: str = "consecutive_recompute",
+    skip_ids: Optional[set] = None,
 ) -> dict:
     """Find every chain the user has on this resource+day, recompute &
     settle each. One audit timeline row is written if anything changed.
@@ -237,7 +244,7 @@ def recompute_user_chains_for_day(
     }
 
     for chain in chains:
-        result = recompute_chain_and_settle(session, user, chain)
+        result = recompute_chain_and_settle(session, user, chain, skip_ids=skip_ids)
         summary["total_delta"] += result["total_delta"]
         if result["per_booking"]:
             summary["details"].append(result)

@@ -77,7 +77,9 @@ def test_find_protected_logic_untouched():
     """Хэши сняты 30.09 после пакета B. Меняете эти куски — это уже не вёрстка:
     нужен отдельный разбор (двойная бронь, перенос, занятость) и новый хэш."""
     src = _read("src/pages/mobile/MobileFind.tsx")
-    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "8d16c484ca75a0c7", \
+    # 12.10 (разобрано): backMin — админ задним числом до 12 ч, как сервер; по
+    # умолчанию 0 — окна по-прежнему с «сейчас».
+    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "d13656f033fed983", \
         "buildFreeWindows изменилась — расчёт свободных окон трогать нельзя"
     assert _sha(_block(src, "const inFlightRef", "\n    const chipsBusy")) == "fe70d7f6e804df6d", \
         "блокировка повторного тапа (inFlightRef/pendingChip) изменилась"

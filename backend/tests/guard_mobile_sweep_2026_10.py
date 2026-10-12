@@ -202,14 +202,227 @@ def test_personal_discount_beats_smaller_plan_discount():
         assert q.applied_rule == "SUBSCRIPTION" and q.final_price == 0.0, (q.applied_rule, q.final_price)
 
 
+def test_extend_into_neighbour_discounts_both():
+    """12.10, тот же класс, что у Дарьи: 12:00–13:00 продлили до 13:30 встык к
+    своей 13:30–15:00 — скидку «часы подряд» получают обе брони."""
+    import guard_hours_pool_moves as H
+    from app.api.v1.bookings import routes
+    from app.models.booking import Booking
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, role="specialist", balance=500.0, name="Клиент")
+        a = _mk(s, u, day=3, start="12:00", minutes=60, room="room_1")
+        b = _mk(s, u, day=3, start="13:30", minutes=90, room="room_1")
+        assert b.applied_rule != "CONSECUTIVE_HOURS"
+        routes.extend_booking(booking_id=str(a.id), payload=routes.ExtendRequest(extra_minutes=30),
+                              session=s, current_user=u)
+        s.expire_all()
+        a, b = s.get(Booking, a.id), s.get(Booking, b.id)
+        assert a.duration == 90 and a.applied_rule == b.applied_rule == "CONSECUTIVE_HOURS", (a.duration, a.applied_rule, b.applied_rule)
+        assert a.discount_percent == b.discount_percent > 0
+
+
+def test_shorten_breaks_chain_drops_neighbour_discount():
+    """Сократили 12:00–13:00 с конца до… нельзя меньше часа — берём 12:00–14:00
+    (2 ч) + 14:00–15:30: сократили первую на час с конца → разрыв, у 14:00 скидки нет."""
+    import guard_hours_pool_moves as H
+    from app.api.v1.bookings import routes
+    from app.models.booking import Booking
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, role="specialist", balance=500.0, name="Клиент")
+        a = _mk(s, u, day=3, start="12:00", minutes=120, room="room_1")
+        b = _mk(s, u, day=3, start="14:00", minutes=90, room="room_1")
+        b = s.get(Booking, b.id)
+        assert b.applied_rule == "CONSECUTIVE_HOURS", b.applied_rule
+        routes.shorten_booking(booking_id=str(a.id), payload=routes.ShortenRequest(remove_minutes=60, side="end"),
+                               session=s, current_user=u)
+        s.expire_all()
+        b = s.get(Booking, b.id)
+        assert b.applied_rule != "CONSECUTIVE_HOURS" and b.final_price == 30.0, (b.applied_rule, b.final_price)
+
+
+def test_crm_session_move_reprices_linked_booking():
+    """12.10: перенос сессии в CRM двигает её бронь — и цену тоже: 12:00 → 20:00
+    (пик 20–22, +5 ₾/ч) — 20 → 25 ₾. Раньше бронь ехала по старой цене."""
+    import guard_hours_pool_moves as H
+    from datetime import datetime, timedelta
+    from app.api.v1.crm import sessions as crm_sessions
+    from app.models.booking import Booking
+    from app.models.therapist_client import TherapistClient
+    from app.models.therapy_session import TherapySession, TherapySessionUpdate
+    with H.frozen_time():
+        s = H._db()
+        u = H._user(s, role="specialist", balance=500.0, name="Спец")
+        b = _mk(s, u, day=3, start="12:00", minutes=60, room="room_1")
+        assert b.final_price == 20.0, b.final_price
+        c = TherapistClient(specialist_id=str(u.id), name="Клиент", alias_code="1234", base_price=100)
+        s.add(c); s.commit(); s.refresh(c)
+        ts = TherapySession(client_id=c.id, specialist_id=str(u.id), date=b.date.replace(hour=8),  # 12:00 Тбилиси
+                            duration_minutes=60, booking_id=str(b.id), is_booked=True)
+        s.add(ts); s.commit(); s.refresh(ts)
+        new_local = b.date.replace(hour=20, minute=0)
+        crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(date=new_local),
+                                    session=s, current_user=u)
+        s.expire_all()
+        b = s.get(Booking, b.id)
+        assert (b.start_time, round(b.final_price, 2)) == ("20:00", 25.0), (b.start_time, b.final_price)
+
+
+def test_reschedule_keeps_plan_discount():
+    """Ревизия денег 12.10: у клиента с абонементом без часов денежная бронь со
+    скидкой тарифа (15 %, 17 ₾) после переноса остаётся 17 ₾ (было: 20 ₾)."""
+    import guard_hours_pool_moves as H
+    from app.models.booking import Booking
+    from app.services import subscription_pool as P
+    with H.frozen_time():
+        s = H._db()
+        sub = P.update(H._sub("REGULAR_PRACTITIONER"), remaining_hours=0.0, used_hours=20.0)
+        u = H._user(s, role="specialist", sub=sub, balance=300.0, name="Абонемент")
+        a = _mk(s, u, day=3, start="14:00", minutes=60, room="room_1")
+        assert (a.applied_rule, a.final_price) == ("SUBSCRIPTION_DISCOUNT", 17.0), (a.applied_rule, a.final_price)
+        _move(s, a, u, room="room_1", start="16:00")
+        a = s.get(Booking, a.id)
+        assert (a.start_time, a.final_price) == ("16:00", 17.0), (a.start_time, a.final_price, a.applied_rule)
+
+
+def _crm_pair(s, owner_user, specialist, *, day, start):
+    from app.models.therapist_client import TherapistClient
+    from app.models.therapy_session import TherapySession
+    b = _mk(s, owner_user, day=day, start=start, minutes=60, room="room_1")
+    c = TherapistClient(specialist_id=str(specialist.id), name="Клиент", alias_code="1234", base_price=100)
+    s.add(c); s.commit(); s.refresh(c)
+    h = int(start[:2])
+    ts = TherapySession(client_id=c.id, specialist_id=str(specialist.id), date=b.date.replace(hour=h - 4),
+                        duration_minutes=60, booking_id=str(b.id), is_booked=True)
+    s.add(ts); s.commit(); s.refresh(ts)
+    return b, ts
+
+
+def test_crm_session_cannot_move_foreign_booking():
+    """Ревизия денег 12.10: сессия с чужой бронью (booking_id вписан руками) —
+    перенос сессии 403, чужая бронь не двигается; booking_id чужой брони — 404."""
+    import guard_hours_pool_moves as H
+    from fastapi import HTTPException
+    from app.api.v1.crm import sessions as crm_sessions
+    from app.models.booking import Booking
+    from app.models.therapy_session import TherapySessionUpdate
+    with H.frozen_time():
+        s = H._db()
+        victim = H._user(s, role="specialist", balance=500.0, name="Чужой")
+        me = H._user(s, role="specialist", balance=500.0, name="Я")
+        b, ts = _crm_pair(s, victim, me, day=3, start="12:00")
+        try:
+            crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(date=b.date.replace(hour=20)),
+                                        session=s, current_user=me)
+            raise AssertionError("чужая бронь сдвинулась")
+        except HTTPException as e:
+            s.rollback()
+            assert e.status_code == 403, e.status_code
+        assert s.get(Booking, b.id).start_time == "12:00"
+        try:
+            crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(booking_id=str(b.id)),
+                                        session=s, current_user=me)
+            raise AssertionError("привязали чужую бронь")
+        except HTTPException as e:
+            s.rollback()
+            assert e.status_code == 404, e.status_code
+
+
+def test_crm_session_move_past_booking_not_repriced():
+    """Ревизия денег 12.10: прошедшую бронь перенос сессии двигает, но цену
+    задним числом не меняет (20 ₾ остаётся и в «пик» 20:00)."""
+    import guard_hours_pool_moves as H
+    from app.api.v1.crm import sessions as crm_sessions
+    from app.models.booking import Booking
+    from app.models.therapy_session import TherapySessionUpdate
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.models.booking import BookingCreate
+    with H.frozen_time():
+        s = H._db()
+        admin = H._user(s, role="owner", balance=0.0, name="Админ")
+        me = H._user(s, role="specialist", balance=500.0, name="Я")
+        # бронь сегодня 09:00 по Тбилиси (сейчас 10:00) — уже идёт/прошла
+        bi = BookingCreate(resource_id="room_1", location_id="unbox_uni", date=H._day(0), start_time="09:00",
+                           duration=60, format="individual", payment_method="balance", target_user_id=str(me.id))
+        out = H._call(routes.create_booking, session=s, booking_in=bi, current_user=admin,
+                      background_tasks=BackgroundTasks())
+        assert not isinstance(out, dict), out
+        s.commit()
+        b = s.get(Booking, out.id)
+        price0 = float(b.final_price)
+        from app.models.therapist_client import TherapistClient
+        from app.models.therapy_session import TherapySession
+        c = TherapistClient(specialist_id=str(me.id), name="К", alias_code="4321", base_price=100)
+        s.add(c); s.commit(); s.refresh(c)
+        ts = TherapySession(client_id=c.id, specialist_id=str(me.id), date=b.date.replace(hour=5),
+                            duration_minutes=60, booking_id=str(b.id), is_booked=True)
+        s.add(ts); s.commit(); s.refresh(ts)
+        crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(date=b.date.replace(hour=8)),
+                                    session=s, current_user=me)
+        s.expire_all()
+        b = s.get(Booking, b.id)
+        assert b.start_time == "08:00" and float(b.final_price) == price0, (b.start_time, b.final_price, price0)
+
+
+def test_crm_session_move_finished_booking_to_future_not_repriced():
+    """Ветка «бронь уже прошла, сессию двигают в будущий пик»: бронь едет за
+    сессией, цена прежняя (правка задним числом не переоценивает)."""
+    import guard_hours_pool_moves as H
+    from datetime import datetime as _dt, timedelta
+    from fastapi import BackgroundTasks
+    from app.api.v1.bookings import routes
+    from app.api.v1.crm import sessions as crm_sessions
+    from app.models.booking import Booking, BookingCreate
+    from app.models.therapist_client import TherapistClient
+    from app.models.therapy_session import TherapySession, TherapySessionUpdate
+    with H.frozen_time():  # пн 05.10, 10:00 по Тбилиси
+        s = H._db()
+        admin = H._user(s, role="owner", balance=0.0, name="Админ")
+        me = H._user(s, role="specialist", balance=500.0, name="Я")
+        # бронь от админа (у специалиста за 2 ч до начала она ушла бы на одобрение)
+        bi = BookingCreate(resource_id="room_1", location_id="unbox_uni", date=H._day(0), start_time="12:00",
+                           duration=60, format="individual", payment_method="balance", target_user_id=str(me.id))
+        out = H._call(routes.create_booking, session=s, booking_in=bi, current_user=admin,
+                      background_tasks=BackgroundTasks())
+        assert not isinstance(out, dict), out
+        s.commit()
+        bid = out.id
+        price0 = float(s.get(Booking, bid).final_price)
+        c = TherapistClient(specialist_id=str(me.id), name="К", alias_code="4321", base_price=100)
+        s.add(c); s.commit(); s.refresh(c)
+        ts = TherapySession(client_id=c.id, specialist_id=str(me.id), date=_dt(2026, 10, 5, 8, 0),
+                            duration_minutes=60, booking_id=str(bid), is_booked=True)
+        s.add(ts); s.commit(); s.refresh(ts)
+        tsid = ts.id
+    with H.frozen_time(at=_dt(2026, 10, 5, 12, 0)):  # 16:00 по Тбилиси — бронь 12:00–13:00 прошла
+        assert routes._is_past(s.get(Booking, bid))
+        crm_sessions.update_session(session_id=tsid, data=TherapySessionUpdate(date=_dt(2026, 10, 7, 20, 0)),
+                                    session=s, current_user=me)
+        s.expire_all()
+        b = s.get(Booking, bid)
+        assert (b.date.day, b.start_time, float(b.final_price)) == (7, "20:00", price0), (b.date, b.start_time, b.final_price, price0)
+
+
 def test_series_reschedule_recomputes_chains_in_code():
     r = _src("backend/app/api/v1/bookings/routes.py")
     one = r[r.index("def reschedule_booking("):r.index("def _move_funds_check(")]
-    assert "_recompute_chains_after_move(\n            session, booking_owner, [(new_resource, new_date), (old_resource, old_date)]" in one
+    assert "_recompute_chains_after_move(\n            session, booking_owner, [(new_resource, new_date), (old_resource, old_date)], current_user,\n        )" in one
     ser = r[r.index("def reschedule_booking_series("):]
-    assert "_recompute_chains_after_move(session, _owner_obj, _places, current_user)" in ser
+    assert '_recompute_chains_after_move(session, _owner_obj, _places, current_user, reason="reschedule_series")' in ser
+    for fn, nxt, tail in (("def extend_booking(", "def add_booking_extras(", 'reason="extend_booking")'),
+                          ("def shorten_booking(", "def split_booking(", 'skip_ids={str(booking.id)}, reason="shorten_booking")')):
+        body = r[r.index(fn):r.index(nxt)]
+        assert "_recompute_chains_after_move(session, _chain_owner, [(booking.resource_id, booking.date)], current_user," in body, fn
+        assert tail in body, fn
+    # ревизия денег 12.10: skip_ids — ТОЛЬКО у «Сократить»; перенос/продление/CRM
+    # пересчитываются целиком (иначе терялась скидка тарифа абонемента)
+    assert r.count("skip_ids={str(booking.id)}") == 1
     h = r[r.index("def _recompute_chains_after_move("):r.index("def _move_funds_check(")]
     assert ".with_for_update()" in h and "populate_existing=True" in h, "нет замка на строке клиента"
+    rp = r[r.index("def _reprice_for_move("):r.index("def _recompute_chains_after_move(")]
+    assert "ignore_subscription=True" not in rp, "перенос снова снимает скидку тарифа"
 
 
 # ── чат админов 12.10: касса и бронь задним числом ─────────────────────
@@ -233,6 +446,16 @@ def test_chessboard_select_allows_12h_back():
     assert "timeToMin(time) < now.totalMins" not in body
     r = _src("backend/app/api/v1/bookings/routes.py")
     assert "if diff_h < -12.0:" in r
+
+
+def test_mobile_find_admin_backdate():
+    """Админ с телефона: «Показать прошедшее время (до 12 ч назад)» на сегодня —
+    окна с now−12 ч (сервер то же пускает). Не админу и в переносе/привязке — нет."""
+    f = _src("src/pages/mobile/MobileFind.tsx")
+    assert "const BACKDATE_MIN = 12 * 60;" in f
+    assert "const canBackdate = isBookingAdmin(currentUser) && !rescheduleId && !linkSessionId;" in f
+    assert "Math.max(0, tbilisiNow().totalMins - backMin)" in f
+    assert "canBackdate && showPast ? BACKDATE_MIN : 0" in f
 
 
 # ── телефон: бронь кабинета из сессии CRM ───────────────────────────────
