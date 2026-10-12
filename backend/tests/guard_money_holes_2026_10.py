@@ -1442,13 +1442,22 @@ def test_r2_4_series_reschedule_reprices_every_meeting():
 def test_r2_4_money_row_reschedule_reprices_cash():
     """Бронь по абонементу, ушедшая в деньги (3 ч с 14:00: 54 + песочница 5 =
     59 ₾), переносится на 19:00 (20–22 пик): цена деньгами на новый слот
-    (20 + 25·2 = 70 − 10 % = 63) + 5 = 68 ₾ — доплата 9 ₾; отмена → +68."""
+    (20 + 25·2 = 70 − 10 % = 63) + 5 = 68 ₾; отмена → +68.
+    12.10 (владелец, п.3): бронь через 3 дня — перенос дальше суток возвращает
+    59 ₾, бронь ждёт списания; крон за сутки снимает 68 ₾ (итого −9, как доплата)."""
     s = _db()
     admin = _admin(s)
     u = _client(s, _sub("WARM_START", remaining_hours=3.0, used_hours=7.0))
     b = _money_row(s, admin, u, minutes=180, extras=["sandbox"])
     bal0 = _bal(s, u)
     b = _reschedule(s, admin, b, start="19:00", days=3)
+    assert (b.payment_status, b.charge_amount, _bal(s, u)) == ("pending", None, round(bal0 + 59.0, 2)), \
+        (b.payment_status, b.charge_amount, _bal(s, u), bal0)
+    from app.services import billing_defer
+    ok, _ = billing_defer.settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok
+    b = s.get(Booking, b.id)
     assert (round(float(b.charge_amount), 2), _bal(s, u)) == (68.0, round(bal0 - 9.0, 2)), \
         (b.charge_amount, _bal(s, u), bal0)
     _cancel(s, admin, b)

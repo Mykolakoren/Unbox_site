@@ -77,7 +77,8 @@ export function MobileCalendar() {
     // single-room timeline and the all-day schedule.
     const dayBookings = useMemo(() => {
         return bookings
-            .filter(b => b.status === 'confirmed' && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') === dayKey)
+            // «На подтверждении» тоже держит время (12.10, как check_availability на сервере).
+            .filter(b => (b.status === 'confirmed' || b.status === 'pending_approval') && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') === dayKey)
             .map(b => {
                 const [h, m] = (b.startTime || '00:00').split(':').map(Number);
                 const startMin = h * 60 + m;

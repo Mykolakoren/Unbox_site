@@ -20,6 +20,7 @@ import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../
 import { calculatePrice } from '../../utils/pricing';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
 import { ruPlural } from '../../utils/plural';
+import { seriesApprovalNote } from '../../utils/approvalNote';
 import type { Format } from '../../types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
@@ -69,7 +70,8 @@ export function MobileCheckout() {
     const [confirmed, setConfirmed] = useState(false);
     // Волна 2 (вёрстка V1): экран подтверждения после брони и шторки
     // «Время», «Чем платите», раскрытые «Допуслуги».
-    const [done, setDone] = useState<{ pending: boolean } | null>(null);
+    // waiting/total — корзина: сколько броней из скольких ждут подтверждения (12.10).
+    const [done, setDone] = useState<{ pending: boolean; waiting?: number; total?: number } | null>(null);
     // Бронь админа «за другого»: экран успеха говорит, чья она (обход 10.10).
     const [doneFor, setDoneFor] = useState<string | null>(null);
     const [timeOpen, setTimeOpen] = useState(false);
@@ -217,20 +219,36 @@ export function MobileCheckout() {
     //   Mon-Fri Tbilisi → 12h
     //   Sat-Sun Tbilisi → 24h (weekend admin coverage is patchier)
     // Mirror this here so the banner shows when it actually will apply.
-    const isHotBooking = useMemo(() => {
-        const first = priced.items[0];
-        if (!first) return false;
-        const hoursUntil = (first.start.getTime() - Date.now()) / 3600000;
-        const dow = first.start.getDay(); // 0=Sun, 6=Sat (local browser TZ)
-        const isWeekend = dow === 0 || dow === 6;
-        const threshold = isWeekend ? 24 : 12;
-        // 06.10: после 21:00 — бронь на завтра до 12:00 тоже ждёт подтверждения.
+    // 12.10: корзина и серия тоже уходят на подтверждение (сервер,
+    // services/booking_policy.is_hot_start) — смотрим КАЖДЫЙ слот, не только первый;
+    // граница — «не больше» 12/24 ч, как на сервере.
+    const hotInfo = useMemo(() => {
         const now = tbilisiNow();
         const tomorrow = new Date(`${now.ymd}T12:00:00`); tomorrow.setDate(tomorrow.getDate() + 1);
         const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-        const eveningNextMorning = now.h >= 21 && sameDay(first.start, tomorrow) && first.start.getHours() < 12;
-        return hoursUntil >= 0 && (hoursUntil < threshold || eveningNextMorning);
+        let reason: string | null = null;
+        let count = 0;
+        for (const item of priced.items) {
+            // Момент начала по Тбилиси (UTC+4), а не по часам браузера (VPN, поездка).
+            const startMs = Date.UTC(item.start.getFullYear(), item.start.getMonth(), item.start.getDate(),
+                item.start.getHours() - 4, item.start.getMinutes());
+            const hoursUntil = (startMs - Date.now()) / 3600000;
+            const dow = item.start.getDay(); // 0=Sun, 6=Sat
+            const isWeekend = dow === 0 || dow === 6;
+            const threshold = isWeekend ? 24 : 12;
+            // 06.10: после 21:00 — бронь на завтра до 12:00 тоже ждёт подтверждения.
+            const eveningNextMorning = now.h >= 21 && sameDay(item.start, tomorrow) && item.start.getHours() < 12;
+            let r: string | null = null;
+            if (hoursUntil > 0 && hoursUntil <= threshold) {
+                r = isWeekend ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';
+            } else if (hoursUntil > 0 && eveningNextMorning) {
+                r = 'Бронь после 21:00 на утро';
+            }
+            if (r) { count += 1; reason = reason ?? r; }
+        }
+        return reason ? { reason, count } : null;
     }, [priced.items]);
+    const isHotBooking = hotInfo !== null;
 
     // ── Порядок оплаты (владелец 29.09): бонус → абонемент → баланс ──
     // Абонемент: честный остаток — часы будущих, ещё не списанных броней уже
@@ -445,8 +463,10 @@ export function MobileCheckout() {
             const skippedNote = result.skipped?.length
                 ? ` · пропущено занятых: ${result.skipped.length}`
                 : '';
+            // 12.10: срочная встреча серии — «на подтверждении» (сервер считает сам).
+            const pendingNote = seriesApprovalNote(result.pendingApproval);
             toast.success(
-                `Серия создана: ${result.created} ${ruPlural(result.created, ['бронь', 'брони', 'броней'])} · ${formatGel(result.totalCost)}${skippedNote}`,
+                `Серия создана: ${result.created} ${ruPlural(result.created, ['бронь', 'брони', 'броней'])} · ${formatGel(result.totalCost)}${skippedNote}${pendingNote}`,
                 { duration: 6000 },
             );
             // Navigate immediately — the toast container lives at app
@@ -548,14 +568,13 @@ export function MobileCheckout() {
                 setDone({ pending: (created as any).status === 'pending_approval' });
             } else {
                 // Multi-slot batch — addBookings handles its own toasts/errors.
-                await addBookings(newBookings as any);
+                const batch = await addBookings(newBookings as any);
                 useBookingStore.getState().reset();
                 setConfirmed(true);
-                // Мультислот (POST /bookings/multi-slot) сервер не отправляет
-                // на одобрение — брони сразу подтверждены; ответ addBookings
-                // сюда не приходит, поэтому «на одобрении» не обещаем.
+                // 12.10: срочные слоты корзины сервер ставит «на подтверждение» —
+                // статус по его ответу (сколько броней ждёт одобрения).
                 setDoneFor(proxyName);
-                setDone({ pending: false });
+                setDone({ pending: !!batch && batch.pendingApproval > 0, waiting: batch?.pendingApproval ?? 0, total: newBookings.length });
             }
         } catch (e: any) {
             if (isSpecialistOnlyRefusal(e)) {
@@ -587,6 +606,8 @@ export function MobileCheckout() {
         return (
             <DoneScreen
                 pending={done.pending}
+                waiting={done.waiting}
+                total={done.total}
                 forName={doneFor}
                 summary={summaryRef.current}
                 onBookings={() => navigate(doneFor ? '/m/admin/bookings' : '/m/bookings', { replace: true })}
@@ -618,9 +639,13 @@ export function MobileCheckout() {
                         ? `С баланса · ${formatGel(seriesQuote.totalMoney)} за серию`
                         : `С баланса · ${payLabel} за встречу`)
                     : `С баланса · ${payLabel}`;
-    // На одобрение сервер отправляет только одиночную бронь не-админа
-    // (routes.py: is_hot and not is_admin_or_above; у мультислота барьера нет).
-    const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser) && !isSeries; // серия создаётся сразу confirmed (барьер только у одиночного POST /bookings/)
+    // На одобрение сервер отправляет срочные часы не-админа — одиночной брони,
+    // корзины и серии (12.10, одно правило booking_policy.is_hot_start).
+    const expectApproval = isHotBooking && !isBookingAdmin(currentUser);
+    // Часть срочная, часть нет: серия (срочной бывает только первая встреча) или
+    // корзина вечером после 21:00 — утро (срочно) и день.
+    const approvalSome = expectApproval && (isSeries || (hotInfo?.count ?? 0) < priced.items.length);
+    const approvalAll = expectApproval && !approvalSome;
 
     return (
         <>
@@ -973,13 +998,12 @@ export function MobileCheckout() {
                         {expectApproval ? (
                             <li>
                                 <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4, color: STATUS.pending.fg }} />
-                                <b>{(() => {
-                                    const f = priced.items[0];
-                                    if (!f) return 'Скоро старт';
-                                    const d = f.start.getDay();
-                                    return (d === 0 || d === 6) ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';
-                                })()}</b> — бронь уйдёт администратору на одобрение.
-                                {' '}Слот закрепится за вами после подтверждения — пришлём уведомление.
+                                <b>{hotInfo?.reason}</b> — {isSeries
+                                    ? 'первая встреча уйдёт администратору на одобрение, остальные сразу ваши.'
+                                    : approvalSome
+                                        ? `срочные брони (${hotInfo?.count} из ${priced.items.length}) уйдут администратору на одобрение, остальные сразу ваши.`
+                                        : priced.items.length > 1 ? 'брони уйдут администратору на одобрение.' : 'бронь уйдёт администратору на одобрение.'}
+                                {' '}Время за вами держится, пока администратор решает, — пришлём уведомление.
                             </li>
                         ) : (
                             <li>Бронь сразу ваша — подтверждать не нужно.</li>
@@ -1031,10 +1055,12 @@ export function MobileCheckout() {
                             return (
                                 <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
                                     {debt > 0
-                                        ? `${expectApproval ? 'Спишем после одобрения' : 'Спишется сразу'} ${formatGel(priced.total)}, из них ${formatGel(debt)} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0)})`
-                                        : expectApproval
+                                        ? `${approvalAll ? 'Спишем после одобрения' : approvalSome ? 'Спишется (за срочные — после одобрения)' : 'Спишется сразу'} ${formatGel(priced.total)}, из них ${formatGel(debt)} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0)})`
+                                        : approvalAll
                                             ? `Спишем после одобрения: ${formatGel(priced.total)} с баланса`
-                                            : `Спишется сразу ${formatGel(priced.total)} с баланса, останется ${formatGel(after)}`}
+                                            : approvalSome
+                                                ? `Спишется ${formatGel(priced.total)} с баланса: за срочные брони — после одобрения, за остальные — сразу`
+                                                : `Спишется сразу ${formatGel(priced.total)} с баланса, останется ${formatGel(after)}`}
                                 </li>
                             );
                         })()}
@@ -1107,7 +1133,7 @@ export function MobileCheckout() {
                                 ? (effectiveOccurrences > 0
                                     ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences)}`
                                     : 'Выберите число повторов или дату')
-                                : expectApproval
+                                : approvalAll
                                     ? `Отправить на одобрение · ${payLabel}`
                                     : `Забронировать · ${payLabel}`}
                 </Button>
@@ -1434,8 +1460,11 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
 
 /** Экран после брони (решение владельца): бронь на одобрении —
  *  «Ждём подтверждения администратора», обычная — «Бронь ваша». */
-function DoneScreen({ pending, forName, summary, onBookings, onHome }: {
+function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onHome }: {
     pending: boolean;
+    /** Корзина: сколько броней из скольких ждут подтверждения (остальные уже подтверждены). */
+    waiting?: number;
+    total?: number;
     /** Бронь админа за другого: «Бронь создана: …», кнопка — в брони центра (обход 10.10:
      *  писали «Бронь ваша… уже в «Моих бронях»», а у админа её там нет). */
     forName?: string | null;
@@ -1443,6 +1472,9 @@ function DoneScreen({ pending, forName, summary, onBookings, onHome }: {
     onBookings: () => void;
     onHome: () => void;
 }) {
+    // «2 из 3 броней» — только когда подтверждения ждёт не вся корзина.
+    const partialWait = pending && waiting && total && waiting < total
+        ? `${waiting} из ${total} ${ruPlural(total, ['брони', 'броней', 'броней'])}` : '';
     return (
         <div style={{ padding: '48px 16px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
             <div aria-hidden="true" style={{
@@ -1459,8 +1491,8 @@ function DoneScreen({ pending, forName, summary, onBookings, onHome }: {
             <p style={{ margin: 0, fontSize: TEXT.body, color: COLOR.ink80, lineHeight: 1.5, maxWidth: 340 }}>
                 {pending
                     ? (forName
-                        ? 'Бронь ждёт подтверждения в «Заявках».'
-                        : 'Слот закрепится за вами после подтверждения. Пришлём уведомление, как только администратор ответит.')
+                        ? (partialWait ? `${partialWait} ${waiting === 1 ? 'ждёт' : 'ждут'} подтверждения в «Заявках», остальные уже подтверждены.` : 'Бронь ждёт подтверждения в «Заявках».')
+                        : `${partialWait ? `${partialWait} ${waiting === 1 ? 'ждёт' : 'ждут'} подтверждения, остальные уже ваши. ` : ''}Время за вами держится, пока администратор решает. Пришлём уведомление, как только он ответит.`)
                     : forName
                         ? 'Бронь уже видна в «Бронях» админки и у специалиста в «Моих бронях».'
                         : 'Всё готово — бронь уже в «Моих бронях».'}

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { backdateHours } from '../../utils/permissions';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LOCATIONS, RESOURCES, EXTRAS, availableExtrasForResource } from '../../utils/data';
@@ -216,6 +217,8 @@ export function AdminChessboardView() {
     // экране оставались обезличенные публичные брони «Гость · 0 ₾», а без списка
     // клиентов вместо имён шли почты. Перезапускаем, как только роль появилась.
     const viewerRole = useUserStore(s => s.currentUser?.role);
+    // Окно «задним числом» (ч): админ 12, старший админ и владелец 72 — как сервер.
+    const backHours = backdateHours({ role: viewerRole });
     const fetchUsersForNames = useUserStore(s => s.fetchUsers);
     useEffect(() => {
         fetchResources();
@@ -333,7 +336,8 @@ export function AdminChessboardView() {
             // Slot instant in true UTC ms: Tbilisi h:m on (y,mo,d) = UTC (h-4):m on same date
             const slotMs = Date.UTC(y, mo - 1, d, h - 4, m, 0);
             const hoursAgo = (Date.now() - slotMs) / 3_600_000;
-            if (hoursAgo > 0 && hoursAgo <= 12) return false; // 12h admin backdate window
+            // Окно «задним числом» по роли — как сервер (backdateHours).
+            if (hoursAgo > 0 && hoursAgo <= backHours) return false;
             return hoursAgo > 0;
         };
 
@@ -359,7 +363,7 @@ export function AdminChessboardView() {
             map.set(resource.id, cells);
         });
         return map;
-    }, [filteredResources, slotMap, selectedDate]);
+    }, [filteredResources, slotMap, selectedDate, backHours]);
 
     // ── Drag-to-select helpers ────────────────────────────────────────────────
     const isSlotOccupied = useCallback((resId: string, time: string) => {
@@ -371,9 +375,9 @@ export function AdminChessboardView() {
         const [y, mo, d] = dateStr.split('-').map(Number);
         const [h, m] = time.split(':').map(Number);
         const hoursAgo = (Date.now() - Date.UTC(y, mo - 1, d, h - 4, m, 0)) / 3_600_000;
-        if (hoursAgo > 12) return true;
+        if (hoursAgo > backHours) return true;
         return slotMap.has(`${resId}|${time}`);
-    }, [selectedDate, slotMap]);
+    }, [selectedDate, slotMap, backHours]);
 
     const selectedNewBlocks = useMemo(() => {
         const byRes: Record<string, number[]> = {};

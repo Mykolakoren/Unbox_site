@@ -148,7 +148,7 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
 
     for b in due:
         try:
-            ok, reason = settle_pending_charge(session, b)
+            ok, reason = settle_pending_charge(session, b, respect_window=True)
             if ok:
                 session.commit()
                 settled += 1
@@ -257,7 +257,10 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
                     logger.warning("[billing] TG charge-notice failed for %s: %r", b.id, e)
             else:
                 session.rollback()
-                failures.append({"booking_id": str(b.id), "reason": reason})
+                # Бронь перенесли дальше суток после выборки (undo_early_charge) —
+                # это не сбой, спишется в свой срок (12.10).
+                if reason != "not_due":
+                    failures.append({"booking_id": str(b.id), "reason": reason})
         except Exception as e:
             session.rollback()
             logger.exception("[billing] charge failed for %s", b.id)

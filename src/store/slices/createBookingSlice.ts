@@ -145,14 +145,14 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
     addBookings: async (bookingsData) => {
         if (bookingsData.length === 0) return;
         if (bookingsData.length === 1) {
-            await get().addBooking(bookingsData[0]);
-            return;
+            const nb = await get().addBooking(bookingsData[0]);
+            return { pendingApproval: nb && nb.status === 'pending_approval' ? 1 : 0 };
         }
         // Multi-slot batch path
         const wasFrozen = !(bookingsData[0] as any).targetUserId && isFrozenSub(get().currentUser);
         try {
             const first = bookingsData[0] as any;
-            await bookingsApi.createMultiSlotBooking({
+            const res = await bookingsApi.createMultiSlotBooking({
                 slots: bookingsData.map((b: any) => ({
                     resourceId: b.resourceId,
                     locationId: b.locationId || 'unbox_one',
@@ -168,10 +168,16 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             // Refetch state so store matches server truth
             await get().fetchCurrentUser();
             notifyIfPauseLifted(wasFrozen, get().currentUser);
+            // Не админу fetchAllBookings ничего не грузит — свои брони отдельно
+            // (аудит 12.10: после корзины «Мои брони» оставались без новых).
             const fetchAllBookings = (get() as any).fetchAllBookings;
-            if (typeof fetchAllBookings === 'function') {
-                await fetchAllBookings();
+            const loadedAll = typeof fetchAllBookings === 'function' ? await fetchAllBookings() : false;
+            if (loadedAll === false && typeof (get() as any).fetchBookings === 'function') {
+                await (get() as any).fetchBookings();
             }
+            // Срочные слоты корзины сервер ставит «на подтверждение» (12.10) —
+            // экран говорит об этом по ответу сервера, а не по догадке.
+            return { pendingApproval: (res.bookings || []).filter((b: any) => b.status === 'pending_approval').length };
         } catch (error: any) {
             const detail = error?.response?.data?.detail;
             const message = typeof detail === 'string'

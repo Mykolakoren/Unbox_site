@@ -627,11 +627,46 @@ def release_rejected_hot_booking(session: Session, booking: Booking) -> dict:
     бонусные часы тратятся при СОЗДАНИИ и гейтом не откатываются — их надо
     вернуть. _refund_booking_to_owner при payment_status='pending' вернёт только
     бонус (денег не брали). Раньше бот этого не делал — бонусный час клиента
-    пропадал (ревизия 03.10). Статус и причину ставит вызывающий. Не коммитит."""
+    пропадал (ревизия 03.10). Статус и причину ставит вызывающий. Не коммитит.
+
+    12.10: отклонённая бронь отвязывается от CRM-сессии, как при отмене (иначе
+    у сессии остаются «КАБ» и is_booked на отменённую бронь). Срочные брони
+    корзины и серии теперь тоже ждут одобрения — серия из CRM привязывает
+    сессию к первой встрече, а она бывает срочной."""
+    from app.models.therapy_session import TherapySession as _TS
+    for ts in session.exec(select(_TS).where(_TS.booking_id == str(booking.id))).all():
+        ts.booking_id = None
+        ts.is_booked = False
+        ts.updated_at = datetime.now()
+        session.add(ts)
     owner = _resolve_booking_owner(session, booking)
     if owner is None:
         return {}
     return _refund_booking_to_owner(session, booking, owner, 1.0)
+
+
+def after_rejected_hot_booking(session: Session, booking: Booking) -> None:
+    """После КОММИТА отклонения (сайт и Telegram) — как после отмены (ревизия
+    12.10): заявка теперь держит время, поэтому освободившийся слот — листу
+    ожидания, а событие кабинета в Google (корзина/серия создают его и для
+    заявки) — удалить, иначе слот остаётся «занятым» в календаре. Best-effort."""
+    if booking.gcal_event_id:
+        _ev, _res = booking.gcal_event_id, booking.resource_id
+        try:
+            booking.gcal_event_id = None
+            session.add(booking)
+            session.commit()
+        except Exception:
+            logger.exception("[reject] clear gcal_event_id failed for %s", booking.id)
+            session.rollback()
+        # В фоне: ответ Google не держит запрос отклонения (сайт и вебхук бота).
+        import threading
+        threading.Thread(target=_gcal_delete_in_background, args=(_ev, _res), daemon=True).start()
+    try:
+        from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+        notify_waitlist_for_freed_slot(session, booking)
+    except Exception:
+        logger.exception("[reject] waitlist notify failed for %s", booking.id)
 
 
 def _extension_cash_price(session: Session, booking: Booking, owner: User, start_dt: datetime,
@@ -977,14 +1012,27 @@ def _maybe_alert_booking_overload(
         logger.warning(f"[overload alert] non-blocking failure: {e}")
 
 
-def _assert_start_not_past(booking_date: datetime, start_time: str, is_admin: bool) -> None:
+# Сколько часов назад можно ставить начало брони (владелец 12.10): админ — 12 ч,
+# старший админ и владелец — 3 суток (внести прошедшую аренду, как у Анны Баевой
+# 08.10: её брони пришлось ставить «технически» на другой день). Остальным — нет.
+# Тот же список — во фронте (src/utils/permissions.ts → backdateHours).
+BACKDATE_HOURS = {"admin": 12.0, "senior_admin": 72.0, "owner": 72.0}
+
+
+def backdate_limit_hours(role: Optional[str]) -> float:
+    return BACKDATE_HOURS.get((role or "").lower(), 0.0)
+
+
+def _assert_start_not_past(booking_date: datetime, start_time: str, role: Optional[str] = None,
+                           is_admin: Optional[bool] = None) -> None:
     """Reject bookings whose start is already in the past.
 
-    Non-admins: no past starts at all. Admins/senior/owner: up to 12h
-    backdating (per owner policy). Previously this was enforced ONLY on the
-    frontend — a direct API call could create a past booking, which also
-    skipped the hot-approval gate (past => diff<=0 => not "hot" => confirmed).
+    Окно «задним числом» — по роли (backdate_limit_hours): админ 12 ч, старший
+    админ и владелец 72 ч, остальные — ни минуты. Previously this was enforced
+    ONLY on the frontend — a direct API call could create a past booking, which
+    also skipped the hot-approval gate (past => diff<=0 => not "hot" => confirmed).
     `booking_date` is Tbilisi-naive midnight; `start_time` is 'HH:MM' Tbilisi.
+    `is_admin` — старый вызов (True = окно админа 12 ч), для совместимости.
     """
     from datetime import timezone as _tz, timedelta as _td
     try:
@@ -998,12 +1046,14 @@ def _assert_start_not_past(booking_date: datetime, start_time: str, is_admin: bo
         start_utc = base.astimezone(_tz.utc)
     diff_h = (start_utc - datetime.now(_tz.utc)).total_seconds() / 3600.0
     if diff_h < 0:
-        if not is_admin:
+        limit = backdate_limit_hours(role) if role is not None else (12.0 if is_admin else 0.0)
+        if limit <= 0:
             raise HTTPException(status_code=400, detail="Нельзя бронировать на прошедшее время.")
-        if diff_h < -12.0:
+        if diff_h < -limit:
+            span = "3 суток" if limit >= 72 else f"{int(limit)} часов"
             raise HTTPException(
                 status_code=400,
-                detail="Задним числом можно бронировать не более чем на 12 часов назад.",
+                detail=f"Задним числом можно бронировать не более чем на {span} назад.",
             )
 
 
@@ -1137,9 +1187,11 @@ def read_public_bookings(
     if (e_date - s_date).days > max_window_days:
         e_date = s_date + timedelta(days=max_window_days)
 
+    # «На подтверждении» тоже держит время (как check_availability, 12.10) —
+    # иначе экраны показывали его свободным, а сервер отвечал «занято».
     query = (
         select(Booking)
-        .where(Booking.status == "confirmed")
+        .where(Booking.status.in_(("confirmed", "pending_approval")))  # type: ignore[attr-defined]
         .where(Booking.date >= s_date)
         .where(Booking.date <= e_date)
         .limit(1000)
@@ -1195,7 +1247,7 @@ def read_external_events(
         b.gcal_event_id for b in session.exec(
             select(Booking)
             .where(Booking.resource_id == resource_id)
-            .where(Booking.status == "confirmed")
+            .where(Booking.status.in_(("confirmed", "pending_approval")))  # 12.10: заявка тоже наша
             .where(Booking.gcal_event_id.is_not(None))  # type: ignore
         ).all() if b.gcal_event_id
     }
@@ -1646,10 +1698,9 @@ def create_booking(
             if target:
                 booking_owner = target
 
-        # Reject past-dated starts (non-admin: none; admin: up to 12h back).
+        # Reject past-dated starts — окно по роли (backdate_limit_hours).
         _assert_start_not_past(
-            booking_in.date, booking_in.start_time,
-            is_admin=current_user.role in ADMIN_ROLES,
+            booking_in.date, booking_in.start_time, role=current_user.role,
         )
 
         is_available, reason = check_availability(
@@ -1937,32 +1988,13 @@ def create_booking(
         #     longer per 2026-05-15 spec).
         # No discount for hot bookings — only admin approval required.
         is_admin_or_above = current_user.role in ("admin", "senior_admin", "owner")
-        # `start_dt` is a NAIVE datetime built from `Booking.date` (naive UTC
-        # midnight of the Tbilisi calendar day) + `start_time` "HH:MM" in
-        # Tbilisi local. The previous version slapped tzinfo=UTC on it, which
-        # was wrong by 4h: a booking at 09:00 Tbilisi was treated as 09:00
-        # UTC → diff vs real UTC now was 4h too big, and bookings that *were*
-        # within 12 hours got classified as not-hot, never went to
-        # `pending_approval`, and admins got no TG alert.
-        # Convert correctly: Tbilisi local → UTC = subtract 4h.
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-        _TB_OFFSET = _td(hours=4)
-        _now = _dt.now(_tz.utc)
-        _start_utc = (start_dt - _TB_OFFSET).replace(tzinfo=_tz.utc) if start_dt.tzinfo is None else start_dt.astimezone(_tz.utc)
-        _diff_hours = (_start_utc - _now).total_seconds() / 3600.0
-        # weekday() on Tbilisi-local start_dt: 5=Sat, 6=Sun
-        _is_weekend = start_dt.weekday() >= 5
-        HOT_BOOKING_THRESHOLD_HOURS = 24 if _is_weekend else 12
-        # 06.10 (владелец): бронь, сделанная после 21:00, на завтра с началом до
-        # 12:00 — тоже на подтверждение (даже если до неё больше 12 ч): админы
-        # должны успеть спланировать выход на работу утром.
-        _now_tb = (_now + _TB_OFFSET).replace(tzinfo=None)
-        _evening_next_morning = (
-            _now_tb.hour >= 21
-            and start_dt.date() == (_now_tb + _td(days=1)).date()
-            and start_dt.hour < 12
-        )
-        is_hot = (0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS) or (_diff_hours > 0 and _evening_next_morning)
+        # Окно «срочной брони» — общее правило (services/booking_policy.is_hot_start,
+        # 12.10): тем же правилом теперь проверяются корзина, серия, перенос и
+        # перенос сессии в CRM. `start_dt` — Тбилиси без пояса (день брони + «HH:MM»):
+        # 12 ч в будни, 24 ч в выходные, и бронь после 21:00 на завтра до 12:00
+        # (владелец 06.10).
+        from app.services.booking_policy import is_hot_start
+        is_hot = is_hot_start(start_dt)
 
         if is_hot and not is_admin_or_above:
             # Don't deduct balance — set status to pending_approval
@@ -2299,6 +2331,60 @@ class MultiSlotRequest(PydanticBaseModel):
     crm_client_id: Optional[str] = None
 
 
+
+
+def _is_hot_series_date(d: datetime, start_time: str) -> bool:
+    from app.services.booking_policy import is_hot_start, start_tb_of
+    try:
+        return is_hot_start(start_tb_of(d, start_time))
+    except (ValueError, TypeError):
+        return False
+
+def _notify_hot_pending(session: Session, booking: Booking, owner: User) -> None:
+    """Бронь ушла «на подтверждение» (корзина / серия, 12.10) — как у одиночной:
+    админам событие с кнопками «Одобрить / Отклонить» и копией в личку, клиенту —
+    Telegram и уведомление на сайте. Не валит запрос."""
+    try:
+        from app.models.resource import Resource as ResModel
+        from app.models.location import Location as LocModel
+        from app.models.notification import Notification
+        res_obj = session.get(ResModel, booking.resource_id)
+        loc_obj = session.get(LocModel, booking.location_id)
+        res_name = res_obj.name if res_obj else booking.resource_id
+        loc_name = loc_obj.name if loc_obj else booking.location_id
+        date_label = booking.date.strftime("%d.%m.%Y")
+        _st = int(booking.start_time[:2]) * 60 + int(booking.start_time[3:5])
+        _en = _st + int(booking.duration or 0)
+        time_label = f"{booking.start_time}–{_en // 60:02d}:{_en % 60:02d}"
+        telegram_service.send_admin_event(
+            event="booking_pending_approval",
+            fields={
+                "Арендатор": owner.name or owner.email,
+                "Когда": f"{date_label} · {time_label}",
+                "Кабинет": f"{res_name} · {loc_name}",
+                "Сумма": (f"{booking.final_price:g} ₾" if booking.final_price
+                          else "бонусные часы" if booking.payment_method == "bonus" else "по абонементу"),
+            },
+            reply_markup=telegram_service.hot_booking_markup(booking.id),
+            dm_copy=True,
+        )
+        if owner.telegram_id:
+            telegram_service.send_booking_pending_approval(
+                chat_id=str(owner.telegram_id), user_name=owner.name, resource_name=res_name,
+                location_name=loc_name, date=booking.date, start_time=booking.start_time,
+                duration_minutes=booking.duration, final_price=booking.final_price, booking_id=str(booking.id),
+            )
+        session.add(Notification(
+            type="booking_pending_approval", title="Заявка на бронь отправлена админу",
+            description=(f"{res_name} · {loc_name} · {date_label} {booking.start_time}. "
+                         "Срочная бронь — ждите подтверждения админа."),
+            recipient_id=str(owner.id), icon="Clock", link="/dashboard/bookings",
+        ))
+        session.commit()
+    except Exception:  # noqa: BLE001
+        session.rollback()
+        logger.warning("[hot-pending notify] failed for %s", booking.id, exc_info=True)
+
 @router.post("/multi-slot")
 def create_multi_slot_booking(
     *,
@@ -2372,9 +2458,8 @@ def create_multi_slot_booking(
     # concurrent multi-slot batches can't both pass the availability check
     # and end up with conflicting bookings (audit found this race).
     conflicts = []
-    _is_admin_ms = current_user.role in ADMIN_ROLES
     for s, d in parsed_slots:
-        _assert_start_not_past(d, s.start_time, is_admin=_is_admin_ms)
+        _assert_start_not_past(d, s.start_time, role=current_user.role)
         available, reason = check_availability(
             session=session,
             resource_id=s.resource_id,
@@ -2409,6 +2494,10 @@ def create_multi_slot_booking(
     # (порядок оплаты владельца 29.09: бонус → абонемент → баланс).
     from app.services.bonus_service import available_free_hours
     _bonus_left = available_free_hours(session, booking_owner.id)
+    # 12.10 (ревизия денег): срочный слот спишет одобрение, но средства на него
+    # проверяем сейчас (суммой по срочным слотам) — как одиночная срочная бронь;
+    # иначе одобрение уводило клиента без денег в минус.
+    _hot_reserved = 0.0
 
     # Пауза абонемента (владелец 03.10): один раз до цикла — если хотя бы один
     # слот при снятой паузе пошёл бы часами. Дальше обычный расчёт по слотам.
@@ -2437,6 +2526,13 @@ def create_multi_slot_booking(
         from datetime import timedelta as _td_multi
         _now_tb_multi = datetime.utcnow() + _td_multi(hours=4)
         defer_charge_multi = (start_dt - _now_tb_multi).total_seconds() > 24 * 3600
+        # Срочный слот (то же правило, что у одиночной брони, booking_policy) у
+        # не-админа — «на подтверждение»: деньги и часы не снимаем, спишет
+        # одобрение (charge_hot_booking_on_approval). 12.10: корзина обходила правило.
+        from app.services.booking_policy import is_hot_start
+        slot_hot = current_user.role not in ADMIN_ROLES and is_hot_start(start_dt)
+        if slot_hot:
+            defer_charge_multi = True
 
         # Ярлык решается ПО СЛОТУ, а не на всю пачку: часы абонемента могут
         # кончиться на середине, и тогда следующие слоты честно уйдут на баланс.
@@ -2484,8 +2580,17 @@ def create_multi_slot_booking(
                                  description=f"Пиковая надбавка абонемента (корзина {s.date} {s.start_time})",
                                  ref_type="booking", ref_id=str(_slot_id))
         else:  # balance (и bonus — остаток сверх бонусных часов)
+            if slot_hot and (quote.final_price or 0) > 0:
+                available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0) - _hot_reserved
+                if available_funds < quote.final_price:
+                    raise HTTPException(
+                        400,
+                        f"Insufficient balance for slot {s.date} {s.start_time}. "
+                        f"Need {quote.final_price}₾, have {available_funds}₾.",
+                    )
+                _hot_reserved += float(quote.final_price)
             if not defer_charge_multi:
-                available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
+                available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0) - _hot_reserved
                 if available_funds < quote.final_price:
                     raise HTTPException(
                         400,
@@ -2505,7 +2610,7 @@ def create_multi_slot_booking(
             date=d,
             start_time=s.start_time,
             duration=s.duration,
-            status="confirmed",
+            status=("pending_approval" if slot_hot else "confirmed"),
             final_price=quote.final_price,
             base_price=quote.base_price,
             applied_rule=quote.applied_rule,
@@ -2543,6 +2648,9 @@ def create_multi_slot_booking(
         session.refresh(b)
     # Пауза снята этой корзиной — сказать клиенту (после коммита; сбой TG не страшен).
     _notify_pause_lifted(booking_owner, _pause_lift)
+    for b in created_bookings:
+        if b.status == "pending_approval":
+            _notify_hot_pending(session, b, booking_owner)
 
     # Excel #24 + R33 — Google Calendar sync for the whole batch.
     # Same try/except policy as single-booking create: a GCal failure must
@@ -2913,9 +3021,8 @@ def create_recurring_booking(
     # the same slots on unbox_one_room_2 Saturdays).
     conflicts = []
     create_dates = dates[1:] if anchor_booking else dates
-    _is_admin_rec = current_user.role in ADMIN_ROLES
     for d in create_dates:
-        _assert_start_not_past(d, data.start_time, is_admin=_is_admin_rec)
+        _assert_start_not_past(d, data.start_time, role=current_user.role)
         available, reason = check_availability(
             session=session,
             resource_id=data.resource_id,
@@ -3048,6 +3155,8 @@ def create_recurring_booking(
     # целиком (порядок оплаты владельца 29.09: бонус → абонемент → баланс).
     from app.services.bonus_service import available_free_hours
     _bonus_left = available_free_hours(session, booking_owner.id)
+    # 12.10 (ревизия денег): срочная встреча спишется одобрением, средства — сейчас.
+    _hot_reserved = 0.0
 
     # Пауза абонемента (владелец 03.10): один раз до цикла — если хотя бы одна
     # дата серии при снятой паузе пошла бы часами. Дальше обычный расчёт.
@@ -3084,6 +3193,12 @@ def create_recurring_booking(
         _start_tb = d.replace(hour=int(data.start_time.split(":")[0]), minute=int(data.start_time.split(":")[1]))
         _now_tb = datetime.utcnow() + _td_recur(hours=4)
         defer_charge = (_start_tb - _now_tb).total_seconds() > 24 * 3600
+        # Срочная встреча серии (обычно первая) у не-админа — «на подтверждение»,
+        # как одиночная бронь (booking_policy, 12.10): без списания до одобрения.
+        from app.services.booking_policy import is_hot_start
+        occ_hot = current_user.role not in ADMIN_ROLES and is_hot_start(_start_tb)
+        if occ_hot:
+            defer_charge = True
 
         # Ярлык — по каждому вхождению серии: часы абонемента могут кончиться
         # в середине, и остаток серии честно уйдёт на баланс.
@@ -3116,8 +3231,16 @@ def create_recurring_booking(
                                  description=f"Пиковая надбавка абонемента (серия {d.strftime('%Y-%m-%d')})",
                                  ref_type="booking", ref_id=str(_occ_id))
         else:
+            if occ_hot and (quote.final_price or 0) > 0:
+                available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0) - _hot_reserved
+                if available_funds < quote.final_price:
+                    raise HTTPException(
+                        400,
+                        f"Insufficient funds for {d.strftime('%Y-%m-%d')}. Required: {quote.final_price}, Available: {available_funds}",
+                    )
+                _hot_reserved += float(quote.final_price)
             if not defer_charge:
-                available_funds = booking_owner.balance + booking_owner.credit_limit
+                available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0) - _hot_reserved
                 if available_funds < quote.final_price:
                     raise HTTPException(
                         400,
@@ -3136,7 +3259,7 @@ def create_recurring_booking(
             date=d,
             start_time=data.start_time,
             duration=data.duration,
-            status="confirmed",
+            status=("pending_approval" if occ_hot else "confirmed"),
             final_price=quote.final_price,
             base_price=quote.base_price,
             applied_rule=quote.applied_rule,
@@ -3388,11 +3511,18 @@ def create_recurring_booking(
     except Exception as e:
         logger.warning(f"[Admin TG alert / series] Non-blocking failure: {e}")
 
+    for _bid in created_bookings:
+        _bk_hot = session.get(Booking, UUID(_bid)) if isinstance(_bid, str) else None
+        if _bk_hot is not None and _bk_hot.status == "pending_approval":
+            _notify_hot_pending(session, _bk_hot, booking_owner)
     _maybe_alert_booking_overload(session, booking_owner, len(created_bookings))
     return {
         "ok": True,
         "recurring_group_id": recurring_group_id,
         "created": len(created_bookings),
+        # 12.10: срочные встречи серии — «на подтверждении»; экран говорит об этом.
+        "pending_approval": sum(1 for _bid in created_bookings
+                                if getattr(session.get(Booking, UUID(_bid)), "status", None) == "pending_approval"),
         "total_cost": round(total_cost, 2),
         "booking_ids": created_bookings,
         "dates": [d.strftime("%Y-%m-%d") for d in dates],
@@ -3615,7 +3745,14 @@ def extend_recurring_series(
     template = next((b for b in reversed(existing) if b.status == "confirmed"), existing[-1])
     booking_owner = _resolve_booking_owner(session, template)
 
-    # Conflict check first — atomic create.
+    # 12.10 (аудит путей): новые даты — по правилам новой брони. Давно закончившаяся
+    # серия иначе продлевалась в прошлое (без окна «задним числом»).
+    for d in new_dates:
+        _assert_start_not_past(d, template.start_time, role=current_user.role)
+
+    _ext_created: list = []
+    # Conflict check first — atomic create. lock_rows — как у создания серии:
+    # два параллельных «Продлить» иначе оба проходили проверку.
     conflicts: list[dict] = []
     for d in new_dates:
         available, reason = check_availability(
@@ -3625,6 +3762,7 @@ def extend_recurring_series(
             start_time=template.start_time,
             duration=template.duration,
             requester_user_uuid=template.user_uuid,
+            lock_rows=True,
         )
         if not available:
             conflicts.append({
@@ -3754,7 +3892,9 @@ def extend_recurring_series(
             date=d,
             start_time=template.start_time,
             duration=template.duration,
-            status="confirmed",
+            # Срочная дата у не-админа — «на подтверждение», как одиночная бронь.
+            status=("pending_approval" if (current_user.role not in ADMIN_ROLES
+                                           and _is_hot_series_date(d, template.start_time)) else "confirmed"),
             final_price=_final,
             base_price=_base,
             applied_rule=_rule,
@@ -3784,6 +3924,7 @@ def extend_recurring_series(
         if _method == "subscription":
             subscription_pool.stamp_booking(new_booking, _hrs, _xhrs)
         session.add(new_booking)
+        _ext_created.append(new_booking)
         session.flush()
         try:
             ev = gcal_service.create_event(new_booking, user_name=booking_owner.name if booking_owner else "")
@@ -3889,6 +4030,10 @@ def extend_recurring_series(
         ))
 
     session.commit()
+    # Срочные даты продления — админам с кнопками, клиенту — заявка (12.10).
+    for _nb in _ext_created:
+        if _nb.status == "pending_approval" and booking_owner is not None:
+            _notify_hot_pending(session, _nb, booking_owner)
     # Пауза снята продлением — сказать клиенту (после коммита; сбой TG не страшен).
     _notify_pause_lifted(booking_owner, _pause_lift)
 
@@ -3989,15 +4134,26 @@ def cancel_recurring_bookings(
         # the series (whether already past or still upcoming).
         cutoff = anchor.date
     else:
-        cutoff = datetime.now()
+        # «Все будущие» — как раньше, с завтрашнего дня (cutoff = now() против
+        # полуночи дня брони): сегодняшние встречи остаются. Плюс сегодняшняя ещё
+        # не начавшаяся заявка «на подтверждении» — её снимаем (отбор ниже).
+        cutoff = (datetime.utcnow() + timedelta(hours=4)).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # 12.10 (ревизия): срочная встреча серии «на подтверждении» — тоже часть
+    # серии. Раньше отмена её пропускала, а одобрение потом списывало деньги за
+    # встречу отменённой серии.
     bookings = session.exec(
         select(Booking).where(
             Booking.recurring_group_id == group_id,
-            Booking.status == "confirmed",
+            Booking.status.in_(("confirmed", "pending_approval")),
             Booking.date >= cutoff,
         )
     ).all()
+    if not from_booking_id:
+        _tomorrow = cutoff + timedelta(days=1)
+        bookings = [b for b in bookings
+                    if b.date >= _tomorrow
+                    or (b.status == "pending_approval" and _booking_hours_until_start(b) > 0)]
 
     if not bookings:
         raise HTTPException(404, "No future bookings found in this group")
@@ -4036,7 +4192,8 @@ def cancel_recurring_bookings(
     if not is_admin:
         for b in bookings:
             hours_until = _booking_hours_until_start(b)
-            if hours_until < 24 and not _is_past(b):
+            # Заявка «на подтверждении» — ещё не бронь (денег не брали): 24 ч не мешают.
+            if hours_until < 24 and not _is_past(b) and b.status != "pending_approval":
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -4060,8 +4217,10 @@ def cancel_recurring_bookings(
         # 0% — как в одиночной отмене — ничего не возвращаем.
         booking_owner = _resolve_booking_owner(session, b)
         _series_refund_meta: dict = {}
-        if booking_owner and applied_refund > 0:
-            _series_refund_meta = _refund_booking_to_owner(session, b, booking_owner, refund_percent=applied_refund) or {}
+        # Заявка «на подтверждении»: денег не брали, бонусный час — вернуть целиком.
+        _b_refund = 1.0 if b.status == "pending_approval" else applied_refund
+        if booking_owner and _b_refund > 0:
+            _series_refund_meta = _refund_booking_to_owner(session, b, booking_owner, refund_percent=_b_refund) or {}
         # Событие отмены по КАЖДОЙ брони (ревизия 03.10): доля возврата нужна
         # снятию штрафа после отмены — иначе у брони по абонементу без денег
         # (без пика и допов) не понять, сколько часов уже вернули.
@@ -4072,10 +4231,12 @@ def cancel_recurring_bookings(
             target_id=str(b.id),
             target_type="booking",
             event_type="booking_cancelled",
-            description=f"Отмена серии: возврат {int(round(applied_refund * 100))}%",
-            metadata={"refund_percent": applied_refund, "via": "series", "group_id": group_id,
+            description=f"Отмена серии: возврат {int(round(_b_refund * 100))}%",
+            # Доля — фактическая по ЭТОЙ брони (заявке — 1.0): по ней «Снять
+            # штраф» считает, сколько уже вернули.
+            metadata={"refund_percent": _b_refund, "via": "series", "group_id": group_id,
                       **{k: v for k, v in _series_refund_meta.items() if k != "refund_percent"},
-                      "policy_refund_percent": applied_refund},
+                      "policy_refund_percent": _b_refund},
             commit=False,
         )
 
@@ -4207,7 +4368,11 @@ def cancel_booking(
     hours_until_start = _booking_hours_until_start(booking)
     is_late_cancellation = hours_until_start < 24
 
-    if is_late_cancellation and not _is_past(booking) and not is_admin:
+    # 12.10 (ревизия): заявка «на подтверждении» — ещё не бронь, денег не брали,
+    # а время она теперь держит. Клиент снимает её сам в любой момент.
+    if booking.status == "pending_approval":
+        applied_refund = 1.0
+    if is_late_cancellation and not _is_past(booking) and not is_admin and booking.status != "pending_approval":
         # Russian + actionable. Frontend matches on "24" + "переаренд" /
         # "админист" to surface a "Написать админу" sonner button (link
         # to t.me/UnboxCenter).
@@ -4453,6 +4618,23 @@ def reschedule_booking(
             status_code=400, detail="Некорректная дата — нужен формат ГГГГ-ММ-ДД"
         )
 
+    # 12.10 (аудит путей бронирования): новое время — по тем же правилам, что у
+    # новой брони. Раньше проверялось только СТАРОЕ время: не-админ мог перенести
+    # бронь в прошлое, а «срочное» окно (подтверждение админа) обходилось
+    # переносом с далёкой даты на ближайшие часы. Бронь, которая уже стоит в
+    # ближайших часах (поздний бесплатный перенос абонемента), этим не задеваем.
+    if not (new_date.date() == booking.date.date() and data.new_start_time == booking.start_time):
+        _assert_start_not_past(new_date, data.new_start_time, role=current_user.role)
+        if current_user.role not in ADMIN_ROLES:
+            from app.services.booking_policy import HOT_MOVE_REFUSAL, is_hot_start, start_tb_of
+            try:
+                _new_hot = is_hot_start(start_tb_of(new_date, data.new_start_time))
+                _old_hot = is_hot_start(start_tb_of(booking.date, booking.start_time))
+            except (ValueError, TypeError):
+                _new_hot = _old_hot = False
+            if _new_hot and not _old_hot:
+                raise HTTPException(status_code=409, detail=HOT_MOVE_REFUSAL)
+
     # Части подарочной брони («Час в подарок» после «Разделить» / вырезки) —
     # только в пределах дня: бонус-час держит одна часть, и при её отмене он
     # переходит к живой части ТОГО ЖЕ дня (billing_defer.pass_gift_on). Перенос
@@ -4600,6 +4782,13 @@ def reschedule_booking(
                 detail="Нельзя менять длительность для бронирований по абонементу. "
                 "Отмените текущее и создайте новое.",
             )
+        # Владелец 12.10 (кейс Марии Кирдун): оплаченная бронь едет дальше чем на
+        # сутки — оплата возвращается, бронь снова «спишется за сутки» (pending),
+        # как новая. До пересчёта цены: у pending он меняет только цену, без
+        # доплаты и проверки средств. «Всё или ничего» — см. undo_early_charge.
+        from app.services.billing_defer import undo_early_charge
+        undo_early_charge(session, booking, _resolve_booking_owner(session, booking), current_user,
+                          new_date=new_date, new_start_time=data.new_start_time)
         _check_extra_pool_move(session, booking, new_resource)
         # Бонусная бронь: бонус-часы потрачены при создании под ЭТУ длительность.
         # Другая длительность — надо вернуть/дотратить бонус, а этого пока нет.
@@ -5636,6 +5825,10 @@ def reschedule_booking_series(
         # 03.10: раньше следующие встречи ехали без пересчёта — якорь в пике
         # 25 ₾, остальные 20 ₾; у абонементной — пик 0 ₾ на всех). Не хватает
         # денег на доплату — встречу пропускаем, админ решит вручную.
+        # Оплаченная встреча едет дальше суток — оплата возвращается (как у якоря).
+        from app.services.billing_defer import undo_early_charge
+        undo_early_charge(session, sib, _resolve_booking_owner(session, sib), current_user,
+                          new_date=sib.date, new_start_time=data.new_start_time)
         try:
             _sib_price = _reprice_for_move(
                 session, sib, _resolve_booking_owner(session, sib), new_resource=new_resource,
@@ -7782,9 +7975,10 @@ def approve_booking(
     session.commit()
     session.refresh(booking)
 
-    # GCal sync
+    # GCal sync. Корзина/серия создают событие и для заявки — второе не нужно
+    # (ревизия 12.10: первое оставалось сиротой и держало слот в календаре).
     try:
-        event_id = gcal_service.create_event(booking, user_name=current_user.name)
+        event_id = None if booking.gcal_event_id else gcal_service.create_event(booking, user_name=current_user.name)
         if event_id:
             booking.gcal_event_id = event_id
             session.add(booking)
@@ -7904,6 +8098,7 @@ def reject_booking(
     session.add(booking)
     session.commit()
     session.refresh(booking)
+    after_rejected_hot_booking(session, booking)
 
     # Notify the client — TG + in-app. Best-effort.
     try:

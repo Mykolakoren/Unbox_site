@@ -330,8 +330,8 @@ def test_crm_session_cannot_move_foreign_booking():
 
 
 def test_crm_session_move_past_booking_not_repriced():
-    """Ревизия денег 12.10: прошедшую бронь перенос сессии двигает, но цену
-    задним числом не меняет (20 ₾ остаётся и в «пик» 20:00)."""
+    """Ревизия денег 12.10: идущую бронь (09:00, сейчас 10:00) перенос сессии в
+    прошлое (08:00) не двигает — отказ 409 «отвяжите кабинет»; цена на месте."""
     import guard_hours_pool_moves as H
     from app.api.v1.crm import sessions as crm_sessions
     from app.models.booking import Booking
@@ -359,16 +359,24 @@ def test_crm_session_move_past_booking_not_repriced():
         ts = TherapySession(client_id=c.id, specialist_id=str(me.id), date=b.date.replace(hour=5),
                             duration_minutes=60, booking_id=str(b.id), is_booked=True)
         s.add(ts); s.commit(); s.refresh(ts)
-        crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(date=b.date.replace(hour=8)),
-                                    session=s, current_user=me)
+        from fastapi import HTTPException
+        bid = b.id
+        try:
+            crm_sessions.update_session(session_id=ts.id, data=TherapySessionUpdate(date=b.date.replace(hour=8)),
+                                        session=s, current_user=me)
+            raise AssertionError("бронь уехала за сессией в прошлое")
+        except HTTPException as e:
+            assert e.status_code == 409 and "в прошлое" in str(e.detail), e.detail
+        s.rollback()
         s.expire_all()
-        b = s.get(Booking, b.id)
-        assert b.start_time == "08:00" and float(b.final_price) == price0, (b.start_time, b.final_price, price0)
+        b = s.get(Booking, bid)
+        assert b.start_time == "09:00" and float(b.final_price) == price0, (b.start_time, b.final_price, price0)
 
 
 def test_crm_session_move_finished_booking_to_future_not_repriced():
-    """Ветка «бронь уже прошла, сессию двигают в будущий пик»: бронь едет за
-    сессией, цена прежняя (правка задним числом не переоценивает)."""
+    """Ветка «бронь уже прошла, сессию двигают в будущее». 12.10 (аудит путей
+    бронирования): кабинет уже использован — перенос на будущее дал бы второе
+    занятие по одной оплате. Отказ 409, бронь и цена на месте."""
     import guard_hours_pool_moves as H
     from datetime import datetime as _dt, timedelta
     from fastapi import BackgroundTasks
@@ -398,11 +406,17 @@ def test_crm_session_move_finished_booking_to_future_not_repriced():
         tsid = ts.id
     with H.frozen_time(at=_dt(2026, 10, 5, 12, 0)):  # 16:00 по Тбилиси — бронь 12:00–13:00 прошла
         assert routes._is_past(s.get(Booking, bid))
-        crm_sessions.update_session(session_id=tsid, data=TherapySessionUpdate(date=_dt(2026, 10, 7, 20, 0)),
-                                    session=s, current_user=me)
+        from fastapi import HTTPException
+        try:
+            crm_sessions.update_session(session_id=tsid, data=TherapySessionUpdate(date=_dt(2026, 10, 7, 20, 0)),
+                                        session=s, current_user=me)
+            raise AssertionError("прошедшая бронь уехала за сессией в будущее")
+        except HTTPException as e:
+            assert e.status_code == 409 and "уже использован" in str(e.detail), e.detail
+        s.rollback()
         s.expire_all()
         b = s.get(Booking, bid)
-        assert (b.date.day, b.start_time, float(b.final_price)) == (7, "20:00", price0), (b.date, b.start_time, b.final_price, price0)
+        assert (b.date.day, b.start_time, float(b.final_price)) == (5, "12:00", price0), (b.date, b.start_time, b.final_price, price0)
 
 
 def test_series_reschedule_recomputes_chains_in_code():
@@ -438,24 +452,55 @@ def test_open_shift_prefill_is_per_branch():
 
 def test_chessboard_select_allows_12h_back():
     """Клетка 30 мин назад не серая, а выделить нельзя было: isSlotOccupied
-    считал любое прошедшее время занятым. Окно — 12 ч, как у клеток и сервера."""
+    считал любое прошедшее время занятым. Окно — по роли (12 ч / 72 ч), как у
+    клеток и сервера."""
     c = _src("src/components/admin/AdminChessboardView.tsx")
     i = c.index("const isSlotOccupied = useCallback(")
-    body = c[i:c.index("}, [selectedDate, slotMap]);", i)]
-    assert "if (hoursAgo > 12) return true;" in body
+    body = c[i:c.index("}, [selectedDate, slotMap, backHours]);", i)]
+    assert "if (hoursAgo > backHours) return true;" in body
     assert "timeToMin(time) < now.totalMins" not in body
     r = _src("backend/app/api/v1/bookings/routes.py")
-    assert "if diff_h < -12.0:" in r
+    assert 'BACKDATE_HOURS = {"admin": 12.0, "senior_admin": 72.0, "owner": 72.0}' in r
 
 
 def test_mobile_find_admin_backdate():
-    """Админ с телефона: «Показать прошедшее время (до 12 ч назад)» на сегодня —
-    окна с now−12 ч (сервер то же пускает). Не админу и в переносе/привязке — нет."""
+    """Админ с телефона: «Показать прошедшее время сегодня» — окна с now−окно по
+    роли (backdateHours, как сервер). Не админу и в переносе/привязке — нет."""
     f = _src("src/pages/mobile/MobileFind.tsx")
-    assert "const BACKDATE_MIN = 12 * 60;" in f
-    assert "const canBackdate = isBookingAdmin(currentUser) && !rescheduleId && !linkSessionId;" in f
+    assert "const backdateMin = backdateHours(currentUser) * 60;" in f
+    assert "const canBackdate = backdateMin > 0 && !rescheduleId && !linkSessionId;" in f
     assert "Math.max(0, tbilisiNow().totalMins - backMin)" in f
-    assert "canBackdate && showPast ? BACKDATE_MIN : 0" in f
+    assert "canBackdate && showPast ? backdateMin : 0" in f
+
+
+def test_backdate_window_by_role():
+    """Владелец 12.10: задним числом админ — 12 ч, старший админ и владелец — 3
+    суток, остальные — нельзя. Сервер, шахматка и телефон — одно правило."""
+    from datetime import datetime as _dt, timedelta, timezone
+    from fastapi import HTTPException
+    from app.api.v1.bookings import routes
+    now_tb = _dt.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=4)
+
+    def start_ago(hours):
+        t = now_tb - timedelta(hours=hours)
+        return t.replace(hour=0, minute=0, second=0, microsecond=0), t.strftime("%H:%M")
+
+    def ok(role, hours):
+        d, st = start_ago(hours)
+        try:
+            routes._assert_start_not_past(d, st, role=role)
+            return True
+        except HTTPException:
+            return False
+    assert ok("admin", 11) and not ok("admin", 13)
+    assert ok("senior_admin", 70) and not ok("senior_admin", 74)
+    assert ok("owner", 70) and not ok("owner", 74)
+    assert not ok("specialist", 1) and not ok("user", 1)
+    perm = _src("src/utils/permissions.ts")
+    assert "if (role === 'owner' || role === 'senior_admin') return 72;" in perm and "if (role === 'admin') return 12;" in perm
+    chess = _src("src/components/admin/AdminChessboardView.tsx")
+    assert "const backHours = backdateHours({ role: viewerRole });" in chess
+    assert "if (hoursAgo > 0 && hoursAgo <= backHours) return false;" in chess and "if (hoursAgo > backHours) return true;" in chess
 
 
 # ── телефон: бронь кабинета из сессии CRM ───────────────────────────────

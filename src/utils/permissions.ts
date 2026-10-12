@@ -70,3 +70,13 @@ export function userCanAccessFinance(user: User | null | undefined): boolean {
 export function userCanAccessRights(user: Pick<User, 'role'> | null | undefined): boolean {
     return user?.role === 'owner' || user?.role === 'senior_admin';
 }
+
+/** Сколько часов назад можно ставить начало брони — как на сервере
+ *  (bookings/routes.py → BACKDATE_HOURS, владелец 12.10): админ 12 ч, старший
+ *  админ и владелец 72 ч (3 суток), остальные — 0. */
+export function backdateHours(user: { role?: string | null } | null | undefined): number {
+    const role = (user?.role || '').toLowerCase();
+    if (role === 'owner' || role === 'senior_admin') return 72;
+    if (role === 'admin') return 12;
+    return 0;
+}

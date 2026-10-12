@@ -36,8 +36,9 @@ MONEY_SNIPPETS = {
     'SERIES_CALL': "            const result = await bookingsApi.createRecurringBooking({\n                resourceId: firstSlot.resourceId,\n                locationId: state.locationId || resource?.locationId || 'unbox_one',\n                startTime: firstSlot.startTime,\n                duration: firstSlot.duration,\n                format: state.format,\n                paymentMethod: resolveFinalMethod(),\n                firstDate: fmtDate(state.date, 'yyyy-MM-dd'),\n                occurrences: effectiveOccurrences,\n                pattern: recurPattern === 'once' ? 'weekly' : recurPattern,\n                targetUserId: state.bookingForUser || undefined,\n                crmClientId: selectedCrmClientId || undefined,\n                skipConflicts: skipConflicts || undefined,\n            });\n",
     'SINGLE_CALL': '                const created = await bookingsApi.createBooking(newBookings[0] as any);\n                await Promise.all([fetchCurrentUser(), fetchBookings()]);\n                useBookingStore.getState().reset();\n                setConfirmed(true);\n',
     'PRICED': '    const priced = useMemo(() => {\n        if (cartItems.length === 0) return { items: [], total: 0 };\n        const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));\n        let total = 0;\n        const items = cartItems.map(b => {\n            const start = new Date(state.date);\n            const [h, m] = b.startTime.split(\':\').map(Number);\n            start.setHours(h, m, 0, 0);\n            const end = new Date(start.getTime() + b.duration * 60000);\n            const p = calculatePrice({\n                format: state.format,\n                startTime: start,\n                endTime: end,\n                extras: selectedExtras,\n                paymentMethod: state.paymentMethod,\n                resourceId: b.resourceId,\n                accumulatedWeeklyHours,\n                personalDiscountPercent: effectiveUser?.personalDiscountPercent,\n                pricingSystem: effectiveUser?.pricingSystem,\n            });\n            total += p.finalPrice;\n            return { ...b, start, end, price: p };\n        });\n        return { items, total };\n    }, [\n        cartItems, state.extras, state.format, state.date, state.paymentMethod,\n        accumulatedWeeklyHours,\n        // Admin-proxy fix: the price depends on the BOOKING TARGET\'s\n        // personal discount, not the logged-in admin\'s. Re-key the memo\n        // on effectiveUser so switching "за кого бронируешь" recomputes.\n        effectiveUser?.id,\n        effectiveUser?.personalDiscountPercent,\n        effectiveUser?.pricingSystem,\n    ]);\n',
-    # 06.10 (владелец): + правило «после 21:00 на завтра до 12:00 — на подтверждение».
-    'HOT': '    const isHotBooking = useMemo(() => {\n        const first = priced.items[0];\n        if (!first) return false;\n        const hoursUntil = (first.start.getTime() - Date.now()) / 3600000;\n        const dow = first.start.getDay(); // 0=Sun, 6=Sat (local browser TZ)\n        const isWeekend = dow === 0 || dow === 6;\n        const threshold = isWeekend ? 24 : 12;\n        // 06.10: после 21:00 — бронь на завтра до 12:00 тоже ждёт подтверждения.\n        const now = tbilisiNow();\n        const tomorrow = new Date(`${now.ymd}T12:00:00`); tomorrow.setDate(tomorrow.getDate() + 1);\n        const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();\n        const eveningNextMorning = now.h >= 21 && sameDay(first.start, tomorrow) && first.start.getHours() < 12;\n        return hoursUntil >= 0 && (hoursUntil < threshold || eveningNextMorning);\n    }, [priced.items]);\n',
+    # 12.10 (владелец, п.2): срочное правило для корзины и серии — смотрим
+    # КАЖДЫЙ слот (как booking_policy.is_hot_start на сервере), граница «≤».
+    'HOT': "    const hotInfo = useMemo(() => {\n        const now = tbilisiNow();\n        const tomorrow = new Date(`${now.ymd}T12:00:00`); tomorrow.setDate(tomorrow.getDate() + 1);\n        const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();\n        let reason: string | null = null;\n        let count = 0;\n        for (const item of priced.items) {\n            // Момент начала по Тбилиси (UTC+4), а не по часам браузера (VPN, поездка).\n            const startMs = Date.UTC(item.start.getFullYear(), item.start.getMonth(), item.start.getDate(),\n                item.start.getHours() - 4, item.start.getMinutes());\n            const hoursUntil = (startMs - Date.now()) / 3600000;\n            const dow = item.start.getDay(); // 0=Sun, 6=Sat\n            const isWeekend = dow === 0 || dow === 6;\n            const threshold = isWeekend ? 24 : 12;\n            // 06.10: после 21:00 — бронь на завтра до 12:00 тоже ждёт подтверждения.\n            const eveningNextMorning = now.h >= 21 && sameDay(item.start, tomorrow) && item.start.getHours() < 12;\n            let r: string | null = null;\n            if (hoursUntil > 0 && hoursUntil <= threshold) {\n                r = isWeekend ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';\n            } else if (hoursUntil > 0 && eveningNextMorning) {\n                r = 'Бронь после 21:00 на утро';\n            }\n            if (r) { count += 1; reason = reason ?? r; }\n        }\n        return reason ? { reason, count } : null;\n    }, [priced.items]);\n    const isHotBooking = hotInfo !== null;\n",
 }
 
 
@@ -78,16 +79,18 @@ def test_checkout_money_core_untouched():
 
 
 def test_approval_promised_only_by_server():
-    """Денежное ревью 30.09 (B1): мультислот (POST /bookings/multi-slot) сервер
-    на одобрение не отправляет, админов (ADMIN_ROLES) — тоже. «Ждём
-    подтверждения» — только по ответу сервера на одиночную бронь; обещание
-    «уйдёт на одобрение» — только для одиночной горячей брони не-админа."""
+    """Денежное ревью 30.09 (B1): «Ждём подтверждения» — только по ответу
+    сервера, не по догадке экрана; админов (ADMIN_ROLES) сервер на одобрение
+    не отправляет. 12.10 (владелец, п.2): корзина и серия тоже уходят на
+    одобрение срочными часами — экран корзины берёт число «на подтверждении»
+    из ответа multi-slot (addBookings → pendingApproval)."""
     src = _code("src/pages/mobile/MobileCheckout.tsx")
     assert "setDone({ pending: isHotBooking" not in src, "мультислот снова обещает одобрение по догадке экрана"
-    assert src.count("setDone({") == 2 and "setDone({ pending: false })" in src
-    # Серия создаётся сразу confirmed (ревью денег 30.09) — одобрение не обещаем.
-    assert "const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser) && !isSeries;" in src, \
-        "expectApproval снова обещает одобрение серии или мультислоту"
+    assert src.count("setDone({") == 2
+    assert "setDone({ pending: !!batch && batch.pendingApproval > 0, waiting: batch?.pendingApproval ?? 0, total: newBookings.length })" in src, \
+        "корзина: «ждём подтверждения» должно браться из ответа сервера"
+    assert "const expectApproval = isHotBooking && !isBookingAdmin(currentUser);" in src, \
+        "expectApproval: срочные часы не-админа — одобрение (одиночная, корзина, серия)"
     render = src[src.index("if (done) {"):]
     assert "isHotBooking ?" not in render and ": isHotBooking" not in render, \
         "тексты «на одобрение» снова по isHotBooking — нужно expectApproval"
@@ -174,7 +177,10 @@ def test_sheet_24h_rule_matches_server():
     assert front == back, f"админы для правила 24 ч разошлись с сервером: {front} vs {back}"
 
     src = _code("src/pages/mobile/BookingDetailSheet.tsx")
-    assert "const lateForClient = within24h && !isAdmin;" in src
+    # 12.10: заявку «на подтверждении» клиент снимает сам и меньше чем за сутки
+    # (сервер cancel_booking это разрешает) — только для неё правило 24 ч не действует.
+    assert "const lateForClient = within24h && !isAdmin && !isRequest;" in src
+    assert "const isRequest = booking.status === 'pending_approval';" in src
     assert "const isAdmin = isBookingAdmin(currentUser);" in src
     # Ветка «меньше суток, клиент»: нет «Отменить»/«Перенести», есть «Пересдать» и связь.
     i = src.index("isLive && !isActive && lateForClient && (")

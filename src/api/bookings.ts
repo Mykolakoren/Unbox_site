@@ -438,6 +438,8 @@ export const bookingsApi = {
         dates: string[]; bookingIds: string[];
         /** Даты, пропущенные как занятые (при skipConflicts). */
         skipped?: Array<{ date: string; day?: string; reason?: string }>;
+        /** Сколько встреч ждут подтверждения администратора (срочные, 12.10). */
+        pendingApproval?: number;
     }> => {
         const response = await api.post('/bookings/recurring', {
             ...data,

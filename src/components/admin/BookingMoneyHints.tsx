@@ -9,7 +9,7 @@ import { paymentErrorText } from '../../utils/errors';
 import { useUserStore } from '../../store/userStore';
 import type { BookingHistoryItem, User } from '../../store/types';
 import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
-import { allocationPayLine, partialCoverLine } from '../../utils/balanceAllocation';
+import { allocationPayLine, chargedAfterDay, debtAfterDay, partialCoverLine } from '../../utils/balanceAllocation';
 import { useClientAllocation } from '../../hooks/useBalanceAllocation';
 import { AddFundsModal } from './modals/AddFundsModal';
 import { formatDayMonth, formatGel } from '../../utils/format';
@@ -78,12 +78,14 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     // 06.10 (владелец): долг по броням после сегодняшнего дня (уже списанным заранее)
     // сейчас не просим — только за сегодняшние и прошедшие. Есть раскладка — вычитаем.
     const todayKey = batumiDayKey();
-    const laterDebt = allocOk
-        ? (alloc!.debts || []).reduce((s, d) => {
-            const k = d.date ? bookingDayKey(d.date) : null;
-            return k && k > todayKey ? s + Number(d.amount || 0) : s;
-        }, 0)
-        : 0;
+    // 12.10 (чат админов, Анна Калекина): день долга — день БРОНИ. d.date — время
+    // списания, а завтрашние брони списываются сегодня, поэтому их долг считался
+    // «сегодняшним» и «Принять оплату» подставляла 93 ₾ вместо 37.
+    const laterDebt = allocOk ? debtAfterDay(alloc!, todayKey, bookingDayKey) : 0;
+    // 12.10 (Лиза): брони после сегодня списываются за сутки — вечером баланс уже
+    // без них, и с таблицей не сверить. «На сегодня» = баланс + уже списанное за
+    // брони после сегодняшнего дня. Только отображение.
+    const laterCharged = allocOk ? chargedAfterDay(alloc!, todayKey, bookingDayKey) : 0;
     const debt = balance !== null && balance < 0 ? Math.max(0, Math.round((-balance - laterDebt) * 100) / 100) : 0;
     const price = booking.finalPrice ?? 0;
     // 03.10: ещё не списанная бронь, часть которой уже покрывает плюс на балансе
@@ -192,6 +194,16 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                     <span className="flex items-center gap-2">
                         <span className={`font-medium ${balance < 0 ? 'text-[var(--status-danger-fg)]' : 'text-unbox-dark'}`}>{formatGel(balance)}</span>
                         <AcceptPaymentButton client={client} defaultAmount={suggested} hint={payHint} label={payLabel} branch={cashBranchOfBooking(booking)} />
+                    </span>
+                </div>
+            )}
+            {client && balance !== null && laterCharged >= 0.01 && (
+                <div className="flex justify-between gap-3" data-balance-today>
+                    <span className="text-ink-60 shrink-0">На сегодня</span>
+                    <span className="text-xs text-right text-ink-60"
+                        title="Брони после сегодняшнего дня списываются с баланса за сутки до начала. Для сверки с таблицей за сегодня — баланс без этих списаний.">
+                        <span className="font-medium text-unbox-dark">{formatGel(Math.round((balance + laterCharged) * 100) / 100)}</span>
+                        {` — без ${formatGel(Math.round(laterCharged * 100) / 100)}, уже списанных за брони после сегодня`}
                     </span>
                 </div>
             )}

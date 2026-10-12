@@ -214,7 +214,8 @@ export interface BookingSlice {
      *  (ошибку уже показал тост). По false экран не должен говорить «броней нет». */
     fetchAllBookings: () => Promise<boolean>;
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;
-    addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<void>;
+    /** Корзина: сколько броней сервер поставил «на подтверждение» (срочные, 12.10). */
+    addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<{ pendingApproval: number } | void>;
     /** Cancel a booking. Excel #66 — `opts` lets admins override the
      *  default full-refund (e.g. 50% penalty). Ignored for non-admins. */
     cancelBooking: (

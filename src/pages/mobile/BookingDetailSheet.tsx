@@ -101,7 +101,10 @@ export function BookingDetailSheet({ booking, onClose }: {
     const isPast = dt && endDt && endDt.getTime() <= now.getTime();
     const isLive = !isPast && booking.status !== 'cancelled';
     // Клиенту меньше чем за сутки сервер не даст ни отменить, ни перенести.
-    const lateForClient = within24h && !isAdmin;
+    // 12.10: заявку «на подтверждении» (денег не брали) клиент снимает сам и
+    // меньше чем за сутки — сервер это разрешает (cancel_booking).
+    const isRequest = booking.status === 'pending_approval';
+    const lateForClient = within24h && !isAdmin && !isRequest;
     // …кроме бесплатного переноса по абонементу (владелец 01.10: Тёплый 1,
     // Регулярный 2, Профи+ 3; не позже чем за 3 ч до начала).
     const lateLeft = lateForClient && booking.status === 'confirmed'
@@ -231,7 +234,9 @@ export function BookingDetailSheet({ booking, onClose }: {
 
     // Подсказка к «Отменить бронь» — от статуса оплаты (G4-14): раньше всегда
     // «оплата ещё не списана», даже при бейдже «Оплачено».
-    const cancelHint = within24h
+    const cancelHint = isRequest && !isAdmin
+        ? 'Заявку можно снять в любой момент — оплата не списана'
+        : within24h
         ? 'Меньше 24 ч до начала — отменяете как администратор'
         : booking.paymentStatus === 'paid'
             ? 'Бесплатно — оплату вернём полностью'
@@ -241,7 +246,7 @@ export function BookingDetailSheet({ booking, onClose }: {
     const title = mode === 'pickClient'
         ? 'Привязать клиента'
         : mode === 'confirmCancel'
-            ? (within24h ? 'Отменить бронь меньше чем за сутки?' : 'Отменить бронь?')
+            ? (isRequest ? 'Снять заявку?' : within24h ? 'Отменить бронь меньше чем за сутки?' : 'Отменить бронь?')
             : dateTitle;
 
     const footer = mode === 'confirmCancel' ? (
@@ -253,7 +258,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                 disabled={busy !== null && busy !== 'cancel'}
                 loading={busy === 'cancel'}
             >
-                {busy === 'cancel' ? 'Отменяем…' : within24h ? 'Всё равно отменить' : 'Отменить бронь'}
+                {busy === 'cancel' ? 'Отменяем…' : isRequest && !isAdmin ? 'Снять заявку' : within24h ? 'Всё равно отменить' : 'Отменить бронь'}
             </Button>
             <Button variant="secondary" block onClick={() => setMode('view')} disabled={busy === 'cancel'}>
                 Оставить
@@ -460,6 +465,7 @@ export function BookingDetailSheet({ booking, onClose }: {
 
                         {isLive && !isActive && !lateForClient && (
                             <>
+                                {!isRequest && (
                                 <ActionRow
                                     icon={<CalendarClock size={18} />}
                                     label="Перенести"
@@ -469,6 +475,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         navigate(`/m/find?reschedule=${booking.id}`);
                                     }}
                                 />
+                                )}
 
                                 {canReRent && (
                                     <ActionRow

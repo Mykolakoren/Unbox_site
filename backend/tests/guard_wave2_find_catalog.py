@@ -79,7 +79,9 @@ def test_find_protected_logic_untouched():
     src = _read("src/pages/mobile/MobileFind.tsx")
     # 12.10 (разобрано): backMin — админ задним числом до 12 ч, как сервер; по
     # умолчанию 0 — окна по-прежнему с «сейчас».
-    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "d13656f033fed983", \
+    # 12.10 (разобрано): «на подтверждении» тоже держит время — как
+    # check_availability на сервере (срочные брони корзины/серии ждут одобрения).
+    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "1b4f5650e284bce1", \
         "buildFreeWindows изменилась — расчёт свободных окон трогать нельзя"
     assert _sha(_block(src, "const inFlightRef", "\n    const chipsBusy")) == "fe70d7f6e804df6d", \
         "блокировка повторного тапа (inFlightRef/pendingChip) изменилась"

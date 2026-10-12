@@ -31,6 +31,7 @@ import { COLOR } from '../../design/tokens';
 import { formatDateLabel, formatDayMonth, formatGel } from '../../utils/format';
 import { parseUTC } from '../../utils/bookingHelpers';
 import { ruCountWord } from '../../utils/plural';
+import { seriesApprovalNote } from '../../utils/approvalNote';
 import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
@@ -424,7 +425,7 @@ export function ConfirmationStep() {
                         targetUserId: state.bookingForUser || undefined,
                     });
                     const patternLabel = recurringPattern === 'weekly' ? 'каждую неделю' : recurringPattern === 'biweekly' ? 'раз в 2 недели' : 'раз в 4 недели';
-                    toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}`);
+                    toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}${seriesApprovalNote(result.pendingApproval)}`);
                     // Mark success BEFORE the refetch — the series IS created.
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;
@@ -638,6 +639,7 @@ export function ConfirmationStep() {
 
             if (newBookings.length > 0) {
                 console.log(`Submitting ${newBookings.length} bookings...`);
+                let batchResult: { pendingApproval: number } | void = undefined;
 
                 if (isRescheduling && state.editBookingId) {
                     // Reschedule a single existing booking — uses the new
@@ -665,16 +667,15 @@ export function ConfirmationStep() {
                         useUserStore.getState().fetchBookings(),
                     ]).catch(() => {});
                 } else {
-                    await addBookings(newBookings);
+                    batchResult = await addBookings(newBookings);
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;
                 }
 
-                // Check if booking is pending approval (hot booking) by checking store
+                // «На подтверждении» — по ответу сервера на ЭТУ бронь / корзину (12.10;
+                // раньше — любая ждущая бронь в сторе, и тост врал «запрос отправлен»).
                 const latestBookings = useUserStore.getState().bookings;
-                const isPending = latestBookings.some(b =>
-                    b.status === 'pending_approval' || (b as any).status === 'pendingApproval'
-                );
+                const isPending = !!batchResult && batchResult.pendingApproval > 0;
 
                 // Check if any booking had GCal sync failure
                 const hasGcalFailure = latestBookings.some(b => (b as any).gcalSyncFailed);

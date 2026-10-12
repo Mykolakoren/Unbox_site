@@ -342,6 +342,7 @@ def _run_with_fakes(fn, booking, per_hour: float):
     import app.services.pricing as pricing_mod
     import app.services.telegram as tg_mod
     import app.services.timeline as tl_mod
+    import app.services.billing_defer as billing_defer_mod
     from app.api.v1.bookings import routes
     from fastapi import HTTPException
 
@@ -382,6 +383,10 @@ def _run_with_fakes(fn, booking, per_hour: float):
     patches = [
         (routes, "wallet", _Wallet), (routes, "check_availability", lambda **kw: (True, None)),
         (routes, "_sync_linked_session_to_booking", lambda *a, **kw: None),
+        # 12.10: перенос дальше суток возвращает оплату (undo_early_charge) —
+        # здесь проверяем пересчёт цены оплаченной брони, как перенос в пределах
+        # суток; дальний перенос — guard_booking_rules_2026_10.
+        (billing_defer_mod, "undo_early_charge", lambda *a, **kw: {"undone": False, "reason": "not_far"}),
         (routes, "timeline_service", _silent), (routes, "telegram_service", _silent),
         (pricing_mod, "PricingService", _Pricing),
         (tg_mod, "telegram_service", _silent), (tl_mod, "timeline_service", _silent),

@@ -1376,7 +1376,8 @@ def _get_busy_slots(session: Session, resource_id: str, d_obj: date) -> set[int]
     bookings = session.exec(
         select(Booking).where(
             Booking.resource_id == resource_id,
-            Booking.status == "confirmed",
+            # 12.10: заявка «на подтверждении» тоже держит время (check_availability).
+            Booking.status.in_(("confirmed", "pending_approval")),
             Booking.date >= start_of_day,
             Booking.date < end_of_day,
         )
@@ -2023,7 +2024,8 @@ def _handle_hot_booking_callback(
         notify_admins_hot_money_fallback(owner, booking, approval_note, actor_label)
 
         try:
-            ev_id = _gcal.create_event(booking, user_name=actor_label)
+            # Событие уже есть (корзина/серия создают его и для заявки) — второе не нужно.
+            ev_id = None if booking.gcal_event_id else _gcal.create_event(booking, user_name=actor_label)
             if ev_id:
                 booking.gcal_event_id = ev_id
                 session.add(booking)
@@ -2212,6 +2214,8 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     session.add(booking)
     session.commit()
     session.refresh(booking)
+    from app.api.v1.bookings.routes import after_rejected_hot_booking
+    after_rejected_hot_booking(session, booking)
 
     # Notify client
     try:

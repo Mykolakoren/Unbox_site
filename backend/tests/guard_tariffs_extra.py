@@ -353,7 +353,9 @@ def test_cancel_series_and_deferred_settle_use_live_pool():
 @_scenario
 def test_reschedule_keeps_pool_and_blocks_cross_kind_move():
     """Перенос капсульной брони на другую дату — часы на месте; в кабинет —
-    нельзя (час капсулы 10 ₾ не должен оплатить кабинет 20 ₾)."""
+    нельзя (час капсулы 10 ₾ не должен оплатить кабинет 20 ₾).
+    12.10 (владелец, п.3): перенос дальше суток возвращает час в СВОЙ пул
+    (доп.), бронь снова ждёт списания за сутки — крон снимет из того же пула."""
     from fastapi import BackgroundTasks
     from app.api.v1.bookings import routes
     s = H._db()
@@ -366,15 +368,41 @@ def test_reschedule_keeps_pool_and_blocks_cross_kind_move():
                   background_tasks=BackgroundTasks(), session=s, current_user=admin)
     assert not (isinstance(out, dict) and "http" in out), out
     s.commit()
-    assert _snap(s, u) == before, "перенос по дате тронул пулы"
+    mid = _snap(s, u)
+    assert s.get(Booking, b.id).payment_status == "pending", "перенос дальше суток не вернул оплату"
+    assert (mid["xrem"], mid["xused"], mid["main"], mid["used"], mid["balance"]) == (
+        before["xrem"] + 1.0, before["xused"] - 1.0, before["main"], before["used"], before["balance"]), (before, mid)
+    from app.services.billing_defer import settle_pending_charge
+    ok, why = settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok, why
+    assert _snap(s, u) == before, "списание за сутки взяло час не из доп. пула"
     assert s.get(Booking, b.id).hours_pool == "extra"
+    # Оплаченная бронь в пределах суток (сегодня 16:00) в кабинет — отказ.
     out = H._call(routes.reschedule_booking, booking_id=str(b.id),
-                  data=routes.RescheduleRequest(new_date=H._day(1).strftime("%Y-%m-%d"), new_start_time="15:00",
+                  data=routes.RescheduleRequest(new_date=H._day(0).strftime("%Y-%m-%d"), new_start_time="16:00",
                                                 new_resource_id="room_1"),
                   background_tasks=BackgroundTasks(), session=s, current_user=admin)
     s.rollback()
     assert isinstance(out, dict) and out.get("http") == 400, "капсульная бронь уехала в кабинет за часы капсулы"
     assert s.get(Booking, b.id).resource_id == "cap_1"
+    assert _snap(s, u) == before
+    _check_pool(s, u)
+    # Дальше суток — как новая бронь: час капсулы вернулся в доп. пул, крон
+    # за сутки возьмёт час КАБИНЕТА из основного пула (не час капсулы).
+    out = H._call(routes.reschedule_booking, booking_id=str(b.id),
+                  data=routes.RescheduleRequest(new_date=H._day(2).strftime("%Y-%m-%d"), new_start_time="15:00",
+                                                new_resource_id="room_1"),
+                  background_tasks=BackgroundTasks(), session=s, current_user=admin)
+    assert not (isinstance(out, dict) and "http" in out), out
+    s.commit()
+    ok, why = settle_pending_charge(s, s.get(Booking, b.id))
+    s.commit()
+    assert ok, why
+    after = _snap(s, u)
+    assert (after["xrem"], after["xused"], after["main"], after["used"]) == (
+        before["xrem"] + 1.0, before["xused"] - 1.0, before["main"] - 1.0, before["used"] + 1.0), (before, after)
+    assert s.get(Booking, b.id).hours_pool == "main"
     _check_pool(s, u)
 
 

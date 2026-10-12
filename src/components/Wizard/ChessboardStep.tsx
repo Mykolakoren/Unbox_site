@@ -240,10 +240,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             return true;
         }
 
-        // Check Internal Bookings
+        // Check Internal Bookings — «на подтверждении» тоже держит время (12.10, как сервер)
         const internalBooking = bookings.find(b =>
             b.resourceId === resId &&
-            b.status === 'confirmed' &&
+            (b.status === 'confirmed' || b.status === 'pending_approval') &&
             !b.isReRentListed &&
             isSameDay(parseUTC(b.date), new Date(date)) &&
             b.startTime &&
@@ -307,7 +307,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         if (!isAdminBooking) return null;
         const booking = bookings.find(b =>
             b.resourceId === resId &&
-            b.status === 'confirmed' &&
+            (b.status === 'confirmed' || b.status === 'pending_approval') &&
             !b.isReRentListed &&
             isSameDay(parseUTC(b.date), new Date(date)) &&
             b.startTime &&

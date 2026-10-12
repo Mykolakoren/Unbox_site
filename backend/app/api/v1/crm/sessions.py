@@ -376,6 +376,7 @@ def update_session(
     data: TherapySessionUpdate,
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]  # FastAPI подставляет сам
 ):
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
@@ -466,6 +467,38 @@ def update_session(
                 and bk.start_time == new_start_time
             )
             if not same_slot:
+                # 12.10 (аудит путей бронирования): бронь едет за сессией по тем же
+                # правилам, что и обычный перенос брони.
+                from app.api.v1.bookings.routes import _is_past as _bk_is_past0
+                from app.core.permissions import ADMIN_ROLES as _ADMIN_ROLES
+                from app.services.booking_policy import HOT_MOVE_REFUSAL, is_hot_start, start_tb_of
+                _done = _bk_is_past0(bk)
+                _to_past = new_session_utc <= datetime.utcnow()
+                if _done and not _to_past:
+                    # Прошедшая бронь — кабинет уже использован: перенос на будущее
+                    # давал бы второе занятие по одной оплате.
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Кабинет этой сессии уже использован — бронь прошла. Чтобы перенести "
+                               "сессию на будущее, отвяжите кабинет и забронируйте новый.",
+                    )
+                if not _done and _to_past:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Бронь кабинета нельзя перенести в прошлое. Если сессия прошла в другое "
+                               "время — отвяжите кабинет от сессии.",
+                    )
+                if not _done and current_user.role not in _ADMIN_ROLES:
+                    try:
+                        _new_hot = is_hot_start(start_tb_of(new_booking_date, new_start_time))
+                        _old_hot = is_hot_start(start_tb_of(bk.date, bk.start_time))
+                    except (ValueError, TypeError):
+                        _new_hot = _old_hot = False
+                    if _new_hot and not _old_hot:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Сессию нельзя перенести вместе с кабинетом на ближайшие часы. " + HOT_MOVE_REFUSAL,
+                        )
                 # Check availability — must NOT count this booking itself.
                 available, conflict_msg = _check_avail(
                     session=session,
@@ -510,6 +543,11 @@ def update_session(
                 if (_bk_owner_obj is not None and bk.payment_status != "waived"
                         and (bk.payment_method or "balance") in ("balance", "subscription")
                         and not _bk_is_past(bk) and not _new_start_past):
+                    # Оплаченная бронь едет дальше суток — оплата возвращается,
+                    # спишется за сутки до начала (владелец 12.10, как перенос брони).
+                    from app.services.billing_defer import undo_early_charge
+                    undo_early_charge(session, bk, _bk_owner_obj, current_user,
+                                      new_date=new_booking_date, new_start_time=new_start_time)
                     try:
                         _reprice(
                             session, bk, _bk_owner_obj, new_resource=bk.resource_id, new_date=new_booking_date,
@@ -522,12 +560,17 @@ def update_session(
                         # «Часы подряд» — только у денежных броней (как в переносе брони).
                         if (bk.payment_method or "balance") == "balance":
                             _chain_after_move = (_bk_owner_obj, [(bk.resource_id, new_booking_date), (bk.resource_id, bk.date)])
+                _old_bk_event, _old_bk_resource = bk.gcal_event_id, bk.resource_id
                 bk.date = new_booking_date
                 bk.start_time = new_start_time
-                # Clearing gcal_event_id forces the next CRM-calendar /
-                # gcal sync pass to regenerate the event at the new time
-                # instead of leaving a stale event on the cabinet calendar.
+                # Событие кабинета в Google — пересоздать на новом времени (как
+                # перенос брони). Раньше id просто стирали, и старое событие
+                # висело на кабинете (аудит 12.10).
                 bk.gcal_event_id = None
+                if _old_bk_event and background_tasks is not None:
+                    from app.api.v1.bookings.routes import _gcal_recreate_in_background
+                    background_tasks.add_task(_gcal_recreate_in_background, str(bk.id),
+                                              current_user.name or "", _old_bk_event, _old_bk_resource)
                 bk.updated_at = datetime.now()
                 session.add(bk)
 

@@ -48,6 +48,7 @@ import { Field, Input } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatTime } from '../utils/format';
 import { ruCountWord } from '../utils/plural';
+import { seriesApprovalNote } from '../utils/approvalNote';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
 import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
 import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
@@ -693,7 +694,7 @@ function BookingsChessboard({
                 pattern: recurringPattern,
             });
             const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-            toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}`);
+            toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0)}${seriesApprovalNote(result.pendingApproval)}`);
             setNewSlots([]);
             setRecurringPattern('');
             await useUserStore.getState().fetchBookings();
@@ -2463,13 +2464,17 @@ export function MyBookingsPage() {
             return;
         }
 
-        const refundText = booking.paymentMethod === 'subscription'
+        // 12.10: заявка «на подтверждении» — оплату ещё не брали, снять можно всегда.
+        const isRequest = booking.status === 'pending_approval';
+        const refundText = isRequest
+            ? 'Оплата ещё не списана — ничего не спишем.'
+            : booking.paymentMethod === 'subscription'
             ? `${booking.hoursDeducted || (booking.duration / 60)} ч. будут возвращены на ваш абонемент.`
             : `${formatGel(booking.finalPrice)} вернём на ваш баланс.`;
 
         setModalConfig({
             isOpen: true,
-            title: 'Отменить бронирование?',
+            title: isRequest ? 'Снять заявку?' : 'Отменить бронирование?',
             message: (
                 <div className="space-y-2 text-sm text-ink-60">
                     <p>Отменённую бронь не вернуть — время сразу увидят другие.</p>
@@ -3200,6 +3205,12 @@ function BookingCard({
                                 </>
                             )}
                         </div>
+                    )}
+                    {/* 12.10: заявку «на подтверждении» клиент снимает сам (сервер разрешает и < 24 ч). */}
+                    {booking.status === 'pending_approval' && !isPast && (
+                        <UiButton variant="quiet" size="touch" className="text-[var(--status-danger-fg)]" onClick={() => onCancel(booking.id)}>
+                            Снять заявку
+                        </UiButton>
                     )}
                     {isConfirmedUpcoming && (
                         <UiButton variant="quiet" size="touch" icon={<CalendarIcon size={16} aria-hidden="true" />} onClick={addToCalendar}>

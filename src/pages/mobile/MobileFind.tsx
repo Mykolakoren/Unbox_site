@@ -12,8 +12,7 @@ import { tbilisiNow } from '../../utils/dateUtils';
 import { getFavoriteCabinet } from './favoriteCabinet';
 import { LoadErrorCard, SkeletonRows } from './LoadStates';
 import type { BookingHistoryItem } from '../../store/types';
-import { canBookCabinets } from '../../utils/permissions';
-import { isBookingAdmin } from './crmAccess';
+import { backdateHours, canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { COLOR, STATUS, Z } from '../../design/tokens';
@@ -85,8 +84,6 @@ function pluralWindows(n: number): string {
     return 'окон';
 }
 
-/** Окно «задним числом» для админа — как на сервере (12 ч). */
-const BACKDATE_MIN = 12 * 60;
 
 export function MobileFind() {
     const navigate = useNavigate();
@@ -299,18 +296,21 @@ export function MobileFind() {
         return d;
     }, [dayOffset, customDate]);
 
-    // Админ может бронировать задним числом до 12 ч (сервер: _assert_start_not_past,
-    // шахматка — то же окно). 12.10, чат админов: с телефона прошедшее время
-    // было не выбрать вовсе. По умолчанию список с «сейчас», прошлое — по кнопке.
-    const canBackdate = isBookingAdmin(currentUser) && !rescheduleId && !linkSessionId;
+    // Админ может бронировать задним числом (сервер: _assert_start_not_past —
+    // админ 12 ч, старший/владелец 72 ч; шахматка — то же окно). 12.10, чат
+    // админов: с телефона прошедшее время было не выбрать вовсе. Здесь — только
+    // СЕГОДНЯ (занятость прошлых дней телефон не грузит); прошлые дни — шахматка.
+    // По умолчанию список с «сейчас», прошлое — по кнопке.
+    const backdateMin = backdateHours(currentUser) * 60;   // как сервер: админ 12 ч, старший/владелец 72
+    const canBackdate = backdateMin > 0 && !rescheduleId && !linkSessionId;
     const [showPast, setShowPast] = useState(false);
     const slots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
         () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
-                               canBackdate && showPast ? BACKDATE_MIN : 0),
-        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast],
+                               canBackdate && showPast ? backdateMin : 0),
+        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin],
     );
 
     const toggleLoc = (id: string) => {
@@ -703,7 +703,7 @@ export function MobileFind() {
                     {canBackdate && dayOffset === 0 && (
                         <Button variant="secondary" size="touch" onClick={() => setShowPast(v => !v)}
                                 style={{ marginBottom: 10 }}>
-                            {showPast ? 'Скрыть прошедшее время' : 'Показать прошедшее время (до 12 ч назад)'}
+                            {showPast ? 'Скрыть прошедшее время' : 'Показать прошедшее время сегодня'}
                         </Button>
                     )}
                     {/* Статус запроса — рядом со списком, а не над «Когда»:
@@ -1301,8 +1301,9 @@ function buildFreeWindows(
     if (locs.size === 0 || spaces.size === 0) return [];
 
     const dayKey = fmtDate(date, 'yyyy-MM-dd');
+    // «На подтверждении» тоже держит время (12.10, как check_availability на сервере).
     const dayBookings = bookings.filter(b =>
-        b.status === 'confirmed' && bookingDay(b) === dayKey
+        (b.status === 'confirmed' || b.status === 'pending_approval') && bookingDay(b) === dayKey
     );
 
     const matchesSpace = (r: typeof RESOURCES[number]) => {

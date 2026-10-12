@@ -14,6 +14,7 @@ compute start_dt in Tbilisi and compare with Tbilisi-now (datetime.utcnow + 4h).
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -217,7 +218,149 @@ def subscription_cash_price(session: Session, user: User, b: Booking) -> float:
     return round(float(breakdown.final_price or 0) + booking_extras_money(b), 2)
 
 
-def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
+def undo_early_charge(session: Session, b: Booking, owner: Optional[User], actor: Optional[User] = None, *,
+                      new_date: datetime, new_start_time: str) -> dict:
+    """Перенос оплаченной брони дальше чем на сутки — оплата возвращается, бронь
+    снова «спишется за сутки до начала» (pending), как новая (владелец 12.10).
+
+    Кейс Марии Кирдун 30.09: бронь 23.10 перенесли на сегодня — сайт сразу списал;
+    утром вернули на 23.10, а бронь осталась «оплаченной» заранее: её деньги сидели
+    на 23.10, а ближняя 16.10 горела долгом в раскладке.
+
+    Зовётся ПЕРЕД _reprice_for_move (после неё бронь pending → меняется только
+    цена, без доплаты и проверки средств), со слотом, куда бронь едет (booking.date
+    ещё старый). «Всё или ничего»: если часы абонемента вернуть нельзя (недельный
+    пакет прошлой недели, абонемент истёк, пул не сходится — часы сняты со
+    старого абонемента), не возвращаем и деньги — бронь остаётся оплаченной, как
+    раньше. Бонус-часы и «Час в подарок» не трогаем: они тратятся при создании, их
+    вернёт отмена (иначе бонус вернулся бы дважды). Не коммитит.
+    """
+    res = {"undone": False, "reason": "", "money": 0.0, "hours": 0.0, "extra_hours": 0.0}
+    if owner is None:
+        res["reason"] = "no_owner"
+        return res
+    # Ревизия денег 12.10: только ЯВНО оплаченная бронь (у старых строк без
+    # статуса NULL — «не знаем, брали ли»; вернуть по ним — деньги из воздуха)
+    # и только способы, которые списывает крон.
+    if (b.status or "") != "confirmed" or b.payment_status != "paid":
+        res["reason"] = "not_paid"
+        return res
+    if (b.payment_method or "balance").lower() not in ("balance", "bonus", "subscription"):
+        res["reason"] = "method"
+        return res
+    try:
+        hh, mm = (int(x) for x in str(new_start_time).split(":")[:2])
+        new_start = new_date.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    except (ValueError, TypeError, AttributeError):
+        res["reason"] = "bad_time"
+        return res
+    if (new_start - tbilisi_now()).total_seconds() / 3600.0 <= DEFER_WINDOW_HOURS:
+        res["reason"] = "not_far"
+        return res
+
+    # Замки: бронь, потом клиент (как у крона) — крон, выбравший эту бронь, не
+    # спишет её поверх возврата.
+    session.flush()
+    locked = session.exec(
+        select(Booking).where(Booking.id == b.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if locked is None or locked.payment_status != "paid" or (locked.status or "") != "confirmed":
+        res["reason"] = "not_paid"
+        return res
+    b = locked
+    owner = session.exec(
+        select(User).where(User.id == owner.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).first() or owner
+
+    method = (b.payment_method or "balance").lower()
+    heal_legacy_subscription_hours(b)
+    money = 0.0
+    hours = 0.0
+    extra = 0.0
+    new_sub = None
+    if method == "subscription":
+        held = subscription_hours_held(b)
+        if held > 0:
+            sub = owner.subscription
+            if not sub:
+                res["reason"] = "no_pool"
+                return res
+            if not subscription_pool.hours_return_allowed(sub, b.date):
+                res["reason"] = "weekly_package_past_week"
+                return res
+            if subscription_pool.is_expired(sub, datetime.utcnow()):
+                res["reason"] = "pool_expired"
+                return res
+            # Абонемент кончится раньше нового времени: час вернули бы, а крон за
+            # сутки взял бы уже деньги (20 ₾ вместо 1 ч) — бронь остаётся оплаченной.
+            if not subscription_valid_for_booking(sub, SimpleNamespace(date=new_date, start_time=new_start_time)):
+                res["reason"] = "pool_expires_before_new_date"
+                return res
+            extra = subscription_pool.booking_extra(b)
+            kind = subscription_pool.kind_for_resource(_resource_type(session, b.resource_id))
+            new_sub = subscription_pool.credit_hours(sub, held, extra=extra, kind=kind)
+            # Пул сходится: возврат ровно +held (остаток) и −held (израсходовано),
+            # без «не ниже 0» — иначе часы сняты со старого абонемента.
+            gain = (subscription_pool.get_float(new_sub, "remaining_hours") - subscription_pool.get_float(sub, "remaining_hours")
+                    + subscription_pool.get_float(new_sub, "extra_hours_remaining") - subscription_pool.get_float(sub, "extra_hours_remaining"))
+            spent = (subscription_pool.get_float(sub, "used_hours") - subscription_pool.get_float(new_sub, "used_hours")
+                     + subscription_pool.get_float(sub, "extra_hours_used") - subscription_pool.get_float(new_sub, "extra_hours_used"))
+            if abs(gain - held) > 1e-6 or abs(spent - held) > 1e-6:
+                res["reason"] = "pool_mismatch"
+                return res
+            hours = held
+            money = subscription_money_taken(b)
+        else:
+            money = round(float(b.charge_amount or 0), 2)   # ушла в деньги — ₾
+    elif method == "bonus":
+        money = round(float(b.charge_amount or 0), 2)       # только денежный остаток
+    else:
+        money = round(float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0)), 2)
+
+    # Сверка с лентой: по брони реально снято (списания минус уже возвращённое)
+    # не меньше, чем возвращаем. Меньше — ярлыки брони неточные (старые строки):
+    # не трогаем совсем, иначе крон спишет полную цену поверх неполного возврата.
+    if money >= 0.01:
+        from app.models.balance_ledger import BalanceLedger
+        _net = -sum(float(r.delta) for r in session.exec(
+            select(BalanceLedger).where(BalanceLedger.ref_type == "booking", BalanceLedger.ref_id == str(b.id))
+        ).all())
+        if _net + 0.01 < money:
+            res["reason"] = "ledger_mismatch"
+            return res
+    if money >= 0.01:
+        wallet.credit(session, owner, money, reason="booking_charge_revert",
+                      description="Перенос дальше чем на сутки — оплата возвращена, спишется за сутки до начала",
+                      ref_type="booking", ref_id=str(b.id), actor=actor)
+    if new_sub is not None:
+        owner.subscription = new_sub
+        session.add(owner)
+    b.payment_status = "pending"
+    b.charged_at = None
+    b.charge_amount = None
+    b.updated_at = datetime.now()
+    session.add(b)
+    try:
+        from app.services.timeline import timeline_service
+        timeline_service.log_event(
+            session=session, actor_id=(actor.id if actor else owner.id),
+            actor_role=(actor.role if actor else "system"), target_id=str(b.id), target_type="booking",
+            event_type="booking_charge_reverted",
+            description=("Перенос дальше чем на сутки: оплата возвращена "
+                         f"({money:g} ₾{f', {hours:g} ч абонемента' if hours else ''}), спишется за сутки до начала"),
+            metadata={"money": money, "hours": hours, "extra_hours": extra, "method": method,
+                      "new_date": new_start.isoformat()},
+            commit=False,
+        )
+    except Exception:  # noqa: BLE001 — журнал не валит возврат
+        logger.exception("[undo_early_charge] timeline failed for %s", b.id)
+    res.update(undone=True, reason="undone", money=money, hours=hours, extra_hours=extra)
+    return res
+
+
+def settle_pending_charge(session: Session, b: Booking, *, respect_window: bool = False) -> Tuple[bool, str]:
     """Apply the deferred charge to a `pending` booking.
 
     Returns (success, reason). Success means payment_status is now `paid`.
@@ -257,6 +400,13 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
         return False, "gone"
     if b.payment_status != "pending":
         return False, f"not_pending(status={b.payment_status!r})"
+    # 12.10 (ревизия денег): крон выбрал бронь как «пора», а её перенесли дальше
+    # суток (undo_early_charge) — не списываем раньше времени. Только для крона
+    # (respect_window=True): одобрение и сторожа зовут списание напрямую.
+    # Там же статус: бронь отменили/отклонили между выборкой крона и замком —
+    # не списываем (ревизия денег 12.10; выборка крона — только confirmed).
+    if respect_window and ((b.status or "") != "confirmed" or should_defer_charge(b)):
+        return False, "not_due"
 
     # Строка клиента под замком (ревизор денег 09.10): крон, «Снять паузу»
     # админа и бронь клиента в ту же секунду иначе затирают пул часов /

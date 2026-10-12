@@ -145,6 +145,29 @@ export type AllocationIndex = Map<string, ClientAllocSummary>;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const cents = (n: number) => Math.round((Number(n) || 0) * 100);
 
+/**
+ * Уже списано с баланса за брони ПОСЛЕ дня `dayKey` («YYYY-MM-DD» по Батуми), ₾.
+ * 12.10 (чат админов, Лиза): брони списываются за сутки до начала, поэтому
+ * вечером баланс уже без завтрашних броней и с таблицей за день не сверить.
+ * «Баланс на сегодня» = баланс + это. `dayOf` — день брони (bookingDayKey).
+ */
+export function chargedAfterDay(a: ClientAllocation, dayKey: string, dayOf: (d: string) => string | null): number {
+    const c = (a.bookings || []).reduce((s, x) => {
+        const k = x.booking?.date ? dayOf(x.booking.date) : null;
+        return k && k > dayKey && Number(x.charged) > 0 ? s + cents(x.charged) : s;
+    }, 0);
+    return c / 100;
+}
+
+/** Долг по броням ПОСЛЕ дня `dayKey` — по дню БРОНИ, не по времени списания (d.date). */
+export function debtAfterDay(a: ClientAllocSummary, dayKey: string, dayOf: (d: string) => string | null): number {
+    const c = (a.debts || []).reduce((s, d) => {
+        const k = d.booking?.date ? dayOf(d.booking.date) : null;
+        return k && k > dayKey ? s + cents(d.amount) : s;
+    }, 0);
+    return c / 100;
+}
+
 export function indexAllocation(clients: ReadonlyArray<ClientAllocSummary> | null | undefined): AllocationIndex {
     const idx: AllocationIndex = new Map();
     for (const c of clients || []) {

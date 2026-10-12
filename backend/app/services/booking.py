@@ -50,7 +50,8 @@ def check_availability(
     """
     Check if a slot is available.
     Returns (True, None) if available, (False, reason) if overlapping.
-    All confirmed bookings block the slot, including re-rent listed ones.
+    All confirmed bookings block the slot, including re-rent listed ones, and
+    pending_approval ones (12.10).
 
     lock_rows=True: take a Postgres advisory lock on (resource_id, date) BEFORE
     the read, so two parallel booking creations on the same slot serialise.
@@ -80,9 +81,11 @@ def check_availability(
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
 
+    # Бронь «на подтверждении» (срочная) тоже держит время (аудит 12.10): иначе
+    # поверх неё ставили другую, и её одобрение потом падало «занято».
     statement = select(Booking).where(
         Booking.resource_id == resource_id,
-        Booking.status == "confirmed",
+        Booking.status.in_(("confirmed", "pending_approval")),  # type: ignore[attr-defined]
         Booking.date >= day_start,
         Booking.date < day_end,
     )

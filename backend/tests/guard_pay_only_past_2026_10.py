@@ -17,7 +17,8 @@ def test_future_charged_due_excluded():
     assert "futureChargedDue(bookings, dueMap, todayKey)" in r("src/pages/mobile/admin/MobileAdminDashboard.tsx")
     assert "futureChargedDue(bookings, dueMap, batumiDayKey())" in r("src/pages/mobile/admin/adminPayment.ts")
     h = r("src/components/admin/BookingMoneyHints.tsx")
-    assert "laterDebt" in h and "k > todayKey" in h
+    # 12.10: день долга — день брони (debtAfterDay), не время списания (guard_reconcile_2026_10).
+    assert "laterDebt" in h and "debtAfterDay(alloc!, todayKey, bookingDayKey)" in h
 
 if __name__ == "__main__":
     f = 0

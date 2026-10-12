@@ -31,6 +31,7 @@ import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { CURRENCIES } from '../../utils/currency';
 import { formatDayMonth } from '../../utils/format';
 import { ruPlural } from '../../utils/plural';
+import { seriesApprovalNote } from '../../utils/approvalNote';
 import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
 import { Sheet } from '../ui/Sheet';
 import { Button } from '../ui/Button';
@@ -119,7 +120,7 @@ function CrmQuickBookModal({
                     crmClientId: selectedClientId || undefined,
                 });
                 const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-                toast.success(`Серия создана: ${result.created} бронирований (${patternLabel})`);
+                toast.success(`Серия создана: ${result.created} бронирований (${patternLabel})${seriesApprovalNote(result.pendingApproval)}`);
                 await useUserStore.getState().fetchBookings();
                 onClose();
                 return;
@@ -826,7 +827,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             try {
                 const bd = parseUTC(b.date);
                 return format(bd, 'yyyy-MM-dd') === dateStr &&
-                    (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
+                    (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed'
+                        || b.status === 'pending_approval');   // 12.10: держит время, как на сервере
             } catch { return false; }
         });
     }, [bookings, selectedDate]);

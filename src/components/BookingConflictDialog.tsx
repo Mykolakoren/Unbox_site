@@ -59,7 +59,7 @@ export function BookingConflictDialog({
             // string — normalise either way to a YYYY-MM-DD prefix.
             const dayStr = String((b as { date?: unknown }).date ?? '').slice(0, 10);
             return b.resourceId === resourceId
-                && b.status === 'confirmed'
+                && (b.status === 'confirmed' || b.status === 'pending_approval')   // 12.10: своя «на подтверждении» тоже держит время
                 && dayStr === primary.date;
         })
         : undefined;

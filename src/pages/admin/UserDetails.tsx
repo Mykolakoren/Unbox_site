@@ -48,6 +48,9 @@ import { statusLabel } from '../../design/statuses';
 import { COLOR, SHADOW, STATUS, Z } from '../../design/tokens';
 import { formatGel, formatDayMonth, formatTime } from '../../utils/format';
 import { cashBranchOfLastBooking } from '../../utils/cashBranch';
+import { useClientAllocation } from '../../hooks/useBalanceAllocation';
+import { chargedAfterDay } from '../../utils/balanceAllocation';
+import { batumiDayKey, bookingDayKey } from '../../utils/adminToday';
 import { extraPoolLabel } from '../../utils/subscriptionHours';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -93,6 +96,12 @@ export function AdminUserDetails() {
     // (аудит 29.09, G7-04). Хуки — до раннего return «Загрузка…».
     const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
     const [isMergeOpen, setIsMergeOpen] = useState(false);
+    // 12.10 (Лиза): «Баланс на сегодня» — без уже списанных броней после сегодня
+    // (списываются за сутки), чтобы вечером сверять с таблицей за день.
+    const { data: balAlloc } = useClientAllocation(user?.id ? String(user.id) : null, user?.balance ?? null);
+    const balAllocOk = !!balAlloc && balAlloc.consistent
+        && Math.round(Number(balAlloc.balance) * 100) === Math.round(Number(user?.balance ?? 0) * 100);
+    const chargedLater = balAllocOk ? chargedAfterDay(balAlloc!, batumiDayKey(), bookingDayKey) : 0;
     // Wave 1: подтверждения — общее окно с кнопками-действиями; правка телефона,
     // Telegram, email и причины архивации — шторка с полем вместо prompt().
     const { confirm } = useConfirmDialog();
@@ -662,6 +671,13 @@ export function AdminUserDetails() {
                             </div>
                             {Number(user.balance || 0) < 0 && (
                                 <div style={{ fontSize: 12, color: STATUS.danger.fg, marginTop: 2 }}>клиент должен</div>
+                            )}
+                            {chargedLater >= 0.01 && (
+                                <div data-balance-today style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}
+                                    title="Брони после сегодняшнего дня списываются с баланса за сутки до начала. Для сверки с таблицей за сегодня — баланс без этих списаний.">
+                                    на сегодня <b style={{ color: GH.ink }}>{formatGel(Math.round((Number(user.balance || 0) + chargedLater) * 100) / 100)}</b>
+                                    {` — без ${formatGel(chargedLater)}, уже списанных за брони после сегодня`}
+                                </div>
                             )}
                             <button
                                 type="button"
