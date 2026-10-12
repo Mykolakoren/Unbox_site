@@ -30,14 +30,38 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
     const [startingBalance, setStartingBalance] = useState('');
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
+    // Админ уже вписал свою сумму — подсказку больше не подставляем.
+    const [touched, setTouched] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             setSelectedBranch(branch);
-            setStartingBalance(balances?.cash != null ? balances.cash.toFixed(2) : '');
             setNotes('');
+            setTouched(false);
         }
-    }, [isOpen, branch, balances?.cash]);
+    }, [isOpen, branch]);
+
+    // Подсказка «наличные на старте» — по ВЫБРАННОМУ филиалу: остаток прошлой
+    // смены + движение с тех пор (тот же расчёт, что у «Закрыть смену»,
+    // /cashbox/shifts/preview). Раньше подставлялись наличные всех филиалов
+    // из сводки страницы — 12.10 в Uni стояло 1018,40 вместо 193,35.
+    useEffect(() => {
+        if (!isOpen || touched) return;
+        if (!selectedBranch) {
+            setStartingBalance(balances?.cash != null ? balances.cash.toFixed(2) : '');
+            return;
+        }
+        let alive = true;
+        setStartingBalance('');
+        cashboxApi.previewCloseShift(selectedBranch)
+            .then(p => { if (alive) setStartingBalance(Number(p.expected ?? 0).toFixed(2)); })
+            .catch(() => {
+                cashboxApi.getBalance(selectedBranch)
+                    .then(b => { if (alive && b.cash != null) setStartingBalance(Number(b.cash).toFixed(2)); })
+                    .catch(() => {});
+            });
+        return () => { alive = false; };
+    }, [isOpen, selectedBranch, touched, balances?.cash]);
 
     const handleSubmit = async () => {
         const startingNum = parseFloat(startingBalance);
@@ -149,7 +173,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
                     step="0.01"
                     min="0"
                     value={startingBalance}
-                    onChange={e => setStartingBalance(e.target.value)}
+                    onChange={e => { setTouched(true); setStartingBalance(e.target.value); }}
                     placeholder="0.00"
                     style={{ ...inputStyle, marginBottom: 16, fontFamily: GH_MONO }}
                 />

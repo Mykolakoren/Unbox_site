@@ -212,6 +212,29 @@ def test_series_reschedule_recomputes_chains_in_code():
     assert ".with_for_update()" in h and "populate_existing=True" in h, "нет замка на строке клиента"
 
 
+# ── чат админов 12.10: касса и бронь задним числом ─────────────────────
+
+def test_open_shift_prefill_is_per_branch():
+    """«Открыть смену» для филиала подставляла наличные ВСЕХ филиалов (Uni:
+    1018,40 вместо 193,35) — теперь preview закрытия по выбранному филиалу."""
+    m = _src("src/components/admin/cashbox/OpenShiftModal.tsx")
+    assert "cashboxApi.previewCloseShift(selectedBranch)" in m
+    assert "setStartingBalance(Number(p.expected ?? 0).toFixed(2))" in m
+    assert "setTouched(true); setStartingBalance(e.target.value)" in m, "подсказка затирает вписанную сумму"
+
+
+def test_chessboard_select_allows_12h_back():
+    """Клетка 30 мин назад не серая, а выделить нельзя было: isSlotOccupied
+    считал любое прошедшее время занятым. Окно — 12 ч, как у клеток и сервера."""
+    c = _src("src/components/admin/AdminChessboardView.tsx")
+    i = c.index("const isSlotOccupied = useCallback(")
+    body = c[i:c.index("}, [selectedDate, slotMap]);", i)]
+    assert "if (hoursAgo > 12) return true;" in body
+    assert "timeToMin(time) < now.totalMins" not in body
+    r = _src("backend/app/api/v1/bookings/routes.py")
+    assert "if diff_h < -12.0:" in r
+
+
 # ── телефон: бронь кабинета из сессии CRM ───────────────────────────────
 
 def test_link_session_booking():

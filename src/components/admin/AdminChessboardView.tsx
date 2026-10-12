@@ -363,11 +363,15 @@ export function AdminChessboardView() {
 
     // ── Drag-to-select helpers ────────────────────────────────────────────────
     const isSlotOccupied = useCallback((resId: string, time: string) => {
-        // Tbilisi-aware past check (see rowCellsMap for rationale).
-        const now = tbilisiNow();
+        // Tbilisi-aware past check — то же окно «12 ч назад», что у клеток
+        // (rowCellsMap.isPast) и на сервере (_assert_start_not_past). 12.10, чат
+        // админов: клетка 30 мин назад была не серой, но выделить её было нельзя —
+        // здесь любое прошедшее время считалось занятым.
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        if (dateStr < now.ymd) return true;
-        if (dateStr === now.ymd && timeToMin(time) < now.totalMins) return true;
+        const [y, mo, d] = dateStr.split('-').map(Number);
+        const [h, m] = time.split(':').map(Number);
+        const hoursAgo = (Date.now() - Date.UTC(y, mo - 1, d, h - 4, m, 0)) / 3_600_000;
+        if (hoursAgo > 12) return true;
         return slotMap.has(`${resId}|${time}`);
     }, [selectedDate, slotMap]);
 
