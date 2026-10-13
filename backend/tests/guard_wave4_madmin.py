@@ -82,7 +82,9 @@ def _mobile_admin_routes(app: str) -> str:
 # 01.10 (guard_duplicate_payment_2026_10): TopupSheet.save осознанно изменён — createIncomeWithDuplicateGuard
 # вместо cashboxApi.createTransaction, платёж и onDone разведены по двум try, ошибка — paymentErrorText.
 # Прежний отпечаток a09bd23bbb62316e.
-TOPUP_SAVE_FP = "27cf084fbdb167c5"
+# 13.10: + вопрос «сумма сильно больше ожидаемой — точно?» ДО записи (topupGuard,
+# Михаил Стефанович 2020 вместо 20); поля платежа те же (проверяются ниже).
+TOPUP_SAVE_FP = "d258c18ba8e2b2ff"
 PERFORM_CANCEL_FP = "4eedaafde0cd9b02"
 END_SHIFT_SUBMIT_FP = "5978bf9faa11448e"
 

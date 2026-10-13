@@ -1,32 +1,39 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Sun, Check } from 'lucide-react';
+import { batumiDayKey } from '../../../utils/adminToday';
 
 /**
  * Excel #54 variant B — morning checklist as a *soft* reminder, not a
  * blocking gate.
  *
- * Behaviour:
- *   - Shown at most once per calendar day per admin (persisted in
- *     localStorage key `unbox_morning_checklist_<YYYY-MM-DD>_<user>`).
- *   - Closable with ✕ or "Позже" — doesn't gate access to Finance.
- *   - "Готово" ticks the day and dismisses, marking the admin as
- *     having acknowledged it.
+ * Behaviour (владелец 13.10):
+ *   - При первом входе в «Финансы» за день (день — по Тбилиси) — окно с
+ *     чек-листом смены; на компьютере и на телефоне.
+ *   - Больше не показывается сегодня, только когда отмечены ВСЕ пункты
+ *     (localStorage `unbox_morning_checklist_<YYYY-MM-DD>_<user>`). Раньше
+ *     можно было «Принято, больше не показывать» без единой галочки.
+ *   - ✕ / «Позже» — закрыть; при следующем входе в «Финансы» окно вернётся.
+ *     Доступ к «Финансам» не перекрывает.
  *
- * The items are operational: what the admin verifies when opening the
- * centre in the morning. No money math.
+ * Пункты: главное из утреннего чек-листа (База знаний) + денежные правила из
+ * разборов чата админов (2020 ₾ вместо 20, цена 0 ₾ без причины, вечерняя
+ * сверка по «На сегодня»).
  */
 
-const ITEMS = [
-    { key: 'lights', label: 'Свет, кондиционеры, роутеры включены' },
-    { key: 'cleaning', label: 'Клининг прошёл, кабинеты готовы к приёму' },
-    { key: 'cash', label: 'Касса на месте — есть размен на ₾20 и ₾50' },
-    { key: 'schedule', label: 'Расписание на день просмотрено' },
+export const CHECKLIST_ITEMS = [
+    { key: 'open', label: 'Филиал открыт к первой брони, кабинеты и холл проверены по утреннему чек-листу' },
+    { key: 'cash', label: 'Наличные пересчитаны и совпадают с остатком на сайте (не совпадают — написать вчерашнему администратору). Есть размен на 20 и 50 ₾' },
+    { key: 'requests', label: 'Срочные заявки «на подтверждении» разобраны — подтвердить или отклонить' },
+    { key: 'pay', label: '«Принять оплату»: перед записью проверяю клиента и сумму' },
+    { key: 'reason', label: 'Цену 0 ₾ и ручную правку баланса — только с причиной' },
+    { key: 'evening', label: 'Вечером сверяю с таблицей строку «На сегодня», а не «Баланс» (завтрашние брони уже списаны)' },
 ];
+const ITEMS = CHECKLIST_ITEMS;
 
 function storageKey(userEmail: string): string {
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    return `unbox_morning_checklist_${today}_${userEmail}`;
+    // День — по Тбилиси (раньше toISOString: день менялся в 04:00 по Тбилиси).
+    return `unbox_morning_checklist_${batumiDayKey()}_${userEmail}`;
 }
 
 interface Props {
@@ -66,6 +73,7 @@ export function MorningChecklistModal({ adminEmail }: Props) {
     };
 
     const handleAcknowledge = () => {
+        if (!allDone) return;   // «больше не показывать» — только с галочками
         markSeen();
         setIsOpen(false);
     };
@@ -86,8 +94,8 @@ export function MorningChecklistModal({ adminEmail }: Props) {
                             <Sun size={20} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-lg text-gray-900">Доброе утро</h3>
-                            <p className="text-xs text-gray-500 mt-0.5">Короткий чек-лист открытия центра</p>
+                            <h3 className="font-bold text-lg text-gray-900">Чек-лист смены</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Отметьте все пункты — сегодня окно больше не появится</p>
                         </div>
                     </div>
                     <button
@@ -136,14 +144,17 @@ export function MorningChecklistModal({ adminEmail }: Props) {
                 <div className="p-5 border-t border-gray-100 space-y-2">
                     <button
                         onClick={handleAcknowledge}
+                        disabled={!allDone}
                         className={
                             'w-full font-semibold py-2.5 rounded-xl transition-all ' +
                             (allDone
                                 ? 'bg-unbox-green text-white hover:bg-unbox-dark'
-                                : 'bg-unbox-light text-unbox-dark hover:bg-unbox-light/80')
+                                : 'bg-unbox-light text-ink-60 cursor-not-allowed')
                         }
                     >
-                        {allDone ? 'Всё проверено — начать день' : 'Принято, больше не показывать сегодня'}
+                        {allDone
+                            ? 'Всё проверено — начать день'
+                            : `Отметьте все пункты (${ITEMS.filter(i => checked[i.key]).length} из ${ITEMS.length})`}
                     </button>
                     <button
                         onClick={handleDismiss}

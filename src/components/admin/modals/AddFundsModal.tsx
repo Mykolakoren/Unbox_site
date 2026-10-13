@@ -3,6 +3,8 @@ import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, CreditCard, Banknote, Landmark } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { topupLooksLikeTypo, topupTypoQuestion } from '../../../utils/topupGuard';
+import { formatGel } from '../../../utils/format';
 
 interface AddFundsModalProps {
     isOpen: boolean;
@@ -38,6 +40,8 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
     // Подсветка «выберите филиал» — после попытки записать без него.
     const [branchMissing, setBranchMissing] = useState(false);
     const branchRef = useRef<HTMLSelectElement>(null);
+    // 13.10: сумма сильно больше ожидаемой — сначала переспрашиваем (topupGuard).
+    const [confirmFor, setConfirmFor] = useState<number | null>(null);
 
     // Сумма обнуляется при каждом открытии. Окно не пересоздаётся (ниже просто
     // return null), поэтому после «Отмены» введённая сумма оставалась в поле —
@@ -45,7 +49,10 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
     // филиал специально НЕ трогаем: за смену они одни и те же, их повторный
     // выбор — как раз лишняя работа.
     useEffect(() => {
-        if (isOpen) setAmount(defaultAmount && defaultAmount > 0 ? String(Math.round(defaultAmount * 100) / 100) : '');
+        if (isOpen) {
+            setAmount(defaultAmount && defaultAmount > 0 ? String(Math.round(defaultAmount * 100) / 100) : '');
+            setConfirmFor(null);
+        }
     }, [isOpen, defaultAmount]);
 
     // Филиал брони известен — подставляем его (как TopupSheet на телефоне).
@@ -68,6 +75,10 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
         if (requireBranch && !branch) {
             setBranchMissing(true);
             branchRef.current?.focus();
+            return;
+        }
+        if (topupLooksLikeTypo(value, defaultAmount) && confirmFor !== value) {
+            setConfirmFor(value);
             return;
         }
         onConfirm(value, method, branch || undefined);
@@ -114,7 +125,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                         <input
                             type="number"
                             value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
+                            onChange={(e) => { setAmount(e.target.value); setConfirmFor(null); }}
                             placeholder="0.00"
                             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green transition-shadow text-lg font-medium"
                             autoFocus
@@ -168,12 +179,17 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                         )}
                     </div>
 
+                    {confirmFor !== null && confirmFor === parseFloat(amount) && (
+                        <p role="alert" data-topup-typo className="text-sm font-medium text-[var(--status-danger-fg)] bg-[var(--status-danger-bg)] rounded-xl px-3 py-2">
+                            {topupTypoQuestion(confirmFor, defaultAmount, n => formatGel(n))}
+                        </p>
+                    )}
                     <div className="flex gap-3 pt-2">
                         <Button variant="outline" type="button" onClick={onClose} className="flex-1">
                             Отмена
                         </Button>
                         <Button variant="primary" type="submit" className="flex-1">
-                            Пополнить
+                            {confirmFor !== null && confirmFor === parseFloat(amount) ? `Да, внести ${formatGel(confirmFor)}` : 'Пополнить'}
                         </Button>
                     </div>
                 </form>

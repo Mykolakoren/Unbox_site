@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, TrendingUp, TrendingDown, Wallet, Check, Lock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MobileCloseShiftSheet } from './MobileCloseShiftSheet';
+import { MorningChecklistModal } from '../../../components/admin/cashbox/MorningChecklistModal';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -103,7 +104,13 @@ export function MobileAdminFinance() {
     const currentUser = useUserStore(s => s.currentUser);
     if (!currentUser) return null;
     if (!userCanAccessFinance(currentUser)) return <Navigate to="/m/admin/dashboard" replace />;
-    return <MobileAdminFinanceScreen />;
+    // Чек-лист смены — раз в день, как на компьютере (владелец 13.10).
+    return (
+        <>
+            {currentUser.email && <MorningChecklistModal adminEmail={currentUser.email} />}
+            <MobileAdminFinanceScreen />
+        </>
+    );
 }
 
 function MobileAdminFinanceScreen() {

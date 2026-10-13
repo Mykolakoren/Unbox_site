@@ -9,6 +9,7 @@ import { Chip, Segmented } from '../../../components/ui/Chip';
 import { Field, Input } from '../../../components/ui/Field';
 import { formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
+import { topupLooksLikeTypo, topupTypoQuestion } from '../../../utils/topupGuard';
 
 /**
  * Пополнить баланс клиента с телефона (волна 4, пакет A).
@@ -51,9 +52,14 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
     const value = parsed ?? 0;
     const amountError = !isMoneyInputBlank(amount) && parsed === null ? MONEY_INPUT_ERROR : undefined;
     const fullDebt = defaultAmount && defaultAmount > debt ? defaultAmount : 0;
+    // 13.10: сумма сильно больше ожидаемой — сначала переспрашиваем (topupGuard).
+    const expected = defaultAmount && defaultAmount > 0 ? defaultAmount : debt;
+    const [confirmFor, setConfirmFor] = useState<number | null>(null);
+    const askTypo = confirmFor !== null && confirmFor === value;
 
     const save = async () => {
         if (value <= 0) { toast.error('Введите сумму больше 0'); return; }
+        if (topupLooksLikeTypo(value, expected) && confirmFor !== value) { setConfirmFor(value); return; }
         setSaving(true);
         try {
             // 01.10: через защиту от дубля (409 duplicate_recent → «Записать ещё одну?»).
@@ -101,7 +107,7 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
                     disabled={value <= 0}
                     onClick={save}
                 >
-                    Пополнить на {value > 0 ? formatGel(value) : '—'}
+                    {askTypo ? `Да, внести ${formatGel(value)}` : <>Пополнить на {value > 0 ? formatGel(value) : '—'}</>}
                 </Button>
             }
         >
@@ -127,8 +133,13 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
                         error={amountError}
                         hint={todayAmount && todayAmount > 0 ? `Из них за сегодня ${formatGel(todayAmount)}` : undefined}
                     >
-                        <Input kind="money" suffix="₾" value={amount} onChange={e => setAmount(e.target.value)} />
+                        <Input kind="money" suffix="₾" value={amount} onChange={e => { setAmount(e.target.value); setConfirmFor(null); }} />
                     </Field>
+                    {askTypo && (
+                        <p role="alert" data-topup-typo style={{ margin: '8px 0 0', fontSize: 14, fontWeight: 600, color: 'var(--status-danger-fg)', background: 'var(--status-danger-bg)', borderRadius: 12, padding: '8px 12px' }}>
+                            {topupTypoQuestion(value, expected, formatGel)}
+                        </p>
+                    )}
                 </div>
 
                 <div>
