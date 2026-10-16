@@ -125,7 +125,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
             <dl className="m-0 text-small">
                 <div className={`${cell} flex justify-between gap-3`}>
                     <dt className="flex items-center gap-2 text-ink-60"><Calendar size={14} aria-hidden="true" /> Действует до</dt>
-                    <dd className="m-0 font-medium">{formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}</dd>
+                    <dd className="m-0 font-medium">{sub.flexible ? 'Без срока' : formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}</dd>
                 </div>
                 <div className={`${cell} flex justify-between gap-3`}>
                     {/* Владелец 01.10: перенос позже суток (не позже чем за 3 ч) —

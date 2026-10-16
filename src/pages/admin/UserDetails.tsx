@@ -1248,7 +1248,11 @@ export function AdminUserDetails() {
                                                                 }}
                                                                 className="hover:text-ink underline decoration-dotted"
                                                             >
-                                                                до {safeFormat(user.subscription.expiryDate, 'd.MM.yyyy', undefined, '—')}
+                                                                {/* 16.10: особые условия (Светлана Розова) — абонемент не истекает;
+                                                                    «до 12.06 — активен» путал админов. */}
+                                                                {user.subscription.flexible
+                                                                    ? 'без срока · особые условия'
+                                                                    : <>до {safeFormat(user.subscription.expiryDate, 'd.MM.yyyy', undefined, '—')}</>}
                                                             </button>
                                                         )}
                                                     </div>
