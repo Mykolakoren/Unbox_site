@@ -548,6 +548,32 @@ def test_crm_past_booking_moved_within_past_keeps_price():
         b = s.get(Booking, b.id)
         assert (b.start_time, float(b.final_price)) == ("07:00", price0), (b.start_time, b.final_price, price0)
 
+
+def test_extend_bonus_booking_pays_its_share():
+    """17.10 (Максим Кочерженко): 1 ч приветственным часом, потом «Продлить» на
+    1 ч. 2 ч стоят 40 − 10 % = 36 ₾; подарок покрывает половину брони — доплата
+    18 ₾ (как при создании 2-часовой брони с бонусом), а не 36 − 20 = 16."""
+    from datetime import timedelta
+    from app.api.v1.bookings import routes
+    from app.models.booking import Booking
+    from app.models.bonus import Bonus
+    with H.frozen_time(), _NoTg():
+        s = H._db()
+        admin = H._user(s, role="owner", balance=0.0, name="Админ")
+        u = H._user(s, role="specialist", balance=0.0, name="Новый")
+        s.add(Bonus(user_id=str(u.id), type="free_hour", quantity=1.0, status="active", description="Добро пожаловать",
+                    granted_by_id="system", granted_by_name="Система", expires_at=H._day(10) + timedelta(days=1)))
+        s.commit()
+        b = _create(s, admin, u, day=0, start="14:00", minutes=60, method="bonus")
+        assert (b.payment_method, float(b.final_price or 0)) == ("bonus", 0.0), (b.payment_method, b.final_price)
+        out = H._call(routes.extend_booking, booking_id=str(b.id), payload=routes.ExtendRequest(extra_minutes=60),
+                      session=s, current_user=admin)
+        assert not (isinstance(out, dict) and "http" in out), out
+        s.expire_all()
+        b = s.get(Booking, b.id)
+        assert (b.duration, float(b.final_price)) == (120, 18.0), (b.duration, b.final_price)
+        assert _bal(s, u) == -18.0, _bal(s, u)
+
 if __name__ == "__main__":
     fails = 0
     for n, f in sorted(globals().items()):

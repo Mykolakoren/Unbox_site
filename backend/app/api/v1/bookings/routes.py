@@ -6774,9 +6774,19 @@ def extend_booking(
         )
         old_quote = pricing.calculate_price(duration_minutes=booking.duration, **_quote_args)
         new_quote = pricing.calculate_price(duration_minutes=new_duration, **_quote_args)
-        extra_price = round(
-            float(new_quote.final_price or 0) - float(old_quote.final_price or 0), 2
-        )
+        if _bonus_hours_on(booking) > 0:
+            # 17.10 (Максим Кочерженко): 1 ч подарком + продление на 1 ч считалось
+            # 36 − 20 = 16 ₾ — подарочный час шёл по полной цене, а вся скидка за
+            # 2 ч — на платный. Доля бонуса — как при создании брони
+            # (_resolve_with_bonus / _bonus_uncovered_price): 36 × ½ = 18 ₾.
+            extra_price = round(
+                _bonus_uncovered_price(booking, float(new_quote.final_price or 0), new_duration)
+                - _bonus_uncovered_price(booking, float(old_quote.final_price or 0), booking.duration), 2
+            )
+        else:
+            extra_price = round(
+                float(new_quote.final_price or 0) - float(old_quote.final_price or 0), 2
+            )
         # Отрицательной разницы при текущих тирах быть не может (база растёт
         # быстрее, чем процент скидки). Если появится — не возвращаем деньги
         # молча из ветки продления, а просто не доплачиваем.
