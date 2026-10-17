@@ -5,7 +5,7 @@ import { FileText, Sun, Moon, Clock, BookOpen, AlertCircle, ChevronDown, Star } 
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
-type SectionId = 'morning' | 'evening' | 'day' | 'rules' | 'pricing' | 'subscriptions' | 'glossary';
+type SectionId = 'morning' | 'evening' | 'day' | 'rules' | 'changes' | 'pricing' | 'subscriptions' | 'glossary';
 
 export function AdminKnowledgeBase() {
     const [expandedIds, setExpandedIds] = useState<Set<SectionId>>(new Set(['morning']));
@@ -435,11 +435,31 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         </div>
     );
 
+    // 17.10 (решение владельца, предложение Егора): кейс Светланы Розовой —
+    // пометка «без срока» от 15.07 «ожила» в октябре вместе с новым правилом
+    // про паузу. Правила меняются только вперёд.
+    const ChangeRules = () => (
+        <div>
+            <p style={para}>
+                Как действуют новые правила и решения. Это касается и админов, и сайта, и Жан-Клода (Claude).
+            </p>
+            <div style={boxHair}>
+                <div style={subhead}>Без обратной силы</div>
+                <div style={li}><span style={bullet}>01</span><strong>Новое правило действует с даты решения.</strong> На прошлые брони, оплаты и абонементы оно само не распространяется.</div>
+                <div style={li}><span style={bullet}>02</span><strong>Изменить прошлое</strong> (вернуть деньги, пересчитать, продлить срок) — только прямым решением Николая и с причиной в корректировке.</div>
+                <div style={li}><span style={bullet}>03</span><strong>Старая договорённость (больше месяца)</strong> — перед тем как применить её к деньгам, заново уточнить у Николая. Пример: абонемент Светланы Розовой с пометкой «без срока» от 15.07 «ожил» в октябре, когда новое правило сняло паузу.</div>
+                <div style={li}><span style={bullet}>04</span><strong>Срок абонемента — это срок.</strong> Закончился — неиспользованные часы сгорают. Исключение — только решением Николая.</div>
+                <div style={li}><span style={bullet}>05</span><strong>Любая ручная правка денег</strong> (цена 0 ₾, корректировка баланса, «простить» бронь) — только с причиной, чтобы через месяц было понятно, зачем.</div>
+            </div>
+        </div>
+    );
+
     const sections: GHSection[] = [
         { id: 'morning', title: 'Утренний чек-лист', subtitle: 'Открытие, подготовка филиала, чистота', body: <MorningChecklist /> },
         { id: 'day', title: 'В течение дня', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
         { id: 'evening', title: 'Вечерний чек-лист', subtitle: 'Выключение, уборка, отчёт по кассе', body: <EveningChecklist /> },
         { id: 'rules', title: 'Правила пространства', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
+        { id: 'changes', title: 'Как меняются правила', subtitle: 'Без обратной силы: новые решения — только с даты решения', body: <ChangeRules /> },
         { id: 'pricing', title: 'Ценовая политика', subtitle: 'Тарифы, скидки, приветственный час, недельная скидка', body: <Pricing /> },
         { id: 'subscriptions', title: 'Абонементы', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
         { id: 'glossary', title: 'Глоссарий', subtitle: 'Термины: бронь vs сессия, статусы, способы оплаты', body: <Glossary /> },
