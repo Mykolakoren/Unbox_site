@@ -12,7 +12,8 @@ interface AssignSubscriptionModalProps {
     isOpen: boolean;
     onClose: () => void;
     /** branch — филиал кассы, куда легли деньги; при оплате с баланса не нужен. */
-    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string) => Promise<void> | void;
+    /** paidNow — сколько клиент внёс сейчас (наличные/карта); меньше цены — остаток долгом на балансе (21.10). */
+    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string, paidNow?: number) => Promise<void> | void;
     currentSubscriptionName?: string;
     /** Филиал по последней брони клиента («Unbox Uni» / «Unbox One») — подставить при открытии. */
     defaultBranch?: string;
@@ -29,6 +30,9 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
     // Подсветка «выберите филиал» — после попытки продать без него.
     const [branchMissing, setBranchMissing] = useState(false);
     const branchRef = useRef<HTMLSelectElement>(null);
+    // 21.10 (Валя, Лиза): абонемент можно оплатить частями — «Внесено сейчас»,
+    // остаток ложится долгом на баланс и закрывается «Принять оплату».
+    const [paidNow, setPaidNow] = useState('');
 
     // Филиал клиента известен — подставляем его (как «Пополнить» в карточке).
     // Неизвестен — оставляем прошлый выбор, а без выбора продать за деньги нельзя.
@@ -37,16 +41,24 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
         setBranchMissing(false);
         if (defaultBranch && (CASH_BRANCHES as readonly string[]).includes(defaultBranch)) setBranch(defaultBranch);
     }, [isOpen, defaultBranch]);
+    // Новый тариф — «Внесено» = его цена (по умолчанию оплата целиком).
+    useEffect(() => {
+        if (selectedPlanIndex !== null) setPaidNow(String(SUBSCRIPTION_PLANS[selectedPlanIndex]?.price ?? ''));
+    }, [selectedPlanIndex]);
 
     if (!isOpen) return null;
 
     // Деньги в кассу (наличные/карта) — нужен филиал; с баланса касса не трогается.
     const paysToCashbox = method !== 'balance';
+    const planPrice = selectedPlanIndex !== null ? (SUBSCRIPTION_PLANS[selectedPlanIndex]?.price ?? 0) : 0;
+    const paidValue = paidNow.trim() === '' ? NaN : Number(paidNow.replace(',', '.'));
+    const paidValid = !paysToCashbox || (Number.isFinite(paidValue) && paidValue >= 0 && paidValue <= planPrice);
+    const debt = paysToCashbox && paidValid ? Math.round((planPrice - paidValue) * 100) / 100 : 0;
 
     // Ждём ответа сервера и блокируем кнопку: продажа — это деньги в кассе,
     // двойной клик не должен провести её дважды (ревизия 29.09).
     const handleSubmit = async () => {
-        if (selectedPlanIndex === null || busy) return;
+        if (selectedPlanIndex === null || busy || !paidValid) return;
         if (requireBranch && paysToCashbox && !branch) {
             setBranchMissing(true);
             branchRef.current?.focus();
@@ -54,7 +66,8 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
         }
         setBusy(true);
         try {
-            await onConfirm(selectedPlanIndex, method, paysToCashbox ? (branch || undefined) : undefined);
+            await onConfirm(selectedPlanIndex, method, paysToCashbox ? (branch || undefined) : undefined,
+                paysToCashbox && debt > 0 ? paidValue : undefined);
             onClose();
         } finally {
             setBusy(false);
@@ -176,6 +189,34 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                     </div>
                 )}
 
+                {selectedPlanIndex !== null && paysToCashbox && (
+                    <div className="mb-6">
+                        <label htmlFor="assign-sub-paid" className="block text-sm font-medium text-gray-700 mb-2">
+                            Внесено сейчас, ₾
+                        </label>
+                        <input
+                            id="assign-sub-paid"
+                            type="text"
+                            inputMode="decimal"
+                            value={paidNow}
+                            onChange={e => setPaidNow(e.target.value)}
+                            aria-invalid={!paidValid || undefined}
+                            className={`w-full px-4 py-2.5 rounded-xl border focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm num ${paidValid ? 'border-gray-200' : 'border-[var(--status-danger-fg)] bg-[var(--status-danger-bg)]'}`}
+                        />
+                        {!paidValid ? (
+                            <p role="alert" className="mt-1.5 text-xs font-medium text-[var(--status-danger-fg)]">
+                                От 0 до {formatGel(planPrice)}
+                            </p>
+                        ) : debt > 0 ? (
+                            <p className="mt-1.5 text-xs text-[var(--status-pending-fg)]">
+                                Остаток {formatGel(debt)} ляжет долгом на баланс клиента — когда доплатит, «Принять оплату».
+                            </p>
+                        ) : (
+                            <p className="mt-1.5 text-xs text-ink-60">Оплата целиком. Если клиент платит частями — впишите, сколько внесено сейчас.</p>
+                        )}
+                    </div>
+                )}
+
                 <div className="flex gap-3">
                     <Button variant="outline" onClick={onClose} className="flex-1">
                         Отмена
@@ -183,7 +224,7 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                     <Button
                         variant="primary"
                         onClick={handleSubmit}
-                        disabled={selectedPlanIndex === null || busy}
+                        disabled={selectedPlanIndex === null || busy || !paidValid}
                         className="flex-1"
                     >
                         {busy ? 'Назначаем…' : 'Назначить абонемент'}

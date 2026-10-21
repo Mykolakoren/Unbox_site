@@ -878,6 +878,10 @@ def sell_subscription_endpoint(
     user = session.exec(select(User).where(User.id == user.id).with_for_update()).one()
     amount = payload.get("amount")
     try:
+        _paid_now = float(payload["paid_now"]) if payload.get("paid_now") not in (None, "") else None
+    except (TypeError, ValueError):
+        raise HTTPException(400, "«Внесено сейчас» — должно быть число")
+    try:
         result = sell_subscription(
             session, user,
             plan_id=str(payload.get("plan_id") or ""),
@@ -886,6 +890,7 @@ def sell_subscription_endpoint(
             amount=float(amount) if amount not in (None, "") else None,
             branch=payload.get("branch") or None,
             category_id=payload.get("category_id") or None,
+            paid_now=_paid_now,
         )
     except SaleError as e:
         session.rollback()
@@ -898,6 +903,7 @@ def sell_subscription_endpoint(
         target_type="user",
         event_type="subscription_sold",
         description=(f"Продан абонемент «{result['plan']}» за {result['price']:g} ₾ ({result['method']})"
+                     + (f", внесено {result['paid_now']:g} ₾, долг {result['debt']:g} ₾" if result.get("debt") else "")
                      + (f", перенесено {result['carried_hours']:g} ч" if result["carried_hours"] else "")
                      + (f", на часы переведено броней: {len(result['converted_bookings'])}" if result["converted_bookings"] else "")),
         metadata=result,

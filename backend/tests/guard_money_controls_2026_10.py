@@ -1107,7 +1107,8 @@ def test_subscription_sale_passes_cash_branch():
     m = _read("src/components/admin/modals/AssignSubscriptionModal.tsx")
     assert "const paysToCashbox = method !== 'balance';" in m
     assert "if (requireBranch && paysToCashbox && !branch)" in m, "окно продаёт за деньги без филиала"
-    assert "await onConfirm(selectedPlanIndex, method, paysToCashbox ? (branch || undefined) : undefined);" in m
+    # 21.10: + «Внесено сейчас» (оплата частями) — только когда есть долг.
+    assert "await onConfirm(selectedPlanIndex, method, paysToCashbox ? (branch || undefined) : undefined,\n                paysToCashbox && debt > 0 ? paidValue : undefined);" in m
     assert "|| busy" in m, "двойной клик снова проведёт продажу дважды"
     tx = _read("src/components/admin/cashbox/AddCashboxTransactionModal.tsx")
     sale = tx[tx.index("if (isSubscriptionSale) {"):tx.index("const r = await usersApi.sellSubscription(clientId, {")]

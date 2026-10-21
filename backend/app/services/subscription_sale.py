@@ -14,7 +14,14 @@ sell_subscription делает всё сразу, в одной транзакц
   3. новый пул часов по тарифу. Остаток ещё действующего абонемента не
      сгорает — переносится в новый (бонусными часами);
   4. будущие брони клиента, ещё не списанные (pending) и оплачиваемые
-     деньгами, переводятся на часы, если тариф их покрывает.
+     деньгами, переводятся на часы, если тариф их покрывает;
+  5. (21.10, Валерия Костенецкая) сегодняшние и будущие брони, УЖЕ списанные
+     деньгами (в т.ч. «абонемент исчерпан → с баланса»), — тоже на часы:
+     деньги за них возвращаются на баланс. Раньше админ удалял их и ставил заново.
+
+Оплата частями (21.10, владелец): paid_now — сколько клиент внёс сейчас
+(наличными/картой). В кассу и на баланс — эта сумма, а списание за абонемент —
+полная цена: разница остаётся долгом на балансе, его закрывают «Принять оплату».
 
 Каталог тарифов — копия src/utils/data.ts SUBSCRIPTION_PLANS (цены сверены
 владельцем 24.07). Сторож test_subscription_sale следит, чтобы они совпадали.
@@ -110,6 +117,7 @@ def sell_subscription(
     amount: Optional[float] = None,
     branch: Optional[str] = None,
     category_id: Optional[str] = None,
+    paid_now: Optional[float] = None,
 ) -> dict:
     """Продать абонемент. Не коммитит — это делает вызывающий (одна транзакция)."""
     if plan_id not in PLANS:
@@ -122,24 +130,34 @@ def sell_subscription(
         raise SaleError("Способ оплаты: наличные, карта TBC, карта BOG или с баланса")
     if method == "balance" and float(user.balance or 0) < price:
         raise SaleError(f"Недостаточно средств на балансе: {float(user.balance or 0):g} ₾, нужно {price:g} ₾")
+    paid = price
+    if paid_now is not None and method in CASH_METHODS:
+        paid = round(float(paid_now), 2)
+        if not (0 <= paid <= price):      # NaN тоже сюда
+
+            raise SaleError(f"Внесено должно быть от 0 до {price:g} ₾")
+    debt = round(price - paid, 2)
 
     now = datetime.utcnow()
     tx_id = None
-    if method in CASH_METHODS:
+    if method in CASH_METHODS and paid >= 0.01:
+        _desc = f'Абонемент "{p["name"]}"' + (f" — внесено {paid:g} из {price:g} ₾, долг {debt:g} ₾" if debt >= 0.01 else "")
         tx = CashboxTransaction(
-            type="income", amount=price, currency="GEL", payment_method=method,
-            category_id=_subscription_category(session, category_id), description=f'Абонемент "{p["name"]}"',
+            type="income", amount=paid, currency="GEL", payment_method=method,
+            category_id=_subscription_category(session, category_id), description=_desc,
             branch=branch, date=now, admin_id=str(actor.id), admin_name=actor.name or "",
             client_id=str(user.id), client_name=user.name, credited_user_id=str(user.id),
         )
         session.add(tx)
         session.flush()
         tx_id = tx.id
-        wallet.credit(session, user, price, reason="topup",
+        wallet.credit(session, user, paid, reason="topup",
                       description=f"Пополнение через кассу ({method}) — оплата абонемента «{p['name']}»",
                       ref_type="cashbox_tx", ref_id=str(tx.id), actor=actor)
 
     note = "" if price == float(p["price"]) else f" — цена {price:g} ₾ (по прайсу {p['price']} ₾)"
+    if debt >= 0.01:
+        note += f"; внесено {paid:g} ₾, долг {debt:g} ₾"
     wallet.debit(session, user, price, reason="subscription_purchase",
                  description=f"Оплата абонемента «{p['name']}»{note}",
                  ref_type="user", ref_id=str(user.id), actor=actor)
@@ -163,10 +181,46 @@ def sell_subscription(
     session.add(user)
     session.flush()
 
-    # Будущие ещё не списанные брони деньгами → на часы (денег не двигает:
-    # pending ещё ничего не списал). Не покрытые тарифом — остаются как есть.
     from app.api.v1.bookings.routes import _convert_booking_to_subscription
     converted = []
+    # Порядок (ревизия 21.10): сначала ближайшие, уже списанные деньгами, —
+    # если часов не хватит на все, часы достанутся сегодняшним/завтрашним.
+    # 5. Сегодняшние и будущие брони, уже списанные ДЕНЬГАМИ: денежная бронь
+    # (balance) и «абонемент исчерпан → с баланса» (subscription, 0 ч) —
+    # на часы нового абонемента, деньги за них — назад на баланс (конвертер
+    # возвращает списанное за вычетом пика/допов). Не покрытые тарифом и
+    # бонусные — как есть.
+    today_tb = (now + timedelta(hours=4)).date()
+    paid_money = session.exec(select(Booking).where(
+        Booking.user_uuid == user.id, Booking.status == "confirmed",
+        Booking.payment_status == "paid",
+        Booking.payment_method.in_(("balance", "subscription")),  # type: ignore[attr-defined]
+        Booking.date >= datetime(today_tb.year, today_tb.month, today_tb.day),
+    ).order_by(Booking.date, Booking.start_time)).all()
+    from app.services.pricing import MANUAL_PRICE_RULES
+    for b in paid_money:
+        was = b.payment_method
+        # Подарок/ручная цена (0 ₾, «Час в подарок», «Цена») — денег за неё не
+        # брали: перевод на часы отнял бы у клиента часы за бесплатную бронь.
+        if (b.applied_rule or "") in MANUAL_PRICE_RULES or float(b.charge_amount or 0) < 0.01:
+            continue
+        if was == "subscription":
+            # Оплачена часами (в т.ч. старые брони серий: часы в charge_amount,
+            # hours_pool main/extra/mixed) — уже на абонементе, не трогаем.
+            from app.services.billing_defer import subscription_hours_held
+            if subscription_hours_held(b) > 0 or (b.hours_pool or "") in ("main", "extra", "mixed"):
+                continue
+            b.payment_method = "balance"   # ушла в деньги — для конвертера это денежная бронь
+        try:
+            r = _convert_booking_to_subscription(session, b, actor)
+            converted.append({"date": b.date.date().isoformat(), "start_time": b.start_time,
+                              "hours": r["hours_deducted"], "refunded": r["refunded_to_balance"]})
+        except ValueError:
+            b.payment_method = was
+            continue
+
+    # Будущие ещё не списанные брони деньгами → на часы (денег не двигает:
+    # pending ещё ничего не списал). Не покрытые тарифом — остаются как есть.
     pending = session.exec(select(Booking).where(
         Booking.user_uuid == user.id, Booking.status == "confirmed",
         Booking.payment_method == "balance", Booking.payment_status == "pending",
@@ -182,6 +236,7 @@ def sell_subscription(
 
     return {
         "plan": p["name"], "price": price, "method": method, "cashbox_tx_id": tx_id,
+        "paid_now": paid, "debt": debt,
         "carried_hours": round(carry + carry_extra, 2), "converted_bookings": converted,
         "carried_extra_hours": round(carry_extra, 2),
         "extra_hours": subscription_pool.extra_remaining(user.subscription),

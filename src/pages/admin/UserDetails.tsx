@@ -338,7 +338,7 @@ export function AdminUserDetails() {
         }
     };
 
-    const handleAssignSubscription = async (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string) => {
+    const handleAssignSubscription = async (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance', branch?: string, paidNow?: number) => {
         // Продажа одной операцией на сервере (29.09): касса/баланс + списание за
         // абонемент + включение. Раньше при оплате наличными/картой в кассу и в
         // историю баланса не попадало ничего, а «с баланса» могло молча не списать.
@@ -352,12 +352,14 @@ export function AdminUserDetails() {
                 // 02.10: филиал кассы — без него оплата наличными/картой не попадала
                 // в остаток ни Uni, ни One (27.08: 160 ₾ без филиала).
                 branch,
+                paidNow,
             });
             await useUserStore.getState().fetchUsers();
             toast.success(
                 `Абонемент «${r.plan}» включён: ${r.remainingHours} ч до ${safeFormat(r.expiryDate, 'd.MM.yyyy')}`
                 + (r.carriedHours ? ` (перенесено ${r.carriedHours} ч)` : '')
-                + (r.convertedBookings?.length ? `. Броней переведено на часы: ${r.convertedBookings.length}` : ''),
+                + (r.convertedBookings?.length ? `. Броней переведено на часы: ${r.convertedBookings.length}` : '')
+                + (r.debt ? `. Долг за абонемент: ${formatGel(r.debt)}` : ''),
                 { duration: 8000 },
             );
         } catch (e: any) {

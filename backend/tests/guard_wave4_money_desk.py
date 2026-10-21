@@ -103,7 +103,8 @@ MONEY_FINGERPRINTS = [
     # абонемента из карточки передаёт филиал кассы (branch из окна: по последней брони клиента,
     # иначе обязательный выбор). В теле запроса добавлено только поле branch.
     # Прежний отпечаток 406179f87bd4d36f (до 02.10).
-    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "126a7197e9776c24", "продажа абонемента"),
+    # 21.10 (владелец): + paidNow — абонемент частями (subscription_sale.paid_now, guard_subscription_sale_2026_10).
+    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "febcdcb3d619d7b5", "продажа абонемента"),
     (UD, "const handleToSubscription = async", "// Excel #59", "883771eeb8c1df0e", "«На абонемент»"),
     (UD, "const handleTopup = async", "setTopupSaving(false);", "a1fb7859b68a87c9", "пополнение часов абонемента"),
     (CASH_API, "export const cashboxApi = {", "\n};", "d3cd209a7a4cf49c", "все тела cashboxApi.*"),
