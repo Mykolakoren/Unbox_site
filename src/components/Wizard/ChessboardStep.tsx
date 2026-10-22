@@ -53,6 +53,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
     const { bookings, fetchBookings, fetchAllBookings, currentUser } = useUserStore();
     const bookingForUser = useBookingStore(s => s.bookingForUser);
+    // 22.10: при переносе своя бронь освобождает время — не считаем её занятой
+    // (как MobileFind и сервер — exclude_booking_id).
+    const editBookingId = useBookingStore(s => s.editBookingId);
     const isAdminBooking = !!bookingForUser && !!currentUser?.isAdmin;
     // Admin / senior_admin / owner may book right up to the slot start (no 30-min buffer)
     const isPrivileged = currentUser?.isAdmin
@@ -243,6 +246,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         // Check Internal Bookings — «на подтверждении» тоже держит время (12.10, как сервер)
         const internalBooking = bookings.find(b =>
             b.resourceId === resId &&
+            String(b.id) !== String(editBookingId ?? '') &&
             (b.status === 'confirmed' || b.status === 'pending_approval') &&
             !b.isReRentListed &&
             isSameDay(parseUTC(b.date), new Date(date)) &&

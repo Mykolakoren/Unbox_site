@@ -574,6 +574,17 @@ def test_extend_bonus_booking_pays_its_share():
         assert (b.duration, float(b.final_price)) == (120, 18.0), (b.duration, b.final_price)
         assert _bal(s, u) == -18.0, _bal(s, u)
 
+
+def test_reschedule_picker_frees_own_booking():
+    """22.10 (Валерия Костенецкая): перенос 03.11 10:00 → 10:30 в том же кабинете
+    не предлагался — экран переноса считал переносимую бронь занятой. Сервер её
+    не считает (exclude_booking_id); телефон и компьютер — тоже."""
+    m = _src("src/pages/mobile/MobileFind.tsx")
+    assert "rescheduleId ? bookings.filter(b => String(b.id) !== rescheduleId) : bookings" in m
+    assert "buildFreeWindows(occupancy, targetDate" in m
+    c = _src("src/components/Wizard/ChessboardStep.tsx")
+    assert "String(b.id) !== String(editBookingId ?? '')" in c
+
 if __name__ == "__main__":
     fails = 0
     for n, f in sorted(globals().items()):

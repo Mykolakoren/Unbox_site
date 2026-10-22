@@ -304,13 +304,21 @@ export function MobileFind() {
     const backdateMin = backdateHours(currentUser) * 60;   // как сервер: админ 12 ч, старший/владелец 72
     const canBackdate = backdateMin > 0 && !rescheduleId && !linkSessionId;
     const [showPast, setShowPast] = useState(false);
+    // 22.10 (Валерия Костенецкая, перенос 03.11 10:00 → 10:30): переносимая бронь
+    // освобождает своё время — экран так и пишет, а окна считал с ней как с
+    // занятой, и сдвиг в пределах её же часа (9:30, 10:30) не предлагался.
+    // Сервер при переносе её тоже не считает (exclude_booking_id).
+    const occupancy = useMemo(
+        () => (rescheduleId ? bookings.filter(b => String(b.id) !== rescheduleId) : bookings),
+        [bookings, rescheduleId],
+    );
     const slots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
-        () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
+        () => buildFreeWindows(occupancy, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
                                canBackdate && showPast ? backdateMin : 0),
-        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin],
+        [occupancy, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin],
     );
 
     const toggleLoc = (id: string) => {
