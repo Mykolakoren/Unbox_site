@@ -693,7 +693,7 @@ def telegram_webhook(
 
     # ── Other commands — require a bound user ─────────────────────────────
     user = session.exec(
-        select(User).where(User.telegram_id == str(chat_id))
+        select(User).where(User.telegram_id == str(chat_id), User.archived_at.is_(None))
     ).first()
 
     if first_word == "/bookings":
@@ -757,7 +757,7 @@ def _handle_start(session: Session, chat_id: int, text: str, username: Optional[
 
     if not payload:
         # Plain /start — if already bound, greet; else instruct
-        bound = session.exec(select(User).where(User.telegram_id == str(chat_id))).first()
+        bound = session.exec(select(User).where(User.telegram_id == str(chat_id), User.archived_at.is_(None))).first()
         if bound:
             _send(chat_id,
                   f"Привет, {escape(bound.name or 'друг')}! Вы подключены. "
@@ -789,9 +789,56 @@ def _handle_start(session: Session, chat_id: int, text: str, username: Optional[
     # placeholder created by the Telegram Login Widget — `<chat_id>@telegram.unbox`)
     # — consolidate them onto the real account we're binding to.
     merged_note = ""
-    existing = session.exec(
-        select(User).where(User.telegram_id == str(chat_id), User.id != user.id)
-    ).first()
+    # Архивные не в счёт (их Telegram нигде не ищется). Несколько живых
+    # владельцев одного chat_id — сливать не угадываем (см. проверку ниже).
+    _holders = session.exec(
+        select(User).where(User.telegram_id == str(chat_id), User.id != user.id, User.archived_at.is_(None))
+    ).all()
+    existing = _holders[0] if _holders else None
+    _multi_holders = len(_holders) > 1
+    # Аудит безопасности 23.10: автослияние задумано для пустых «призраков»
+    # `<chat_id>@telegram.unbox`, а срабатывало для ЛЮБОГО аккаунта: злоумышленник
+    # слал жертве свою ссылку «нажмите Start» — баланс, абонемент и брони жертвы
+    # уезжали к нему, а её аккаунт удалялся. Сливаем только призраков; настоящий
+    # аккаунт с этим Telegram не трогаем.
+    # Призрак с деньгами/бронями тоже не сливаем сам: чужая ссылка увела бы их
+    # к владельцу ссылки. Такое склеивает администратор (/users/merge).
+    _is_ghost = False
+    if existing is not None:
+        from sqlalchemy import or_ as _or
+        from app.models.bonus import Bonus
+        _has_bookings = session.exec(
+            select(Booking.id).where(_or(Booking.user_uuid == existing.id, Booking.user_id == existing.email)).limit(1)
+        ).first() is not None
+        _is_ghost = (
+            (existing.email or "").lower().endswith("@telegram.unbox")
+            and not (existing.hashed_password or "").strip()
+            and not existing.google_id
+            and existing.role in ("user", None, "")
+            and abs(float(existing.balance or 0)) < 0.01
+            and not existing.subscription
+            and not _has_bookings
+            and not _multi_holders
+            and session.exec(select(Bonus.id).where(Bonus.user_id == str(existing.id)).limit(1)).first() is None
+        )
+    if existing and not _is_ghost:
+        try:
+            telegram_service.send_admin_alert(
+                "⚠️ Привязка Telegram отклонена: этот Telegram уже у другого аккаунта\n"
+                f"Хотел привязать: {escape(user.email or str(user.id))}\n"
+                f"Уже привязан к: {escape(existing.email or str(existing.id))}\n"
+                "Если это один человек — склейте аккаунты в админке."
+            )
+        except Exception as _e:
+            logger.warning("[tg:admin-alert] bind-refused alert failed: %r", _e)
+        user.telegram_link_token = None
+        user.telegram_link_token_expires_at = None
+        session.add(user); session.commit()
+        logger.warning("[tg:webhook] refused bind: chat_id=%s already on real account %s (token of %s)",
+                       chat_id, existing.id, user.id)
+        _send(chat_id, "⚠️ Этот Telegram уже привязан к другому аккаунту Unbox. "
+                       "Если это ошибка — напишите администратору @UnboxCenter.")
+        return {"ok": True}
     if existing:
         try:
             _merge_into(session, absorb=existing, keep=user)
@@ -799,8 +846,12 @@ def _handle_start(session: Session, chat_id: int, text: str, username: Optional[
             logger.info("[tg:webhook] auto-merged user=%s into=%s (chat_id=%s)",
                         existing.id, user.id, chat_id)
         except Exception as e:
+            # Раньше шли дальше и привязывали — один Telegram на двух аккаунтах
+            # (вход через Telegram потом не знает, кого пускать). Откат и отказ.
             logger.error("[tg:webhook] auto-merge failed: %r", e)
-            # Fall through — still bind the token so the link works.
+            session.rollback()
+            _send(chat_id, "⚠️ Не получилось подключить Telegram — напишите администратору @UnboxCenter.")
+            return {"ok": True}
 
     user.telegram_id = str(chat_id)
     user.telegram_link_token = None
@@ -826,15 +877,16 @@ def _merge_into(session: Session, *, absorb: User, keep: User) -> None:
     Runs inside the caller's transaction; the caller commits."""
     from sqlalchemy import text as _text
 
-    params_uuid = {"s": absorb.id, "t": keep.id}
     params_sstr = {"s_str": str(absorb.id), "t_str": str(keep.id)}
     params_email = {"s_email": absorb.email, "t_email": keep.email}
 
+    from sqlalchemy import update as _update
+    # UUID-колонки — через ORM: так тип uuid подставляется одинаково в любой базе.
+    session.execute(_update(Booking).where(Booking.user_uuid == absorb.id).values(user_uuid=keep.id))
+    session.execute(_update(Waitlist).where(Waitlist.user_uuid == absorb.id).values(user_uuid=keep.id))
     for sql, p in [
-        ('UPDATE booking SET user_uuid = :t WHERE user_uuid = :s', params_uuid),
         ('UPDATE booking SET user_id = :t_email WHERE user_id = :s_email', params_email),
         ('UPDATE booking SET cancelled_by = :t_email WHERE cancelled_by = :s_email', params_email),
-        ('UPDATE waitlist SET user_uuid = :t WHERE user_uuid = :s', params_uuid),
         ('UPDATE waitlist SET user_id = :t_email WHERE user_id = :s_email', params_email),
         ('UPDATE cashbox_transactions SET client_id = :t_email WHERE client_id = :s_email', params_email),
         ('UPDATE cashbox_transactions SET client_id = :t_str WHERE client_id = :s_str', params_sstr),
@@ -1161,7 +1213,7 @@ def _handle_callback(session: Session, callback: dict) -> dict:
 
     # Require bound user for all booking callbacks
     user = session.exec(
-        select(User).where(User.telegram_id == str(chat_id))
+        select(User).where(User.telegram_id == str(chat_id), User.archived_at.is_(None))
     ).first()
     if not user:
         _answer_callback(callback_id, "Сначала подключите аккаунт в профиле", show_alert=True)
@@ -1927,7 +1979,7 @@ def _handle_hot_booking_callback(
         _answer_callback(callback_id, "Не определён пользователь", show_alert=True)
         return {"ok": True}
     actor = session.exec(
-        select(User).where(User.telegram_id == str(from_user_id))
+        select(User).where(User.telegram_id == str(from_user_id), User.archived_at.is_(None))
     ).first()
     admin_chat = str(settings.TELEGRAM_ADMIN_CHAT_ID or "")
     in_admin_chat = bool(admin_chat) and str(chat_id) == admin_chat
@@ -2178,7 +2230,7 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     chat_id = chat.get("id")
 
     actor = session.exec(
-        select(User).where(User.telegram_id == str(from_user_id))
+        select(User).where(User.telegram_id == str(from_user_id), User.archived_at.is_(None))
     ).first() if from_user_id else None
     # Trust the admin chat (см. _handle_hot_booking_callback): причину отказа
     # может прислать любой участник админ-чата, не только залинкованный.

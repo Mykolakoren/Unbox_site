@@ -1,5 +1,6 @@
 from typing import Optional, List
 from uuid import UUID, uuid4
+from pydantic import Field as PydanticField
 from sqlmodel import Field, SQLModel, JSON, Relationship
 from sqlalchemy import Column
 from datetime import datetime
@@ -71,6 +72,11 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: UUID
     created_at: datetime
+    # Аудит безопасности 23.10: одноразовый ключ привязки Telegram уходил админам
+    # в списке пользователей — по чужому ключу админ привязывал свой Telegram к
+    # аккаунту владельца. Ключ живёт только в ответе /telegram/link-token.
+    telegram_link_token: Optional[str] = PydanticField(default=None, exclude=True)
+    telegram_link_token_expires_at: Optional[datetime] = PydanticField(default=None, exclude=True)
     
 class UserUpdate(SQLModel):
     name: Optional[str] = None

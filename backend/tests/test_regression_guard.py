@@ -396,7 +396,8 @@ def test_admin_user_update_routes_balance_through_wallet():
     src = open(os.path.join(base, "app/api/v1/users/admin.py"), encoding="utf-8").read()
     i = src.find("def update_user(")
     assert i != -1, "update_user не найден"
-    body = src[i:i + 4000]
+    _end = src.find("\n@router", i)
+    body = src[i:_end if _end != -1 else i + 12000]  # вся функция (23.10 стала длиннее 4000 знаков)
     assert 'user_data.pop("balance"' in body, (
         "update_user не вынимает balance из общего setattr — баланс запишется мимо ленты")
     assert "set_balance(" in body, (

@@ -52,6 +52,10 @@ def get_current_user(
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
+    # Аудит 23.10: архив проверялся только при входе по паролю — уволенный админ
+    # с живым токеном (30 дней, продлевается) продолжал работать.
+    if getattr(user, "archived_at", None) is not None:
+        raise HTTPException(status_code=401, detail="Аккаунт в архиве — доступ закрыт")
     return user
 
 def get_current_active_user(

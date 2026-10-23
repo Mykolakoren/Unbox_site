@@ -822,8 +822,8 @@ export function AdminUserDetails() {
                                             if (file) {
                                                 const reader = new FileReader();
                                                 reader.onloadend = () => {
-                                                    updateUserById(user.email, { avatarUrl: reader.result as string });
-                                                    toast.success('Фото обновлено');
+                                                    updateUserById(user.email, { avatarUrl: reader.result as string })
+                                                        .then(ok => { if (ok) toast.success('Фото обновлено'); });
                                                 };
                                                 reader.readAsDataURL(file);
                                             }
@@ -1029,8 +1029,9 @@ export function AdminUserDetails() {
                                                     const field = adminPickerType === 'responsible'
                                                         ? { responsibleAdminId: admin.id }
                                                         : { attractedByAdminId: admin.id };
-                                                    updateUserById(user.email, field as any);
-                                                    toast.success(adminPickerType === 'responsible' ? `Ответственный: ${admin.name}` : `Привлёк: ${admin.name}`);
+                                                    const okMsg = adminPickerType === 'responsible' ? `Ответственный: ${admin.name}` : `Привлёк: ${admin.name}`;
+                                                    updateUserById(user.email, field as any)
+                                                        .then(ok => { if (ok) toast.success(okMsg); });
                                                     setAdminPickerType(null);
                                                 }}
                                                 className={clsx(
@@ -1224,8 +1225,8 @@ export function AdminUserDetails() {
                                                                     onClick={() => {
                                                                         if (!editExpiryDate) return;
                                                                         const updated = { ...user.subscription!, expiryDate: new Date(editExpiryDate).toISOString() };
-                                                                        updateUserById(user.email, { subscription: updated as any });
-                                                                        toast.success('Дата абонемента обновлена');
+                                                                        updateUserById(user.email, { subscription: updated as any })
+                                                                            .then(ok => { if (ok) toast.success('Дата абонемента обновлена'); });
                                                                         setIsEditingExpiry(false);
                                                                     }}
                                                                     className="text-[color:var(--status-ok-fg)] hover:text-ink font-bold text-xs"
@@ -1615,7 +1616,7 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
     user: { id: string; email: string; phone?: string; telegramId?: string };
     field: EditField | null;
     onClose: () => void;
-    updateUserById: (email: string, data: any) => void | Promise<void>;
+    updateUserById: (email: string, data: any) => Promise<boolean>;
     afterEmailChange: (next: string) => Promise<void>;
 }) {
     const [value, setValue] = useState('');
@@ -1649,9 +1650,10 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
             }
             // Чистый числовой chat_id сохраняем как есть.
             if (/^-?\d+$/.test(trimmed)) {
-                updateUserById(user.email, { telegramId: trimmed });
-                toast.success('Telegram ID сохранён');
-                onClose();
+                if (await updateUserById(user.email, { telegramId: trimmed })) {
+                    toast.success('Telegram ID сохранён');
+                    onClose();
+                }
                 return;
             }
             // Иначе — @username: бэкенд узнаёт chat_id через Telegram getChat.
@@ -1663,13 +1665,14 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
                     { username: trimmed },
                 );
                 const chatId = resp.data.chat_id;
-                updateUserById(user.email, { telegramId: chatId });
-                toast.success(
-                    resp.data.name
-                        ? `Привязан Telegram: ${resp.data.name} (${chatId})`
-                        : `Привязан Telegram ID ${chatId}`,
-                );
-                onClose();
+                if (await updateUserById(user.email, { telegramId: chatId })) {
+                    toast.success(
+                        resp.data.name
+                            ? `Привязан Telegram: ${resp.data.name} (${chatId})`
+                            : `Привязан Telegram ID ${chatId}`,
+                    );
+                    onClose();
+                }
             } catch (e: any) {
                 setError(e?.response?.data?.detail || 'Не удалось распознать @username');
             } finally {

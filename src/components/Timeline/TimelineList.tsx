@@ -68,7 +68,8 @@ export function TimelineList({ targetId, limit = 20, className }: TimelineListPr
                         {event.event_type === 'discount_change' && 'Изменение скидки'}
                         {event.event_type === 'subscription_freeze' && 'Заморозка абонемента'}
                         {event.event_type === 'booking_cancelled' && 'Отмена бронирования'}
-                        {!['role_change', 'discount_change', 'subscription_freeze', 'booking_cancelled'].includes(event.event_type) && event.event_type}
+                        {event.event_type === 'admin_profile_change' && 'Правка профиля'}
+                        {!['role_change', 'discount_change', 'subscription_freeze', 'booking_cancelled', 'admin_profile_change'].includes(event.event_type) && event.event_type}
                     </div>
 
                     <div className="text-xs text-ink-80 mt-1">

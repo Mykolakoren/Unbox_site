@@ -241,7 +241,7 @@ interface GHAdminUsersProps {
     setSelectedUser: (u: User | null) => void;
     showAddUser: boolean;
     setShowAddUser: (v: boolean) => void;
-    updateUserById: (id: string, data: Partial<User>) => Promise<void>;
+    updateUserById: (id: string, data: Partial<User>) => Promise<boolean>;
     fetchUsers: () => Promise<void>;
 }
 
@@ -667,7 +667,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
 
 // ── Edit User Modal ──────────────────────────────────────────────────────────
 
-function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () => void; onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
+function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () => void; onUpdate: (id: string, data: Partial<User>) => Promise<boolean> }) {
     const currentUser = useUserStore(s => s.currentUser);
     const isOwner = currentUser?.role === 'owner';
     const isSeniorAdmin = currentUser?.role === 'senior_admin';
@@ -709,9 +709,8 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
             if (localDiscount !== user.personalDiscountPercent) updates.personalDiscountPercent = localDiscount;
         }
 
-        if (Object.keys(updates).length > 0) {
-            await onUpdate(user.id, updates);
-        }
+        // Отказ сервера — окно не закрываем, чтобы правка не «пропала» молча.
+        if (Object.keys(updates).length > 0 && !(await onUpdate(user.id, updates))) return;
         onClose();
     };
 

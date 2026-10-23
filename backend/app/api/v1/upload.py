@@ -14,6 +14,22 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"
 IMAGE_MAX_BYTES = 2 * 1024 * 1024  # 2 MB — keeps avatars/cabinet photos light
 
 
+def _sniff_image_ext(data: bytes):
+    """Тип картинки — по первым байтам файла, а не по имени и заголовку от клиента.
+    Аудит 23.10: раньше `x.html` с `Content-Type: image/png` сохранялся как .html
+    и открывался с нашего домена (чужой скрипт с доступом к входу админа).
+    SVG не принимаем — внутри может быть скрипт."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 @router.post("/", response_model=Dict[str, str])
 async def upload_file(
     file: UploadFile = File(...),
@@ -32,7 +48,9 @@ async def upload_file(
             detail=f"Файл слишком большой ({len(contents) // 1024} KB). Максимум 2 МБ — сожмите изображение.",
         )
 
-    file_ext = os.path.splitext(file.filename or "")[1]
+    file_ext = _sniff_image_ext(contents)
+    if not file_ext:
+        raise HTTPException(status_code=400, detail="Можно загрузить только фото: JPG, PNG, WEBP или GIF")
     filename = f"{uuid.uuid4()}{file_ext}"
     file_path = os.path.join(UPLOAD_DIR, filename)
 
@@ -74,6 +92,14 @@ async def upload_task_file(
             status_code=400,
             detail="Недопустимый тип файла. Разрешены: PDF, изображения, документы (doc/xls), txt/csv.",
         )
+    # Картинка с чужим нутром под видом .png — тоже отказ (см. _sniff_image_ext).
+    if file_ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        _real = _sniff_image_ext(contents)
+        if not _real:
+            raise HTTPException(status_code=400, detail="Файл не похож на изображение")
+        file_ext = _real
+    if file_ext == ".pdf" and b"%PDF" not in contents[:1024]:  # заголовок может быть не с 1-го байта
+        raise HTTPException(status_code=400, detail="Файл не похож на PDF")
     unique_name = f"{uuid.uuid4()}{file_ext}"
 
     # Store in uploads/tasks/ subfolder

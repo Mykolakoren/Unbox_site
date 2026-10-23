@@ -15,6 +15,20 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_STAFF_RANK = {"owner": 3, "senior_admin": 2, "admin": 1}
+
+
+def _forbid_peer_target(current_user: User, *targets: User) -> None:
+    """Аудит 23.10: старший админ мог сменить email владельцу, склеить его
+    аккаунт с чужим и т.п. Не-владелец не трогает аккаунты своего уровня и выше."""
+    if current_user.role == "owner":
+        return
+    my = _STAFF_RANK.get(current_user.role, 0)
+    for t in targets:
+        if t is not None and _STAFF_RANK.get(t.role, 0) >= my:
+            raise HTTPException(403, "Аккаунты сотрудников вашего уровня и выше меняет только владелец")
+
+
 def _resolve_user(session: Session, user_id: str) -> User:
     """Resolve user by UUID or email. Raises 404 if not found."""
     user = None
@@ -84,6 +98,7 @@ def archive_user(
     # Senior admins can archive admins/specialists/users; regular admins — users/specialists only
     if current_user.role == "admin" and user.role in ("senior_admin", "admin"):
         raise HTTPException(status_code=403, detail="Недостаточно прав для архивации администратора")
+    _forbid_peer_target(current_user, user)
 
     if user.archived_at is not None:
         return user  # already archived, idempotent
@@ -107,6 +122,7 @@ def unarchive_user(
 ) -> Any:
     """Restore an archived user (Excel #11)."""
     user = _resolve_user(session, user_id)
+    _forbid_peer_target(current_user, user)
     if user.archived_at is None:
         return user  # not archived, idempotent
     user.archived_at = None
@@ -218,6 +234,43 @@ def update_user(
     """Update a user by ID or Email (Admin only)."""
     user = _resolve_user(session, user_id)
 
+    # Аудит безопасности 23.10 (Trail of Bits): PATCH писал в профиль всё подряд
+    # и смотрел только смену роли — админ вписывал владельцу свой Telegram и
+    # входил через Telegram под владельцем. Теперь: менять профиль сотрудника
+    # своего уровня и выше нельзя (owner — всех; senior — admin и ниже; admin —
+    # клиентов и специалистов). Себя — только безопасные поля.
+    _RANK = {"owner": 3, "senior_admin": 2, "admin": 1}
+    if "telegram_id" in user_in.dict(exclude_unset=True):
+        user_in.telegram_id = str(user_in.telegram_id or "").strip() or None  # «» = отвязать
+    _sent = user_in.dict(exclude_unset=True)
+    _SENSITIVE = {"telegram_id", "role", "subscription", "credit_limit", "balance",
+                  "pricing_system", "personal_discount_percent", "crm_data"}
+    _changed_sensitive = {k for k in _SENSITIVE & set(_sent)
+                          if (_sent.get(k) or None) != (getattr(user, k, None) or None)}
+    if "crm_data" in _changed_sensitive and current_user.role != "owner":
+        # Тут же лежит календарь специалиста — его проверяет /crm/settings; в обход
+        # можно было вписать календарь кабинета или коллеги.
+        _cal_keys = ("calendar_id", "gcal_source_of_truth", "sync_ignore_names")
+        _old_crm, _new_crm = user.crm_data or {}, _sent.get("crm_data") or {}
+        if any(_old_crm.get(k) != _new_crm.get(k) for k in _cal_keys):
+            raise HTTPException(403, "Календарь специалиста меняет только он сам (или владелец)")
+    if user.id == current_user.id and current_user.role != "owner":
+        if _changed_sensitive:
+            raise HTTPException(403, "Свои роль, Telegram, абонемент, лимит и цены через админку не меняются — попросите владельца")
+    elif (current_user.role != "owner" and _RANK.get(current_user.role, 0) <= _RANK.get(user.role, 0)
+          and (_changed_sensitive or {"name", "phone", "email", "avatar_url", "is_admin"} & set(_sent))):
+        # Служебные пометки (теги, задачи, контакты, статус) коллеге ставить можно.
+        raise HTTPException(403, "Профиль сотрудника вашего уровня или выше меняет только владелец")
+
+    # Один Telegram — один аккаунт (вход через Telegram ищет по нему).
+    if _sent.get("telegram_id"):
+        _tg = _sent["telegram_id"]
+        _other = session.exec(select(User).where(User.telegram_id == _tg, User.id != user.id,
+                                                 User.archived_at.is_(None))).first()
+        if _other is not None:
+            raise HTTPException(409, f"Этот Telegram уже привязан к другому аккаунту ({_other.name or _other.email}). "
+                                     "Если это один человек — сначала склейте аккаунты")
+
     # Role Update Protection
     if user_in.role is not None:
         target_role = user_in.role
@@ -271,8 +324,64 @@ def update_user(
     if _price_changes and not deps.has_permission(current_user, "subscriptions.set_discount"):
         raise HTTPException(status_code=403, detail=PRICING_DENIED_DETAIL)
     _old_percent = int(user.personal_discount_percent or 0)
+    # Абонемент и кредитный лимит через общий PATCH — только с правом и всегда
+    # с записью в журнал (аудит 23.10: админ мог тихо дописать часы или снять
+    # лимит, без следа в кассе и ленте).
+    _audit: list[str] = []
+    if "credit_limit" in user_data and float(user_data["credit_limit"] or 0) != float(user.credit_limit or 0):
+        if not deps.has_permission(current_user, "finance.set_credit_limit"):
+            raise HTTPException(403, "Нет права «Кредитный лимит» — его выдаёт владелец или старший администратор")
+        _audit.append(f"кредитный лимит {float(user.credit_limit or 0):g} → {float(user_data['credit_limit'] or 0):g} ₾")
+    if "subscription" in user_data:
+        from app.services import subscription_pool as _sp
+        _old_sub, _new_sub = user.subscription or {}, user_data.get("subscription") or {}
+        _HOURS = ("remaining_hours", "used_hours", "total_hours", "bonus_hours",
+                  "extra_hours_remaining", "extra_hours_used", "extra_hours_total")
+        if not deps.has_permission(current_user, "subscriptions.manage"):
+            raise HTTPException(403, "Нужно право «Абонементы: управление»")
+        # Абонемент хранит срок в двух написаниях (expiry_date / expiryDate), а
+        # карточка шлёт новое только в одном — второе остаётся старым, и срок
+        # «не менялся». Берём то написание, что реально изменилось.
+        _exp = next((_new_sub.get(k) for k in ("expiryDate", "expiry_date")
+                     if _new_sub.get(k) and _new_sub.get(k) != _old_sub.get(k)), None)
+        if bool(_old_sub) != bool(_new_sub) and current_user.role not in ("owner", "senior_admin"):
+            raise HTTPException(403, "Выдать или снять абонемент целиком — через «Продать абонемент» или старшего администратора")
+        if _old_sub and _new_sub and current_user.role not in ("owner", "senior_admin"):
+            # Обычный админ через профиль меняет только срок; остальное (без срока,
+            # скидка, пакет, заморозки) — старший/владелец или свои кнопки.
+            _new_sub = _sp.update(_old_sub, expiry_date=_exp) if _exp else dict(_old_sub)
+            user_data["subscription"] = _new_sub
+        elif _old_sub and _new_sub:
+            # Часы через общий PATCH не меняются ни у кого: фронт шлёт весь объект
+            # абонемента (правка срока), и устаревшие часы из открытой карточки
+            # затёрли бы свежие. Часы — только «Пополнить часы» (с историей).
+            _new_sub = dict(_new_sub)
+            for k in _HOURS:
+                for key in {k, _sp._ALIASES.get(k, k)}:
+                    if key in _old_sub:
+                        _new_sub[key] = _old_sub[key]
+                    else:
+                        _new_sub.pop(key, None)
+            if _exp:
+                _new_sub = _sp.update(_new_sub, expiry_date=_exp)
+            user_data["subscription"] = _new_sub
+            _other_keys = sorted(k for k in set(_old_sub) | set(_new_sub)
+                                 if k not in ("expiry_date", "expiryDate") and _old_sub.get(k) != _new_sub.get(k))
+            if _other_keys:
+                _audit.append("абонемент: " + ", ".join(f"{k} {_old_sub.get(k)!r} → {_new_sub.get(k)!r}" for k in _other_keys[:10]))
+        elif _old_sub != _new_sub:
+            _audit.append("абонемент " + ("снят" if _old_sub else "выдан") + " целиком через правку профиля")
+        if str(_sp.get(_old_sub, "expiry_date") or "") != str(_sp.get(_new_sub, "expiry_date") or ""):
+            _audit.append(f"абонемент срок: {str(_sp.get(_old_sub, 'expiry_date') or '—')[:10]} → {str(_sp.get(_new_sub, 'expiry_date') or '—')[:10]}")
+    if "telegram_id" in user_data and (user_data.get("telegram_id") or "") != (user.telegram_id or ""):
+        _audit.append(f"Telegram: {user.telegram_id or '—'} → {user_data.get('telegram_id') or '—'}")
     for key, value in user_data.items():
         setattr(user, key, value)
+    if _audit:
+        from app.services.timeline import timeline_service as _tl
+        _tl.log_event(session=session, actor_id=current_user.id, actor_role=current_user.role,
+                      target_id=str(user.id), target_type="user", event_type="admin_profile_change",
+                      description="Правка профиля: " + "; ".join(_audit), metadata={"changes": _audit}, commit=False)
     if _price_changes:
         _record_pricing_change(user, _price_changes, _old_percent, current_user)
     if _new_balance is not None:
@@ -731,6 +840,7 @@ def update_permissions(
     user = _resolve_user(session, user_id)
     if current_user.role == "senior_admin" and user.role == "owner":
         raise HTTPException(403, "Старший администратор не может менять права владельца")
+    _forbid_peer_target(current_user, user)
 
     invalid = [p for p in permissions if p not in deps.ALL_GRANTABLE]
     if invalid:
@@ -941,11 +1051,19 @@ def change_user_email(
         )
 
     user = _resolve_user(session, user_id)
+    _forbid_peer_target(current_user, user)
     old_email = user.email
     new_email = (payload.new_email or "").strip().lower()
 
     if not new_email:
         raise HTTPException(400, "Новый email не может быть пустым")
+
+    # Адрес из OWNER_EMAILS при перезапуске получает права владельца —
+    # вписать его может только сам владелец.
+    from app.core.config import settings as _settings
+    _owner_emails = {e.strip().lower() for e in (_settings.OWNER_EMAILS or "").split(",") if e.strip()}
+    if new_email in _owner_emails and current_user.role != "owner":
+        raise HTTPException(403, "Этот адрес закреплён за владельцем")
 
     import re
     if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", new_email):
@@ -1037,6 +1155,17 @@ def merge_users(
     tgt = _resolve_user(session, payload.target)
     if src.id == tgt.id:
         raise HTTPException(400, "Нельзя слить аккаунт сам с собой")
+    _forbid_peer_target(current_user, src, tgt)
+    if current_user.role != "owner":
+        # Склейка переносит CRM психолога (клиенты, сессии, заметки) — то же,
+        # что restore-crm-data, а его делает только владелец.
+        from sqlalchemy import text as _t
+        _has_crm = src.role == "specialist" or any(
+            session.execute(_t(f"SELECT 1 FROM {tbl} WHERE specialist_id = :s LIMIT 1"), {"s": str(src.id)}).first()
+            for tbl in ("therapist_clients", "therapy_sessions", "therapist_notes", "therapist_payments")
+        )
+        if _has_crm:
+            raise HTTPException(403, "У аккаунта есть данные CRM психолога — склеивает только владелец")
 
     from sqlalchemy import text
     user_table = '"user"' if session.bind.dialect.name == 'postgresql' else 'user'
@@ -1212,8 +1341,11 @@ def restore_orphaned_crm(
     payload: _RestoreCrmRequest,
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    if current_user.role not in ("owner", "senior_admin"):
-        raise HTTPException(403, "Только старший администратор или владелец")
+    # Аудит 23.10: перенос CRM (клиенты, сессии, заметки психолога) — только
+    # владелец и только с «осиротевшего» id. Раньше старший админ мог забрать
+    # себе базу живого специалиста.
+    if current_user.role != "owner":
+        raise HTTPException(403, "Перенос CRM-данных делает только владелец")
 
     # Validate UUIDs and target user
     try:
@@ -1228,6 +1360,8 @@ def restore_orphaned_crm(
     tgt = session.get(User, UUID(tgt_id))
     if not tgt:
         raise HTTPException(404, f"Целевой пользователь не найден: {tgt_id}")
+    if session.get(User, UUID(src_id)) is not None:
+        raise HTTPException(409, "Источник — живой аккаунт. Переносить можно только данные удалённого аккаунта")
 
     from sqlalchemy import text
     moved: dict[str, int] = {}

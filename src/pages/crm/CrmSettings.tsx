@@ -92,7 +92,8 @@ export function CrmSettings() {
 
     const handleSaveCalendar = async () => {
         try {
-            await crmApi.updateSettings({ calendarId: calendarId || null });
+            // Пустое поле = отключить календарь (null бэк читает как «не менять»).
+            await crmApi.updateSettings({ calendarId: (calendarId || '').trim() });
             setCalendarSaved(true);
             toast.success('Календарь сохранён');
             setTimeout(() => setCalendarSaved(false), 2000);

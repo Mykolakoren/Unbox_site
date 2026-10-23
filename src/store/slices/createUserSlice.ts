@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { UserStore, UserSlice } from '../types';
 import { usersApi } from '../../api/users';
 import { startOfWeek, endOfWeek } from 'date-fns';
+import { toastApiError } from '../../utils/errors';
 
 export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set, get) => ({
     users: [],
@@ -39,8 +40,13 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
                 users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u),
                 currentUser: state.currentUser?.email === updatedUser.email ? updatedUser : state.currentUser
             }));
+            return true;
         } catch (error) {
             console.error("Failed to update user", error);
+            // 23.10: отказ сервера (права, «Telegram уже привязан») раньше
+            // глотался — админ думал, что сохранилось.
+            toastApiError(error, 'Не удалось сохранить изменения');
+            return false;
         }
     },
 

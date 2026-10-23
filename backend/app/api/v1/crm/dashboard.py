@@ -1,7 +1,7 @@
 """CRM Dashboard — stats + settings for specialist."""
 from typing import Optional, List
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Body, Query
+from fastapi import APIRouter, Depends, Body, Query, HTTPException
 from sqlmodel import Session, select, func
 from app.api import deps
 from app.models.user import User
@@ -327,6 +327,29 @@ def get_crm_settings(
     }
 
 
+def _check_calendar_id_allowed(session, current_user: User, calendar_id: str) -> None:
+    """Аудит 23.10: calendar_id принимался любой — специалист мог вписать
+    календарь коллеги или кабинета, и синк читал/удалял бы чужие события.
+    Личный календарь (адрес почты) — только свой; общий — не кабинетный и не
+    занятый другим специалистом."""
+    from app.core.config import settings as _settings
+    cid = calendar_id.lower()
+    if len(cid) > 200:
+        raise HTTPException(400, "Слишком длинный идентификатор календаря")
+    _cabinets = {
+        str(getattr(_settings, k) or "").strip().lower()
+        for k in dir(_settings) if k.startswith("CALENDAR_ID_")
+    } - {""}
+    if cid in _cabinets:
+        raise HTTPException(400, "Это календарь кабинета — укажите свой личный календарь")
+    if not cid.endswith("@group.calendar.google.com") and cid != (current_user.email or "").strip().lower():
+        raise HTTPException(400, "Личный календарь можно подключить только свой — адрес должен совпадать с почтой аккаунта")
+    for (other_id, other_crm) in session.exec(select(User.id, User.crm_data).where(
+            User.id != current_user.id, User.archived_at.is_(None))).all():
+        if str((other_crm or {}).get("calendar_id") or "").strip().lower() == cid:
+            raise HTTPException(409, "Этот календарь уже подключён у другого специалиста")
+
+
 @router.patch("/settings")
 def update_crm_settings(
     session: Session = Depends(deps.get_session),
@@ -350,6 +373,8 @@ def update_crm_settings(
         if calendar_id == "":
             crm_data.pop("calendar_id", None)
         else:
+            calendar_id = calendar_id.strip()
+            _check_calendar_id_allowed(session, current_user, calendar_id)
             crm_data["calendar_id"] = calendar_id
     if google_calendar_source_of_truth is not None:
         crm_data["gcal_source_of_truth"] = bool(google_calendar_source_of_truth)

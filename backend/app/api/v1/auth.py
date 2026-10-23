@@ -188,6 +188,21 @@ def register_new_user(
 
     return user
 
+def _pick_telegram_user(session: Session, telegram_id: str):
+    """Кого пускать по Telegram. Аудит 23.10: номер Telegram не уникален в базе —
+    раньше брали первого попавшегося. Архивные не в счёт; два живых аккаунта
+    с одним Telegram — вход не угадываем. Возвращает (user, (код, текст) | None)."""
+    rows = session.exec(select(User).where(User.telegram_id == telegram_id)).all()
+    live = [u for u in rows if getattr(u, "archived_at", None) is None]
+    if len(live) > 1:
+        return None, (409, "Этот Telegram привязан к нескольким аккаунтам — напишите администратору")
+    if live:
+        return live[0], None
+    if rows:
+        return None, (403, "Аккаунт в архиве — вход закрыт")
+    return None, None
+
+
 @router.post("/google", response_model=dict)
 def google_login(
     login_data: GoogleLoginData,
@@ -213,6 +228,10 @@ def google_login(
         user = session.exec(select(User).where(User.google_id == google_id)).first()
         
         if not user:
+            # Аудит 23.10: привязка к существующему аккаунту по почте — только
+            # если Google подтвердил, что почта принадлежит владельцу токена.
+            if not id_info.get("email_verified", False):
+                raise HTTPException(status_code=400, detail="Почта в Google не подтверждена — войдите по паролю")
             # Check by email
             user = session.exec(select(User).where(User.email == email)).first()
             if user:
@@ -238,6 +257,8 @@ def google_login(
                 session.refresh(user)
                 _create_welcome_bonus(session, user)
 
+        if getattr(user, "archived_at", None) is not None:
+            raise HTTPException(status_code=403, detail="Аккаунт в архиве — вход закрыт")
         user_id = user.id
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = security.create_access_token(
@@ -295,7 +316,7 @@ async def telegram_login(
     secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode()).digest()
     hash_calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    if hash_calc != hash_val:
+    if not hmac.compare_digest(hash_calc, str(hash_val)):
         # Log enough to debug a future "Invalid hash" — the keys we saw
         # (NOT values, since they include user data), the calculated
         # hash, and the received hash. Helps pinpoint when Telegram adds
@@ -312,7 +333,8 @@ async def telegram_login(
         auth_date_i = int(auth_date) if auth_date is not None else 0
     except (TypeError, ValueError):
         auth_date_i = 0
-    if auth_date_i and time.time() - auth_date_i > 86400:
+    # Без даты или старше суток — не пускаем (раньше пустая дата проходила).
+    if not auth_date_i or time.time() - auth_date_i > 86400:
         raise HTTPException(status_code=400, detail="Telegram auth data expired. Please try again.")
 
     tg_id_raw = body.get("id")
@@ -320,7 +342,9 @@ async def telegram_login(
         raise HTTPException(status_code=400, detail="Telegram payload без id")
     telegram_id = str(tg_id_raw)
 
-    user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
+    user, _tg_err = _pick_telegram_user(session, telegram_id)
+    if _tg_err:
+        raise HTTPException(status_code=_tg_err[0], detail=_tg_err[1])
 
     if not user:
         # Mirror the rule from the GET callback: no auto-create. The login-via-
@@ -519,13 +543,34 @@ def telegram_login_callback(
     secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode()).digest()
     hash_calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     
-    if hash_calc != hash_val:
+    if not hmac.compare_digest(hash_calc, str(hash_val)):
         raise HTTPException(status_code=400, detail="Invalid Telegram Hash.")
-        
+    # Аудит 23.10: подписанная ссылка входа жила вечно — старую (из истории
+    # браузера, логов) можно было открыть снова. Как в POST: не старше суток.
+    try:
+        _auth_date = int(params.get("auth_date") or 0)
+    except (TypeError, ValueError):
+        _auth_date = 0
+    if not _auth_date or time.time() - _auth_date > 86400:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/login?tg_failed=expired", status_code=302)
+
     telegram_id = str(params.get("id"))
 
     # Check user by Telegram ID
-    user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
+    user, _tg_err = _pick_telegram_user(session, telegram_id)
+    if _tg_err:
+        # Это полностраничный переход — отдаём страницу, а не голый JSON.
+        from fastapi.responses import HTMLResponse
+        from html import escape as _esc
+        return HTMLResponse(status_code=_tg_err[0], content=(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<title>Вход через Telegram</title></head>"
+            "<body style='font-family:-apple-system,sans-serif;text-align:center;padding:48px 24px'>"
+            f"<h1 style='font-size:20px'>{_esc(_tg_err[1])}</h1>"
+            "<p><a href='/login'>Перейти на вход</a></p></body></html>"
+        ))
 
     if not user:
         # Owner 2026-05-25: the "Login via Telegram" widget previously

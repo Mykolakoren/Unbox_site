@@ -55,6 +55,9 @@ export function LoginPage() {
         if (tgUnlinked) {
             return 'Telegram не привязан ни к одному аккаунту. Войдите через Google или email — затем привяжите Telegram в профиле, и вход через TG заработает на этом же аккаунте.';
         }
+        if (tgFailed === 'expired') {
+            return 'Ссылка входа через Telegram устарела. Нажмите «Войти через Telegram» ещё раз.';
+        }
         if (tgFailed === 'storage') {
             return 'Браузер заблокировал сохранение токена (приватный режим / отключённый localStorage). Откройте сайт в обычном окне.';
         }
