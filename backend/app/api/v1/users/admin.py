@@ -242,7 +242,8 @@ def update_user(
     _RANK = {"owner": 3, "senior_admin": 2, "admin": 1}
     if "telegram_id" in user_in.dict(exclude_unset=True):
         user_in.telegram_id = str(user_in.telegram_id or "").strip() or None  # «» = отвязать
-    _sent = user_in.dict(exclude_unset=True)
+    from app.models.user import drop_echoed_avatar
+    _sent = drop_echoed_avatar(user_in.dict(exclude_unset=True))
     _SENSITIVE = {"telegram_id", "role", "subscription", "credit_limit", "balance",
                   "pricing_system", "personal_discount_percent", "crm_data"}
     _changed_sensitive = {k for k in _SENSITIVE & set(_sent)
@@ -303,7 +304,8 @@ def update_user(
             if not other_owners:
                 raise HTTPException(status_code=400, detail="Cannot demote the last Owner")
 
-    user_data = user_in.dict(exclude_unset=True)
+    from app.models.user import drop_echoed_avatar
+    user_data = drop_echoed_avatar(user_in.dict(exclude_unset=True))
     # БАЛАНС — только через wallet, иначе движение не попадает в ленту и
     # инвариант «сумма ленты == баланс» ломается. Так было с выдачей абонемента
     # «за счёт баланса»: фронт слал сюда новый balance напрямую (UserDetails

@@ -26,7 +26,8 @@ import { useTouchDensity } from '../../hooks/useTouchDensity';
  *   - main scroll area takes the remaining viewport height
  */
 export function MobileLayout() {
-    const { currentUser, fetchCurrentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
+    const fetchCurrentUser = useUserStore(s => s.fetchCurrentUser);
     const navigate = useNavigate();
     const location = useLocation();
     const [tourOpen, setTourOpen] = useState(false);

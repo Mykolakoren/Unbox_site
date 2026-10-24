@@ -33,7 +33,8 @@ import { Sheet } from '../../../components/ui/Sheet';
  * Gate: owner / senior_admin / admin only. Anyone else hits /m fallback.
  */
 export function MobileAdminLayout() {
-    const { currentUser, fetchCurrentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
+    const fetchCurrentUser = useUserStore(s => s.fetchCurrentUser);
     const navigate = useNavigate();
     const location = useLocation();
     // Страховка, как в MobileLayout: при смене экрана снимаем лок прокрутки,

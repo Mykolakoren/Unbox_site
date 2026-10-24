@@ -121,7 +121,11 @@ const DevUiPage = import.meta.env.DEV
 let forceDesktopThisTab = false;
 
 function App() {
-  const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
+  // Только нужные функции: подписка на весь стор перерисовывала всё приложение
+  // после любого изменения (например, загрузки 5000 броней) — скорость 23.10.
+  const fetchBookings = useUserStore(s => s.fetchBookings);
+  const fetchCurrentUser = useUserStore(s => s.fetchCurrentUser);
+  const fetchWaitlist = useUserStore(s => s.fetchWaitlist);
   const navigate = useNavigate();
 
   useEffect(() => {

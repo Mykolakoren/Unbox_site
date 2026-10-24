@@ -188,8 +188,19 @@ export function AdminBookings() {
         };
     }, [fetchUsers]);
 
+    // Скорость 23.10: поиск клиента был users.find на каждую из 5000 броней
+    // при каждой перерисовке. Справочник строим один раз на список клиентов.
+    const userByKey = useMemo(() => {
+        const m = new Map<string, (typeof users)[number]>();
+        for (const u of users) {
+            if (u.id && !m.has(u.id)) m.set(u.id, u);
+            if (u.email && !m.has(u.email)) m.set(u.email, u);
+        }
+        return m;
+    }, [users]);
+
     const getUserName = (email: string) => {
-        const u = users.find(u => u.email === email || u.id === email);
+        const u = userByKey.get(email);
         if (u?.name) return u.name;
         // Fallback: если userStore ещё не догрузил юзера (timing race на
         // мобильном) — показываем хотя бы префикс email, а не «полный
@@ -199,14 +210,26 @@ export function AdminBookings() {
         return (email || '').slice(0, 12) || 'Гость';
     };
 
-    const nowRef = new Date();
-    const filteredBookings = bookings
+    // Фильтр и сортировка 5000 броней — только когда меняются брони, клиенты
+    // или фильтры, а не при каждом открытии окна/наборе символа (скорость 23.10).
+    // Минута как зависимость: «сегодня/предстоящие/прошедшие» сдвигаются со
+    // временем и без новых данных (на ближайшей перерисовке).
+    const nowMinute = Math.floor(Date.now() / 60000);
+    const filteredBookings = useMemo(() => {
+    const nowRef = new Date(nowMinute * 60000);
+    const startMs = new Map<string, number>();
+    const msOf = (b: BookingHistoryItem) => {
+        let v = startMs.get(b.id);
+        if (v === undefined) { v = bookingStartMs(b); startMs.set(b.id, v); }
+        return v;
+    };
+    return bookings
         .filter(b => {
             if (filterStatus !== 'all' && b.status !== filterStatus) return false;
             if (branchFilter !== 'all' && bookingBranch(b) !== branchFilter) return false;
             if (paidTodayOnly && paidTodayIds && !paidTodayIds.has(b.id)) return false;
             if (timeFilter !== 'all') {
-                const bk = bookingBucket(bookingStartMs(b), nowRef);
+                const bk = bookingBucket(msOf(b), nowRef);
                 if (timeFilter === 'today' && bk !== 'today') return false;
                 if (timeFilter === 'upcoming' && bk !== 'upcoming') return false;
                 if (timeFilter === 'completed' && bk !== 'past') return false;
@@ -224,8 +247,8 @@ export function AdminBookings() {
         // (по времени), затем прошлые (свежие сверху). Раньше сортировали по
         // createdAt — «когда оформили», из-за чего порядок не совпадал с днём.
         .sort((a, b) => {
-            const ma = bookingStartMs(a);
-            const mb = bookingStartMs(b);
+            const ma = msOf(a);
+            const mb = msOf(b);
             const rank = (ms: number) => {
                 const bk = bookingBucket(ms, nowRef);
                 return bk === 'today' ? 0 : bk === 'upcoming' ? 1 : 2;
@@ -236,6 +259,9 @@ export function AdminBookings() {
             // сегодня и предстоящие — раньше выше; прошлые — свежие выше
             return ra === 2 ? mb - ma : ma - mb;
         });
+    // getUserName читает только userByKey — его и держим в зависимостях.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [bookings, userByKey, filterStatus, branchFilter, paidTodayOnly, paidTodayIds, timeFilter, search, nowMinute]);
 
     const handleEditPrice = (bookingId: string, _currentPrice?: number) => {
         setPriceBooking(bookings.find(b => b.id === bookingId) || null);

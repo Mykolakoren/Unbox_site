@@ -36,6 +36,7 @@ import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLi
 import { ResetPasswordModal } from '../../components/admin/modals/ResetPasswordModal';
 import { MergeAccountsModal } from '../../components/admin/modals/MergeAccountsModal';
 import { api } from '../../api/client';
+import { compressImage } from '../../utils/imageCompress';
 import { cashboxApi } from '../../api/cashbox';
 import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../utils/cashboxDuplicate';
 import { paymentErrorText, toastApiError } from '../../utils/errors';
@@ -820,12 +821,21 @@ export function AdminUserDetails() {
                                         onChange={(e) => {
                                             const file = e.target.files?.[0];
                                             if (file) {
-                                                const reader = new FileReader();
-                                                reader.onloadend = () => {
-                                                    updateUserById(user.email, { avatarUrl: reader.result as string })
-                                                        .then(ok => { if (ok) toast.success('Фото обновлено'); });
-                                                };
-                                                reader.readAsDataURL(file);
+                                                // Раньше фото уходило текстом в профиль (data:…) и
+                                                // утяжеляло список клиентов на сотни КБ на человека.
+                                                // Теперь — файлом через /upload/, в профиле только ссылка.
+                                                void (async () => {
+                                                    try {
+                                                        const data = new FormData();
+                                                        data.append('file', await compressImage(file));
+                                                        const res = await api.post<{ url: string }>('/upload/', data, {
+                                                            headers: { 'Content-Type': 'multipart/form-data' },
+                                                        });
+                                                        if (await updateUserById(user.email, { avatarUrl: res.data.url })) toast.success('Фото обновлено');
+                                                    } catch (err) {
+                                                        toastApiError(err, 'Не удалось загрузить фото');
+                                                    }
+                                                })();
                                             }
                                         }}
                                     />

@@ -10,7 +10,8 @@ import { loginPathWithRedirect } from '../utils/loginRedirect';
 import { canBookCabinets } from '../utils/permissions';
 
 export function DashboardLayout() {
-    const { currentUser, fetchCurrentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
+    const fetchCurrentUser = useUserStore(s => s.fetchCurrentUser);
     const navigate = useNavigate();
     const location = useLocation();
     const [isLoading, setIsLoading] = useState(true);

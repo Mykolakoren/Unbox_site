@@ -18,7 +18,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { User } from '../../store/types';
 
 export function CrmLayout() {
-    const { currentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
     const { fetchPaymentAccounts } = useCrmStore();
     // «Просмотр как специалист» (админ смотрит чужой кабинет): кнопки
     // создания прячем — записывать за другого отсюда нельзя.

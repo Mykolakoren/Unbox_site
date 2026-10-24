@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, func
 from app.api import deps
 from app.db.session import get_session
-from app.models.user import User, UserRead, UserUpdate
+from app.models.user import User, UserRead, UserUpdate, drop_echoed_avatar
 from app.models.booking import Booking
 from app.services.pricing import PricingService
 
@@ -79,6 +79,32 @@ def get_discount_progress(
     }
 
 
+@router.get("/{user_id}/avatar")
+def read_user_avatar(user_id: str, session: Session = Depends(get_session)):
+    """Фото профиля, сохранённое в базе текстом (data:image/…;base64,…), — как
+    обычная картинка. Ссылку с ?v=<отпечаток> даёт UserRead; новое фото = новый
+    отпечаток, поэтому кэшировать можно надолго."""
+    import base64
+    import re
+    from uuid import UUID
+    from fastapi.responses import Response
+    try:
+        user = session.get(User, UUID(user_id))
+    except ValueError:
+        user = None
+    m = re.match(r"^data:(image/(?:jpeg|jpg|png|webp|gif));base64,(.+)$", (user.avatar_url or "") if user else "", re.S)
+    if not m:
+        raise HTTPException(status_code=404, detail="Фото нет")
+    try:
+        body = base64.b64decode(m.group(2))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Фото нет")
+    return Response(content=body, media_type=m.group(1).replace("jpg", "jpeg"), headers={
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+    })
+
+
 @router.patch("/me", response_model=UserRead)
 def update_user_me(
     *,
@@ -87,7 +113,7 @@ def update_user_me(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Update own profile."""
-    user_data = user_in.dict(exclude_unset=True)
+    user_data = drop_echoed_avatar(user_in.dict(exclude_unset=True))
     # G3-01 (аудит 29.09): стёртое в профиле имя уходило сюда как name="" и
     # сохранялось — клиент пропадал из поиска и шахматки. Имя обрезаем
     # и пустым не принимаем. Проверка до try: иначе 400 завернётся в str(e).

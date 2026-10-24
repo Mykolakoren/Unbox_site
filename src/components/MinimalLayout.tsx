@@ -27,7 +27,7 @@ export function MinimalLayout({
 }: MinimalLayoutProps) {
     const navigate = useNavigate();
     const resetBooking = useBookingStore(s => s.reset);
-    const { currentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
 
     const handleBack = () => {
         if (onBack) onBack();

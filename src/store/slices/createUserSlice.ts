@@ -4,16 +4,37 @@ import { usersApi } from '../../api/users';
 import { startOfWeek, endOfWeek } from 'date-fns';
 import { toastApiError } from '../../utils/errors';
 
+let usersInFlight: Promise<void> | null = null;
+let usersAgain = false;
+
 export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set, get) => ({
     users: [],
 
     fetchUsers: async () => {
-        try {
-            const users = await usersApi.getUsers();
-            set({ users });
-        } catch (error) {
-            console.error("Failed to fetch users", error);
+        // Как fetchAllBookings: одновременные вызовы ждут один запрос (+ один
+        // догоняющий, если просили во время загрузки) — скорость 23.10.
+        if (usersInFlight) {
+            // Всегда догоняющий: запрос в пути мог уйти в базу раньше, чем
+            // сохранилось действие админа (ревизия 24.10).
+            usersAgain = true;
+            return usersInFlight;
         }
+        const run = async () => {
+            try {
+                const users = await usersApi.getUsers();
+                set({ users });
+            } catch (error) {
+                console.error("Failed to fetch users", error);
+            }
+        };
+        usersInFlight = (async () => {
+            await run();
+            while (usersAgain) {
+                usersAgain = false;
+                await run();
+            }
+        })().finally(() => { usersInFlight = null; });
+        return usersInFlight;
     },
 
     updateUser: async (updates) => {

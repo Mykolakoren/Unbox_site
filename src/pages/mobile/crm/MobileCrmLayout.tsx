@@ -33,7 +33,8 @@ import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
  * psy_crm.access (см. ../crmAccess.ts). Админ без CRM → /m/admin, остальные → /m.
  */
 export function MobileCrmLayout() {
-    const { currentUser, fetchCurrentUser } = useUserStore();
+    const currentUser = useUserStore(s => s.currentUser);
+    const fetchCurrentUser = useUserStore(s => s.fetchCurrentUser);
     const navigate = useNavigate();
     const location = useLocation();
     // Страховка, как в MobileLayout: при смене экрана снимаем лок прокрутки,

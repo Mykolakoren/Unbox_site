@@ -10,6 +10,13 @@ import { isFrozenSub, notifyIfPauseLifted } from '../../utils/pauseLiftNotice';
 let fetchSeq = 0;
 let appliedSeq = 0;
 
+// Скорость 23.10: экран и действия зовут fetchAllBookings пачкой (шахматка,
+// дашборд, «после отмены»…) — каждый раз 5000 броней. Пока запрос в пути,
+// новые вызовы ждут его же; если за это время что-то просили — ещё ОДИН
+// догоняющий запрос, чтобы данные были свежее последнего действия.
+let allInFlight: Promise<boolean> | null = null;
+let allAgain = false;
+
 export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> = (set, get) => ({
     bookings: [],
     bookingsStatus: 'idle',
@@ -85,24 +92,41 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         // admin either. Surface only the second failure with the server's
         // detail so the message tells the truth (rate limit, etc.). 401/403
         // never bubble — those are silenced above.
-        const tryOnce = () => bookingsApi.getAllBookings();
-        try {
-            const bookings = await tryOnce().catch(async (e) => {
-                if (e?.response?.status === 401 || e?.response?.status === 403) throw e;
-                await new Promise(r => setTimeout(r, 500));
-                return tryOnce();
-            });
-            set({ bookings });
-            return true;
-        } catch (error: any) {
-            const status = error?.response?.status;
-            if (status === 401 || status === 403) return false;  // not for us, no UI noise
-            const detail = error?.response?.data?.detail
-                || error?.message
-                || 'Не удалось загрузить бронирования';
-            toast.error(detail);
-            return false;
+        if (allInFlight) {
+            // Всегда догоняющий: запрос в пути мог уйти в базу раньше, чем
+            // сохранилось действие админа (ревизия 24.10).
+            allAgain = true;
+            return allInFlight;
         }
+        const run = async (): Promise<boolean> => {
+            const tryOnce = () => bookingsApi.getAllBookings();
+            try {
+                const bookings = await tryOnce().catch(async (e) => {
+                    if (e?.response?.status === 401 || e?.response?.status === 403) throw e;
+                    await new Promise(r => setTimeout(r, 500));
+                    return tryOnce();
+                });
+                set({ bookings });
+                return true;
+            } catch (error: any) {
+                const status = error?.response?.status;
+                if (status === 401 || status === 403) return false;  // not for us, no UI noise
+                const detail = error?.response?.data?.detail
+                    || error?.message
+                    || 'Не удалось загрузить бронирования';
+                toast.error(detail);
+                return false;
+            }
+        };
+        allInFlight = (async () => {
+            let ok = await run();
+            while (allAgain) {
+                allAgain = false;
+                ok = await run();
+            }
+            return ok;
+        })().finally(() => { allInFlight = null; });
+        return allInFlight;
     },
 
     addBooking: async (bookingData) => {

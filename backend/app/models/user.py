@@ -1,6 +1,6 @@
 from typing import Optional, List
 from uuid import UUID, uuid4
-from pydantic import Field as PydanticField
+from pydantic import Field as PydanticField, model_validator
 from sqlmodel import Field, SQLModel, JSON, Relationship
 from sqlalchemy import Column
 from datetime import datetime
@@ -77,7 +77,30 @@ class UserRead(UserBase):
     # аккаунту владельца. Ключ живёт только в ответе /telegram/link-token.
     telegram_link_token: Optional[str] = PydanticField(default=None, exclude=True)
     telegram_link_token_expires_at: Optional[datetime] = PydanticField(default=None, exclude=True)
-    
+
+    @model_validator(mode="after")
+    def _avatar_as_link(self):
+        # Скорость 23.10: три фото, сохранённые в базе текстом (data:…), весили
+        # 2,7 МБ из 2,8 МБ списка клиентов и качались при каждом его открытии.
+        # Отдаём ссылку — браузер скачает фото один раз и запомнит.
+        a = self.avatar_url or ""
+        if a.startswith("data:"):
+            import hashlib
+            self.avatar_url = f"/api/v1/users/{self.id}{AVATAR_LINK_MARK}{hashlib.md5(a.encode()).hexdigest()[:10]}"
+        return self
+
+
+AVATAR_LINK_MARK = "/avatar?v="
+
+
+def drop_echoed_avatar(data: dict) -> dict:
+    """Форма прислала обратно ссылку из UserRead вместо самого фото — не
+    затираем им настоящее фото в базе (иначе картинка пропадёт)."""
+    if AVATAR_LINK_MARK in str(data.get("avatar_url") or ""):
+        data.pop("avatar_url", None)
+    return data
+
+
 class UserUpdate(SQLModel):
     name: Optional[str] = None
     phone: Optional[str] = None
