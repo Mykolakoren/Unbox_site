@@ -1,7 +1,7 @@
 from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt  # PyJWT (24.10, вместо заброшенного python-jose)
 from pydantic import ValidationError
 from sqlmodel import Session, select
 from ..core import security
@@ -34,7 +34,7 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
             )
-    except (JWTError, ValidationError):
+    except (jwt.PyJWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",

@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Optional, Any, Union
-from jose import jwt
+# 24.10: python-jose заброшен (уязвимость без исправления) → PyJWT. Формат
+# токена тот же (HS256, exp, sub) — выданные раньше входы продолжают работать.
+import jwt
 from passlib.context import CryptContext
 from .config import settings
 
