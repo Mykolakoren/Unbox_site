@@ -47,6 +47,7 @@ import { statusLabel } from '../../design/statuses';
 import { formatGel, formatDateLabel, formatDayMonth, formatTime } from '../../utils/format';
 import { BATUMI_TZ } from '../../utils/dateUtils';
 import { useArchivedClients } from '../../hooks/useArchivedClients';
+import { toastApiError } from '../../utils/errors';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -853,7 +854,7 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
             await fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось применить бонус-час');
+            toastApiError(e, 'Не удалось применить бонус-час');
         }
     };
 
@@ -893,7 +894,7 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
             await fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
+            toastApiError(e, 'Не удалось перевести на абонемент');
         }
     };
 
@@ -920,11 +921,19 @@ export function AdminChessboardView() {
             await fetchAllBookings();
             setSelectedBooking(res.booking ?? null);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось убрать доп');
+            toastApiError(e, 'Не удалось убрать доп');
         }
     };
 
     const handleToggleReRent = async (b: BookingHistoryItem) => {
+        // Выставить на пересдачу — денежное действие (займут время → клиенту 50 %),
+        // поэтому спрашиваем, как в списке броней. Снять — сразу (UX 24.10).
+        if (!b.isReRentListed && !(await confirm({
+            title: 'Пересдать бронь?',
+            body: 'Время увидят другие. Если его займут, эту бронь отменим и вернём клиенту 50%.',
+            confirmLabel: 'Пересдать',
+            cancelLabel: 'Не пересдавать',
+        }))) return;
         try {
             await listForReRent(b.id);
             await fetchAllBookings();
@@ -950,7 +959,7 @@ export function AdminChessboardView() {
             await fetchAllBookings();
             setSelectedBooking(null);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
+            toastApiError(e, 'Не удалось продлить — возможно, следующий слот занят');
         }
     };
 
@@ -970,7 +979,7 @@ export function AdminChessboardView() {
             await fetchAllBookings();
             setSelectedBooking(null);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось сократить');
+            toastApiError(e, 'Не удалось сократить');
             throw e;
         }
     };
@@ -1002,7 +1011,7 @@ export function AdminChessboardView() {
             await fetchAllBookings();
             setSelectedBooking(null);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перенести — слот занят или не помещается');
+            toastApiError(e, 'Не удалось перенести — слот занят или не помещается');
         }
     };
 
@@ -1022,7 +1031,7 @@ export function AdminChessboardView() {
             await fetchAllBookings();
             setSelectedBooking(null);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перенести — возможно, слот занят');
+            toastApiError(e, 'Не удалось перенести — возможно, слот занят');
         }
     };
 
@@ -1039,7 +1048,7 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
             await fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отклонить бронь. Попробуйте ещё раз.');
+            toastApiError(e, 'Не удалось отклонить бронь. Попробуйте ещё раз.');
         } finally {
             setReasonSaving(false);
         }
@@ -1064,7 +1073,7 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
             await fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+            toastApiError(e, 'Не удалось снять штраф');
         } finally {
             setReasonSaving(false);
         }
@@ -1480,7 +1489,7 @@ export function AdminChessboardView() {
                                                     setSelectedBooking(null);
                                                     await fetchAllBookings();
                                                 } catch (e: any) {
-                                                    toast.error(e?.response?.data?.detail || 'Не удалось подтвердить бронь. Попробуйте ещё раз.');
+                                                    toastApiError(e, 'Не удалось подтвердить бронь. Попробуйте ещё раз.');
                                                 }
                                             }}
                                             className="py-2 min-h-11 text-xs font-bold rounded-lg bg-accent text-on-accent flex items-center justify-center gap-1"
@@ -1568,7 +1577,7 @@ export function AdminChessboardView() {
                                                         setSelectedBooking(null);
                                                         await fetchAllBookings();
                                                     } catch (e: any) {
-                                                        toast.error(e?.response?.data?.detail || 'Не удалось сменить формат');
+                                                        toastApiError(e, 'Не удалось сменить формат');
                                                     }
                                                 }}
                                                 className="w-full py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink flex items-center justify-center gap-1.5"

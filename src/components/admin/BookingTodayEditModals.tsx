@@ -9,6 +9,7 @@ import { AlertTriangle } from 'lucide-react';
 import { STATUS } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { ruCountWord } from '../../utils/plural';
+import { toastApiError } from '../../utils/errors';
 
 /**
  * Быстрые правки СЕГОДНЯШНЕЙ брони для админа:
@@ -55,7 +56,7 @@ export function ExtendBookingModal({
             onDone();
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
+            toastApiError(e, 'Не удалось продлить — возможно, следующий слот занят');
         } finally {
             setBusy(false);
         }
@@ -147,7 +148,7 @@ export function SplitBookingModal({
             onDone();
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось разделить бронь');
+            toastApiError(e, 'Не удалось разделить бронь');
         } finally {
             setBusy(false);
         }
@@ -237,7 +238,7 @@ export function AddExtrasModal({
             onDone();
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось добавить допы');
+            toastApiError(e, 'Не удалось добавить допы');
         } finally {
             setBusy(false);
         }

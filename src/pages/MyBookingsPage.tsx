@@ -53,6 +53,7 @@ import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, la
 import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
 import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
+import { toastApiError } from '../utils/errors';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
  *  пересдачу (флаг isReRentListed, не отдельный статус). Вид — как у
@@ -807,7 +808,7 @@ function BookingsChessboard({
                 toast.success('Бронирование перенесено');
                 refreshBookings();
             } catch (err: any) {
-                toast.error(err.response?.data?.detail || 'Не удалось перенести');
+                toastApiError(err, 'Не удалось перенести');
             }
         }
 
@@ -2068,7 +2069,7 @@ function BookingsChessboard({
                                         refreshBookings?.();
                                         toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                     } catch (err: any) {
-                                        toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                        toastApiError(err, 'Не удалось продлить');
                                     } finally {
                                         setExtending(false);
                                     }
@@ -2134,7 +2135,7 @@ function BookingsChessboard({
                                             refreshBookings?.();
                                             toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                         } catch (err: any) {
-                                            toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                            toastApiError(err, 'Не удалось продлить');
                                         } finally {
                                             setExtending(false);
                                         }
@@ -2191,7 +2192,7 @@ function BookingsChessboard({
                                     date: `${seriesMoveTarget.newDate}T${seriesMoveTarget.newStartTime}:00`,
                                 });
                             } catch (err: any) {
-                                toast.error(err.response?.data?.detail || 'Не удалось обновить сессию');
+                                toastApiError(err, 'Не удалось обновить сессию');
                             }
                         }
                         setSeriesMoveTarget(null);
@@ -2524,7 +2525,7 @@ export function MyBookingsPage() {
                     toast.success('Бронь на пересдаче. Если время займут, вернём 50 % на баланс.');
                     refreshBookings();
                 } catch (err: any) {
-                    toast.error(err.response?.data?.detail || 'Ошибка');
+                    toastApiError(err, 'Не удалось выставить бронь на пересдачу');
                 }
             }
         });
@@ -2536,7 +2537,7 @@ export function MyBookingsPage() {
             toast.success('Снято с пересдачи');
             refreshBookings();
         } catch (err: any) {
-            toast.error(err.response?.data?.detail || 'Ошибка');
+            toastApiError(err, 'Не удалось снять с пересдачи');
         }
     };
 
@@ -2546,7 +2547,7 @@ export function MyBookingsPage() {
             toast.success(clientId ? 'Клиент привязан' : 'Клиент отвязан');
             refreshBookings();
         } catch (err: any) {
-            toast.error(err.response?.data?.detail || 'Ошибка привязки');
+            toastApiError(err, 'Ошибка привязки');
         }
     };
 
@@ -2865,7 +2866,7 @@ function BookingCard({
             toast.success('Серия завершится в срок — больше не напомним');
             clearHighlightedSeries?.();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось сохранить');
+            toastApiError(e, 'Не удалось сохранить');
         } finally {
             setDismissing(false);
         }
@@ -2916,7 +2917,7 @@ function BookingCard({
             // Refresh the page-level map (one call) instead of refetching here.
             onSeriesChanged?.();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось продлить серию');
+            toastApiError(e, 'Не удалось продлить серию');
         } finally {
             setExtending(false);
         }

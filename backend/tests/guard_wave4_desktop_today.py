@@ -196,12 +196,12 @@ def test_chessboard_slot_width_and_scroll_to_now():
 
 CHESS_MONEY_FP = {
     ("const handleCancelConfirm = async", "    // «Час в подарок»"): "b655ef28838f2ce0",
-    ("const handleBonusHour = async", "    const handleEditPrice"): "2dca2bd67b90e716",
-    ("const handleToggleReRent = async", "    /** \"Продлить +30 мин\""): "73d6d7d0a5e4a3f7",
-    ("const handleExtend = async", "    /** Сократить бронь"): "4c09297c63012f35",
-    ("const doShorten = async", "    /** \"Перенести\""): "830d3b7231125147",
-    ("const handleDropMove = async", "    /** Собственно перенос"): "25ae16962b80e8ba",
-    ("const doMove = async", "    // ─── Render"): "40db36a87307795b",
+    ("const handleBonusHour = async", "    const handleEditPrice"): "5dd48359a96a3409",
+    ("const handleToggleReRent = async", "    /** \"Продлить +30 мин\""): "ca17d5c2b7b11ee0",  # 24.10: + вопрос перед «Пересдать»
+    ("const handleExtend = async", "    /** Сократить бронь"): "64740fef41a09aa5",
+    ("const doShorten = async", "    /** \"Перенести\""): "b86af22b8d2abc49",
+    ("const handleDropMove = async", "    /** Собственно перенос"): "cde34792955d53d3",
+    ("const doMove = async", "    // ─── Render"): "4220acd0e3a7015b",
     # 03.10 (решение владельца «оплачено скидкой + куда ушли деньги»): dueMap =
     # applyAllocation(computeDueByBooking(...)) — раскладка ленты с сервера поверх
     # прежнего расчёта (долг — на брони, к которой его привязала лента; бронь вне
@@ -213,7 +213,7 @@ CHESS_MONEY_FP = {
 LIST_MONEY_FP = {
     ("const handleCancelConfirm = async", "    // Excel #67"): "86f0510436e2d8e4",
     ("const handleReRent = async", "    // Excel #28"): "58c0c9e4e7dc5642",
-    ("const handleToSubscription = async", "    // Excel #59"): "f5e119923ff5a68b",
+    ("const handleToSubscription = async", "    // Excel #59"): "c01b1404e0ffd084",
     ("const loadAllBookings = async", "    // Только для списка"): "3bbe851c2336fa0a",
 }
 

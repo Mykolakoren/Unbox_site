@@ -11,6 +11,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatDateLabel } from '../../../utils/format';
+import { toastApiError } from '../../../utils/errors';
 
 /**
  * Mobile admin — waitlist (Слежу за слотами).
@@ -93,7 +94,7 @@ export function MobileAdminWaitlist() {
             setEntries(prev => (prev || []).filter(e => e.id !== id));
             toast.success('Убрали из листа ожидания');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось убрать из листа. Попробуйте ещё раз');
+            toastApiError(e, 'Не удалось убрать из листа. Попробуйте ещё раз');
         } finally {
             setBusy(null);
         }

@@ -11,7 +11,7 @@ import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
 import { undoToast } from '../../ui/undoToast';
 import { cashboxApi } from '../../../api/cashbox';
 import { createIncomeWithDuplicateGuard, isDuplicateDeclined } from '../../../utils/cashboxDuplicate';
-import { paymentErrorText } from '../../../utils/errors';
+import { paymentErrorText, toastApiError } from '../../../utils/errors';
 import { useUserStore } from '../../../store/userStore';
 import { canUndoCashTx, claimCashUndo, releaseCashUndo } from './cashMoney';
 
@@ -225,7 +225,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                 resetForm();
                 onClose();
             } catch (err: any) {
-                toast.error(err?.response?.data?.detail || 'Не удалось продать абонемент');
+                toastApiError(err, 'Не удалось продать абонемент');
             } finally {
                 setSaving(false);
             }
@@ -292,7 +292,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                             onUndone?.();
                         } catch (err: any) {
                             releaseCashUndo(created.id);
-                            toast.error(err?.response?.data?.detail || 'Не удалось отменить операцию — удалите её в журнале');
+                            toastApiError(err, 'Не удалось отменить операцию — удалите её в журнале');
                         }
                     });
                 } else {

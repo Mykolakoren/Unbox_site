@@ -579,7 +579,7 @@ export function CrmBookings() {
             setModalExistingClientId(undefined);
             await fetchSessions();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось отвязать');
+            toastApiError(err, 'Не удалось отвязать');
         }
     };
 
@@ -905,7 +905,7 @@ function GHBookingRow({ booking, linkedClient, linkedSessionId, linkedSessions, 
             setWaiveOpen(false);
             await fetchBookings?.();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+            toastApiError(e, 'Не удалось снять штраф');
         } finally {
             setWaiveBusy(false);
         }
@@ -926,7 +926,7 @@ function GHBookingRow({ booking, linkedClient, linkedSessionId, linkedSessions, 
             toast.success(`Формат изменён на «${targetLabel}»`);
             await fetchBookings?.();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось сменить формат');
+            toastApiError(e, 'Не удалось сменить формат');
         }
     };
 

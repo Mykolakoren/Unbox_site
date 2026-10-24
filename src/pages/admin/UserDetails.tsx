@@ -315,7 +315,7 @@ export function AdminUserDetails() {
             await useUserStore.getState().fetchUsers();
             toast.success(`Кредитный лимит установлен: ${limit} ₾`);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить кредитный лимит');
+            toastApiError(e, 'Не удалось изменить кредитный лимит');
         }
     }
 
@@ -364,7 +364,7 @@ export function AdminUserDetails() {
                 { duration: 8000 },
             );
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось продать абонемент');
+            toastApiError(e, 'Не удалось продать абонемент');
         }
     };
 
@@ -449,7 +449,7 @@ export function AdminUserDetails() {
             toast.success('Пользователь восстановлен');
             await useUserStore.getState().fetchUsers();
         } catch (err: any) {
-            toast.error(err.response?.data?.detail || 'Не удалось восстановить');
+            toastApiError(err, 'Не удалось восстановить');
         }
     };
 
@@ -604,7 +604,7 @@ export function AdminUserDetails() {
                                                 await useUserStore.getState().fetchUsers();
                                                 setIsEditingName(false);
                                             } catch (err: any) {
-                                                toast.error(err?.response?.data?.detail || 'Не удалось сохранить');
+                                                toastApiError(err, 'Не удалось сохранить');
                                             } finally {
                                                 setSavingName(false);
                                             }

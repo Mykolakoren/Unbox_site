@@ -34,6 +34,7 @@ import { formatGel, formatDayMonth, formatDayMonthShort, formatMonthLabel, forma
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { Segmented } from '../../components/ui/Chip';
+import { toastApiError } from '../../utils/errors';
 
 // «Итоги дня» и «Недельные скидки» (решение владельца 02.10): админы сверяют день
 // и скидки с сайтом, а не со своим Excel.
@@ -473,7 +474,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
             const real = await pricingApi.runWeeklyRebate(false);
             toast.success(`Начислено ${formatGel(real.total_credited)} · ${real.users_credited} клиент(ов)`);
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');
+            toastApiError(e, 'Ошибка перерасчёта');
         }
     };
 
@@ -880,7 +881,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                         p.refetchTransactions();
                                     } catch (err: any) {
                                         const { toast } = await import('sonner');
-                                        toast.error(err?.response?.data?.detail || 'Ошибка корректировки');
+                                        toastApiError(err, 'Ошибка корректировки');
                                     } finally {
                                         p.setCorrSaving(false);
                                     }

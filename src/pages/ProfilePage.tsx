@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { toast } from 'sonner';
 import { api } from '../api/client';
-import { apiErrorMessage } from '../utils/errors';
+import { apiErrorMessage, toastApiError } from '../utils/errors';
 import { hasPermission } from '../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { COLOR, STATUS } from '../design/tokens';
@@ -124,7 +124,7 @@ function ChangePasswordSection() {
             setNewPassword('');
             setConfirmPassword('');
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Ошибка смены пароля');
+            toastApiError(err, 'Ошибка смены пароля');
         } finally {
             setSaving(false);
         }
@@ -261,7 +261,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
             setEditing(false);
             setPassword('');
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Ошибка смены email');
+            toastApiError(err, 'Ошибка смены email');
         } finally {
             setSaving(false);
         }

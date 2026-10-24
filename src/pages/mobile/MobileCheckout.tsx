@@ -68,6 +68,13 @@ export function MobileCheckout() {
     const state = useBookingStore();
     const [submitting, setSubmitting] = useState(false);
     const [confirmed, setConfirmed] = useState(false);
+    // Перерисовка раз в 30 с — чтобы «время уже началось» появлялось само (UX 24.10).
+    // Хуки — только здесь, до ранних return (экран «Готово» и пр.).
+    const [, setNowTick] = useState(0);
+    useEffect(() => {
+        const t = setInterval(() => setNowTick(n => n + 1), 30_000);
+        return () => clearInterval(t);
+    }, []);
     // Волна 2 (вёрстка V1): экран подтверждения после брони и шторки
     // «Время», «Чем платите», раскрытые «Допуслуги».
     // waiting/total — корзина: сколько броней из скольких ждут подтверждения (12.10).
@@ -308,16 +315,17 @@ export function MobileCheckout() {
 
     // Занятость этого кабинета в этот день — чтобы нельзя было выбрать занятое.
     const dayBusy = useMemo(() => {
-        if (!editSlot) return [] as { s: number; e: number }[];
+        if (!editSlot) return [] as { s: number; e: number; reRent: boolean }[];
         const dayKey = fmtDate(state.date, 'yyyy-MM-dd');
         return bookings
-            .filter(b => b.status === 'confirmed'
+            // Заявка на одобрении тоже держит время (правило 12.10).
+            .filter(b => (b.status === 'confirmed' || b.status === 'pending_approval')
                 && b.resourceId === editSlot.resourceId
                 && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') === dayKey)
             .map(b => {
                 const [h, m] = (b.startTime || '00:00').split(':').map(Number);
                 const s = h * 60 + m;
-                return { s, e: s + (b.duration ?? 60) };
+                return { s, e: s + (b.duration ?? 60), reRent: !!b.isReRentListed };
             });
     }, [bookings, state.date, editSlot?.resourceId]);
 
@@ -408,6 +416,13 @@ export function MobileCheckout() {
     // Что реально спишется — для итога, подписи и кнопки (G4-01: кнопка всегда
     // писала «Забронировать · 45 ₾», даже когда платили часами).
     const payMethod = resolveFinalMethod();
+    // UX 24.10: «Не хватает N ₾» раньше всплывало только после нажатия кнопки,
+    // а итог над кнопкой при этом обещал «уйдёт в долг». Считаем заранее — так
+    // же, как проверка в submit (своя разовая бронь, платим деньгами).
+    const moneyDueNow = payMethod === 'balance' ? priced.total : payMethod === 'bonus' ? bonusMoneyDue(plan) : 0;
+    const overLimitBy = (!isSeries && moneyDueNow > 0 && !!effectiveUser && effectiveUser.email === currentUser?.email)
+        ? Math.max(0, moneyDueNow - (effectiveUser.balance ?? 0) - (effectiveUser.creditLimit ?? 0))
+        : 0;
     // Абонемент на паузе, а бронь пойдёт его часами — пауза снимется (владелец 03.10).
     const pauseNote = pauseLiftNote(plan, payMethod, isSeries);
     const extrasTotal = priced.items.reduce((s, i) => s + i.price.extrasPrice, 0);
@@ -621,6 +636,24 @@ export function MobileCheckout() {
     const lastEnd = priced.items[priced.items.length - 1].end;
     const firstStart = priced.items[0]?.start;
     const moreThanDay = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
+    // UX 24.10: пока клиент сидит на оплате, время может пройти или его займут —
+    // раньше он узнавал об этом только отказом после нажатия. Тик перерисовки
+    // (nowTick) — в начале компонента. Админ может ставить задним числом — ему не мешаем.
+    // Начало — по Тбилиси (UTC+4), как hotInfo, а не по часам телефона.
+    const firstStartTbMs = firstStart
+        ? Date.UTC(firstStart.getFullYear(), firstStart.getMonth(), firstStart.getDate(),
+            firstStart.getHours() - 4, firstStart.getMinutes())
+        : null;
+    // submitting: после создания своя же новая бронь появится в занятости раньше,
+    // чем экран перейдёт в «Готово», — не пугаем «уже заняли».
+    const slotProblem: string | null = isSeries || confirmed || submitting || isAdminActor ? null
+        : firstStartTbMs !== null && firstStartTbMs <= Date.now()
+            ? 'Это время уже началось — выберите другое.'
+            // Только пересечение с чужими бронями (без рамки 9–22 из isFree);
+            // бронь на пересдаче — не помеха: сервер её снимет (find_re_rent_conflicts).
+            : editSlot && dayBusy.some(x => !x.reRent && x.s < curStartMin + curDurMin && x.e > curStartMin)
+                ? 'Это время уже заняли — выберите другое.'
+                : null;
     const extrasSummary = state.extras.length === 0
         ? 'Нет'
         : EXTRAS.filter(e => state.extras.includes(e.id)).map(e => e.name).join(', ');
@@ -1035,7 +1068,17 @@ export function MobileCheckout() {
                         {/* Оплата балансом: говорим явно, сколько спишется, и
                             честно предупреждаем про уход в долг — раньше клиент
                             узнавал о минусе постфактум из истории баланса. */}
-                        {!isSeries && payMethod === 'balance' && effectiveUser && (() => {
+                        {slotProblem && (
+                            <li style={{ color: STATUS.danger.fg, fontWeight: 600 }}>{slotProblem}</li>
+                        )}
+                        {overLimitBy > 0 && effectiveUser && (
+                            <li style={{ color: STATUS.danger.fg, fontWeight: 600 }}>
+                                Не хватает {formatGel(overLimitBy)}: на балансе {formatGel(effectiveUser.balance ?? 0)}
+                                {(effectiveUser.creditLimit ?? 0) > 0 ? `, в долг можно до ${formatGel(effectiveUser.creditLimit ?? 0)}` : ''}.
+                                {' '}Пополните баланс у администратора — и бронь пройдёт.
+                            </li>
+                        )}
+                        {!isSeries && payMethod === 'balance' && effectiveUser && overLimitBy === 0 && (() => {
                             const bal = effectiveUser.balance ?? 0;
                             const after = bal - priced.total;
                             const debt = after < 0 ? Math.min(priced.total, -after) : 0;
@@ -1118,13 +1161,17 @@ export function MobileCheckout() {
                     size="touch"
                     // Не специалист: вместо заведомого отказа — к анкете (внутри /m).
                     onClick={needsApplication ? () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) : submit}
-                    disabled={submitting || confirmed}
+                    disabled={submitting || confirmed || ((overLimitBy > 0 || !!slotProblem) && !needsApplication)}
                     loading={submitting}
                     // Длинная подпись («Отправить на одобрение · 1 ч абонемента + 5 ₾») переносится, а не режется.
                     style={{ minHeight: 52, fontSize: TEXT.body, whiteSpace: 'normal', lineHeight: 1.25, textAlign: 'center', paddingBlock: 8 }}
                 >
                     {confirmed
                         ? 'Готово'
+                        : slotProblem && !needsApplication
+                            ? 'Выберите другое время'
+                        : overLimitBy > 0 && !needsApplication
+                            ? `Не хватает ${formatGel(overLimitBy)} — пополните баланс`
                         : needsApplication
                             ? (applicationStatus === 'none' ? 'Заполнить анкету специалиста' : 'Открыть анкету')
                         : submitting

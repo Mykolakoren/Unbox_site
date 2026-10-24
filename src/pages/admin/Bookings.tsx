@@ -34,6 +34,7 @@ import { statusLabel } from '../../design/statuses';
 import { hasPermission } from '../../utils/permissions';
 import { useRecentWeeklyRebates } from '../../hooks/useRecentWeeklyRebates';
 import { weeklyRebateNote, rebateRowsOnce } from '../../utils/weeklyRebateNote';
+import { toastApiError } from '../../utils/errors';
 
 type ViewMode = 'list' | 'grid';
 type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
@@ -396,7 +397,7 @@ export function AdminBookings() {
             toast.success('Бронь переведена на абонемент');
             useUserStore.getState().fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
+            toastApiError(e, 'Не удалось перевести на абонемент');
         }
         setConvertingId(null);
     };
@@ -456,7 +457,7 @@ export function AdminBookings() {
             // Refresh bookings
             useUserStore.getState().fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка при одобрении');
+            toastApiError(e, 'Ошибка при одобрении');
         }
         setApprovingId(null);
     };
@@ -477,7 +478,7 @@ export function AdminBookings() {
             setRejectFor(null);
             useUserStore.getState().fetchAllBookings();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отклонить бронь');
+            toastApiError(e, 'Не удалось отклонить бронь');
         }
         setRejectingId(null);
     };

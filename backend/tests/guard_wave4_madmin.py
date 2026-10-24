@@ -85,8 +85,8 @@ def _mobile_admin_routes(app: str) -> str:
 # 13.10: + вопрос «сумма сильно больше ожидаемой — точно?» ДО записи (topupGuard,
 # Михаил Стефанович 2020 вместо 20); поля платежа те же (проверяются ниже).
 TOPUP_SAVE_FP = "d258c18ba8e2b2ff"
-PERFORM_CANCEL_FP = "4eedaafde0cd9b02"
-END_SHIFT_SUBMIT_FP = "5978bf9faa11448e"
+PERFORM_CANCEL_FP = "c3ef680eb7ba8110"  # 24.10: только toastApiError
+END_SHIFT_SUBMIT_FP = "2f9e5a1c3a7411bb"  # 24.10: только toastApiError
 
 
 def test_money_fingerprints():

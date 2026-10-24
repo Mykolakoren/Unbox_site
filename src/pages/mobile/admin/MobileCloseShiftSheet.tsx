@@ -8,6 +8,7 @@ import { Field, Input, TextArea } from '../../../components/ui/Field';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
+import { toastApiError } from '../../../utils/errors';
 
 /**
  * Mobile close-shift flow — упрощённая версия десктопной 2-шаговой модалки.
@@ -130,7 +131,7 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
             toast.success(`Смена закрыта — ${branchLabel}`);
             onClosed();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось закрыть смену. Попробуйте ещё раз');
+            toastApiError(e, 'Не удалось закрыть смену. Попробуйте ещё раз');
             setSubmitting(false);
         }
     };

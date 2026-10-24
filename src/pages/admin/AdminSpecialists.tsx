@@ -33,6 +33,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { Field, Input, Select } from '../../components/ui/Field';
 import { ruCountWord } from '../../utils/plural';
+import { toastApiError } from '../../utils/errors';
 
 const CATEGORIES = [
     { value: '', label: 'Без категории' },
@@ -834,7 +835,7 @@ function ApplicationsPanel({
             toast.success(kind === 'approve' ? 'Заявка одобрена — специалист в каталоге' : 'Заявка отклонена');
             await onChange();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка');
+            toastApiError(e, kind === 'approve' ? 'Не удалось одобрить заявку' : 'Не удалось отклонить заявку');
         } finally {
             setBusyId(null);
         }

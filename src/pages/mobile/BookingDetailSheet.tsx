@@ -219,6 +219,13 @@ export function BookingDetailSheet({ booking, onClose }: {
     }
 
     async function doToggleReRent() {
+        // Выставить на пересдачу — только после вопроса, как в списке броней (UX 24.10).
+        if (!booking.isReRentListed && !(await confirm({
+            title: 'Пересдать бронь?',
+            body: 'Слот появится у других как свободный. Если его заберут — вернём 50% стоимости. Если не заберут — бронь останется за вами.',
+            confirmLabel: 'Пересдать',
+            cancelLabel: 'Оставить',
+        }))) return;
         setBusy('rerent');
         try {
             const updated = await bookingsApi.toggleReRent(booking.id);

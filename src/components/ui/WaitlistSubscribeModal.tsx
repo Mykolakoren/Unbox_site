@@ -6,6 +6,7 @@ import { waitlistApi } from '../../api/waitlist';
 import { formatDateLabel, formatTimeRange } from '../../utils/format';
 import { Sheet } from './Sheet';
 import { Button } from './Button';
+import { toastApiError } from '../../utils/errors';
 
 interface Props {
     isOpen: boolean;
@@ -54,7 +55,7 @@ export function WaitlistSubscribeModal({
             onSubscribed?.();
             onClose();
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось подписаться. Попробуйте ещё раз.');
+            toastApiError(err, 'Не удалось подписаться. Попробуйте ещё раз.');
         } finally {
             setSubmitting(false);
         }

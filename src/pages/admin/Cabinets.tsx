@@ -16,6 +16,7 @@ import { STATUS } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { toastApiError } from '../../utils/errors';
 
 /* ── Grid House module-scope constants (prefix: ghc) ── */
 const ghcHairline = `1px solid ${GH.ink10}`;
@@ -67,12 +68,12 @@ export function AdminCabinets() {
                         await resourcesApi.update(r.id, { isActive: true });
                         await fetchResources();
                     } catch (e: any) {
-                        toast.error(e?.response?.data?.detail || 'Не удалось вернуть кабинет');
+                        toastApiError(e, 'Не удалось вернуть кабинет');
                     }
                 });
             }
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось');
+            toastApiError(e, 'Не удалось');
         } finally {
             setToggleBusyId(null);
         }
@@ -118,7 +119,7 @@ export function AdminCabinets() {
             await fetchResources();
             toast.success(next ? 'Локация включена' : 'Локация и её кабинеты скрыты');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || `Не удалось ${action}`);
+            toastApiError(e, `Не удалось ${action}`);
         } finally {
             setToggleBusyId(null);
         }

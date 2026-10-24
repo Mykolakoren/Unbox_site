@@ -16,6 +16,7 @@ import { tbilisiToday } from '../../../utils/crmNextSession';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { COLOR, Z } from '../../../design/tokens';
+import { toastApiError } from '../../../utils/errors';
 
 /**
  * Mobile CRM — specialist's own public profile editor.
@@ -485,7 +486,7 @@ function VacationSection() {
             await fetchCurrentUser();
             toast.success(newDate ? `Отпуск отмечен до ${formatDayMonth(newDate, { withYear: 'auto' })}` : 'Отпуск снят');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось сохранить отпуск. Попробуйте ещё раз');
+            toastApiError(e, 'Не удалось сохранить отпуск. Попробуйте ещё раз');
         } finally {
             setBusy(false);
         }

@@ -158,7 +158,7 @@ export function CrmClients() {
             toast.success(`${client.name} удалён`);
             fetchClients(false, true);
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Ошибка удаления');
+            toastApiError(err, 'Ошибка удаления');
         }
     };
 

@@ -98,13 +98,13 @@ MONEY_FINGERPRINTS = [
     # текст ошибки — paymentErrorText. Поля тела запроса прежние (их держит guard_wave4_polish).
     # Прежний отпечаток db9e87fe1f162a33 (до 01.10).
     (UD, "const handleAddFunds = async", "const handleUpdateCreditLimit", "f1e232a66d220245", "пополнение баланса из карточки"),
-    (UD, "const handleUpdateCreditLimit = async", "const toggleFreeze", "82366847dc731d47", "кредитный лимит"),
+    (UD, "const handleUpdateCreditLimit = async", "const toggleFreeze", "baeb7a0b69cb9311", "кредитный лимит"),
     # 02.10 (guard_money_controls_2026_10): handleAssignSubscription осознанно изменён — продажа
     # абонемента из карточки передаёт филиал кассы (branch из окна: по последней брони клиента,
     # иначе обязательный выбор). В теле запроса добавлено только поле branch.
     # Прежний отпечаток 406179f87bd4d36f (до 02.10).
     # 21.10 (владелец): + paidNow — абонемент частями (subscription_sale.paid_now, guard_subscription_sale_2026_10).
-    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "febcdcb3d619d7b5", "продажа абонемента"),
+    (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "0e87ef371b30558b", "продажа абонемента"),
     (UD, "const handleToSubscription = async", "// Excel #59", "883771eeb8c1df0e", "«На абонемент»"),
     (UD, "const handleTopup = async", "setTopupSaving(false);", "a1fb7859b68a87c9", "пополнение часов абонемента"),
     (CASH_API, "export const cashboxApi = {", "\n};", "d3cd209a7a4cf49c", "все тела cashboxApi.*"),
@@ -116,7 +116,7 @@ MONEY_FINGERPRINTS = [
     (ADD_TX, "const r = await usersApi.sellSubscription(clientId, {", "});", "04b48bb9ee731e79", "продажа абонемента из кассы"),
     (FIN, "await api.post('/cashbox/balance-correction', {", "});", "bfc1fa6db997627d", "корректировка остатка"),
     (FIN, "const preview = await pricingApi.runWeeklyRebate(true);",
-     "toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');", "e5ffe1c9a13824ac", "недельные кредиты"),
+     "toastApiError(e, 'Ошибка перерасчёта');", "e5ffe1c9a13824ac", "недельные кредиты"),
 ]
 
 

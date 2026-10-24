@@ -5,6 +5,7 @@ import { X, Loader2, Wallet } from 'lucide-react';
 import { COLOR, FONT, SHADOW, STATUS } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { usersApi } from '../../api/users';
+import { toastApiError } from '../../utils/errors';
 
 interface Props {
     isOpen: boolean;
@@ -55,7 +56,7 @@ export function BalanceCorrectionModal({
             onSaved(updated.balance);
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось обновить баланс');
+            toastApiError(e, 'Не удалось обновить баланс');
         } finally {
             setSaving(false);
         }

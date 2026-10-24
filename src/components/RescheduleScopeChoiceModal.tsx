@@ -3,6 +3,7 @@ import { X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../api/bookings';
 import { formatDayMonth } from '../utils/format';
+import { toastApiError } from '../utils/errors';
 
 /**
  * Choice modal shown when an admin / specialist / user has just picked
@@ -52,7 +53,7 @@ export function RescheduleScopeChoiceModal({
             toast.success('Бронь перенесена');
             onCompleted('this');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перенести');
+            toastApiError(e, 'Не удалось перенести');
         } finally {
             setBusy(null);
         }
@@ -89,7 +90,7 @@ export function RescheduleScopeChoiceModal({
             }
             onCompleted('series');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перенести серию');
+            toastApiError(e, 'Не удалось перенести серию');
         } finally {
             setBusy(null);
         }

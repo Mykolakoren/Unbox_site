@@ -12,6 +12,7 @@ import { DesktopLink } from './DesktopLink';
 import { ADMIN_REQUESTS_CHANGED } from './sheetLayers';
 import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { toastApiError } from '../../../utils/errors';
 
 interface SpecialistRow {
     id: string;
@@ -123,7 +124,7 @@ export function MobileAdminSpecialists() {
             window.dispatchEvent(new Event(ADMIN_REQUESTS_CHANGED));
             toast.success(next ? 'Анкета опубликована' : 'Анкета скрыта с сайта');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить анкету. Попробуйте ещё раз');
+            toastApiError(e, 'Не удалось изменить анкету. Попробуйте ещё раз');
         } finally {
             setBusyId(null);
         }

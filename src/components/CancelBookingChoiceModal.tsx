@@ -3,6 +3,7 @@ import { X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../api/bookings';
 import { ruCountWord } from '../utils/plural';
+import { toastApiError } from '../utils/errors';
 
 /**
  * Choice modal shown when an admin / specialist / user clicks "Удалить" on a
@@ -44,7 +45,7 @@ export function CancelBookingChoiceModal({
             toast.success('Бронь отменена');
             onCompleted('this');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отменить');
+            toastApiError(e, 'Не удалось отменить');
         } finally {
             setBusy(null);
         }
@@ -60,7 +61,7 @@ export function CancelBookingChoiceModal({
             toast.success(`Серия отменена: ${ruCountWord(res?.cancelled ?? 0, ['бронь', 'брони', 'броней'])}`);
             onCompleted('series');
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отменить серию');
+            toastApiError(e, 'Не удалось отменить серию');
         } finally {
             setBusy(null);
         }

@@ -16,6 +16,7 @@ import { Segmented } from '../../../components/ui/Chip';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
+import { toastApiError } from '../../../utils/errors';
 
 /**
  * Шторки брони мобильной админки — ОДНИ на «Брони» и на «Дашборд».
@@ -106,7 +107,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
             setCancelTarget(null);
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отменить');
+            toastApiError(e, 'Не удалось отменить');
         } finally {
             setBusy(null);
         }
@@ -127,7 +128,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
             setPriceTarget(null);
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
+            toastApiError(e, 'Не удалось изменить цену');
         } finally {
             setBusy(null);
         }
@@ -141,7 +142,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
             toast.success(res.approvalNote || 'Одобрено');
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось одобрить');
+            toastApiError(e, 'Не удалось одобрить');
         } finally {
             setBusy(null);
         }
@@ -167,13 +168,20 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
             toast.success('Добавлено 30 минут');
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось добавить время');
+            toastApiError(e, 'Не удалось добавить время');
         } finally {
             setBusy(null);
         }
     };
 
     const doToggleReRent = async (b: BookingHistoryItem) => {
+        // Как на компьютере: выставить на пересдачу — только после вопроса (UX 24.10).
+        if (!b.isReRentListed && !(await confirm({
+            title: 'Пересдать бронь?',
+            body: 'Время увидят другие. Если его займут, эту бронь отменим и вернём клиенту 50%.',
+            confirmLabel: 'Пересдать',
+            cancelLabel: 'Не пересдавать',
+        }))) return;
         setBusy(b.id);
         try {
             const updated = await bookingsApi.toggleReRent(b.id);
@@ -183,7 +191,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
                 : 'Бронь снята с пересдачи');
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось обновить статус');
+            toastApiError(e, 'Не удалось обновить статус');
         } finally {
             setBusy(null);
         }
