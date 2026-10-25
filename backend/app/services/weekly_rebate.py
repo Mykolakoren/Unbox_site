@@ -61,9 +61,17 @@ def run_weekly_rebates(
     session: Session,
     week_start: date,
     dry_run: bool = True,
+    *,
+    user_ids: Optional[set] = None,
+    topup: bool = False,
 ) -> dict:
     """Начисляет недельные кредиты за неделю [week_start, +7).
     dry_run=True — только считает и возвращает суммы, ничего не пишет.
+
+    25.10: user_ids — только эти клиенты; topup=True — если за неделю уже
+    начислено, а по текущим броням положено больше (бронь задним числом в
+    закрытую неделю), доначислить РАЗНИЦУ. Меньше — не трогаем (без обратной
+    силы: начисленное не забираем).
     """
     # «Только вперёд» — недели до перехода не трогаем (кроме явного dry_run
     # для проверки сумм). Реальное начисление за прошлое заблокировано.
@@ -105,6 +113,10 @@ def run_weekly_rebates(
     skipped_already = 0
 
     for key, user_bookings in by_user.items():
+        if user_ids is not None:
+            _first = user_bookings[0]
+            if str(_first.user_uuid or "") not in user_ids and (_first.user_id or "") not in user_ids:
+                continue
         # Резолвим пользователя.
         user: Optional[User] = None
         first = user_bookings[0]
@@ -201,12 +213,39 @@ def run_weekly_rebates(
             continue
 
         # Идемпотентность.
-        existing = session.exec(
-            select(WeeklyRebate).where(
-                WeeklyRebate.user_id == user.id,
-                WeeklyRebate.week_start == week_start,
-            )
-        ).first()
+        _q = select(WeeklyRebate).where(
+            WeeklyRebate.user_id == user.id,
+            WeeklyRebate.week_start == week_start,
+        )
+        # Блокировка — только при записи: пробный расчёт остаётся чистым чтением.
+        existing = session.exec(_q if dry_run else _q.with_for_update()).first()
+        if existing and topup:
+            delta = round(rebate - float(existing.amount or 0), 2)
+            if delta < MIN_REBATE_GEL:
+                skipped_already += 1
+                continue
+            results.append({"user_id": str(user.id), "user_email": user.email, "user_name": user.name,
+                            "total_hours": round(total_hours, 1), "tier_percent": tier,
+                            "rebate": delta, "topup": True})
+            total_credited += delta
+            if not dry_run:
+                from app.services import wallet
+                # Свежий баланс под замком: параллельное списание не затрёт доначисление.
+                session.refresh(user, with_for_update=True)
+                wallet.credit(session, user, delta, reason="weekly_rebate",
+                              description=f"Доначисление недельной скидки ({tier}%, {round(total_hours,1)} ч) — бронь задним числом",
+                              ref_type="weekly_rebate", ref_id=str(user.id))
+                session.add(CashboxTransaction(
+                    type="expense", amount=delta, currency="GEL", payment_method="adjustment",
+                    description=f"Доначисление недельной скидки ({tier}%, {round(total_hours,1)} ч) — неделя с {week_start.isoformat()}",
+                    date=datetime.utcnow(), client_name=user.name, admin_id="system",
+                    admin_name="Недельный перерасчёт", credited_user_id=str(user.id),
+                ))
+                existing.amount = round(float(existing.amount or 0) + delta, 2)
+                existing.total_hours = round(total_hours, 1)
+                existing.tier_percent = tier
+                session.add(existing)
+            continue
         if existing:
             skipped_already += 1
             continue

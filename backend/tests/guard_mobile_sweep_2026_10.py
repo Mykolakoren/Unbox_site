@@ -470,7 +470,7 @@ def test_mobile_find_admin_backdate():
     assert "const backdateMin = backdateHours(currentUser) * 60;" in f
     assert "const canBackdate = backdateMin > 0 && !rescheduleId && !linkSessionId;" in f
     assert "Math.max(0, tbilisiNow().totalMins - backMin)" in f
-    assert "canBackdate && showPast ? backdateMin : 0" in f
+    assert "canBackdate && (showPast || daysBack > 0) ? backdateMin : 0" in f  # 25.10: + прошлые дни
 
 
 def test_backdate_window_by_role():

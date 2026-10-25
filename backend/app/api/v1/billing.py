@@ -285,13 +285,75 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
         except Exception:
             logger.warning("[billing] charge-failures admin alert failed", exc_info=True)
 
+    try:
+        reminded = _remind_pending_hot_step(session)
+    except Exception:
+        logger.warning("[billing] pending-approval reminders failed", exc_info=True)
+        session.rollback()
+        reminded = 0
+
     return {
         "ok": True,
         "candidates": len(due),
         "settled": settled,
         "failures": failures[:20],  # cap to keep response small
         "unfrozen": len(unfrozen),
+        "pending_reminded": reminded,
     }
+
+
+# 25.10: срочная заявка, которую никто не подтвердил, держит время до бесконечности
+# (правило 12.10). Сами не снимаем — встреча могла пройти, а админ забыл нажать.
+# Напоминаем в чат админов с кнопками ✅/❌: за час до начала и после начала —
+# каждое по одному разу (отметка — событие в журнале брони).
+_PENDING_REMIND_STAGES = (
+    ("hot_pending_remind_1h", lambda mins: 0 < mins <= 60, "⏰ Срочная заявка ждёт подтверждения — начало через {mins} мин"),
+    ("hot_pending_remind_started", lambda mins: mins <= 0, "⚠️ Заявка так и не подтверждена, а время уже началось"),
+)
+
+
+def _remind_pending_hot_step(session: Session) -> int:
+    from datetime import datetime, timedelta
+    from sqlmodel import select
+    from app.models.timeline import TimelineEvent
+    from app.services.timeline import SYSTEM_ACTOR_ID
+
+    now_tb = datetime.utcnow() + timedelta(hours=4)
+    rows = session.exec(select(Booking).where(Booking.status == "pending_approval")).all()
+    sent = 0
+    for b in rows:
+        start = booking_start_dt_tbilisi(b)
+        if start is None:
+            continue
+        mins = int((start - now_tb).total_seconds() // 60)
+        if mins < -24 * 60:
+            continue  # старше суток — не шумим каждые 10 минут, разберут по списку
+        for event_type, due, title in _PENDING_REMIND_STAGES:
+            if not due(mins):
+                continue
+            done = session.exec(select(TimelineEvent.id).where(
+                TimelineEvent.event_type == event_type, TimelineEvent.target_id == str(b.id)).limit(1)).first()
+            if done:
+                break
+            owner = session.get(User, b.user_uuid) if b.user_uuid else None
+            res = session.get(Resource, b.resource_id) if b.resource_id else None
+            text = (
+                f"{title.format(mins=mins)}\n\n"
+                f"👤 {(owner.name if owner else None) or b.user_id or '—'}\n"
+                f"📅 {start.strftime('%d.%m %H:%M')} · {b.duration or 60} мин\n"
+                f"📍 {(res.name if res else None) or b.resource_id}\n\n"
+                "Подтвердите или отклоните — пока заявка висит, время занято."
+            )
+            ok = telegram_service.send_admin_alert(text, reply_markup=telegram_service.hot_booking_markup(str(b.id)))
+            if ok:
+                timeline_service.log_event(
+                    session=session, actor_id=SYSTEM_ACTOR_ID, actor_role="system",
+                    target_id=str(b.id), target_type="booking", event_type=event_type,
+                    description="Напоминание админам: срочная заявка не подтверждена",
+                )
+                sent += 1
+            break  # одна стадия за проход
+    return sent
 
 
 @router.post("/bookings/{booking_id}/waive")

@@ -81,7 +81,8 @@ def test_find_protected_logic_untouched():
     # умолчанию 0 — окна по-прежнему с «сейчас».
     # 12.10 (разобрано): «на подтверждении» тоже держит время — как
     # check_availability на сервере (срочные брони корзины/серии ждут одобрения).
-    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "1b4f5650e284bce1", \
+    # 25.10: + daysBack (прошлые дни задним числом у админа) — осознанная правка.
+    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "813ccaeb726ffff1", \
         "buildFreeWindows изменилась — расчёт свободных окон трогать нельзя"
     assert _sha(_block(src, "const inFlightRef", "\n    const chipsBusy")) == "fe70d7f6e804df6d", \
         "блокировка повторного тапа (inFlightRef/pendingChip) изменилась"

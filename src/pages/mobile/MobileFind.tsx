@@ -298,9 +298,9 @@ export function MobileFind() {
 
     // Админ может бронировать задним числом (сервер: _assert_start_not_past —
     // админ 12 ч, старший/владелец 72 ч; шахматка — то же окно). 12.10, чат
-    // админов: с телефона прошедшее время было не выбрать вовсе. Здесь — только
-    // СЕГОДНЯ (занятость прошлых дней телефон не грузит); прошлые дни — шахматка.
-    // По умолчанию список с «сейчас», прошлое — по кнопке.
+    // админов: с телефона прошедшее время было не выбрать вовсе. Сегодня — по
+    // кнопке «Показать прошедшее время»; прошлые дни — чипами «Вчера/Задним
+    // числом» (25.10, занятость догружается из админского списка).
     const backdateMin = backdateHours(currentUser) * 60;   // как сервер: админ 12 ч, старший/владелец 72
     const canBackdate = backdateMin > 0 && !rescheduleId && !linkSessionId;
     const [showPast, setShowPast] = useState(false);
@@ -312,13 +312,32 @@ export function MobileFind() {
         () => (rescheduleId ? bookings.filter(b => String(b.id) !== rescheduleId) : bookings),
         [bookings, rescheduleId],
     );
+    // 25.10: прошлые дни задним числом (раньше — только сегодня). Дни, в которые
+    // ещё дотягивается окно права (админ 12 ч, старший/владелец 72 ч), и их
+    // занятость — из админского списка (ensureBookingsRange), а не «пусто».
+    const pastDayOptions = useMemo(() => {
+        if (!canBackdate) return [] as number[];
+        const nowMin = tbilisiNow().totalMins;
+        return [1, 2, 3].filter(k => nowMin - backdateMin + k * 1440 < 22 * 60);
+    }, [canBackdate, backdateMin]);
+    const daysBack = useMemo(() => {
+        if (dayOffset !== -1 || !customDate) return 0;
+        const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+        const k = Math.round((t0.getTime() - targetDate.getTime()) / 86400000);
+        return k > 0 ? k : 0;
+    }, [dayOffset, customDate, targetDate]);
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
+    useEffect(() => {
+        if (daysBack > 0) void ensureBookingsRange(targetDate, addDays(targetDate, 1));
+    }, [daysBack, targetDate, ensureBookingsRange]);
     const slots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
         () => buildFreeWindows(occupancy, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
-                               canBackdate && showPast ? backdateMin : 0),
-        [occupancy, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin],
+                               canBackdate && (showPast || daysBack > 0) ? backdateMin : 0,
+                               canBackdate ? daysBack : 0),
+        [occupancy, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin, daysBack],
     );
 
     const toggleLoc = (id: string) => {
@@ -934,6 +953,32 @@ export function MobileFind() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                     {/* When */}
                     <FieldGroup label="Когда">
+                        {/* 25.10: админ — прошлые дни в пределах права «задним числом». */}
+                        {pastDayOptions.length > 0 && (
+                            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                                {pastDayOptions.slice().reverse().map(k => {
+                                    const d = addDays(new Date(), -k);
+                                    const active = daysBack === k;
+                                    return (
+                                        <button
+                                            key={`past-${k}`}
+                                            aria-pressed={active}
+                                            onClick={() => { const x = new Date(d); x.setHours(0, 0, 0, 0); setCustomDate(x); setDayOffset(-1); }}
+                                            style={{
+                                                background: active ? COLOR.ink : COLOR.sunken,
+                                                color: active ? COLOR.onInk : COLOR.ink,
+                                                border: 'none', borderRadius: 12, padding: '10px 12px',
+                                                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                                                minHeight: 44,
+                                            }}
+                                        >
+                                            <div style={{ fontSize: 13, fontWeight: 600 }}>{k === 1 ? 'Вчера' : 'Задним числом'}</div>
+                                            <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60 }}>{formatDayMonth(d)}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                         {/* Today/Tomorrow — flat 50/50 row */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                             {[0, 1].map(off => {
@@ -1305,6 +1350,8 @@ function buildFreeWindows(
     isToday: boolean,
     /** Сколько минут назад ещё можно начинать (админ, задним числом). */
     backMin = 0,
+    /** Прошлый день (1 — вчера, …): окно «задним числом» тянется в него (25.10). */
+    daysBack = 0,
 ): FreeWindow[] {
     if (locs.size === 0 || spaces.size === 0) return [];
 
@@ -1373,7 +1420,9 @@ function buildFreeWindows(
     // показывал 9:00 как «свободный» в 15:56 — пользователь жал, потом
     // не мог забронировать. tbilisiNow() не зависит от браузерного TZ
     // (важно — клиент может быть на UK VPN).
-    const minStartMin = isToday ? Math.max(0, tbilisiNow().totalMins - backMin) : 0;
+    const minStartMin = isToday
+        ? Math.max(0, tbilisiNow().totalMins - backMin)
+        : daysBack > 0 ? Math.max(0, tbilisiNow().totalMins - backMin + daysBack * 1440) : 0;
     // Step by 30 minutes — owner 2026-05-31 (Микола): нужны полу-часовые
     // старты (19:30 на 1.5ч). Раньше шаг был 60 «для коротких списков»,
     // но это резало половину легальных слотов. Список вырос вдвое, но

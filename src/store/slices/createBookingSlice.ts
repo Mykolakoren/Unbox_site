@@ -242,6 +242,8 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
                     startTime: b.startTime,
                     duration: b.duration,
                     format: b.format || 'individual',
+                    // 25.10: допы терялись — кофе выбран, а бронь и цена без него.
+                    extras: Array.isArray(b.extras) ? b.extras : [],
                 })),
                 paymentMethod: first.paymentMethod || 'balance',
                 targetUserId: first.targetUserId,

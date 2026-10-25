@@ -308,6 +308,33 @@ def _gcal_delete_in_background(event_id: str, resource_id: Optional[str]) -> Non
         logger.warning(f"[GCal cancel bg] delete_event failed for event={event_id}: {e}")
 
 
+def _topup_weekly_rebate_if_closed_week(session: Session, booking: Booking, owner: Optional[User]) -> None:
+    """25.10: бронь задним числом в неделю, за которую скидку за объём уже
+    начислили (крон пн 01:00), раньше её не пересчитывала — клиент недополучал
+    скидку. Пересчитываем ЭТУ неделю для ЭТОГО клиента и доначисляем разницу
+    (меньше — не забираем). Сбой не ломает бронь. Коммитит сам."""
+    # Любой способ оплаты: часы абонемента тоже считаются в объём недели и
+    # поднимают тариф для броней, оплаченных с баланса (их пересчёт и вернёт).
+    if owner is None or booking.status != "confirmed":
+        return
+    try:
+        from app.services import weekly_rebate as _wr
+        # date бывает и datetime (полночь), и date — сравниваем только дни.
+        b_day = booking.date.date() if hasattr(booking.date, "hour") else booking.date
+        week = _wr._monday(b_day)
+        today_tb = (datetime.utcnow() + timedelta(hours=4)).date()
+        if week >= _wr._monday(today_tb) or week < _wr.REBATE_CUTOVER_WEEK:
+            return  # неделя ещё идёт (посчитает крон) или до перехода на кредиты
+        res = _wr.run_weekly_rebates(session, week, dry_run=False,
+                                     user_ids={str(owner.id), owner.email or ""}, topup=True)
+        if res.get("total_credited"):
+            logger.info("[weekly_rebate] topup %s ₾ for %s week %s after backdated booking %s",
+                        res["total_credited"], owner.id, week, booking.id)
+    except Exception:
+        session.rollback()
+        logger.exception("[weekly_rebate] topup after backdated booking failed")
+
+
 def _gcal_create_in_background(booking_id: str, user_name: str) -> None:
     """Push a booking to Google Calendar from a FastAPI BackgroundTask.
 
@@ -1240,9 +1267,14 @@ def read_external_events(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     session: Session = Depends(deps.get_session),
+    viewer: Optional[User] = Depends(deps.get_optional_current_user),
 ) -> Any:
     """Return Google Calendar events for a specific resource in a time window.
-    Public — no auth required so the checkout chessboard can see them."""
+    Public — no auth required so the checkout chessboard can see them.
+
+    25.10 (аудит): без входа отдавались события целиком — заголовки из
+    календаря кабинета (бывают имена) видел кто угодно. Теперь не-админу —
+    только время и «Занято»; окно — не больше 62 дней."""
     from datetime import timezone as _tz
 
     # Default window: now → now + 14 days
@@ -1254,6 +1286,8 @@ def read_external_events(
         t_max = datetime.fromisoformat(date_to) if date_to else (t_min + timedelta(days=14))
     except ValueError:
         t_max = t_min + timedelta(days=14)
+    if t_max - t_min > timedelta(days=62):
+        t_max = t_min + timedelta(days=62)
 
     # RFC3339 for the Google API — pin to UTC if naive
     def _rfc3339(d: datetime) -> str:
@@ -1277,7 +1311,11 @@ def read_external_events(
         time_min=_rfc3339(t_min),
         time_max=_rfc3339(t_max),
     )
-    return [e for e in events if e.get('id') not in our_event_ids]
+    events = [e for e in events if e.get('id') not in our_event_ids]
+    if viewer is not None and viewer.role in ADMIN_ROLES:
+        return events
+    return [{"id": e.get("id"), "resource_id": e.get("resource_id", resource_id),
+             "start": e.get("start"), "end": e.get("end"), "title": "Занято"} for e in events]
 
 
 # ─── Availability check ──────────────────────────────────────────────────────
@@ -2101,6 +2139,12 @@ def create_booking(
             except Exception:
                 logger.exception("[consecutive] recompute on create failed")
 
+        # Бронь задним числом в уже закрытую неделю — доначислить недельную скидку.
+        # Сначала фиксируем пересчёт «часы подряд»: сбой доначисления откатит
+        # только его самого (ревизия денег 25.10).
+        session.commit()
+        _topup_weekly_rebate_if_closed_week(session, booking, booking_owner)
+
         # Peak hours subscription debt notification — только если доплату правда
         # списали сейчас (ревизия 03.10): у горячей брони она откатывается до
         # одобрения, у брони заранее её снимет крон за сутки — писать «списана со
@@ -2342,6 +2386,9 @@ class MultiSlotItem(PydanticBaseModel):
     start_time: str    # "HH:MM"
     duration: int = 60
     format: str = "individual"
+    # 25.10: допуслуги слота (кофе, песочница…). Корзина их не передавала —
+    # клиент выбирал кофе, а бронь создавалась без него и без его цены.
+    extras: List[str] = []
 
 
 class MultiSlotRequest(PydanticBaseModel):
@@ -2464,6 +2511,12 @@ def create_multi_slot_booking(
                 detail="Этот клиент принадлежит другому специалисту",
             )
 
+    # Допуслуги — тот же реестр и та же проверка, что у одиночной брони.
+    for s in data.slots:
+        _unknown = PricingService.validate_extras(list(s.extras or []))
+        if _unknown:
+            raise HTTPException(status_code=400, detail=f"Неизвестные допуслуги: {', '.join(_unknown)}")
+
     # Parse + validate dates
     parsed_slots: List[tuple[MultiSlotItem, datetime]] = []
     for s in data.slots:
@@ -2541,6 +2594,11 @@ def create_multi_slot_booking(
             duration_minutes=s.duration,
             format_type=s.format,
         )
+        # Допы поверх цены кабинета — как одиночная бронь: дальше все проверки
+        # средств, списание и charge_amount идут уже с ними.
+        _slot_extras = list(s.extras or [])
+        _slot_extras_price = PricingService.calculate_extras_price(_slot_extras)
+        quote.final_price = round(float(quote.final_price or 0) + _slot_extras_price, 2)
 
         # ── Deferred billing per slot ──────────────────────────────────────
         from datetime import timedelta as _td_multi
@@ -2564,6 +2622,7 @@ def create_multi_slot_booking(
             duration_minutes=s.duration,
             format_type=s.format,
             bonus_left=_bonus_left,
+            extras_price=_slot_extras_price,
         )
         _bonus_left = max(0.0, _bonus_left - slot_bonus_hours)
         _slot_id = gen_uuid4()  # заранее — для ref_id строк ленты
@@ -2643,6 +2702,7 @@ def create_multi_slot_booking(
             # Бонусная бронь хранит потраченные бонус-часы — их вернёт отмена.
             hours_deducted=(slot_bonus_hours if slot_method == "bonus" else quote.hours_deducted),
             format=s.format,
+            extras=_slot_extras,
             user_id=booking_owner.email,
             user_uuid=booking_owner.id,
             # Multi-slot is a BATCH, not a recurring series — leaving
@@ -7373,6 +7433,20 @@ def shorten_booking(
         )
     if _subscription_money_row(booking):
         raise HTTPException(status_code=409, detail=_money_row_refusal(booking, current_user, "сократить её нельзя"))
+
+    # 25.10: то же правило суток, что у отмены — иначе «отменить нельзя» обходилось
+    # сокращением до часа с возвратом за остальное. Админ — по своему решению.
+    if current_user.role not in ADMIN_ROLES:
+        _hours_left = _booking_hours_until_start(booking)
+        if _hours_left < 24:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Сократить бронь можно не позже чем за 24 часа до начала "
+                    f"(до сессии осталось {_hours_left:.1f} ч). "
+                    f"Можно поставить бронь на переаренду или связаться с администратором."
+                ),
+            )
 
     remove = int(payload.remove_minutes or 0)
     if remove < 30 or remove % 30 != 0:

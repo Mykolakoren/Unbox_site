@@ -62,6 +62,16 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # Mount static files
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+
+@app.middleware("http")
+async def _uploads_nosniff(request, call_next):
+    """25.10 (аудит): браузер не «угадывает» тип загруженного файла — картинка
+    остаётся картинкой, даже если внутри что-то похожее на страницу."""
+    response = await call_next(request)
+    if request.url.path.startswith("/uploads/"):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
 # CORS Middleware (Allow Frontend to connect)
 app.add_middleware(
     CORSMiddleware,

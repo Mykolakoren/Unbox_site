@@ -394,6 +394,7 @@ export const bookingsApi = {
             startTime: string;  // "HH:MM"
             duration: number;
             format: string;
+            extras?: string[];
         }>;
         paymentMethod: string;
         targetUserId?: string;

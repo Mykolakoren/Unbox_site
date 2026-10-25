@@ -1823,7 +1823,9 @@ def _book_do_confirm(
     # directly as a Python call — bypasses HTTP but reuses all business rules
     # (pricing, race-safe locking, gcal sync, notifications, hot-booking gate, etc.).
     from fastapi import BackgroundTasks
-    from app.api.v1.bookings.routes import PAUSE_LIFT_INFO_KEY, create_booking, pause_lift_client_text
+    from app.api.v1.bookings.routes import (
+        PAUSE_LIFT_INFO_KEY, _gcal_create_in_background, create_booking, pause_lift_client_text,
+    )
 
     booking_in = BookingCreate(
         resource_id=resource.id,
@@ -1840,12 +1842,13 @@ def _book_do_confirm(
     # Сведения о снятии паузы абонемента этой бронью (владелец 03.10) кладёт
     # create_booking в session.info — только после успешного коммита.
     session.info.pop(PAUSE_LIFT_INFO_KEY, None)
+    _bg = BackgroundTasks()
     try:
         result = create_booking(
             session=session,
             booking_in=booking_in,
             current_user=user,
-            background_tasks=BackgroundTasks(),
+            background_tasks=_bg,
         )
     except HTTPException as e:
         # Бронь не создалась — ничего из её расчёта (в т.ч. снятие паузы) не
@@ -1864,6 +1867,14 @@ def _book_do_confirm(
         _answer_callback(callback_id, "", show_alert=False)
         return {"ok": True}
     pause_lift = session.info.pop(PAUSE_LIFT_INFO_KEY, None)
+
+    # 25.10: фоновые задачи create_booking здесь никто не запускал — бронь из
+    # бота не попадала в Google-календарь кабинета. Запускаем только календарь:
+    # подтверждение клиенту и сигнал админам бот шлёт сам ниже (иначе дубли).
+    import threading as _threading
+    for _t in _bg.tasks:
+        if _t.func is _gcal_create_in_background:
+            _threading.Thread(target=_t.func, args=_t.args, kwargs=_t.kwargs, daemon=True).start()
 
     # Success
     final_price = getattr(result, "final_price", None)
