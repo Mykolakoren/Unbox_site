@@ -234,7 +234,7 @@ function AdminFinancePage() {
     const [adjustments, setAdjustments] = useState<CashboxTransaction[]>([]);
     const rawAnalytics = useCashboxStore(s => s.analytics);
     const bookings = useUserStore(s => s.bookings);
-    const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
     useEffect(() => {
         if (!analyticsOpen) return;
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
@@ -246,9 +246,14 @@ function AdminFinancePage() {
             .catch(() => setAdjustments([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [analyticsOpen, fetchAnalytics, period.from.getTime(), period.to.getTime()]);
+    // 25.10: графики берут брони именно за выбранный период — догружаем его
+    // (раньше «5000 последних» и старые месяцы выходили заниженными).
     useEffect(() => {
-        if (analyticsOpen && bookings.length === 0) void fetchAllBookings();
-    }, [analyticsOpen, bookings.length, fetchAllBookings]);
+        if (!analyticsOpen) return;
+        const to = new Date(period.to); to.setDate(to.getDate() + 1);
+        void ensureBookingsRange(period.from, to);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [analyticsOpen, ensureBookingsRange, period.from.getTime(), period.to.getTime()]);
     // N2: корректировки (недельная скидка, правка баланса клиента) — не деньги.
     const analytics = useMemo(
         () => (rawAnalytics ? excludeAdjustments(rawAnalytics, adjustments) : null),

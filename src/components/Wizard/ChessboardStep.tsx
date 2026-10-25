@@ -109,6 +109,14 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
     const [waitlistData, setWaitlistData] = useState<{ resourceId: string; time: string } | null>(null);
 
+    // 25.10: у админа брони окном дат — выбрали день за краем окна, догружаем.
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
+    const dayMs = new Date(new Date(date).setHours(0, 0, 0, 0)).getTime();
+    useEffect(() => {
+        if (!isAdminBooking) return;
+        void ensureBookingsRange(new Date(dayMs), new Date(dayMs + 2 * 86400000));
+    }, [isAdminBooking, dayMs, ensureBookingsRange]);
+
     // Sync weekStart when date changes externally
     useEffect(() => {
         setWeekStart(startOfWeek(date, { weekStartsOn: 1 }));

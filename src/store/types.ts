@@ -213,6 +213,14 @@ export interface BookingSlice {
     /** Admin only. true — полный список пришёл; false — не админ или сбой
      *  (ошибку уже показал тост). По false экран не должен говорить «броней нет». */
     fetchAllBookings: () => Promise<boolean>;
+    /** 25.10: админка держит брони ОКНОМ дат, а не «5000 последних».
+     *  from — включительно, to — не включая (yyyy-MM-dd). null — ещё не грузили. */
+    bookingsWindow: { from: string; to: string } | null;
+    /** Расширить окно, если нужные дни [from, to) не загружены (шахматка
+     *  листнули назад, отчёт за старый период). true — данные на месте. */
+    ensureBookingsRange: (from: Date, to: Date) => Promise<boolean>;
+    /** Бронь по номеру (ссылка на старую бронь): если её нет в окне — догрузить её дни. */
+    ensureBookingLoaded: (id: string) => Promise<BookingHistoryItem | null>;
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;
     /** Корзина: сколько броней сервер поставил «на подтверждение» (срочные, 12.10). */
     addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<{ pendingApproval: number } | void>;

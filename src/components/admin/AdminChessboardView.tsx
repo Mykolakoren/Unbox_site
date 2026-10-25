@@ -7,7 +7,7 @@ import { LOCATIONS, RESOURCES, EXTRAS, availableExtrasForResource } from '../../
 import {
     format, addMinutes, setHours, setMinutes, startOfToday,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
-    isSameDay, isToday,
+    isSameDay, isToday, addDays, startOfDay,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle, UserRound } from 'lucide-react';
@@ -169,10 +169,20 @@ export function AdminChessboardView() {
     // select it (so the detail card opens), and scroll its row into view.
     // Then we strip the query param so a later reload doesn't re-trigger.
     const highlightId = searchParams.get('highlight');
+    // 25.10: бронь по ссылке может быть старше загруженного окна дат — догружаем
+    // её дни один раз (ref — чтобы не спрашивать сервер на каждой перерисовке).
+    const ensureBookingLoaded = useUserStore(s => s.ensureBookingLoaded);
+    const highlightAskedRef = useRef<string | null>(null);
     useEffect(() => {
         if (!highlightId || bookings.length === 0) return;
         const booking = bookings.find(b => b.id === highlightId);
-        if (!booking) return;
+        if (!booking) {
+            if (highlightAskedRef.current !== highlightId) {
+                highlightAskedRef.current = highlightId;
+                void ensureBookingLoaded(highlightId);
+            }
+            return;
+        }
         try {
             const d = parseUTC(booking.date);
             setSelectedDate(d);
@@ -191,7 +201,7 @@ export function AdminChessboardView() {
             next.delete('highlight');
             setSearchParams(next, { replace: true });
         }
-    }, [highlightId, bookings, searchParams, setSearchParams]);
+    }, [highlightId, bookings, searchParams, setSearchParams, ensureBookingLoaded]);
 
     // Admin booking state
     const [adminBookSlot, setAdminBookSlot] = useState<{ resId: string; time: string; date: Date; duration?: number } | null>(null);
@@ -227,6 +237,16 @@ export function AdminChessboardView() {
         fetchAllBookings();
         fetchUsersForNames();
     }, [viewerRole, fetchAllBookings, fetchResources, fetchUsersForNames]);
+
+    // 25.10: брони держатся окном дат — листнули неделю/день за край окна,
+    // догружаем эти дни (раньше всё старше «5000 последних» было пустым).
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
+    const rangeFromMs = Math.min(weekStart.getTime(), startOfDay(selectedDate).getTime());
+    const rangeToMs = Math.max(addDays(weekStart, 7).getTime(), addDays(startOfDay(selectedDate), 1).getTime());
+    useEffect(() => {
+        if (!viewerRole) return;
+        void ensureBookingsRange(new Date(rangeFromMs), new Date(rangeToMs));
+    }, [viewerRole, rangeFromMs, rangeToMs, ensureBookingsRange]);
 
     // ── Week days ──────────────────────────────────────────────────────────────
     const weekDays = useMemo(() =>
@@ -800,11 +820,21 @@ export function AdminChessboardView() {
     };
 
     // ── Actions ───────────────────────────────────────────────────────────────
-    const handleCancel = (id: string) => {
+    // 25.10: серия может уходить дальше окна дат (+60 дней) — хвост «эту и
+    // следующие» считаем по всей серии с сервера, иначе окно показало бы меньше,
+    // чем отменит сервер.
+    const [cancelSeriesRows, setCancelSeriesRows] = useState<BookingHistoryItem[] | null>(null);
+    const handleCancel = async (id: string) => {
         const target = selectedBooking && selectedBooking.id === id ? selectedBooking : bookings.find(b => b.id === id) || null;
-        if (target) setCancelTarget(target);
+        if (!target) return;
+        let rows: BookingHistoryItem[] | null = null;
+        if (target.recurringGroupId) {
+            try { rows = await bookingsApi.getSeriesBookings(target.recurringGroupId); } catch { rows = null; }
+        }
+        setCancelSeriesRows(rows);
+        setCancelTarget(target);
     };
-    const cancelSeries = cancelTarget ? seriesTailOf(cancelTarget, bookings) : null;
+    const cancelSeries = cancelTarget ? seriesTailOf(cancelTarget, cancelSeriesRows ?? bookings) : null;
     const handleCancelConfirm = async (option: RefundOption, reason: string, scope: CancelScope) => {
         const target = cancelTarget;
         if (!target) return;

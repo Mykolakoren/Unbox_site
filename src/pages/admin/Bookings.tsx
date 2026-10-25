@@ -137,6 +137,16 @@ export function AdminBookings() {
         [paidToday.data],
     );
     const [search, setSearch] = useState(searchParams.get('search') || '');
+    // 25.10: ссылка «бронь №…» из карточки клиента может вести на бронь старше
+    // загруженного окна дат — догружаем её дни, чтобы поиск её нашёл.
+    const ensureBookingLoaded = useUserStore(s => s.ensureBookingLoaded);
+    const searchRole = useUserStore(s => s.currentUser?.role);
+    useEffect(() => {
+        const id = search.trim();
+        // Ждём роль: без неё догрузка молча откажется (админский список).
+        if (!searchRole) return;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) void ensureBookingLoaded(id);
+    }, [search, searchRole, ensureBookingLoaded]);
     // Default view = chessboard (admin team works in shahmatka day-to-day).
     // Honour ?view=list in the URL so deep-links/bookmarks still open in
     // list mode if explicitly requested.
@@ -278,7 +288,7 @@ export function AdminBookings() {
         seriesGroupId?: string; series?: SeriesTail | null;
     }>({ open: false, bookingId: '', label: '' });
 
-    const handleCancel = (bookingId: string) => {
+    const handleCancel = async (bookingId: string) => {
         const b = bookings.find(x => x.id === bookingId);
         const userName = b ? getUserName(b.userId) : '';
         const label = b ? `${userName} · ${b.startTime} · ${b.finalPrice}₾` : '';
@@ -286,7 +296,12 @@ export function AdminBookings() {
         // Аудит 29.09 (G7-admin-core-M1): раньше тут был системный confirm, где
         // «ОК» отменял ВСЮ серию, а выбранный потом штраф к серии не применялся.
         // Теперь выбор — в окне отмены, по умолчанию «только эта бронь».
-        const series = b ? seriesTailOf(b, bookings) : null;
+        // 25.10: хвост серии — по всей серии с сервера (она может уходить дальше окна дат).
+        let seriesRows: BookingHistoryItem[] | null = null;
+        if (b?.recurringGroupId) {
+            try { seriesRows = await bookingsApi.getSeriesBookings(b.recurringGroupId); } catch { seriesRows = null; }
+        }
+        const series = b ? seriesTailOf(b, seriesRows ?? bookings) : null;
         setCancelModal({
             open: true, bookingId, label,
             seriesGroupId: series ? b?.recurringGroupId : undefined,
@@ -822,7 +837,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                             Бронирования
                         </h1>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 12 : 20, fontSize: 14, color: GH.ink60, flexWrap: 'wrap' }}>
-                            <span><span className="num" style={{ color: GH.ink, fontWeight: 600 }}>{bookings.length}</span> всего</span>
+                            <span><span className="num" style={{ color: GH.ink, fontWeight: 600 }}>{bookings.length}</span> в списке</span>
                             <span><span className="num" style={{ color: GH.ink, fontWeight: 600 }}>{activeCount}</span> {ruPlural(activeCount, ['активная', 'активные', 'активных'])}</span>
                             {pendingCount > 0 && (
                                 <span style={{ color: STATUS.pending.fg }}>
@@ -1261,6 +1276,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                         </div>
                     )}
 
+                    <BookingsWindowBar />
+
                     {rest > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '16px 0' }}>
                             <Button variant="secondary" onClick={() => setLimit(l => l + PAGE)} data-show-more>
@@ -1321,5 +1338,37 @@ function RejectBookingSheet({ open, busy, onClose, onSubmit }: {
                 />
             </Field>
         </Sheet>
+    );
+}
+
+
+/** 25.10: брони загружены окном дат (а не «5000 последних») — честно говорим,
+ *  за какой период список, и даём догрузить раньше/позже на 2 месяца. */
+function BookingsWindowBar() {
+    const w = useUserStore(s => s.bookingsWindow);
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
+    const [busy, setBusy] = useState<'back' | 'ahead' | null>(null);
+    if (!w) return null;
+    const from = new Date(w.from + 'T00:00:00');
+    const to = new Date(w.to + 'T00:00:00');
+    const last = new Date(to); last.setDate(last.getDate() - 1);
+    const shift = async (dir: 'back' | 'ahead') => {
+        setBusy(dir);
+        try {
+            if (dir === 'back') { const f = new Date(from); f.setDate(f.getDate() - 60); await ensureBookingsRange(f, to); }
+            else { const t = new Date(to); t.setDate(t.getDate() + 60); await ensureBookingsRange(from, t); }
+        } finally { setBusy(null); }
+    };
+    const fmt = (d: Date) => d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 0', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, color: GH.ink60 }}>Брони с {fmt(from)} по {fmt(last)}</span>
+            <Button variant="secondary" size="compact" loading={busy === 'back'} disabled={!!busy} onClick={() => void shift('back')}>
+                Показать раньше
+            </Button>
+            <Button variant="secondary" size="compact" loading={busy === 'ahead'} disabled={!!busy} onClick={() => void shift('ahead')}>
+                Показать позже
+            </Button>
+        </div>
     );
 }

@@ -3,7 +3,7 @@ import contextlib
 import copy
 import logging
 from typing import Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from app.core.rate_limit import limiter
@@ -1121,9 +1121,18 @@ def read_bookings(
         description="Только брони этого клиента (email или UUID). "
                     "Карточка клиента обязана фильтровать здесь, а не в браузере.",
     ),
+    date_from: Optional[date] = Query(None, description="Брони с этого дня (включительно)"),
+    date_to: Optional[date] = Query(None, description="Брони до этого дня (не включая)"),
+    booking_id: Optional[str] = Query(None, description="Одна бронь по номеру (ссылки на старые брони)"),
+    recurring_group_id: Optional[str] = Query(None, description="Все брони серии (хвост «эту и следующие»)"),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """Retrieve all bookings (Admin only).
+
+    25.10: админка грузит брони ОКНОМ дат (date_from/date_to), а не «5000
+    последних»: броней 9576, и потолок отрезал всё старше 20.08 (пустая
+    шахматка за август, заниженные графики). Без параметров — как раньше
+    (старые открытые вкладки).
 
     Returns rows ordered by date DESC so the admin chessboard sees the
     NEWEST bookings first when the result is truncated. Without explicit
@@ -1147,6 +1156,17 @@ def read_bookings(
         except (ValueError, TypeError):
             pass
         stmt = stmt.where(or_(*cond))
+    if date_from:
+        stmt = stmt.where(Booking.date >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        stmt = stmt.where(Booking.date < datetime.combine(date_to, datetime.min.time()))
+    if recurring_group_id:
+        stmt = stmt.where(Booking.recurring_group_id == recurring_group_id)
+    if booking_id:
+        try:
+            stmt = stmt.where(Booking.id == UUID(str(booking_id)))
+        except (ValueError, TypeError):
+            return []
     bookings = session.exec(
         stmt.order_by(Booking.date.desc()).offset(skip).limit(limit)
     ).all()

@@ -71,6 +71,11 @@ export function MobileAdminBookings() {
         return Number.isFinite(d.getTime()) ? d : new Date();
     }, [dayKey]);
     const todayKey = useMemo(() => fmtDate(new Date(), 'yyyy-MM-dd'), []);
+    // 25.10: брони держатся окном дат — выбрали день за краем окна, догружаем его.
+    const ensureBookingsRange = useUserStore(s => s.ensureBookingsRange);
+    useEffect(() => {
+        void ensureBookingsRange(targetDate, addDays(targetDate, 1));
+    }, [targetDate, ensureBookingsRange]);
 
     // Брони клиента, чей аккаунт в архиве (склейка дублей): в обычном списке
     // его нет — подписываем именем из архива с пометкой «архив», а не началом

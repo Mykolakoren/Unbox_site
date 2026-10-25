@@ -173,7 +173,7 @@ def test_admin_cancel_dialogs_pass_scope_anchor_and_refund():
         "отмена серии снова не передаёт процент возврата"
 
     lst = _read("src/pages/admin/Bookings.tsx")
-    h = _fn_body(lst, "const handleCancel = (bookingId: string)", "const handleCancelConfirm")
+    h = _fn_body(lst, "const handleCancel = async (bookingId: string)", "const handleCancelConfirm")  # 25.10: async — серия с сервера
     assert "window.confirm(" not in h, "список броней снова спрашивает серию системным confirm"
     c = _fn_body(lst, "const handleCancelConfirm", "const handleReRent")
     assert "cancelModal.seriesGroupId, cancelModal.bookingId" in c, \

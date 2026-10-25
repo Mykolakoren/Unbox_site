@@ -132,10 +132,10 @@ export function MobileFind() {
         const role = useUserStore.getState().currentUser?.role;
         if (role !== 'owner' && role !== 'senior_admin' && role !== 'admin') return;
         let cancelled = false;
-        bookingsApi.getAllBookings()
-            .then(all => {
+        // 25.10: одна бронь по номеру, а не «5000 последних» (старую не находило).
+        bookingsApi.getBookingById(rescheduleId)
+            .then(found => {
                 if (cancelled) return;
-                const found = all.find((b: BookingHistoryItem) => b.id === rescheduleId) ?? null;
                 if (found) setRescheduleSnapshot(found); else setRescheduleLookupFailed(true);
             })
             .catch(() => { if (!cancelled) setRescheduleLookupFailed(true); });

@@ -63,6 +63,26 @@ export const bookingsApi = {
         return response.data.map(mapToFrontend);
     },
 
+    /** Админ: брони окна дат [dateFrom, dateTo) — 25.10, вместо «5000 последних». */
+    getBookingsWindow: async (dateFrom: string, dateTo: string) => {
+        const response = await api.get<any[]>('/bookings', {
+            params: { date_from: dateFrom, date_to: dateTo, limit: 20000 }
+        });
+        return response.data.map(mapToFrontend);
+    },
+
+    /** Админ: все брони серии — хвост «эту и следующие» не зависит от окна дат. */
+    getSeriesBookings: async (groupId: string) => {
+        const response = await api.get<any[]>('/bookings', { params: { recurring_group_id: groupId, limit: 1000 } });
+        return response.data.map(mapToFrontend);
+    },
+
+    /** Админ: одна бронь по номеру (null — нет такой). */
+    getBookingById: async (id: string) => {
+        const response = await api.get<any[]>('/bookings', { params: { booking_id: id, limit: 1 } });
+        return response.data.length ? mapToFrontend(response.data[0]) : null;
+    },
+
     getAllBookings: async (skip = 0, limit = 5000) => {
         // 5000 — enough headroom for ~12 months of activity at scale;
         // backend caps at 20k. Bumped from 1000 because admins reported

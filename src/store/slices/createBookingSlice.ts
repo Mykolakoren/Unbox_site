@@ -16,9 +16,27 @@ let appliedSeq = 0;
 // догоняющий запрос, чтобы данные были свежее последнего действия.
 let allInFlight: Promise<boolean> | null = null;
 let allAgain = false;
+// Пришёл ли хоть раз админский список окна (а не «мои + публичные» из fetchBookings).
+let windowLoaded = false;
+
+// 25.10: окно по умолчанию — 45 дней назад (CRM смотрит «активен за 45 дней»)
+// и 60 вперёд. Раньше было «5000 последних» — при 9576 бронях это отрезало
+// всё старше 20.08. Старое/дальнее догружается через ensureBookingsRange.
+const WINDOW_BACK_DAYS = 45;
+const WINDOW_AHEAD_DAYS = 60;
+const dayStr = (d: Date) => {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+};
+const shiftDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const defaultWindow = () => {
+    const today = new Date();
+    return { from: dayStr(shiftDays(today, -WINDOW_BACK_DAYS)), to: dayStr(shiftDays(today, WINDOW_AHEAD_DAYS)) };
+};
 
 export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> = (set, get) => ({
     bookings: [],
+    bookingsWindow: null,
     bookingsStatus: 'idle',
     bookingsLoadedAt: null,
     occupancyStatus: 'idle',
@@ -63,6 +81,8 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             const myIds = new Set(myBookings.map(b => b.id));
             const uniquePublic = publicBookings.filter(b => !myIds.has(b.id));
 
+            // Это не админское окно — ensureBookingsRange не должен считать его загруженным.
+            windowLoaded = false;
             set({
                 bookings: [...myBookings, ...uniquePublic],
                 bookingsStatus: myOk ? 'ready' : 'error',
@@ -98,8 +118,12 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             allAgain = true;
             return allInFlight;
         }
+        if (!get().bookingsWindow) set({ bookingsWindow: defaultWindow() });
         const run = async (): Promise<boolean> => {
-            const tryOnce = () => bookingsApi.getAllBookings();
+            // Окно читаем в момент запроса: если его расширили, пока шёл прошлый,
+            // догоняющий запрос возьмёт уже новое окно.
+            const w = get().bookingsWindow || defaultWindow();
+            const tryOnce = () => bookingsApi.getBookingsWindow(w.from, w.to);
             try {
                 const bookings = await tryOnce().catch(async (e) => {
                     if (e?.response?.status === 401 || e?.response?.status === 403) throw e;
@@ -107,8 +131,11 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
                     return tryOnce();
                 });
                 set({ bookings });
+                windowLoaded = true;
                 return true;
             } catch (error: any) {
+                // Окно уже расширено «в долг» — пусть следующий ensure повторит загрузку.
+                windowLoaded = false;
                 const status = error?.response?.status;
                 if (status === 401 || status === 403) return false;  // not for us, no UI noise
                 const detail = error?.response?.data?.detail
@@ -127,6 +154,37 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             return ok;
         })().finally(() => { allInFlight = null; });
         return allInFlight;
+    },
+
+    ensureBookingsRange: async (from, to) => {
+        const role = (get() as any)?.currentUser?.role;
+        if (!(role === 'owner' || role === 'senior_admin' || role === 'admin')) return false;
+        if (!get().bookingsWindow) set({ bookingsWindow: defaultWindow() });
+        const w = get().bookingsWindow!;
+        const needFrom = dayStr(from), needTo = dayStr(to);
+        if (needFrom >= w.from && needTo <= w.to) {
+            // Окно уже покрывает: ждём идущую загрузку или берём готовое — без
+            // лишнего запроса (шахматка при открытии зовёт и общий, и этот).
+            if (allInFlight) return allInFlight;
+            if (windowLoaded) return true;
+            return (get() as any).fetchAllBookings();
+        }
+        set({ bookingsWindow: { from: needFrom < w.from ? needFrom : w.from, to: needTo > w.to ? needTo : w.to } });
+        return (get() as any).fetchAllBookings();
+    },
+
+    ensureBookingLoaded: async (id) => {
+        const have = get().bookings.find(b => b.id === id);
+        if (have) return have;
+        try {
+            const b = await bookingsApi.getBookingById(id);
+            if (!b) return null;
+            const d = new Date(b.date as any);
+            await (get() as any).ensureBookingsRange(shiftDays(d, -1), shiftDays(d, 2));
+            return get().bookings.find(x => x.id === id) || b;
+        } catch {
+            return null;
+        }
     },
 
     addBooking: async (bookingData) => {
