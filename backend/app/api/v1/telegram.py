@@ -1210,6 +1210,10 @@ def _handle_callback(session: Session, callback: dict) -> dict:
     # personal-chat lookup.
     if data.startswith("ba:") or data.startswith("br:"):
         return _handle_hot_booking_callback(session, callback_id, chat_id, message_id, from_user_id, data)
+    # 27.10: подарочный час новичку — «выдать / не выдавать / забрать» из чата админов.
+    if data[:3] in ("wa:", "wr:", "wx:"):
+        return _handle_welcome_callback(session, callback_id, chat_id, message_id, from_user_id, data,
+                                        message.get("text") or "")
 
     # Require bound user for all booking callbacks
     user = session.exec(
@@ -1966,6 +1970,29 @@ def _book_do_confirm(
 # server restart between stages doesn't break the flow.
 
 REJECT_PROMPT_MARKER = "[UNBOX-REJECT]"  # стабильный маркер чтобы парсить reply-to
+
+def _handle_welcome_callback(session: Session, callback_id: str, chat_id: int, message_id: int,
+                             from_user_id: Optional[int], data: str, orig_text: str = "") -> dict:
+    """Кнопки приветственного часа. Права — как у срочных броней: привязанный
+    админ или нажатие внутри чата админов."""
+    from app.core.permissions import ADMIN_ROLES
+    from app.services import welcome_bonus
+    actor = session.exec(
+        select(User).where(User.telegram_id == str(from_user_id), User.archived_at.is_(None))
+    ).first() if from_user_id is not None else None
+    admin_chat = str(settings.TELEGRAM_ADMIN_CHAT_ID or "")
+    if not ((actor and actor.role in ADMIN_ROLES) or (admin_chat and str(chat_id) == admin_chat)):
+        _answer_callback(callback_id, "Недостаточно прав", show_alert=True)
+        return {"ok": True}
+    label = (actor.name or actor.email) if actor else "админ (TG-чат)"
+    action, raw_id = data.split(":", 1)
+    result = welcome_bonus.decide(session, raw_id, action, label)
+    _answer_callback(callback_id, result, show_alert=True)
+    if result in ("Подарочный час выдан", "Подарочный час убран"):
+        # Текст вопроса оставляем, кнопки убираем, решение — строкой ниже.
+        _edit(chat_id, message_id, f"{orig_text}\n\n✔️ {result} — {label}")  # обычный текст, без HTML
+    return {"ok": True}
+
 
 def _handle_hot_booking_callback(
     session: Session,

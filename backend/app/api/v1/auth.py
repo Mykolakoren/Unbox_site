@@ -56,20 +56,11 @@ def _create_welcome_bonus(session: Session, user: User) -> None:
         logger.info("Welcome bonus skipped for technical address %s", user.email)
         return
     try:
-        from app.models.bonus import Bonus
-        bonus = Bonus(
-            user_id=str(user.id),
-            type="free_hour",
-            quantity=1.0,
-            status="active",
-            description="Добро пожаловать в Unbox! 1 час аренды в подарок",
-            granted_by_id="system",
-            granted_by_name="Система",
-            expires_at=datetime.now() + timedelta(days=WELCOME_BONUS_EXPIRY_DAYS),
-        )
-        session.add(bonus)
-        session.commit()
-        logger.info(f"Welcome bonus created for {user.email}")
+        # 27.10: похож на известного клиента — подарок ждёт решения админа
+        # (services/welcome_bonus.py); админам — вопрос или уведомление в чат.
+        from app.services.welcome_bonus import grant_welcome_bonus
+        bonus = grant_welcome_bonus(session, user, WELCOME_BONUS_EXPIRY_DAYS)
+        logger.info(f"Welcome bonus created for {user.email}: {bonus.status if bonus else '—'}")
     except Exception as e:
         logger.warning(f"Failed to create welcome bonus for {user.email}: {e}")
 
