@@ -54,7 +54,9 @@ def known_client_match(session: Session, user: User) -> Optional[str]:
     if not nk and not pk:
         return None
     for other in session.exec(select(User).where(User.id != user.id)).all():
-        if (other.email or "").lower().endswith("@unbox.center"):
+        # Техадреса и следы склейки (merged-into-…@deleted.unbox) — не клиенты;
+        # у склеенного дубля есть основной аккаунт, он и найдётся.
+        if (other.email or "").lower().endswith(("@unbox.center", "@deleted.unbox")):
             continue
         if nk and _name_key(other.name) == nk:
             return f"на сайте уже есть клиент «{other.name}» ({other.email})" + (" — в архиве" if other.archived_at else "")
