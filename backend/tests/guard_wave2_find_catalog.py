@@ -89,7 +89,8 @@ def test_find_protected_logic_untouched():
     # 10.10 (обход мобильной версии, разобрано): привязка к сессии — дата строкой
     # и acceptMergeSuggestion (is_booked); перенос — «было → станет» под тем же
     # inFlightRef (отмена снимает блок до setPendingChip).
-    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "4521e0607ca17dc0", \
+    # 29.10 (Егор): перенос — длительность из самой брони (newDuration) — осознанная правка.
+    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "87577cabd23d97fe", \
         "chooseWindow изменилась — оформление/перенос/привязка трогать нельзя"
 
 

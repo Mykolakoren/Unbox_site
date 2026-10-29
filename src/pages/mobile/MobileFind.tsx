@@ -258,9 +258,10 @@ export function MobileFind() {
     // so the user can move to a different cabinet/site.
     useEffect(() => {
         if (rescheduleBooking) {
-            const dur = rescheduleBooking.duration ?? 60;
-            // Snap to nearest available chip, else keep
-            if (DURATIONS.includes(dur)) setDuration(dur);
+            // 28.10 (Егор): длительность переносимой брони — ровно как в брони.
+            // Раньше 4 ч не было среди кнопок 1/1,5/2/3 ч, и перенос молча
+            // делал из неё 1 час.
+            setDuration(rescheduleBooking.duration ?? 60);
         }
     }, [rescheduleBooking]);
 
@@ -483,11 +484,10 @@ export function MobileFind() {
                     newDate: fmtDate(targetDate, 'yyyy-MM-dd'),
                     newStartTime: minsToHHMM(startMin),
                     newResourceId: resourceId,
-                    // 2026-06-02: пробрасываем выбранную длительность.
-                    // Раньше /m/find игнорировал её на reschedule, и бронь
-                    // сохраняла исходную duration (1ч), даже если в UI
-                    // выбрали 1.5ч — Galina багрепорт.
-                    newDuration: duration,
+                    // 28.10 (Егор): перенос двигает бронь ЦЕЛИКОМ — длительность
+                    // всегда из самой брони (кнопок длительности при переносе
+                    // больше нет). Заменяет правило 02.06 «длительность из UI».
+                    newDuration: rescheduleBooking.duration ?? duration,
                 });
                 await fetchBookings();
                 toast.success('Бронь перенесена');
@@ -1092,6 +1092,15 @@ export function MobileFind() {
                     </FieldGroup>
 
                     {/* Duration */}
+                    {rescheduleId ? (
+                        // Перенос двигает бронь целиком — выбор длительности не
+                        // предлагаем (путал: Егор 28.10).
+                        <FieldGroup label="Сколько">
+                            <div style={{ fontSize: 15, color: COLOR.ink, padding: '10px 0' }}>
+                                {formatBookingDuration(duration)} — как в брони
+                            </div>
+                        </FieldGroup>
+                    ) : (
                     <FieldGroup label="Сколько">
                         <ChipsRow>
                             {DURATIONS.map(d => {
@@ -1121,6 +1130,7 @@ export function MobileFind() {
                             })}
                         </ChipsRow>
                     </FieldGroup>
+                    )}
 
                     {/* Where — multi-select */}
                     <FieldGroup label="Где">

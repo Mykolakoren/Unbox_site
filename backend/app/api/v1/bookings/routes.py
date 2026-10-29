@@ -308,6 +308,102 @@ def _gcal_delete_in_background(event_id: str, resource_id: Optional[str]) -> Non
         logger.warning(f"[GCal cancel bg] delete_event failed for event={event_id}: {e}")
 
 
+def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, current_user: User) -> None:
+    """Забрать время у броней «на пересдаче»: отменить их, вернуть владельцу 50 %,
+    сообщить ему в Telegram, убрать событие из Google. Общее для новой брони и
+    (29.10) продления — раньше продление поверх пересдачи отвечало «слот занят».
+    Не коммитит."""
+    # Auto-cancel all conflicting re-rent bookings with 50% refund.
+    # Re-rent policy: original owner gets 50%, remaining 50% = Unbox income.
+    RE_RENT_REFUND_PERCENT = 0.5
+
+    for re_rent_booking in re_rent_conflicts:
+        re_rent_owner = _resolve_booking_owner(session, re_rent_booking)
+        refund_meta = {}
+        refund_amount = 0.0
+
+        if re_rent_owner:
+            refund_meta = _refund_booking_to_owner(
+                session, re_rent_booking, re_rent_owner,
+                refund_percent=RE_RENT_REFUND_PERCENT,
+            )
+            refund_amount = float(refund_meta.get("refunded_amount", 0.0)) if isinstance(refund_meta, dict) else 0.0
+
+        # Cancel the re-rent booking + remember refund details on
+        # the row itself so the UI can render a "Возвращено 50%
+        # (X ₾)" badge without joining timeline events.
+        re_rent_booking.status = "cancelled"
+        re_rent_booking.cancellation_reason = (
+            f"Auto-cancelled: slot re-rented to another user (50% refund · "
+            f"{refund_amount:.2f}GEL)"
+        )
+        re_rent_booking.cancelled_by = "system:re-rent"
+        re_rent_booking.is_re_rent_listed = False
+        re_rent_booking.updated_at = datetime.now()
+        session.add(re_rent_booking)
+
+        # Notify the original owner via Telegram (best-effort —
+        # never blocks the new booking creation).
+        try:
+            if re_rent_owner and re_rent_owner.telegram_id:
+                from app.models.resource import Resource as ResModel
+                from app.models.location import Location as LocModel
+                rb_res = session.get(ResModel, re_rent_booking.resource_id)
+                rb_loc = (
+                    session.get(LocModel, rb_res.location_id)
+                    if rb_res and rb_res.location_id else None
+                )
+                telegram_service.send_rerent_taken(
+                    chat_id=str(re_rent_owner.telegram_id),
+                    resource_name=(rb_res.name if rb_res else re_rent_booking.resource_id),
+                    location_name=(rb_loc.name if rb_loc else None),
+                    date=re_rent_booking.date,
+                    start_time=re_rent_booking.start_time,
+                    refund_amount=refund_amount,
+                    new_balance=float(re_rent_owner.balance or 0.0),
+                    booking_id=str(re_rent_booking.id),
+                )
+        except Exception as e:
+            logger.warning(f"[TG re-rent owner alert] failed: {e}")
+
+        # GCal cleanup
+        if re_rent_booking.gcal_event_id:
+            try:
+                gcal_service.delete_event(
+                    re_rent_booking.gcal_event_id,
+                    re_rent_booking.resource_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[GCal Auto-cancel re-rent] delete_event failed for "
+                    f"booking={re_rent_booking.id} event={re_rent_booking.gcal_event_id}: {e}"
+                )
+            re_rent_booking.gcal_event_id = None
+
+        # Audit log for auto-cancel with 50% refund details
+        timeline_service.log_event(
+            session=session,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_id=str(re_rent_booking.id),
+            target_type="booking",
+            event_type="booking_auto_cancelled_re_rent",
+            description=(
+                f"Booking auto-cancelled due to re-rent claim by {current_user.name}. "
+                f"Owner refunded {int(RE_RENT_REFUND_PERCENT * 100)}%, rest → Unbox income."
+            ),
+            metadata={
+                "refund_percent": RE_RENT_REFUND_PERCENT,
+                "new_booking_user": current_user.email,
+                **refund_meta,
+                "policy_refund_percent": RE_RENT_REFUND_PERCENT,
+            },
+            # Не коммитим посреди: отмена пересдачи и новая бронь/продление уходят
+            # в базу одним коммитом (сбой ниже откатит и отмену).
+            commit=False,
+        )
+
+
 def _topup_weekly_rebate_if_closed_week(session: Session, booking: Booking, owner: Optional[User]) -> None:
     """25.10: бронь задним числом в неделю, за которую скидку за объём уже
     начислили (крон пн 01:00), раньше её не пересчитывала — клиент недополучал
@@ -1804,92 +1900,7 @@ def create_booking(
                     status_code=400, detail=f"Это время уже занято: {reason}"
                 )
 
-            # Auto-cancel all conflicting re-rent bookings with 50% refund.
-            # Re-rent policy: original owner gets 50%, remaining 50% = Unbox income.
-            RE_RENT_REFUND_PERCENT = 0.5
-
-            for re_rent_booking in re_rent_conflicts:
-                re_rent_owner = _resolve_booking_owner(session, re_rent_booking)
-                refund_meta = {}
-                refund_amount = 0.0
-
-                if re_rent_owner:
-                    refund_meta = _refund_booking_to_owner(
-                        session, re_rent_booking, re_rent_owner,
-                        refund_percent=RE_RENT_REFUND_PERCENT,
-                    )
-                    refund_amount = float(refund_meta.get("refunded_amount", 0.0)) if isinstance(refund_meta, dict) else 0.0
-
-                # Cancel the re-rent booking + remember refund details on
-                # the row itself so the UI can render a "Возвращено 50%
-                # (X ₾)" badge without joining timeline events.
-                re_rent_booking.status = "cancelled"
-                re_rent_booking.cancellation_reason = (
-                    f"Auto-cancelled: slot re-rented to another user (50% refund · "
-                    f"{refund_amount:.2f}GEL)"
-                )
-                re_rent_booking.cancelled_by = "system:re-rent"
-                re_rent_booking.is_re_rent_listed = False
-                re_rent_booking.updated_at = datetime.now()
-                session.add(re_rent_booking)
-
-                # Notify the original owner via Telegram (best-effort —
-                # never blocks the new booking creation).
-                try:
-                    if re_rent_owner and re_rent_owner.telegram_id:
-                        from app.models.resource import Resource as ResModel
-                        from app.models.location import Location as LocModel
-                        rb_res = session.get(ResModel, re_rent_booking.resource_id)
-                        rb_loc = (
-                            session.get(LocModel, rb_res.location_id)
-                            if rb_res and rb_res.location_id else None
-                        )
-                        telegram_service.send_rerent_taken(
-                            chat_id=str(re_rent_owner.telegram_id),
-                            resource_name=(rb_res.name if rb_res else re_rent_booking.resource_id),
-                            location_name=(rb_loc.name if rb_loc else None),
-                            date=re_rent_booking.date,
-                            start_time=re_rent_booking.start_time,
-                            refund_amount=refund_amount,
-                            new_balance=float(re_rent_owner.balance or 0.0),
-                            booking_id=str(re_rent_booking.id),
-                        )
-                except Exception as e:
-                    logger.warning(f"[TG re-rent owner alert] failed: {e}")
-
-                # GCal cleanup
-                if re_rent_booking.gcal_event_id:
-                    try:
-                        gcal_service.delete_event(
-                            re_rent_booking.gcal_event_id,
-                            re_rent_booking.resource_id,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"[GCal Auto-cancel re-rent] delete_event failed for "
-                            f"booking={re_rent_booking.id} event={re_rent_booking.gcal_event_id}: {e}"
-                        )
-                    re_rent_booking.gcal_event_id = None
-
-                # Audit log for auto-cancel with 50% refund details
-                timeline_service.log_event(
-                    session=session,
-                    actor_id=current_user.id,
-                    actor_role=current_user.role,
-                    target_id=str(re_rent_booking.id),
-                    target_type="booking",
-                    event_type="booking_auto_cancelled_re_rent",
-                    description=(
-                        f"Booking auto-cancelled due to re-rent claim by {current_user.name}. "
-                        f"Owner refunded {int(RE_RENT_REFUND_PERCENT * 100)}%, rest → Unbox income."
-                    ),
-                    metadata={
-                        "refund_percent": RE_RENT_REFUND_PERCENT,
-                        "new_booking_user": current_user.email,
-                        **refund_meta,
-                        "policy_refund_percent": RE_RENT_REFUND_PERCENT,
-                    },
-                )
+            _take_over_re_rent_bookings(session, re_rent_conflicts, current_user)
             # Slot is now free — proceed with creating the new booking
 
         # (booking_owner already resolved above, before check_availability)
@@ -6788,15 +6799,24 @@ def extend_booking(
     old_end_h = int(booking.start_time.split(":")[0]) * 60 + int(booking.start_time.split(":")[1]) + booking.duration
     new_end_total = int(booking.start_time.split(":")[0]) * 60 + int(booking.start_time.split(":")[1]) + new_duration
 
+    re_rent_in_way = []
     for other in all_bookings:
         other_start = int(other.start_time.split(":")[0]) * 60 + int(other.start_time.split(":")[1])
         other_end = other_start + other.duration
         # Check if the extended portion overlaps
         if other_start < new_end_total and other_end > old_end_h:
+            # 29.10: бронь «на пересдаче» — не помеха, её время можно забрать (как
+            # при новой брони: отмена + 50 % владельцу). Раньше продление Богдана
+            # Барановского поверх пересдачи Аллы Коноплицкой отвечало «слот занят».
+            if other.is_re_rent_listed and other.status == "confirmed":
+                re_rent_in_way.append(other)
+                continue
             raise HTTPException(
                 status_code=409,
                 detail=f"Конфликт с бронью {other.start_time} ({other.duration} мин). Слот занят."
             )
+    if re_rent_in_way:
+        _take_over_re_rent_bookings(session, re_rent_in_way, current_user)
 
     # ── Доплата за добавленное время ────────────────────────────────────────
     # Считаем прайс-движком: цена(новая длительность) − цена(старая), а НЕ
