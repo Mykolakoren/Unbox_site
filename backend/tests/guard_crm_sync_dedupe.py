@@ -705,6 +705,49 @@ def test_create_session_near_conflict_is_409_without_force():
         p.undo()
 
 
+def test_create_session_moves_stale_link_to_chosen_booking():
+    """02.11: встреча перенесена в календаре и держит старую бронь. Новая бронь на её
+    время + выбор клиента: раньше 200 «успешно», а связь оставалась старой."""
+    from sqlmodel import Session, select
+    from uuid import uuid4
+    from app.api.v1.crm.sessions import create_session
+    from app.models.booking import Booking
+    from app.models.therapy_session import TherapySession, TherapySessionCreate
+
+    eng = _engine()
+    when = _day(hour_utc=11)
+    def _bk(s, day, start, client=None):
+        b = Booking(id=uuid4(), resource_id="r7", location_id="l", user_id="sp1@example.com",
+                    date=day.replace(hour=0), start_time=start, duration=60, status="confirmed",
+                    final_price=30.0, base_price=30.0, crm_client_id=client,
+                    payment_method="balance", format="individual")
+        s.add(b); s.commit(); s.refresh(b)
+        return str(b.id)
+    with Session(eng) as s:
+        _seed_client(s)
+        old_id = _bk(s, when - timedelta(days=1), "18:00", client="c1")
+        new_id = _bk(s, when, "15:00")
+        s.add(TherapySession(id="moved", client_id="c1", specialist_id="sp1", date=when,
+                             booking_id=old_id, is_booked=True, price=190.0))
+        s.commit()
+    with Session(eng) as s:
+        out = create_session(data=TherapySessionCreate(client_id="c1", date=when + timedelta(hours=4),
+                                                       booking_id=new_id, is_booked=True, price=50.0),
+                             session=s, current_user=_user())
+        assert out.id == "moved" and out.booking_id == new_id, "сессия осталась на старой брони"
+        assert out.price == 190.0, "цена встречи не должна меняться при привязке"
+    with Session(eng) as s:
+        rows = s.exec(select(TherapySession)).all()
+        assert len(rows) == 1, "появился дубль сессии"
+        from uuid import UUID
+        assert s.get(Booking, UUID(old_id)).crm_client_id is None, "старая бронь всё ещё показывает клиента"
+        # Повторная привязка к той же брони ничего не ломает.
+        out = create_session(data=TherapySessionCreate(client_id="c1", date=when + timedelta(hours=4),
+                                                       booking_id=new_id, is_booked=True),
+                             session=s, current_user=_user())
+        assert out.booking_id == new_id
+
+
 # ─── G: пуш при создании сессий ──────────────────────────────────────────
 
 def test_session_creation_paths_push_to_calendar():

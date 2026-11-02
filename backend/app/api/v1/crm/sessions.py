@@ -189,7 +189,12 @@ def create_session(
             # info (booking_id, price, notes etc.) — same shape as the
             # recurring path. Don't blindly overwrite — only fill nulls.
             ex = existing_match
-            if create_data.get("booking_id") and not ex.booking_id:
+            # 02.11 (Константин): встречу перенесли в календаре, она осталась на
+            # старой брони (синк бронь не двигает). Специалист снял кабинет на новое
+            # время и выбрал клиента — ответ «успешно», а связь оставалась старой.
+            # Его выбор сильнее: сессия переезжает на новую бронь.
+            if create_data.get("booking_id") and ex.booking_id != create_data["booking_id"]:
+                _release_old_booking_client(session, ex)
                 ex.booking_id = create_data["booking_id"]
                 ex.is_booked = True
             elif create_data.get("is_booked") and not ex.is_booked:
@@ -354,6 +359,21 @@ def _own_booking(bk, user: User) -> bool:
     if bk.user_uuid:
         return bk.user_uuid == user.id
     return bool(bk.user_id) and bool(user.email) and bk.user_id.lower() == user.email.lower()
+
+
+def _release_old_booking_client(session: Session, ts: TherapySession) -> None:
+    """Сессия уходит с брони — бронь больше не показывает этого клиента в шахматке."""
+    if not ts.booking_id:
+        return
+    from app.models.booking import Booking as _Bk
+    from uuid import UUID as _UUID
+    try:
+        old = session.get(_Bk, _UUID(str(ts.booking_id)))
+    except (ValueError, TypeError):
+        return
+    if old and old.crm_client_id == ts.client_id:
+        old.crm_client_id = None
+        session.add(old)
 
 
 def _check_session_booking_id(session: Session, booking_id: Optional[str], user: User) -> None:
