@@ -48,6 +48,7 @@ import { formatGel, formatDateLabel, formatDayMonth, formatTime } from '../../ut
 import { BATUMI_TZ } from '../../utils/dateUtils';
 import { useArchivedClients } from '../../hooks/useArchivedClients';
 import { toastApiError } from '../../utils/errors';
+import { themed } from '../../design/tokens';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1389,10 +1390,10 @@ export function AdminChessboardView() {
                         <div
                             className="rounded-2xl p-3.5 flex items-center justify-between"
                             style={{
-                                background: 'rgba(255,255,255,0.85)',
+                                background: themed('rgba(255,255,255,0.85)', 'rgba(28,28,30,0.92)'),
                                 backdropFilter: 'blur(24px)',
                                 WebkitBackdropFilter: 'blur(24px)',
-                                border: '1px solid rgba(255,255,255,0.50)',
+                                border: `1px solid ${themed('rgba(255,255,255,0.50)', 'rgba(236,236,232,0.13)')}`,
                                 boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
                             }}
                         >

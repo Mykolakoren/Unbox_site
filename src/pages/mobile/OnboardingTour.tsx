@@ -431,7 +431,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                 style={{
                     position: 'fixed',
                     inset: 0,
-                    background: `${COLOR.ink}BF`,
+                    background: `${COLOR.panel}BF`,
                     zIndex: Z.tour + 1,
                 }}
             />
@@ -464,7 +464,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                     // The inset shadow draws a glowing rim; the wide outset
                     // shadow paints the rest of the screen dim. The viewport
                     // size cap (200vmax) ensures coverage on any device.
-                    boxShadow: `0 0 0 200vmax ${COLOR.ink}BF, 0 0 0 3px ${COLOR.onInk}E6`,
+                    boxShadow: `0 0 0 200vmax ${COLOR.panel}BF, 0 0 0 3px ${COLOR.onPanel}E6`,
                     transition: 'top 200ms ease, left 200ms ease, width 200ms ease, height 200ms ease',
                     zIndex: Z.tour + 1,
                 }}

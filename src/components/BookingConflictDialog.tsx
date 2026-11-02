@@ -100,7 +100,7 @@ export function BookingConflictDialog({
 
     return (
         <div
-            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-ink/45 p-4"
+            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-overlay p-4"
             onClick={onClose}
         >
             <div

@@ -68,7 +68,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                 {!isAdding ? (
                     <button
                         onClick={() => setIsAdding(true)}
-                        className="px-3 py-1 rounded-full border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-black transition-colors flex items-center gap-1 text-sm"
+                        className="px-3 py-1 rounded-full border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-ink transition-colors flex items-center gap-1 text-sm"
                     >
                         <Plus size={12} />
                         Добавить
@@ -105,7 +105,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                             key={preset.name}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => handleAdd(preset.name)}
-                            className={`px-2 py-0.5 rounded-md text-xs border border-transparent hover:border-black/10 transition-colors ${preset.color}`}
+                            className={`px-2 py-0.5 rounded-md text-xs border border-transparent hover:border-ink-10 transition-colors ${preset.color}`}
                         >
                             {preset.name}
                         </button>

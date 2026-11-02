@@ -108,7 +108,7 @@ import { MotionConfig } from 'framer-motion';
 import { ConfirmDialogProvider } from './components/ui/ConfirmDialogProvider';
 import { CmdKProvider } from './components/admin/CmdKSearch';
 import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
-import { FONT, Z } from './design/tokens';
+import { FONT, Z, IS_DARK } from './design/tokens';
 
 // Витрина дизайн-системы — только в `npm run dev`. В прод-сборке
 // import.meta.env.DEV === false, ветка и сам чанк выбрасываются сборщиком.
@@ -267,7 +267,7 @@ function App() {
     // убирает сдвиги и масштаб, оставляя только прозрачность.
     <MotionConfig reducedMotion="user">
     <ConfirmDialogProvider>
-      <Toaster position="top-center" richColors closeButton style={{ zIndex: Z.toast, fontFamily: FONT.sans }} />
+      <Toaster position="top-center" richColors closeButton theme={IS_DARK ? 'dark' : 'light'} style={{ zIndex: Z.toast, fontFamily: FONT.sans }} />
       <CmdKProvider />
       {/* Общая граница над всеми ленивыми маршрутами (в т.ч. /login): устаревший чанк после выкладки → автоперезагрузка. */}
       <ModuleErrorBoundary moduleName="Сайт">

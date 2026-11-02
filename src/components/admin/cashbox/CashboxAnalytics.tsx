@@ -53,7 +53,7 @@ export function CashboxAnalytics({ analytics, periodLabel }: Props) {
                             />
                             <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: COLOR.ink60 }} />
                             <Tooltip
-                                contentStyle={{ border: `1px solid ${COLOR.ink10}`, boxShadow: SHADOW.pop }}
+                                contentStyle={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, boxShadow: SHADOW.pop }}
                                 labelFormatter={(label: any) => formatDayMonth(String(label))}
                                 formatter={(value: any, name: any) => [
                                     formatGel(Number(value)),

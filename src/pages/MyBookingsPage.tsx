@@ -1277,7 +1277,7 @@ function BookingsChessboard({
 
                 {/* Booking detail popup (mobile: bottom sheet) */}
                 {activeBooking && (
-                    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45" onClick={() => setActiveBooking(null)}>
+                    <div className="fixed inset-0 z-50 flex items-end justify-center bg-overlay" onClick={() => setActiveBooking(null)}>
                         <div className="bg-card rounded-t-2xl shadow-2xl w-full max-w-md p-5 animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
                             <div className="w-10 h-1 bg-ink-10 rounded-full mx-auto mb-4" />
                             <div className="flex items-start justify-between mb-3">
@@ -1927,7 +1927,7 @@ function BookingsChessboard({
 
             {/* Overlap confirmation modal */}
             {showOverlapWarning && (
-                <div className="fixed inset-0 z-[300] flex items-center justify-center bg-ink/45" onClick={() => setShowOverlapWarning(false)}>
+                <div className="fixed inset-0 z-[300] flex items-center justify-center bg-overlay" onClick={() => setShowOverlapWarning(false)}>
                     <div className="bg-card rounded-none shadow-2xl w-full max-w-sm p-6 space-y-4 mx-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-[var(--status-pending-bg)] flex items-center justify-center">
@@ -3444,7 +3444,7 @@ function CrmQuickBookingModal({
         f === 'individual' ? 'Индивид.' : f === 'group' ? 'Группа' : 'Интервизия';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/45 p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-overlay p-4" onClick={onClose}>
             <div
                 className="bg-card rounded-none shadow-2xl w-full max-w-sm p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200 max-h-[92vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}

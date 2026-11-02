@@ -8,6 +8,7 @@ import { toastApiError } from '../../utils/errors';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { Field, Input } from '../../components/ui/Field';
 import { Button } from '../../components/ui/Button';
+import { ThemeSwitch } from '../../components/ui/ThemeSwitch';
 
 const BOT_USERNAME = 'Unbox_Booking_G_Bot';
 
@@ -120,6 +121,14 @@ export function MobileProfileEdit() {
                     {isDirty ? 'Сохранить' : 'Изменений нет'}
                 </Button>
             </form>
+
+            <section style={{ padding: '24px 16px 0' }} aria-labelledby="m-profile-theme">
+                <h2 id="m-profile-theme" style={sectionTitle}>Оформление</h2>
+                <ThemeSwitch />
+                <p style={{ margin: '8px 0 0', fontSize: TEXT.caption, color: COLOR.ink60 }}>
+                    Тёмная тема — для вечера. «Авто» — как настроено на устройстве. Выбор действует на этом устройстве, страница обновится.
+                </p>
+            </section>
 
             <section style={{ padding: '24px 16px 0' }} aria-labelledby="m-profile-notify">
                 <h2 id="m-profile-notify" style={sectionTitle}>Уведомления</h2>

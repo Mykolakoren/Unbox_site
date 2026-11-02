@@ -6,6 +6,7 @@ import { notificationsApi, type AppNotification } from '../../api/notifications'
 import { useAdminTaskStore } from '../../store/adminTaskStore';
 // Значок по имени с сервера — общий с телефоном (utils/notificationIcon).
 import { notificationIcon } from '../../utils/notificationIcon';
+import { themed } from '../../design/tokens';
 
 function timeAgo(dateStr: string): string {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -130,13 +131,13 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                 className={clsx(
                     "relative p-2 rounded-xl transition-colors",
                     variant === 'light'
-                        ? (open ? "bg-black/10" : "hover:bg-black/5")
+                        ? (open ? "bg-ink-10" : "hover:bg-ink-05")
                         : (open ? "bg-white/15" : "hover:bg-white/10"),
                 )}
             >
                 <Bell
                     size={18}
-                    className={variant === 'light' ? "text-black/70" : "text-white/80"}
+                    className={variant === 'light' ? "text-ink-80" : "text-white/80"}
                 />
                 {totalUnread > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-[var(--status-danger-solid)] text-white text-xs font-bold px-1 shadow-lg animate-in zoom-in-50 duration-200">
@@ -150,7 +151,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                     <div
                         className="absolute right-0 top-full mt-2 w-80 max-h-[420px] rounded-xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-150 flex flex-col"
                         style={{
-                            background: 'rgba(255,255,255,0.97)',
+                            background: themed('rgba(255,255,255,0.97)', 'var(--color-card)'),
                             backdropFilter: 'blur(20px)',
                             boxShadow: '0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.1)',
                         }}

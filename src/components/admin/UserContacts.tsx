@@ -117,7 +117,7 @@ export function UserContacts({ email, contacts }: UserContactsProps) {
             {!isAdding ? (
                 <button
                     onClick={() => setIsAdding(true)}
-                    className="w-full py-2 rounded-xl border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-black transition-colors flex items-center justify-center gap-2 text-sm"
+                    className="w-full py-2 rounded-xl border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-ink transition-colors flex items-center justify-center gap-2 text-sm"
                 >
                     <Plus size={16} />
                     Добавить контакт

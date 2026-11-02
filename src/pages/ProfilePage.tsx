@@ -12,6 +12,7 @@ import { hasPermission } from '../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { COLOR, STATUS } from '../design/tokens';
 import { formatGel } from '../utils/format';
+import { ThemeSwitch } from '../components/ui/ThemeSwitch';
 
 export function ProfilePage() {
     const { currentUser, updateUser } = useUserStore();
@@ -666,6 +667,14 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     <div style={{ marginBottom: 24, borderTop: ghpHairline, paddingTop: 24 }}>
                         <label htmlFor="profile-email" style={ghpLabel}>Email</label>
                         <ChangeEmailInline currentEmail={currentUser.email} />
+                    </div>
+
+                    <div style={{ marginBottom: 24, borderTop: ghpHairline, paddingTop: 24 }}>
+                        <h2 className="m-0 mb-1 text-title font-semibold">Оформление</h2>
+                        <p className="m-0 mb-3 text-small text-ink-60">
+                            Тёмная тема — для вечера. «Авто» — как настроено на устройстве. Выбор действует на этом устройстве, страница обновится.
+                        </p>
+                        <ThemeSwitch />
                     </div>
 
                     <div style={{ marginBottom: 24, borderTop: ghpHairline, paddingTop: 24 }}>

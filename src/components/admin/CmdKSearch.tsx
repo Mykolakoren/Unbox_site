@@ -236,7 +236,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 <div style={{
                     display: 'flex', alignItems: 'center', gap: 10,
                     padding: '14px 16px',
-                    borderBottom: '1px solid rgba(0,0,0,0.08)',
+                    borderBottom: '1px solid var(--color-ink-08)',
                 }}>
                     <Search size={18} style={{ color: COLOR.ink60, flexShrink: 0 }} aria-hidden="true" />
                     <input
@@ -287,7 +287,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                                     display: 'flex', alignItems: 'center', gap: 12,
                                     cursor: 'pointer', textAlign: 'left',
                                     fontFamily: 'inherit',
-                                    borderBottom: '1px solid rgba(0,0,0,0.04)',
+                                    borderBottom: '1px solid var(--color-ink-05)',
                                 }}
                                 onMouseEnter={e => (e.currentTarget.style.background = COLOR.sunken)}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -330,7 +330,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 {/* Footer hint */}
                 <div style={{
                     padding: '8px 16px',
-                    borderTop: '1px solid rgba(0,0,0,0.04)',
+                    borderTop: '1px solid var(--color-ink-05)',
                     fontSize: 12, color: COLOR.ink60,
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     background: COLOR.paper,

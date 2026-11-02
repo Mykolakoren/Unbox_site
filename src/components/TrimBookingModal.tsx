@@ -109,7 +109,7 @@ export function TrimBookingModal({
 
     return (
         <div
-            className="fixed inset-0 z-[1000] bg-ink/45 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[1000] bg-overlay flex items-center justify-center p-4"
             onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
         >
             <div className="bg-card rounded-2xl shadow-[var(--shadow-pop)] w-full max-w-sm overflow-hidden">

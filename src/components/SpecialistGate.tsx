@@ -149,8 +149,8 @@ export function SpecialistGateCard({ variant, status }: {
             style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 gap: 16, padding: '16px 20px', flexWrap: 'wrap',
-                background: waiting ? STATUS.pending.bg : GH.ink,
-                color: waiting ? STATUS.pending.fg : GH.paper,
+                background: waiting ? STATUS.pending.bg : COLOR.panel,
+                color: waiting ? STATUS.pending.fg : COLOR.onPanel,
                 // Янтарная карточка без рамки сливалась с бумагой страницы.
                 border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : GH.ink}`,
                 fontFamily: GH_SANS,
@@ -166,8 +166,8 @@ export function SpecialistGateCard({ variant, status }: {
                 style={{
                     minHeight: 44,
                     padding: '0 16px',
-                    background: waiting ? 'transparent' : GH.paper,
-                    color: waiting ? STATUS.pending.fg : GH.ink,
+                    background: waiting ? 'transparent' : COLOR.onPanel,
+                    color: waiting ? STATUS.pending.fg : COLOR.panel,
                     border: waiting ? `1px solid ${STATUS.pending.fg}` : 'none',
                     cursor: 'pointer',
                     fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',

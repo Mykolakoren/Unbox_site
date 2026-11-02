@@ -55,8 +55,8 @@ export function MobilePlaces() {
                                     alignItems: 'center',
                                     gap: 10,
                                     padding: '14px 16px',
-                                    background: COLOR.ink,
-                                    color: COLOR.onInk,
+                                    background: COLOR.panel,
+                                    color: COLOR.onPanel,
                                     textDecoration: 'none',
                                     fontFamily: 'inherit',
                                 }}

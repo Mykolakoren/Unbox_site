@@ -351,7 +351,7 @@ export function MobileAdminTasks() {
                 width: '100%',
                 maxWidth: 480,
                 padding: '8px 16px',
-                background: 'linear-gradient(to bottom, rgba(253,253,251,0) 0%, var(--color-card) 30%)',
+                background: 'linear-gradient(to bottom, transparent 0%, var(--color-card) 30%)',
                 zIndex: Z.sticky,
                 pointerEvents: 'none',
             }}>

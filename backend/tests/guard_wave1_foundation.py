@@ -188,9 +188,11 @@ def test_gh_reads_from_tokens():
     body = gh[gh.find("export const GH = {"):gh.find("} as const;", gh.find("export const GH = {"))]
     code = re.sub(r"//[^\n]*", "", body)  # комментарии могут упоминать старые цвета
     hexes = re.findall(r"#[0-9A-Fa-f]{3,8}\b", code)
-    assert hexes == ["#F6F2E8"], f"в GH вписаны цвета мимо токенов: {hexes}"
+    # 02.11: cellDead переехал в токены (тёмная тема) — исключений больше нет.
+    assert hexes == [], f"в GH вписаны цвета мимо токенов: {hexes}"
     for key, src in (("paper", "COLOR.paper"), ("ink", "COLOR.ink"), ("ink60", "COLOR.ink60"),
-                     ("accent", "COLOR.accent"), ("danger", "STATUS.danger.fg"), ("label", "COLOR.accentInk")):
+                     ("accent", "COLOR.accent"), ("danger", "STATUS.danger.fg"), ("label", "COLOR.accentInk"),
+                     ("cellDead", "COLOR.cellDead")):
         assert re.search(rf"\b{key}: {re.escape(src)},", body), f"GH.{key} не из {src}"
     assert "export const GH_SANS = FONT.sans" in gh and "export const GH_MONO = FONT.mono" in gh
 

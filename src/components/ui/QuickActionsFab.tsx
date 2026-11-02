@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, X } from 'lucide-react';
-import { FONT } from '../../design/tokens';
+import { FONT, themed } from '../../design/tokens';
 
 export interface QuickAction {
     label: string;
@@ -91,8 +91,8 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                         right: 0,
                         bottom: 64,
                         width: 280,
-                        background: '#fff',
-                        border: '1px solid rgba(15,15,16,0.12)',
+                        background: themed('#fff', 'var(--color-card)'),
+                        border: `1px solid ${themed('rgba(15,15,16,0.12)', 'var(--color-ink-10)')}`,
                         boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
                         overflow: 'hidden',
                         animation: 'qaf-fade 0.14s ease',
@@ -101,11 +101,11 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                     <div
                         style={{
                             padding: '12px 14px',
-                            borderBottom: '1px solid rgba(15,15,16,0.08)',
+                            borderBottom: '1px solid var(--color-ink-08)',
                             fontSize: 11,
                             letterSpacing: '0.18em',
                             textTransform: 'uppercase',
-                            color: '#6b7280',
+                            color: themed('#6b7280', 'var(--color-ink-60)'),
                             fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
                         }}
                     >
@@ -127,22 +127,22 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                                     background: 'transparent',
                                     border: 'none',
                                     borderBottom:
-                                        i < actions.length - 1 ? '1px solid rgba(15,15,16,0.06)' : 'none',
+                                        i < actions.length - 1 ? '1px solid var(--color-ink-05)' : 'none',
                                     textAlign: 'left',
                                     cursor: 'pointer',
-                                    color: '#111',
+                                    color: themed('#111', 'var(--color-ink)'),
                                     fontSize: 14,
                                     transition: 'background 0.1s',
                                 }}
                                 onMouseEnter={(e) => {
-                                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,15,16,0.04)';
+                                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-ink-05)';
                                 }}
                                 onMouseLeave={(e) => {
                                     (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
                                 }}
                             >
                                 {Icon && (
-                                    <span style={{ display: 'inline-flex', color: '#476D6B' }}>
+                                    <span style={{ display: 'inline-flex', color: themed('#476D6B', 'var(--color-accent)') }}>
                                         <Icon size={16} />
                                     </span>
                                 )}
@@ -152,7 +152,7 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                                         <div
                                             style={{
                                                 fontSize: 12,
-                                                color: '#6b7280',
+                                                color: themed('#6b7280', 'var(--color-ink-60)'),
                                                 marginTop: 2,
                                                 lineHeight: 1.3,
                                             }}
@@ -174,8 +174,8 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                     width: 52,
                     height: 52,
                     borderRadius: '50%',
-                    background: open ? '#111' : '#476D6B',
-                    color: '#fff',
+                    background: open ? themed('#111', 'var(--color-ink)') : 'var(--color-accent)',
+                    color: themed('#fff', open ? 'var(--color-on-ink)' : 'var(--color-on-accent)'),
                     border: 'none',
                     cursor: 'pointer',
                     boxShadow: '0 10px 30px rgba(71,109,107,0.35)',
@@ -186,10 +186,10 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                     transform: open ? 'rotate(90deg)' : 'none',
                 }}
                 onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = open ? '#000' : '#3c5b5a';
+                    (e.currentTarget as HTMLButtonElement).style.background = open ? themed('#000', 'var(--color-ink-80)') : themed('#3c5b5a', 'var(--color-accent-hover)');
                 }}
                 onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = open ? '#111' : '#476D6B';
+                    (e.currentTarget as HTMLButtonElement).style.background = open ? themed('#111', 'var(--color-ink)') : 'var(--color-accent)';
                 }}
             >
                 {open ? <X size={22} /> : <Zap size={22} />}

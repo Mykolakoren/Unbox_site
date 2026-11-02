@@ -186,7 +186,7 @@ export function MobileCrmLayout() {
                         <ChevronDown size={16} aria-hidden="true" />
                     </button>
                     <div style={{ flex: 1 }} />
-                    <NotificationsBell color={COLOR.onInk} />
+                    <NotificationsBell color={COLOR.onPanel} />
                     {/* Wave 1: кнопка «десктоп» убрана, как в админке 02.06 и в
                         /m/me (аудит G6-04, X2-03). */}
                 </div>
@@ -218,8 +218,8 @@ const AUTO_COMPLETE_EVERY_MS = 10 * 60 * 1000;
 const headerStyle: React.CSSProperties = {
     // В standalone-режиме iOS контент начинается под чёлкой — тёмный фон
     // заливает её, кнопки начинаются ниже (скрин владельца 31.08).
-    background: 'var(--color-ink)',
-    color: 'var(--color-on-ink)',
+    background: 'var(--color-panel)',
+    color: 'var(--color-on-panel)',
     padding: 'calc(6px + env(safe-area-inset-top, 0px)) 12px 6px',
     display: 'flex',
     alignItems: 'center',
@@ -234,7 +234,7 @@ const switcherStyle: React.CSSProperties = {
     padding: '0 8px',
     display: 'flex', alignItems: 'center', gap: 6,
     cursor: 'pointer',
-    color: 'var(--color-on-ink)',
+    color: 'var(--color-on-panel)',
     fontFamily: 'inherit',
     fontSize: 16,
     fontWeight: 600,

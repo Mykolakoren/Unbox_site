@@ -28,6 +28,9 @@ export const COLOR = {
     ink05: 'rgba(15,15,16,0.05)',
     onInk: '#FAFAF7',   // текст на тёмном
     overlay: 'rgba(15,15,16,0.45)', // затемнение фона под шторкой/окном
+    panel: '#0F0F10',   // большая тёмная панель/шапка: в тёмной теме не светлеет
+    onPanel: '#FAFAF7',
+    cellDead: '#F6F2E8', // нерабочая ячейка шахматки
     sidebar: '#F0ECDD',       // боковая панель админки
     sidebarNarrow: '#F3EFE2', // она же в узком виде
     // Бирюза Unbox — только «выбрано», фокус и главная кнопка.
@@ -113,3 +116,57 @@ export const MOTION = {
     easeOut: [0.23, 1, 0.32, 1] as [number, number, number, number],
     easeDrawer: [0.32, 0.72, 0, 1] as [number, number, number, number],
 } as const;
+
+/* ── Тёмная тема (02.11) ──
+ * Атрибут data-theme ставит скрипт в index.html до загрузки кода, поэтому к
+ * моменту, когда другие модули читают COLOR/STATUS/SHADOW (в том числе в
+ * константы модулей вроде GH), значения уже нужной темы. Смена темы — перезагрузка
+ * страницы (src/utils/theme.ts). Значения совпадают с :root[data-theme="dark"]
+ * в index.css; сторож guard_dark_theme_2026_11 сверяет. */
+export const IS_DARK = typeof document !== 'undefined'
+    && document.documentElement.getAttribute('data-theme') === 'dark';
+
+/** Цвет, которого нет в палитре: themed(светлый, тёмный). */
+export const themed = (light: string, dark: string): string => (IS_DARK ? dark : light);
+
+if (IS_DARK) {
+    Object.assign(COLOR, {
+        paper: '#141415',
+        card: '#1C1C1E',
+        sunken: '#242427',
+        ink: '#ECECE8',
+        ink80: 'rgba(236,236,232,0.84)',
+        ink60: 'rgba(236,236,232,0.66)',
+        ink40: 'rgba(236,236,232,0.44)',
+        ink30: 'rgba(236,236,232,0.32)',
+        ink20: 'rgba(236,236,232,0.22)',
+        ink10: 'rgba(236,236,232,0.13)',
+        ink08: 'rgba(236,236,232,0.10)',
+        ink05: 'rgba(236,236,232,0.06)',
+        onInk: '#141415',
+        overlay: 'rgba(0,0,0,0.60)',
+        panel: '#2A2A2E',
+        onPanel: '#ECECE8',
+        cellDead: '#0E0E0F',
+        sidebar: '#19191A',
+        sidebarNarrow: '#19191A',
+        accent: '#7FB3AF',
+        accentHover: '#93C4C0',
+        accentInk: '#8FC2BE',
+        accentSoft: '#24302F',
+        onAccent: '#0F1413',
+        unboxGrey: '#A3A9B2',
+    });
+    Object.assign(STATUS, {
+        ok: { bg: '#16291D', fg: '#7DD69A' },
+        pending: { bg: '#2E2410', fg: '#E8B955' },
+        danger: { bg: '#331719', fg: '#F59A9A' },
+        info: { bg: '#17233A', fg: '#93B8F5' },
+        muted: { bg: '#2A2A2C', fg: '#B8B8BC' },
+        warn: { bg: '#33200F', fg: '#F5B27A' },
+        dangerSolid: '#EF6B6B',
+    });
+    Object.assign(SHADOW, {
+        pop: '0 12px 32px -8px rgba(0,0,0,0.70), 0 2px 6px rgba(0,0,0,0.45)',
+    });
+}

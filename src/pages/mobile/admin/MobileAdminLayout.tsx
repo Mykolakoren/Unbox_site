@@ -150,8 +150,8 @@ export function MobileAdminLayout() {
                 {/* Safe-area сверху: в standalone-режиме iOS шапка пряталась
                     под чёлкой (см. MobileCrmLayout, тот же фикс 31.08). */}
                 <div style={{
-                    background: 'var(--color-ink)',
-                    color: 'var(--color-on-ink)',
+                    background: 'var(--color-panel)',
+                    color: 'var(--color-on-panel)',
                     padding: 'calc(6px + env(safe-area-inset-top, 0px)) 12px 6px',
                     display: 'flex',
                     alignItems: 'center',
@@ -172,7 +172,7 @@ export function MobileAdminLayout() {
                             padding: '0 8px',
                             display: 'flex', alignItems: 'center', gap: 6,
                             cursor: 'pointer',
-                            color: 'var(--color-on-ink)',
+                            color: 'var(--color-on-panel)',
                             fontFamily: 'inherit',
                             fontSize: 16,
                             fontWeight: 600,
@@ -181,10 +181,10 @@ export function MobileAdminLayout() {
                         Админка
                         <ChevronDown size={16} aria-hidden="true" />
                     </button>
-                    <div style={{ flex: 1, fontSize: TEXT.caption, color: 'var(--color-on-ink)', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ flex: 1, fontSize: TEXT.caption, color: 'var(--color-on-panel)', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {currentUser.name?.split(' ')[0]}
                     </div>
-                    <NotificationsBell color={COLOR.onInk} />
+                    <NotificationsBell color={COLOR.onPanel} />
                 </div>
 
                 <main data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>

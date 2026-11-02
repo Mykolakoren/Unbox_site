@@ -65,7 +65,7 @@ export function CabinetsShowcaseSection() {
 
     return (
         <section id="locations" className="max-w-6xl mx-auto px-6 py-12">
-            <div className="border-t border-black/10 pt-12">
+            <div className="border-t border-ink-10 pt-12">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}

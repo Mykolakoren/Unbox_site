@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, Share, X, ArrowDown } from 'lucide-react';
-import { COLOR } from '../../design/tokens';
+import { COLOR, themed } from '../../design/tokens';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 
@@ -97,8 +97,8 @@ export function InstallBanner() {
                 onKeyDown={hint ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHelpOpen(true); } } : undefined}
                 style={{
                     margin: '12px 16px 0',
-                    background: COLOR.ink,
-                    color: COLOR.onInk,
+                    background: COLOR.panel,
+                    color: COLOR.onPanel,
                     borderRadius: 14,
                     padding: '14px 16px',
                     display: 'flex',
@@ -110,7 +110,7 @@ export function InstallBanner() {
                 <div style={{
                     width: 38, height: 38,
                     borderRadius: 10,
-                    background: `${COLOR.onInk}1F`,
+                    background: `${COLOR.onPanel}1F`,
                     display: 'grid', placeItems: 'center',
                     flexShrink: 0,
                 }}>
@@ -128,8 +128,8 @@ export function InstallBanner() {
                     <button
                         onClick={(e) => { e.stopPropagation(); install(); }}
                         style={{
-                            background: COLOR.card,
-                            color: COLOR.ink,
+                            background: themed(COLOR.card, COLOR.onPanel),
+                            color: COLOR.panel,
                             border: 'none',
                             borderRadius: 10,
                             minHeight: 44,
@@ -150,7 +150,7 @@ export function InstallBanner() {
                         background: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
-                        color: `${COLOR.onInk}B3`,
+                        color: `${COLOR.onPanel}B3`,
                         // Цель касания 44×44; отрицательный отступ — плашка не растёт.
                         width: 44, height: 44,
                         margin: '-10px -10px -10px 0',
@@ -247,8 +247,8 @@ function Step({ n, title, body }: { n: number; title: string; body: React.ReactN
                 flexShrink: 0,
                 width: 28, height: 28,
                 borderRadius: 999,
-                background: COLOR.ink,
-                color: COLOR.onInk,
+                background: COLOR.panel,
+                color: COLOR.onPanel,
                 display: 'grid', placeItems: 'center',
                 fontSize: 14, fontWeight: 600,
             }}>

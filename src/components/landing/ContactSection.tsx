@@ -11,7 +11,7 @@ const glassBtn: React.CSSProperties = {
 export function ContactSection() {
     return (
         <section className="max-w-6xl mx-auto px-6 py-12 pb-20">
-            <div className="border-t border-black/10 pt-10">
+            <div className="border-t border-ink-10 pt-10">
                 <motion.div
                     initial={{ opacity: 0, y: 16 }}
                     whileInView={{ opacity: 1, y: 0 }}

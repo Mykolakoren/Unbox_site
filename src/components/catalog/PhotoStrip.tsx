@@ -80,7 +80,7 @@ export function PhotoStrip({ photos, onOpen, altFor, aspect = '4 / 3', inset = 1
                     aria-hidden="true"
                     style={{
                         position: 'absolute', top: 8, left: 8,
-                        background: 'rgba(14,14,14,0.72)', color: COLOR.onInk,
+                        background: 'rgba(14,14,14,0.72)', color: COLOR.onPanel,
                         fontFamily: FONT.mono, fontSize: 12,
                         padding: '4px 8px', borderRadius: 8,
                         pointerEvents: 'none',

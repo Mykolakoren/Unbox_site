@@ -270,7 +270,7 @@ function GridHouseLocationDetails({
                                     <span style={{
                                         position: 'absolute', inset: 0, background: 'rgba(14,14,14,0.55)',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        color: COLOR.onInk, fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap',
+                                        color: COLOR.onPanel, fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap',
                                     }}>
                                         Ещё {allPhotos.length - 4} фото
                                     </span>

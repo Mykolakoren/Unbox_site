@@ -92,7 +92,7 @@ export function AnalyticsCharts({ bookings = [], revenueDaily, from, to, periodL
                   tickFormatter={(v: string) => formatDayMonthShort(v)} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: COLOR.ink60 }} />
                 <Tooltip
-                  contentStyle={{ border: `1px solid ${COLOR.ink10}`, boxShadow: SHADOW.pop }}
+                  contentStyle={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, boxShadow: SHADOW.pop }}
                   formatter={(value: any) => [formatGel(value), 'Выручка']}
                   labelFormatter={(l: any) => formatDayMonth(String(l))}
                   labelStyle={{ color: COLOR.ink60, marginBottom: '4px' }}

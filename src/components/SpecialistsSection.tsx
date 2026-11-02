@@ -167,7 +167,7 @@ export function SpecialistsSection({ categoryFilter }: Props) {
                 </Link>
             </div>
 
-            <div className="mt-12 border-b border-black/10" />
+            <div className="mt-12 border-b border-ink-10" />
         </section>
     );
 }

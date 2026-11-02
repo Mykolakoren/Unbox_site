@@ -96,8 +96,8 @@ export function MobileSubscription() {
                                 aria-label="Остаток абонемента"
                                 style={{
                                     // Заморожен — статус «инфо», а не декоративный голубой.
-                                    background: sub.isFrozen ? STATUS.info.bg : COLOR.ink,
-                                    color: sub.isFrozen ? STATUS.info.fg : COLOR.onInk,
+                                    background: sub.isFrozen ? STATUS.info.bg : COLOR.panel,
+                                    color: sub.isFrozen ? STATUS.info.fg : COLOR.onPanel,
                                     borderRadius: RADIUS.sheet,
                                     padding: 20,
                                     display: 'flex', flexDirection: 'column', gap: 8,

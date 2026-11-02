@@ -812,7 +812,7 @@ export function AdminUserDetails() {
                                         (user.name || '?').charAt(0).toUpperCase()
                                     )}
                                 </div>
-                                <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
+                                <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-photo opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
                                     <span className="text-xs font-medium">Изменить</span>
                                     <input
                                         type="file"

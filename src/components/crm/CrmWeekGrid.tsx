@@ -40,6 +40,7 @@ import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field, Input } from '../ui/Field';
 import { PickList, PickRow } from './CrmChessboardView';
+import { themed } from '../../design/tokens';
 
 const SLOT = 30;            // шаг сетки, мин
 const ROW_H = 22;           // высота 30 минут, px
@@ -396,7 +397,7 @@ export function CrmWeekGrid({ onChanged }: { onChanged?: () => void }) {
                         style={{
                             position: 'relative', height: rows * ROW_H, borderLeft: '1px solid var(--color-ink-10)', cursor: 'cell',
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${2 * ROW_H - 1}px, var(--color-ink-10, #e3e8e5) ${2 * ROW_H - 1}px, var(--color-ink-10, #e3e8e5) ${2 * ROW_H}px)`,
-                            backgroundColor: d < now.ymd ? 'var(--color-sunken, #f6f8f7)' : undefined,
+                            backgroundColor: d < now.ymd ? themed('var(--color-sunken, #f6f8f7)', 'rgba(0,0,0,0.25)') : undefined,
                         }}
                     >
                         {d === now.ymd && now.totalMins >= gridFrom && now.totalMins <= gridTo && (

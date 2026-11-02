@@ -26,7 +26,7 @@ export const GH = {
     ink30: COLOR.ink30,
     ink60: COLOR.ink60,
     ink80: COLOR.ink80,
-    cellDead: '#F6F2E8',
+    cellDead: COLOR.cellDead,
     accent: COLOR.accent,
     // Был свой кирпичный #B84A2F — одиннадцатый оттенок красного. Теперь это
     // статус «опасно» (--status-danger-fg), как во всём продукте.

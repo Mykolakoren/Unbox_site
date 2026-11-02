@@ -47,6 +47,7 @@ const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code ||
 // parseUTC заменяет локальный parseBookingDate (тело идентичное).
 import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
 import { createSessionResolvingCalendar, type SeriesCalendarChoice } from '../../utils/crmCalendarConflict';
+import { IS_DARK } from '../../design/tokens';
 
 const _minToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -2123,7 +2124,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                                                                 isMine
                                                                     ? (noSession
-                                                                        ? 'bg-ink/45 text-on-ink border-ink border-dashed cursor-grab active:cursor-grabbing hover:bg-ink/60'
+                                                                        ? (IS_DARK ? 'bg-ink-60' : 'bg-ink/45') + ' text-on-ink border-ink border-dashed cursor-grab active:cursor-grabbing hover:bg-ink/60'
                                                                         : 'bg-ink text-on-ink border-ink cursor-grab active:cursor-grabbing hover:bg-ink-80')
                                                                     : claimable
                                                                         ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/40 border-dashed cursor-pointer hover:bg-[var(--status-pending-bg)]/70'

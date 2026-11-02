@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { X, Loader2, Wallet } from 'lucide-react';
-import { COLOR, FONT, SHADOW, STATUS } from '../../design/tokens';
+import { COLOR, FONT, SHADOW, STATUS, themed } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { usersApi } from '../../api/users';
 import { toastApiError } from '../../utils/errors';
@@ -134,7 +134,7 @@ export function BalanceCorrectionModal({
                         style={{
                             width: '100%',
                             padding: '10px 12px',
-                            border: '1px solid rgba(0,0,0,0.12)',
+                            border: `1px solid ${themed('rgba(0,0,0,0.12)', 'var(--color-ink-20)')}`,
                             borderRadius: 8,
                             fontSize: 15,
                             fontFamily: 'ui-monospace, "SF Mono", monospace',
@@ -169,7 +169,7 @@ export function BalanceCorrectionModal({
                         style={{
                             width: '100%',
                             padding: '10px 12px',
-                            border: '1px solid rgba(0,0,0,0.12)',
+                            border: `1px solid ${themed('rgba(0,0,0,0.12)', 'var(--color-ink-20)')}`,
                             borderRadius: 8,
                             fontSize: 13,
                             outline: 'none',
@@ -184,7 +184,7 @@ export function BalanceCorrectionModal({
                         onClick={onClose}
                         style={{
                             flex: 1, padding: '11px 0',
-                            background: 'rgba(0,0,0,0.05)',
+                            background: 'var(--color-ink-05)',
                             color: COLOR.ink,
                             border: 'none', borderRadius: 10,
                             fontSize: 14, fontWeight: 600,

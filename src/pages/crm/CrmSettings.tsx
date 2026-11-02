@@ -18,6 +18,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { STATUS } from '../../design/tokens';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { useUserStore } from '../../store/userStore';
+import { ThemeSwitch } from '../../components/ui/ThemeSwitch';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { Field, Input } from '../../components/ui/Field';
@@ -241,6 +242,11 @@ function GridHouseCrmSettings({
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 820 }}>
             <PageHeader title="Настройки" description="Счета для оплаты, валюты и Google Календарь." />
+
+            <GHSSection title="Оформление">
+                <p style={GHS_NOTE}>Тёмная тема — для вечера. «Авто» — как настроено на устройстве. Выбор действует на этом устройстве, страница обновится.</p>
+                <ThemeSwitch />
+            </GHSSection>
 
             <GHSSection title="Счета для оплаты">
                 <PaymentAccountsManager />

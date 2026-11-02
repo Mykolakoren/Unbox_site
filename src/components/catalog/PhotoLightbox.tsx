@@ -137,7 +137,7 @@ export function PhotoLightbox({ photos, index, onClose, onIndexChange, altFor, l
                 style={{
                     position: 'absolute', left: 0, right: 0,
                     bottom: 'max(16px, env(safe-area-inset-bottom, 0px))',
-                    textAlign: 'center', color: COLOR.onInk,
+                    textAlign: 'center', color: COLOR.onPanel,
                     fontFamily: FONT.mono, fontSize: 14,
                     pointerEvents: 'none',
                 }}
@@ -161,6 +161,6 @@ const roundBtn: React.CSSProperties = {
     background: 'rgba(255,255,255,0.12)',
     border: 'none',
     borderRadius: 999,
-    color: COLOR.onInk,
+    color: COLOR.onPanel,
     cursor: 'pointer',
 };

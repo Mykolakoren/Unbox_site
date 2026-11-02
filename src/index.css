@@ -33,6 +33,8 @@
   --color-ink-04:  rgba(15,15,16,0.04);
   --color-on-ink:  #FAFAF7;   /* текст на тёмном */
   --color-overlay: rgba(15,15,16,0.45);   /* затемнение фона под шторкой/окном */
+  --color-panel:    #0F0F10;   /* большая тёмная панель/шапка: в тёмной теме не становится светлой, как ink */
+  --color-on-panel: #FAFAF7;
   --color-sidebar:        #F0ECDD;   /* боковая панель админки */
   --color-sidebar-narrow: #F3EFE2;   /* она же в узком (свёрнутом) виде */
 
@@ -566,3 +568,121 @@ html [data-sonner-toast] [data-button] {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * ТЁМНАЯ ТЕМА (02.11). Включается атрибутом data-theme="dark" на <html>:
+ * по выбору человека в настройках, по умолчанию выключена (src/utils/theme.ts).
+ *
+ * Классы Tailwind берут цвет из этих переменных, поэтому экраны не нужно
+ * переписывать. --color-white — намеренно тёмная поверхность: bg-white это
+ * карточка, а text-white стоит на заливке (акцент, ink), которая в тёмной
+ * теме становится светлой, и текст на ней должен быть тёмным. Настоящий белый
+ * (текст на фото) — класс text-photo. --color-black не меняем: bg-black/50 — затемнение.
+ * TS-зеркало для inline-стилей — конец src/design/tokens.ts.
+ * ═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-paper:   #141415;
+  --color-card:    #1C1C1E;
+  --color-surface: #1C1C1E;
+  --color-sunken:  #242427;
+  --color-ink:     #ECECE8;
+  --color-ink-80:  rgba(236,236,232,0.84);
+  --color-ink-60:  rgba(236,236,232,0.66);
+  --color-ink-40:  rgba(236,236,232,0.44);
+  --color-ink-30:  rgba(236,236,232,0.32);
+  --color-ink-20:  rgba(236,236,232,0.22);
+  --color-ink-10:  rgba(236,236,232,0.13);
+  --color-ink-08:  rgba(236,236,232,0.10);
+  --color-ink-05:  rgba(236,236,232,0.06);
+  --color-ink-04:  rgba(236,236,232,0.05);
+  --color-on-ink:  #141415;
+  --color-overlay: rgba(0,0,0,0.60);
+  --color-panel:    #2A2A2E;
+  --color-on-panel: #ECECE8;
+  --color-sidebar:        #19191A;
+  --color-sidebar-narrow: #19191A;
+
+  --color-accent:       #7FB3AF;
+  --color-accent-hover: #93C4C0;
+  --color-accent-ink:   #8FC2BE;
+  --color-accent-soft:  #24302F;
+  --color-on-accent:    #0F1413;
+
+  --color-unbox-green:  #7FB3AF;
+  --color-unbox-dark:   #E4E6EA;
+  --color-unbox-light:  #2A3837;
+  --color-unbox-grey:   #A3A9B2;
+  --color-unbox-accent: #7FB3AF;
+
+  --color-white: #1C1C1E;
+  --color-gray-50:  #202022;
+  --color-gray-100: #27272A;
+  --color-gray-200: #34343A;
+  --color-gray-300: #46464C;
+  --color-gray-400: #77777E;
+  --color-gray-500: #A0A0A7;
+  --color-gray-600: #B4B4BA;
+  --color-gray-700: #C8C8CD;
+  --color-gray-800: #DEDEE1;
+  --color-gray-900: #ECECE8;
+
+  --color-amber-50:  #2A2210;
+  --color-amber-100: #33280F;
+  --color-amber-200: #4A3A12;
+  --color-amber-400: #E8B955;
+  --color-amber-500: #E8B955;
+  --color-amber-700: #E8B955;
+  --color-red-100:   #3A1A1C;
+  --color-red-500:   #EF6B6B;
+  --color-red-600:   #F08A8A;
+  --color-red-700:   #F59A9A;
+  --color-green-200: #1F3D2A;
+  --color-green-400: #5BC47F;
+  --color-green-500: #5BC47F;
+  --color-green-800: #8FDCA8;
+  --color-blue-200:  #1F3358;
+  --color-blue-800:  #A9C6F7;
+
+  --status-ok-bg:        #16291D;
+  --status-ok-fg:        #7DD69A;
+  --status-pending-bg:   #2E2410;
+  --status-pending-fg:   #E8B955;
+  --status-danger-bg:    #331719;
+  --status-danger-fg:    #F59A9A;
+  --status-info-bg:      #17233A;
+  --status-info-fg:      #93B8F5;
+  --status-warn-bg:      #33200F;
+  --status-warn-fg:      #F5B27A;
+  --status-muted-bg:     #2A2A2C;
+  --status-muted-fg:     #B8B8BC;
+  --status-danger-solid: #EF6B6B;
+
+  --shadow-pop: 0 12px 32px -8px rgba(0,0,0,0.70), 0 2px 6px rgba(0,0,0,0.45);
+  --shadow-premium: 0 10px 40px -10px rgba(0,0,0,0.60);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.40), 0 4px 16px rgba(0,0,0,0.25);
+  --shadow-card-hover: 0 4px 12px rgba(0,0,0,0.45), 0 12px 32px rgba(0,0,0,0.35);
+  --shadow-glass: 0 8px 32px 0 rgba(0,0,0,0.35);
+  --color-glass-bg: rgba(28,28,30,0.72);
+  --color-glass-bg-light: rgba(28,28,30,0.55);
+  --color-glass-border: rgba(236,236,232,0.12);
+}
+:root[data-theme="dark"] body { background-color: var(--color-paper); }
+:root[data-theme="dark"] .glass-card { background: rgba(28,28,30,0.88); border-color: rgba(236,236,232,0.10); }
+:root[data-theme="dark"] .bg-striped {
+  background-color: rgba(127,179,175,0.10);
+  background-image: repeating-linear-gradient(-45deg, rgba(127,179,175,0.18), rgba(127,179,175,0.18) 5px, transparent 5px, transparent 12px);
+}
+:root[data-theme="dark"] .dot-pattern { background-image: radial-gradient(circle, #7FB3AF 1px, transparent 1px); }
+:root[data-theme="dark"] .stat-accent { border-left-color: #7FB3AF; }
+:root[data-theme="dark"] ::selection { background: rgba(127,179,175,0.35); color: #ECECE8; }
+:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-track { background: rgba(236,236,232,0.06); }
+:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb { background: rgba(236,236,232,0.40); border-color: rgba(20,20,21,0.6); }
+:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb:hover { background: rgba(236,236,232,0.55); }
+:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb:active { background: rgba(236,236,232,0.70); }
+@supports (scrollbar-width: auto) {
+  :root[data-theme="dark"] .scrollbar-visible { scrollbar-color: rgba(236,236,232,0.40) rgba(236,236,232,0.06); }
+}
+/* Настоящий белый поверх фото: в обеих темах. */
+.text-photo { color: #fff; }

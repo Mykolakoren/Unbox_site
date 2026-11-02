@@ -616,14 +616,14 @@ function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryIt
     const place = bookingPlace(booking);
     const end = bookingEndDate(booking, dt);
     const route = mapsUrl(place.location);
-    const soft = `${COLOR.onInk}B3`;   // 70 % — вторичный текст на тёмном (≈11:1)
-    const line = `${COLOR.onInk}26`;
+    const soft = `${COLOR.onPanel}B3`;   // 70 % — вторичный текст на тёмном (≈11:1)
+    const line = `${COLOR.onPanel}26`;
     return (
         <section
             aria-label="Ближайшая встреча"
             style={{
-                background: COLOR.ink,
-                color: COLOR.onInk,
+                background: COLOR.panel,
+                color: COLOR.onPanel,
                 borderRadius: RADIUS.sheet,
                 padding: 20,
                 display: 'flex',
@@ -643,7 +643,7 @@ function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryIt
             </div>
             <div style={{
                 borderTop: `1px solid ${line}`, paddingTop: 12,
-                fontSize: TEXT.small, color: COLOR.onInk,
+                fontSize: TEXT.small, color: COLOR.onPanel,
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
             }}>
                 <span>{paymentLine(booking, dt)}</span>
@@ -658,7 +658,7 @@ function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryIt
                         className="press"
                         style={{
                             flex: 1, minHeight: 44, borderRadius: RADIUS.control,
-                            border: `1px solid ${COLOR.onInk}4D`, color: COLOR.onInk, textDecoration: 'none',
+                            border: `1px solid ${COLOR.onPanel}4D`, color: COLOR.onPanel, textDecoration: 'none',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                             fontSize: TEXT.body, fontWeight: 600,
                         }}
@@ -672,7 +672,7 @@ function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryIt
                     className="press"
                     style={{
                         flex: 1, minHeight: 44, borderRadius: RADIUS.control,
-                        border: 'none', background: COLOR.onInk, color: COLOR.ink,
+                        border: 'none', background: COLOR.onPanel, color: COLOR.panel,
                         fontFamily: 'inherit', fontSize: TEXT.body, fontWeight: 600, cursor: 'pointer',
                     }}
                 >
