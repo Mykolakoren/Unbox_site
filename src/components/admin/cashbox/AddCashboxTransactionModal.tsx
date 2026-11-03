@@ -15,6 +15,9 @@ import { paymentErrorText, toastApiError } from '../../../utils/errors';
 import { useUserStore } from '../../../store/userStore';
 import { canUndoCashTx, claimCashUndo, releaseCashUndo } from './cashMoney';
 
+/** Статьи прихода не про баланс клиента (зеркало: cashbox/transactions.py, 03.11). */
+const NOT_TO_BALANCE_CATEGORIES = ['cat-catalog', 'cat-other'];
+
 interface Props {
     isOpen: boolean;
     onClose: () => void;
@@ -95,6 +98,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
     const [txDate, setTxDate] = useState(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
+    const toBalance = type === 'income' && !!clientId && !NOT_TO_BALANCE_CATEGORIES.includes(categoryId);
     const [clientSearch, setClientSearch] = useState('');
     const [showClientDropdown, setShowClientDropdown] = useState(false);
     const clientInputRef = useRef<HTMLInputElement>(null);
@@ -272,8 +276,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                     date: dateValue,
                     client_id: (type === 'income' && clientId) ? clientId : undefined,
                     client_name: (type === 'income' && clientId) ? bookingUsers.find(c => c.id === clientId)?.name : undefined,
-                    // Клиент выбран → деньги его, зачисляем всегда.
-                    credit_user_balance: (type === 'income' && !!clientId),
+                    // Клиент выбран → деньги его, зачисляем. Кроме статей не про баланс (03.11).
+                    credit_user_balance: toBalance,
                 } as any);
                 try { await useCashboxStore.getState().fetchBalance(); } catch { /* обновится при следующем открытии */ }
                 const doneText = `${type === 'income' ? 'Приход' : 'Расход'} ${formatGel(value)} записан`;
@@ -551,9 +555,14 @@ export function AddCashboxTransactionModal({ isOpen, onClose, onUndone, defaultB
                                     клиента и означает, что деньги его. Возможность снять
                                     галочку была лишним шагом и главным источником
                                     расхождений — платёж вносили, копилка не пополнялась. */}
-                                {type === 'income' && clientId && (
+                                {toBalance && (
                                     <div className="mt-2 text-xs text-[var(--status-ok-fg)] bg-[var(--status-ok-bg)] rounded-lg px-2 py-1.5">
                                         Сумма зачислится на баланс клиента (копилку).
+                                    </div>
+                                )}
+                                {type === 'income' && clientId && !toBalance && (
+                                    <div className="mt-2 text-xs text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)] rounded-lg px-3 py-2">
+                                        На баланс не зачислится: эта статья только для кассы, клиент останется в записи.
                                     </div>
                                 )}
                                 {/* Подсказка: приход без клиента не попадёт ни на чей баланс */}

@@ -57,7 +57,8 @@ export function UserTransactions({ email }: UserTransactionsProps) {
             : t.paymentMethod === 'bank_transfer' ? 'transfer'
             : t.paymentMethod,
         description: t.description || t.categoryName || '',
-        category: t.type === 'income' ? 'deposit' : 'shop',
+        // 03.11: приход только в кассу (каталог, допы) — не «Пополнение», на баланс он не шёл.
+        category: t.type === 'income' ? ((t as any).creditedUserId ? 'deposit' : 'cash_only') : 'shop',
         type: t.type === 'income' ? 'deposit' : 'manual_correction',
         status: 'completed' as const,
         adminName: t.adminName,
@@ -123,6 +124,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
             case 'booking': return 'Разовая бронь';
             case 'shop': return 'Допы';
             case 'deposit': return 'Пополнение';
+            case 'cash_only': return 'Только в кассу';
             default: return 'Прочее';
         }
     };

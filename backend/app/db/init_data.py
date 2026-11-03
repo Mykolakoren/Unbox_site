@@ -348,6 +348,15 @@ def migrate_add_columns():
                 is_active=True,
             ))
             ses.commit()
+        # Сервер узнаёт её по этому id: не зачислять на баланс (cashbox/transactions.py).
+        if not ses.get(_EC, "cat-catalog"):
+            ses.add(_EC(
+                id="cat-catalog",
+                name="Каталог",
+                category_type="income",
+                is_active=True,
+            ))
+            ses.commit()
 
     # resource table: convert services from TEXT to JSONB if needed (Postgres only)
     if dialect == 'postgresql':

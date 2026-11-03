@@ -111,7 +111,7 @@ MONEY_FINGERPRINTS = [
     (END_SHIFT, "const handleSubmit = async", "return createPortal(", "233e73ad83be0edb", "отправка закрытия смены"),
     (TX_TABLE, "const handleDelete = async", "if (isLoading)", "1899d119091c944b", "удаление операции в журнале"),
     (TX_TABLE, "const isOwner = currentUser?.role === 'owner';", "// Flatten categories", "fec6d962bb0f0382", "canEditTx / canDeleteTx"),
-    (ADD_TX, "                    type,\n                    amount: value,", "} as any);", "f35a90a335e4c493", "тело «Новой операции»"),
+    (ADD_TX, "                    type,\n                    amount: value,", "} as any);", "3d9f8cf6e9f97d97", "тело «Новой операции»"),
     (ADD_TX, "if (type === 'transfer') {\n                // Transfer", "} else {", "1a25816536aaedb3", "перевод между счетами"),
     (ADD_TX, "const r = await usersApi.sellSubscription(clientId, {", "});", "04b48bb9ee731e79", "продажа абонемента из кассы"),
     (FIN, "await api.post('/cashbox/balance-correction', {", "});", "bfc1fa6db997627d", "корректировка остатка"),
@@ -131,7 +131,9 @@ def test_money_handlers_unchanged():
 
 def test_add_tx_still_credits_client_and_store_creates_transfers():
     src = _read(ADD_TX)
-    assert "credit_user_balance: (type === 'income' && !!clientId)" in src, "приход с клиентом снова может не зачислиться"
+    # 03.11: кроме статей не про баланс (guard_catalog_income_2026_11).
+    assert "const toBalance = type === 'income' && !!clientId && !NOT_TO_BALANCE_CATEGORIES.includes(categoryId);" in src \
+        and "credit_user_balance: toBalance," in src, "приход с клиентом снова может не зачислиться"
     assert "await createTransaction({\n                    type: 'expense'," in src, "перевод больше не через стор"
 
 

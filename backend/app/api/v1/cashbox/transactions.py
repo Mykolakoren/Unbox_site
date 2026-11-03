@@ -453,6 +453,11 @@ def _duplicate_payment_error(
     )
 
 
+# Статьи прихода, которые не зачисляются на баланс клиента. Зеркало во фронте:
+# src/components/admin/cashbox/AddCashboxTransactionModal.tsx
+NOT_TO_BALANCE_CATEGORIES = {"cat-catalog", "cat-other"}
+
+
 @router.post("/transactions", response_model=CashboxTransactionRead)
 def create_transaction(
     payload: CashboxTransactionCreate,
@@ -489,7 +494,13 @@ def create_transaction(
     lookup_user: Optional[User] = None
     if payload.type == "income" and payload.client_id:
         lookup_user = _resolve_user_from_client_id(session, payload.client_id)
-    if payload.credit_user_balance and payload.type == "income" and payload.client_id:
+    # 03.11 (Алёна Дёмина): оплата каталога легла на баланс — её можно было потратить
+    # на брони. Правило «клиент выбран = деньги на баланс» (владелец 22.07) остаётся,
+    # кроме этих статей: они не про баланс, клиент в записи только для учёта.
+    if payload.type == "income" and payload.category_id in NOT_TO_BALANCE_CATEGORIES:
+        if not client_name and lookup_user is not None:
+            client_name = lookup_user.name
+    elif payload.credit_user_balance and payload.type == "income" and payload.client_id:
         target_user = lookup_user
         if not target_user:
             raise HTTPException(
@@ -634,6 +645,15 @@ def update_transaction(
     # Allowed fields
     allowed = {"type", "amount", "currency", "payment_method", "category_id",
                "description", "branch", "date", "client_id", "client_name"}
+
+    # Смена статьи деньги не двигает: зачисленная запись осталась бы на балансе под
+    # видом «Каталога», а запись только для кассы стала бы «пополнением» без зачисления.
+    if "category_id" in payload and tx.type == "income" and tx.client_id:
+        _new_off = payload["category_id"] in NOT_TO_BALANCE_CATEGORIES
+        _old_off = tx.category_id in NOT_TO_BALANCE_CATEGORIES
+        if (_new_off and tx.credited_user_id) or (_old_off and not _new_off and not tx.credited_user_id):
+            raise HTTPException(400, "Так статью не поменять: от неё зависит, идут ли деньги на баланс. "
+                                     "Удалите запись и внесите заново с нужной статьёй.")
 
     # Snapshot pre-change state to rebalance a credited user afterwards.
     old_amount = float(tx.amount or 0)
