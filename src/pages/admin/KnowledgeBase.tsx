@@ -387,7 +387,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             <div style={boxHair}>
                 <div style={subhead}>Статусы бронирования</div>
                 <div style={li}><span style={bullet}>01</span><strong>Подтверждена</strong> — активная бронь, клиент придёт.</div>
-                <div style={li}><span style={bullet}>02</span><strong>Пересдана</strong> — владелец нажал «Пересдать», и другой клиент занял это время. Первоначальная бронь отменена с 50% возвратом.</div>
+                <div style={li}><span style={bullet}>02</span><strong>Пересдана</strong> — владелец нажал «Пересдать», и другой клиент занял это время. Занятая часть брони отменена с возвратом 50% её стоимости; если заняли не всё, остальное время остаётся за владельцем и на пересдаче.</div>
                 <div style={li}><span style={bullet}>03</span><strong>На пересдаче</strong> — владелец нажал «Пересдать», но время пока никто не занял. Бронь ещё активна.</div>
                 <div style={li}><span style={bullet}>04</span><strong>Отменена</strong> — бронь отменена (возврат зависит от политики — см. ценовую политику).</div>
                 <div style={li}><span style={bullet}>05</span><strong>Прошла</strong> — время брони вышло.</div>

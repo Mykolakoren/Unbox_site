@@ -614,6 +614,8 @@ class TelegramService:
         refund_amount: float,
         new_balance: float,
         booking_id: Optional[str] = None,
+        duration: Optional[int] = None,
+        remaining: str = "",
     ) -> bool:
         """Notify the original owner that their re-rent-listed slot was
         taken by someone else. They get the refund (50% by policy) and a
@@ -623,14 +625,18 @@ class TelegramService:
         date_label = self._fmt_date(date)
         loc_line = f" · {escape(location_name)}" if location_name else ""
         bal_line = (
-            f"💰 Возвращено: <b>+{refund_amount:.2f} ₾</b> (50%)\n"
+            f"💰 Возвращено: <b>+{refund_amount:.2f} ₾</b> (50% за занятое время)\n"
             f"💼 Баланс: <b>{new_balance:+.2f} ₾</b>"
         )
+        when = f"{escape(start_time)}, {duration} мин" if duration else escape(start_time)
+        # Заняли часть брони — остальное время всё ещё за владельцем (04.11).
+        rest_line = (f"🕐 Осталось за вами и на пересдаче: {escape(remaining)}\n\n" if remaining else "")
         id_line = f"\n<code>#{booking_id[:8]}</code>" if booking_id else ""
         text = (
             f"♻️ <b>Слот переарендован</b>\n\n"
-            f"📅 {escape(date_label)}, {escape(start_time)}\n"
+            f"📅 {escape(date_label)}, {when}\n"
             f"📍 {escape(resource_name)}{loc_line}\n\n"
+            f"{rest_line}"
             f"{bal_line}"
             f"{id_line}"
         )

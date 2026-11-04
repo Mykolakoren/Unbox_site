@@ -17,6 +17,7 @@ os.environ.setdefault("ENVIRONMENT", "development")
 
 import guard_hours_pool_moves as H  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
+from sqlmodel import select  # noqa: E402
 
 _REPO = os.path.join(os.path.dirname(__file__), "..", "..")
 
@@ -45,10 +46,13 @@ def test_extend_takes_over_re_rent_and_refunds_half():
         _extend(s, admin, b, 30)                      # раньше: 409 «Слот занят»
         s.expire_all()
         assert s.get(Booking, b.id).duration == 90
-        aa = s.get(Booking, a.id)
-        assert aa.status == "cancelled" and not aa.is_re_rent_listed, "пересдача не забрана"
+        # 04.11: продление заняло 30 из 60 минут — отменён и оплачен только этот кусок.
+        rows = s.exec(select(Booking).where(Booking.user_uuid == alla.id).order_by(Booking.start_time)).all()
+        assert [(r.start_time, r.duration, r.status) for r in rows] == \
+            [("15:00", 30, "cancelled"), ("15:30", 30, "confirmed")], "занятая часть брони Аллы отделена неверно"
+        assert rows[1].is_re_rent_listed, "остаток снялся с пересдачи"
         got_back = float(s.get(User, alla.id).balance) - alla_before
-        assert abs(got_back - alla_paid * 0.5) < 0.01, f"Алле ждали 50 % ({alla_paid * 0.5}), вернулось {got_back}"
+        assert abs(got_back - alla_paid * 0.25) < 0.01, f"Алле ждали 25 % ({alla_paid * 0.25}), вернулось {got_back}"
 
 
 def test_extend_still_blocked_by_normal_booking():

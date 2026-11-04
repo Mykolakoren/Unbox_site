@@ -308,24 +308,102 @@ def _gcal_delete_in_background(event_id: str, resource_id: Optional[str]) -> Non
         logger.warning(f"[GCal cancel bg] delete_event failed for event={event_id}: {e}")
 
 
-def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, current_user: User) -> None:
+def _cut_taken_piece(session: Session, booking: Booking, taken_start: int, taken_end: int,
+                     current_user: User) -> tuple:
+    """Отделить от брони на пересдаче кусок [taken_start, taken_end) в минутах от начала дня.
+    Возвращает (кусок, что осталось, событие календаря старой брони). Остаток остаётся за
+    владельцем и на пересдаче. Разделить нельзя (время вне сетки 30 минут, бронь со снятым
+    долгом) — (вся бронь, [], None): её отменяет вызывающий, а возврат считает по доле
+    занятого времени."""
+    h, m = map(int, (booking.start_time or "0:0").split(":"))
+    start = h * 60 + m
+    end = start + int(booking.duration or 0)
+    cut_from, cut_to = max(start, taken_start), min(end, taken_end)
+    if cut_from <= start and cut_to >= end:
+        return booking, [], None
+    parts = [p for p in (cut_from - start, cut_to - cut_from, end - cut_to) if p > 0]
+    piece_idx = 1 if cut_from > start else 0
+    created_by = (booking.created_by_id, booking.created_by_name)
+    try:
+        if booking.payment_status == "waived":
+            raise HTTPException(status_code=409, detail="waived")
+        rows, old_event_id, _owner = split_booking_rows(session, booking, parts, current_user)
+    except HTTPException:
+        return booking, [], None
+    piece = rows[piece_idx]
+    rest = [r for i, r in enumerate(rows) if i != piece_idx]
+    for r in rows:
+        r.is_re_rent_listed = True
+        r.created_by_id, r.created_by_name = created_by
+        # Остаток — та же бронь: серия и уже отправленное напоминание при нём.
+        r.recurring_group_id = booking.recurring_group_id
+        r.reminder_sent_at = booking.reminder_sent_at
+        session.add(r)
+    if piece is booking and booking.crm_client_id:
+        rest[0].crm_client_id = booking.crm_client_id
+    session.flush()
+    return piece, rest, old_event_id
+
+
+def _run_after_commit(session: Session, actions: list) -> None:
+    """Telegram и календарь — только когда бронь уже записана: иначе отказ ниже по пути
+    («недостаточно средств») оставлял бы ложное сообщение о возврате и удалённые события."""
+    for action in actions:
+        try:
+            action()
+        except Exception as e:
+            logger.warning("[re-rent after commit] %s", e)
+    if actions:
+        session.commit()
+
+
+def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, current_user: User,
+                                taken_start: int, taken_end: int) -> list:
     """Забрать время у броней «на пересдаче»: отменить их, вернуть владельцу 50 %,
     сообщить ему в Telegram, убрать событие из Google. Общее для новой брони и
     (29.10) продления — раньше продление поверх пересдачи отвечало «слот занят».
-    Не коммитит."""
+    04.11 (владелец): забрали часть — отменяется и возвращается 50 % только за неё, а
+    не за всю бронь (11:00–12:30 за 30 ₾, заняли 30 минут: было 15 ₾ и отмена всей
+    брони, теперь 5 ₾, час остаётся за владельцем и на пересдаче). Не коммитит.
+    Возвращает действия для _run_after_commit."""
     # Auto-cancel all conflicting re-rent bookings with 50% refund.
     # Re-rent policy: original owner gets 50%, remaining 50% = Unbox income.
     RE_RENT_REFUND_PERCENT = 0.5
+    after_commit: list = []
 
-    for re_rent_booking in re_rent_conflicts:
-        re_rent_owner = _resolve_booking_owner(session, re_rent_booking)
+    for conflict in re_rent_conflicts:
+        # Замок и свежее состояние: владелец мог отменить бронь, снять с пересдачи, или
+        # её кусок уже забрал другой — иначе двойной возврат и пересечение остатков.
+        listed_booking = session.exec(
+            select(Booking).where(Booking.id == conflict.id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        if listed_booking is None or listed_booking.status != "confirmed":
+            continue
+        _h, _m = map(int, (listed_booking.start_time or "0:0").split(":"))
+        _start = _h * 60 + _m
+        _full = int(listed_booking.duration or 0)
+        _taken = max(0, min(_start + _full, taken_end) - max(_start, taken_start))
+        if _taken <= 0:
+            continue
+        if not listed_booking.is_re_rent_listed:
+            raise HTTPException(status_code=409, detail="Это время уже занято: бронь сняли с пересдачи")
+
+        re_rent_owner = _resolve_booking_owner(session, listed_booking)
         refund_meta = {}
         refund_amount = 0.0
+
+        re_rent_booking, remaining_parts, split_event_id = _cut_taken_piece(
+            session, listed_booking, taken_start, taken_end, current_user)
+        # Не удалось отделить кусок: бронь снимается целиком, но возврат — только за занятое.
+        refund_percent = RE_RENT_REFUND_PERCENT
+        if not remaining_parts and _full > 0 and _taken < _full:
+            refund_percent = round(RE_RENT_REFUND_PERCENT * _taken / _full, 4)
 
         if re_rent_owner:
             refund_meta = _refund_booking_to_owner(
                 session, re_rent_booking, re_rent_owner,
-                refund_percent=RE_RENT_REFUND_PERCENT,
+                refund_percent=refund_percent,
             )
             refund_amount = float(refund_meta.get("refunded_amount", 0.0)) if isinstance(refund_meta, dict) else 0.0
 
@@ -334,7 +412,7 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
         # (X ₾)" badge without joining timeline events.
         re_rent_booking.status = "cancelled"
         re_rent_booking.cancellation_reason = (
-            f"Auto-cancelled: slot re-rented to another user (50% refund · "
+            f"Auto-cancelled: slot re-rented to another user ({refund_percent * 100:g}% refund · "
             f"{refund_amount:.2f}GEL)"
         )
         re_rent_booking.cancelled_by = "system:re-rent"
@@ -342,43 +420,53 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
         re_rent_booking.updated_at = datetime.now()
         session.add(re_rent_booking)
 
-        # Notify the original owner via Telegram (best-effort —
-        # never blocks the new booking creation).
-        try:
-            if re_rent_owner and re_rent_owner.telegram_id:
+        # Сессия CRM не держится за отменённую бронь — как при обычной отмене.
+        from app.models.therapy_session import TherapySession as _TS
+        for ts in session.exec(select(_TS).where(_TS.booking_id == str(re_rent_booking.id))).all():
+            ts.booking_id = None
+            ts.is_booked = False
+            ts.updated_at = datetime.now()
+            session.add(ts)
+
+        # Notify the original owner via Telegram (best-effort — never blocks the booking).
+        if re_rent_owner and re_rent_owner.telegram_id:
+            def _notify(owner=re_rent_owner, piece=re_rent_booking, amount=refund_amount, rest=tuple(remaining_parts)):
                 from app.models.resource import Resource as ResModel
                 from app.models.location import Location as LocModel
-                rb_res = session.get(ResModel, re_rent_booking.resource_id)
+                rb_res = session.get(ResModel, piece.resource_id)
                 rb_loc = (
                     session.get(LocModel, rb_res.location_id)
                     if rb_res and rb_res.location_id else None
                 )
                 telegram_service.send_rerent_taken(
-                    chat_id=str(re_rent_owner.telegram_id),
-                    resource_name=(rb_res.name if rb_res else re_rent_booking.resource_id),
+                    chat_id=str(owner.telegram_id),
+                    resource_name=(rb_res.name if rb_res else piece.resource_id),
                     location_name=(rb_loc.name if rb_loc else None),
-                    date=re_rent_booking.date,
-                    start_time=re_rent_booking.start_time,
-                    refund_amount=refund_amount,
-                    new_balance=float(re_rent_owner.balance or 0.0),
-                    booking_id=str(re_rent_booking.id),
+                    date=piece.date,
+                    start_time=piece.start_time,
+                    refund_amount=amount,
+                    new_balance=float(owner.balance or 0.0),
+                    booking_id=str(piece.id),
+                    duration=int(piece.duration or 0),
+                    remaining=", ".join(f"{r.start_time} ({int(r.duration or 0)} мин)" for r in rest),
                 )
-        except Exception as e:
-            logger.warning(f"[TG re-rent owner alert] failed: {e}")
+            after_commit.append(_notify)
 
-        # GCal cleanup
-        if re_rent_booking.gcal_event_id:
-            try:
-                gcal_service.delete_event(
-                    re_rent_booking.gcal_event_id,
-                    re_rent_booking.resource_id,
-                )
-            except Exception as e:
-                logger.warning(
-                    f"[GCal Auto-cancel re-rent] delete_event failed for "
-                    f"booking={re_rent_booking.id} event={re_rent_booking.gcal_event_id}: {e}"
-                )
-            re_rent_booking.gcal_event_id = None
+        # GCal cleanup: событие целой брони уходит, у остатка — свои.
+        _event_to_delete = split_event_id or re_rent_booking.gcal_event_id
+        _event_resource = re_rent_booking.resource_id
+        re_rent_booking.gcal_event_id = None
+        if _event_to_delete:
+            def _delete_event(event_id=_event_to_delete, resource_id=_event_resource):
+                gcal_service.delete_event(event_id, resource_id)
+            after_commit.append(_delete_event)
+        for _rest_row in remaining_parts:
+            def _create_event(row=_rest_row, owner=re_rent_owner):
+                ev = gcal_service.create_event(row, user_name=(owner.name if owner else row.user_id))
+                if ev:
+                    row.gcal_event_id = ev
+                    session.add(row)
+            after_commit.append(_create_event)
 
         # Audit log for auto-cancel with 50% refund details
         timeline_service.log_event(
@@ -390,18 +478,19 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
             event_type="booking_auto_cancelled_re_rent",
             description=(
                 f"Booking auto-cancelled due to re-rent claim by {current_user.name}. "
-                f"Owner refunded {int(RE_RENT_REFUND_PERCENT * 100)}%, rest → Unbox income."
+                f"Owner refunded {refund_percent * 100:g}%, rest → Unbox income."
             ),
             metadata={
-                "refund_percent": RE_RENT_REFUND_PERCENT,
+                "refund_percent": refund_percent,
                 "new_booking_user": current_user.email,
                 **refund_meta,
-                "policy_refund_percent": RE_RENT_REFUND_PERCENT,
+                "policy_refund_percent": refund_percent,
             },
             # Не коммитим посреди: отмена пересдачи и новая бронь/продление уходят
             # в базу одним коммитом (сбой ниже откатит и отмену).
             commit=False,
         )
+    return after_commit
 
 
 def _topup_weekly_rebate_if_closed_week(session: Session, booking: Booking, owner: Optional[User]) -> None:
@@ -1455,7 +1544,11 @@ def check_slots_availability(
                 start_time=slot.start_time,
                 duration=slot.duration,
             )
-            if re_rent:
+            # Кроме пересдачи может стоять обычная бронь — тогда забрать время нельзя.
+            if re_rent and check_availability(
+                session=session, resource_id=slot.resource_id, date=date,
+                start_time=slot.start_time, duration=slot.duration, ignore_re_rent=True,
+            )[0]:
                 results.append({
                     "available": False,
                     "conflict": conflict,
@@ -1884,6 +1977,7 @@ def create_booking(
                     detail="Этот клиент принадлежит другому специалисту",
                 )
 
+        _re_rent_after_commit: list = []
         if not is_available:
             # Check if conflict is with re-rent-listed booking(s)
             re_rent_conflicts = find_re_rent_conflicts(
@@ -1900,7 +1994,24 @@ def create_booking(
                     status_code=400, detail=f"Это время уже занято: {reason}"
                 )
 
-            _take_over_re_rent_bookings(session, re_rent_conflicts, current_user)
+            # 04.11: пересдача не помеха, но кроме неё на это время может стоять обычная
+            # бронь или закрытый кабинет. Раньше новая бронь ложилась поверх чужой.
+            _free_besides, _other_reason = check_availability(
+                session=session,
+                resource_id=booking_in.resource_id,
+                date=booking_in.date,
+                start_time=booking_in.start_time,
+                duration=booking_in.duration,
+                ignore_re_rent=True,
+            )
+            if not _free_besides:
+                raise HTTPException(status_code=400, detail=f"Это время уже занято: {_other_reason}")
+
+            _new_h, _new_m = map(int, booking_in.start_time.split(":"))
+            _new_start = _new_h * 60 + _new_m
+            _re_rent_after_commit = _take_over_re_rent_bookings(
+                session, re_rent_conflicts, current_user,
+                _new_start, _new_start + int(booking_in.duration))
             # Slot is now free — proceed with creating the new booking
 
         # (booking_owner already resolved above, before check_availability)
@@ -2120,6 +2231,8 @@ def create_booking(
 
         session.add(booking)
         session.commit()
+        session.refresh(booking)
+        _run_after_commit(session, _re_rent_after_commit)
         session.refresh(booking)
 
         # Пауза снята этой бронью — сказать клиенту (после коммита, в фоне).
@@ -6815,8 +6928,10 @@ def extend_booking(
                 status_code=409,
                 detail=f"Конфликт с бронью {other.start_time} ({other.duration} мин). Слот занят."
             )
+    _re_rent_after_commit: list = []
     if re_rent_in_way:
-        _take_over_re_rent_bookings(session, re_rent_in_way, current_user)
+        _re_rent_after_commit = _take_over_re_rent_bookings(
+            session, re_rent_in_way, current_user, old_end_h, new_end_total)
 
     # ── Доплата за добавленное время ────────────────────────────────────────
     # Считаем прайс-движком: цена(новая длительность) − цена(старая), а НЕ
@@ -6958,6 +7073,8 @@ def extend_booking(
 
     session.add(booking)
     session.commit()
+    session.refresh(booking)
+    _run_after_commit(session, _re_rent_after_commit)
     session.refresh(booking)
 
     # «Часы подряд» у соседей — как при переносе (12.10, тот же класс, что у Дарьи
@@ -7643,42 +7760,12 @@ class SplitRequest(PydanticBaseModel):
     parts: List[int]
 
 
-@router.patch("/{booking_id}/split", response_model=List[BookingRead])
-def split_booking(
-    booking_id: str,
-    payload: SplitRequest,
-    session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    """Разделить бронь на несколько подряд идущих частей.
-
-    Первой частью остаётся ИСХОДНАЯ бронь (тот же id) — чтобы не отвалились
-    привязанная CRM-сессия, событие календаря и ссылки на неё. Остальные части
-    создаются новыми бронями сразу за ней.
-    """
-    try:
-        b_uuid = UUID(booking_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Некорректный номер брони")
-
-    booking = session.get(Booking, b_uuid)
-    if not booking:
-        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+def split_booking_rows(session: Session, booking: Booking, parts: list, current_user: User) -> tuple:
+    """Деление брони на части без коммита и календаря: (части, старое событие, владелец).
+    Общее для «Разделить» и (04.11) пересдачи части брони. Права проверяет вызывающий."""
     from app.services.billing_defer import heal_legacy_subscription_hours
     heal_legacy_subscription_hours(booking)
-
-    is_owner = _check_ownership(booking, current_user)
-    if not is_owner and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
-    if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Делить можно только подтверждённую бронь")
-    if booking.payment_status == "waived":
-        raise HTTPException(
-            status_code=409,
-            detail=_waived_refusal(booking, current_user, "разделить её нельзя"),
-        )
-
-    parts = [int(p) for p in (payload.parts or [])]
+    parts = [int(p) for p in (parts or [])]
     if len(parts) < 2:
         raise HTTPException(status_code=400, detail="Нужно минимум две части")
     if any(p < 30 or p % 30 != 0 for p in parts):
@@ -7747,6 +7834,17 @@ def split_booking(
 
     weights = [float(q.final_price) if q is not None else float(p)
                for q, p in zip(quotes, parts)]
+    # 04.11: абонемент — по тому, что уже снято, а не по сегодняшнему остатку часов (пул
+    # исчерпался — и котировки становились денежными: пиковые 5 ₾ делились 2,22 / 2,78).
+    _sub_split = (booking.payment_method or "").lower() == "subscription"
+    if _sub_split:
+        _off = 0
+        weights = []
+        for p in parts:
+            _m = start_min0 + _off
+            _st = booking.date.replace(hour=_m // 60, minute=_m % 60, second=0, microsecond=0)
+            weights.append(float(PricingService.subscription_peak_money(_st, p)) if float(booking.hours_deducted or 0) > 0 else 0.0)
+            _off += p
     if sum(weights) <= 0:
         weights = [float(p) for p in parts]
     wsum = sum(weights)
@@ -7775,6 +7873,8 @@ def split_booking(
             # Бонус-час «Часа в подарок» держит одна строка — исходная (первая
             # часть): отмена каждой части иначе вернула бы его снова.
             return _manual_rule if (first or _manual_rule != "BONUS_HOUR") else "BONUS_HOUR_PART"
+        if _sub_split:
+            return booking.applied_rule
         return q.applied_rule if q is not None else booking.applied_rule
 
     def _part_discount(q, room: float) -> float:
@@ -7904,6 +8004,46 @@ def split_booking(
             created.append(nb)
         offset += p
 
+    return created, old_event_id, owner
+
+
+@router.patch("/{booking_id}/split", response_model=List[BookingRead])
+def split_booking(
+    booking_id: str,
+    payload: SplitRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Разделить бронь на несколько подряд идущих частей.
+
+    Первой частью остаётся ИСХОДНАЯ бронь (тот же id) — чтобы не отвалились
+    привязанная CRM-сессия, событие календаря и ссылки на неё. Остальные части
+    создаются новыми бронями сразу за ней.
+    """
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    from app.services.billing_defer import heal_legacy_subscription_hours
+    heal_legacy_subscription_hours(booking)
+
+    is_owner = _check_ownership(booking, current_user)
+    if not is_owner and current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if booking.status != "confirmed":
+        raise HTTPException(status_code=400, detail="Делить можно только подтверждённую бронь")
+    if booking.payment_status == "waived":
+        raise HTTPException(
+            status_code=409,
+            detail=_waived_refusal(booking, current_user, "разделить её нельзя"),
+        )
+
+    created, old_event_id, owner = split_booking_rows(session, booking, payload.parts or [], current_user)
+
     session.commit()
     for b in created:
         session.refresh(b)
@@ -7926,7 +8066,7 @@ def split_booking(
     session.commit()
 
     logger.info("[split] бронь %s разделена на %s: %s",
-                booking_id, parts, [float(b.final_price or 0) for b in created])
+                booking_id, payload.parts, [float(b.final_price or 0) for b in created])
     return [enrich_booking_status(b) for b in created]
 
 

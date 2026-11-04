@@ -46,9 +46,12 @@ def check_availability(
     exclude_booking_id: str = None,
     lock_rows: bool = False,
     requester_user_uuid=None,
+    ignore_re_rent: bool = False,
 ) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
+    ignore_re_rent=True: брони на пересдаче не считаются помехой (можно ли занять слот,
+    если их время забрать).
     Returns (True, None) if available, (False, reason) if overlapping.
     All confirmed bookings block the slot, including re-rent listed ones, and
     pending_approval ones (12.10).
@@ -111,6 +114,8 @@ def check_availability(
     new_end = new_start + duration
 
     for b in day_bookings:
+        if ignore_re_rent and b.status == "confirmed" and b.is_re_rent_listed:
+            continue
         existing_start = time_to_minutes(b.start_time)
         if existing_start < 0:
             continue  # Skip corrupted bookings in DB
