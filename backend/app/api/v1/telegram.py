@@ -94,6 +94,103 @@ SLOT_STEP_MIN = 30
 DURATION_OPTIONS = [60, 90, 120, 180]
 
 
+SERIES_END_ADMIN_THRESHOLD = 2   # занятий осталось — пора предупредить админов
+TG_TEXT_LIMIT = 3800             # запас до лимита Telegram в 4096 символов
+
+
+def _series_end_admin_digest(session: Session, series_groups: dict, now: datetime) -> int:
+    """Одно сообщение в админ-чат со списком серий, где осталось ≤2 занятий.
+
+    Каждую серию сообщаем один раз на каждую «последнюю дату»: отметка
+    owner.crm_data['series_admin_notified'] = {group_id: 'YYYY-MM-DD'}
+    ставится только после успешной отправки. Продлили серию в той же группе —
+    последняя дата сменилась, и у нового конца будет новое сообщение.
+    Возвращает число серий в сводке.
+    """
+    if not settings.TELEGRAM_ADMIN_CHAT_ID:
+        return 0
+
+    items: list[tuple[User, str, str]] = []  # (владелец, group_id, строка)
+    for group_id, group_bookings in series_groups.items():
+        if len(group_bookings) > SERIES_END_ADMIN_THRESHOLD:
+            continue
+        rep = group_bookings[0]
+        owner: Optional[User] = session.get(User, rep.user_uuid) if rep.user_uuid else None
+        if not owner and rep.user_id:
+            owner = session.exec(select(User).where(User.email == rep.user_id)).first()
+        if not owner or getattr(owner, "archived_at", None):
+            continue
+        dates = sorted(b.date for b in group_bookings)
+        last = dates[-1]
+        notified = (owner.crm_data or {}).get("series_admin_notified")
+        if isinstance(notified, dict) and notified.get(group_id) == last.strftime("%Y-%m-%d"):
+            continue
+        res = session.get(Resource, rep.resource_id)
+        res_name = (res.name if res and res.name else rep.resource_id)
+        left = len(group_bookings)
+
+        # Другие живые серии этого клиента — вдруг продление уже поставлено.
+        others = session.exec(
+            select(Booking)
+            .where(Booking.recurring_group_id.is_not(None))  # type: ignore
+            .where(Booking.recurring_group_id != group_id)
+            .where(Booking.status == "confirmed")
+            .where(Booking.date >= now.replace(hour=0, minute=0, second=0, microsecond=0))
+            .where(Booking.user_uuid == owner.id)
+        ).all()
+        other_last: dict[str, Booking] = {}
+        for b in others:
+            cur = other_last.get(b.recurring_group_id)
+            if cur is None or b.date > cur.date:
+                other_last[b.recurring_group_id] = b
+        other_txt = "; ".join(
+            f"{WEEKDAYS_RU[b.date.weekday()].lower()} {b.start_time} до {b.date.strftime('%d.%m')}"
+            for b in sorted(other_last.values(), key=lambda x: x.date)
+        )
+
+        line = (
+            f"• <b>{escape(owner.name or owner.email)}</b> — {escape(res_name)}, "
+            f"{WEEKDAYS_RU[last.weekday()].lower()} {rep.start_time}\n"
+            f"   осталось {left}, последняя {last.strftime('%d.%m')} · "
+            + ("бот подключён" if owner.telegram_id else "<b>бота нет — напишите клиенту</b>")
+        )
+        if other_txt:
+            line += f"\n   другие серии: {other_txt}"
+        items.append((owner, f"{group_id}|{last.strftime('%Y-%m-%d')}", line))
+
+    if not items:
+        return 0
+
+    header = "📅 <b>Заканчиваются постоянные брони</b>\n\n"
+    chunks: list[list[tuple[User, str, str]]] = [[]]
+    size = len(header)
+    for it in items:
+        if chunks[-1] and size + len(it[2]) + 2 > TG_TEXT_LIMIT:
+            chunks.append([])
+            size = len(header)
+        chunks[-1].append(it)
+        size += len(it[2]) + 2
+
+    sent = 0
+    for chunk in chunks:
+        text = header + "\n\n".join(it[2] for it in chunk)
+        if not telegram_service.send_admin_alert(text):
+            continue
+        for owner, key, _ in chunk:
+            group_id, last_iso = key.split("|", 1)
+            crm = dict(owner.crm_data or {})
+            done = crm.get("series_admin_notified")
+            done = dict(done) if isinstance(done, dict) else {}
+            done[group_id] = last_iso
+            crm["series_admin_notified"] = done
+            owner.crm_data = crm
+            session.add(owner)
+            sent += 1
+    if sent:
+        session.commit()
+    return sent
+
+
 # ── POST /telegram/send-reminders ──────────────────────────────────────────
 # Called by cron every 10-15 minutes. Scans for bookings starting in ~2h that
 # haven't been reminded yet and fires the Telegram reminder. Excel #58.
@@ -289,7 +386,18 @@ def send_reminders_endpoint(
     if series_sent:
         session.commit()
 
+    # Админам — когда в серии осталось ≤2 занятий (владелец 08.11). Клиенту
+    # напоминание выше уходит только через бота, а бот подключён меньше чем
+    # у половины владельцев серий — без этого серия кончается молча.
+    try:
+        series_admin_alerts = _series_end_admin_digest(session, series_groups, now)
+    except Exception:
+        logger.exception("[tg:series-end-admin] digest failed")
+        session.rollback()
+        series_admin_alerts = 0
+
     return {
+        "series_admin_alerts": series_admin_alerts,
         "scanned": scanned,
         "sent": sent,
         "series_reminders_sent": series_sent,
