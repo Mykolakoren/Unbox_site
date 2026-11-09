@@ -432,8 +432,10 @@ export function CrmBookings() {
 
     // Load clients and sessions on mount
     useEffect(() => {
-        if (clients.length === 0) {
-            setLoadingClients(true);
+        // 06.11: клиентов грузим всегда, не только при пустом списке — синк календаря
+        // мог завести новую карточку, а в памяти страницы её нет (встреча «без имени»).
+        {
+            setLoadingClients(clients.length === 0);
             fetchClients().finally(() => setLoadingClients(false));
         }
         fetchSessions();

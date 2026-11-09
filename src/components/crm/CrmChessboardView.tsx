@@ -803,7 +803,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     useEffect(() => {
         fetchBookings();
         fetchResources();
-        if (clients.length === 0) fetchClients();
+        // 06.11: клиентов грузим всегда, не только при пустом списке — синк календаря
+        // мог завести новую карточку, а в памяти страницы её нет (встреча «без имени»).
+        fetchClients();
         fetchSessions();
     }, []);
 

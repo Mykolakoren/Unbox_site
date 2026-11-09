@@ -57,7 +57,9 @@ export function MobileCrmNotes() {
     };
 
     useEffect(() => {
-        if (clients.length === 0) fetchClients(false).catch(() => {});
+        // 06.11: клиентов грузим всегда, не только при пустом списке — синк календаря
+        // мог завести новую карточку, а в памяти страницы её нет (встреча «без имени»).
+        fetchClients(false).catch(() => {});
         loadNotes();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clients.length, fetchClients]);

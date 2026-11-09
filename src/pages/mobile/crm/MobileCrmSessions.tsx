@@ -70,8 +70,10 @@ export function MobileCrmSessions() {
     useDocumentTitle('Сессии · Psy-CRM');
 
     useEffect(() => {
-        if (clients.length === 0) fetchClients(false, true).catch(() => {});
-    }, [clients.length, fetchClients]);
+        // 06.11: клиентов грузим всегда, не только при пустом списке — синк календаря
+        // мог завести новую карточку, а в памяти страницы её нет (встреча «без имени»).
+        fetchClients(false, true).catch(() => {});
+    }, [fetchClients]);
 
     // Границы — календарные дни по Батуми. Сервер сравнивает с UTC, поэтому
     // начало берём на день раньше: сессия в 00:30 по Батуми не теряется.
