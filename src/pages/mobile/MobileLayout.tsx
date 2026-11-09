@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CalendarDays, Home, Search, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Home, Search, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { OnboardingTour, hasCompletedTour } from './OnboardingTour';
 import { registerPtrScrollContainer } from './usePullToRefresh';
@@ -12,6 +12,9 @@ import { loginPathWithRedirect } from '../../utils/loginRedirect';
 // цветом ink-60 (было #999, 2.8:1), активная — бирюзой «выбрано».
 import { COLOR, FONT, TEXT, Z } from '../../design/tokens';
 import { useTouchDensity } from '../../hooks/useTouchDensity';
+import { isAdminFlowPath, useAdminFlow } from './adminFlow';
+import { isBookingAdmin } from './crmAccess';
+import { useBookingStore } from '../../store/bookingStore';
 
 /**
  * Mobile beta shell.
@@ -33,6 +36,27 @@ export function MobileLayout() {
     const [tourOpen, setTourOpen] = useState(false);
     const mainRef = useRef<HTMLElement>(null);
     useTouchDensity();
+
+    // Админ-бронь / админ-перенос (ревью админки 09.11, №2б): оболочка открылась
+    // сразу на «Свободно»/«Оформлении» — значит, пришли из админки (или по
+    // ссылке), а не своими вкладками. Тогда вместо клиентского меню — полоска
+    // «← Вернуться в админку · Бронь для: …». Ушли на другой клиентский экран —
+    // режим снимается. «Привязать кабинет» из CRM (?linkSession) — не админ-бронь.
+    const adminFlowActive = useAdminFlow(s => s.active);
+    const adminFlowFor = useAdminFlow(s => s.forName);
+    const setAdminFlow = useAdminFlow(s => s.setActive);
+    const mountedOnce = useRef(false);
+    useLayoutEffect(() => {
+        const sp = new URLSearchParams(location.search);
+        const flowPath = isAdminFlowPath(location.pathname) && !sp.has('linkSession');
+        mountedOnce.current = true;
+        // 09.11 (ревизия регрессий): режим включается ТОЛЬКО явным признаком из
+        // админки (?admin=1), а не «оболочка открылась на Свободно» — иначе админ,
+        // бронирующий себе с телефона (или после перезагрузки), попадал в него сам.
+        if (flowPath && sp.get('admin') === '1') { setAdminFlow(true); return; }
+        if (!flowPath && useAdminFlow.getState().active) setAdminFlow(false);
+    }, [location.pathname, location.search, setAdminFlow]);
+    const showAdminStrip = adminFlowActive && isBookingAdmin(currentUser) && isAdminFlowPath(location.pathname);
 
     // Register the real scroll container so usePullToRefresh gates on its
     // scrollTop (PTR was firing even when scrolled down inside lists).
@@ -178,7 +202,17 @@ export function MobileLayout() {
                 </main>
             </div>
 
-            {/* Bottom tab bar */}
+            {showAdminStrip ? (
+                <AdminFlowStrip
+                    forName={adminFlowFor}
+                    onBack={() => {
+                        setAdminFlow(false);
+                        useBookingStore.getState().setBookingForUser(null);
+                        navigate('/m/admin/bookings');
+                    }}
+                />
+            ) : (
+            /* Bottom tab bar */
             <nav
                 style={{
                     position: 'fixed',
@@ -200,9 +234,53 @@ export function MobileLayout() {
                 <TabLink to="/m/find" icon={Search} label="Свободно" tourId="tab-find" />
                 <TabLink to="/m/me" icon={UserIcon} label="Я" tourId="tab-me" />
             </nav>
+            )}
 
             {tourOpen && <OnboardingTour onClose={() => setTourOpen(false)} />}
         </div>
+    );
+}
+
+/** Вместо клиентского меню во время админ-брони: дорога назад и для кого бронь. */
+function AdminFlowStrip({ forName, onBack }: { forName: string | null; onBack: () => void }) {
+    return (
+        <nav
+            aria-label="Админ-бронь"
+            style={{
+                position: 'fixed',
+                bottom: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: '100%',
+                maxWidth: 480,
+                minHeight: 60,
+                background: COLOR.card,
+                borderTop: `1px solid ${COLOR.ink08}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 12px calc(6px + env(safe-area-inset-bottom, 0px))',
+                zIndex: Z.nav,
+            }}
+        >
+            <button
+                type="button"
+                onClick={onBack}
+                className="press"
+                style={{
+                    minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '0 10px', borderRadius: 10, border: `1px solid ${COLOR.ink20}`,
+                    background: COLOR.card, color: COLOR.ink, fontFamily: 'inherit',
+                    fontSize: TEXT.small, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+                }}
+            >
+                <ArrowLeft size={16} aria-hidden="true" /> В админку
+            </button>
+            <div style={{ flex: 1, minWidth: 0, fontSize: TEXT.small, lineHeight: 1.3 }}>
+                <span style={{ color: COLOR.ink60 }}>Бронь для: </span>
+                <b style={{ overflowWrap: 'anywhere' }}>{forName || 'выберите на оформлении'}</b>
+            </div>
+        </nav>
     );
 }
 

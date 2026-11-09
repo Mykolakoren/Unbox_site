@@ -86,10 +86,19 @@ export function MobileAdminLayout() {
         }
     }, [currentUser, isAdmin, location.search]);
 
-    // Счётчик на вкладке «Заявки»: срочные брони + анкеты на проверке.
+    // Счётчик на вкладке «Заявки»: срочные брони + анкеты на проверке — то, что
+    // ждёт РЕШЕНИЯ админа. Колокольчик в шапке считает другое: непрочитанные
+    // уведомления (поэтому числа могут не совпадать — это разные вещи).
     // Обновляем при смене экрана, не чаще раза в минуту.
+    // Ревью 09.11 (№5): раньше отметка времени ставилась ДО запроса, а первый
+    // запрос отменялся повторным запуском эффекта (пришёл currentUser) — второй
+    // блокировался «не чаще раза в минуту», и число не появлялось, пока не зайдёшь
+    // в «Заявки». Теперь отметка — только после ответа, а поздний ответ старого
+    // запроса отбрасывается по номеру, а не флагом «эффект перезапущен».
     const [requests, setRequests] = useState<number | null>(null);
     const requestsAt = useRef(0);
+    const requestsSeq = useRef(0);
+    const requestsInFlight = useRef(false);
     const [requestsTick, setRequestsTick] = useState(0);
     useEffect(() => {
         const onChanged = () => { requestsAt.current = 0; setRequestsTick(t => t + 1); };
@@ -99,19 +108,22 @@ export function MobileAdminLayout() {
     useEffect(() => {
         // Не админу эти запросы сервер отклоняет (403) — он и так уйдёт на /m.
         if (!currentUser || !isAdmin) return;
-        if (Date.now() - requestsAt.current < 60_000 && !location.pathname.startsWith('/m/admin/inbox')) return;
-        requestsAt.current = Date.now();
-        let alive = true;
+        const onInbox = location.pathname.startsWith('/m/admin/inbox');
+        if (!onInbox && (requestsInFlight.current || Date.now() - requestsAt.current < 60_000)) return;
+        const seq = ++requestsSeq.current;
+        requestsInFlight.current = true;
         Promise.allSettled([
             bookingsApi.getPendingApprovals(),
             specialistsApi.adminList(),
         ]).then(([hot, specs]) => {
-            if (!alive) return;
+            if (seq === requestsSeq.current) requestsInFlight.current = false;
+            if (seq !== requestsSeq.current) return;
+            if (hot.status === 'rejected' && specs.status === 'rejected') return; // повторим при следующем экране
             const a = hot.status === 'fulfilled' ? hot.value.length : 0;
             const b = specs.status === 'fulfilled' ? specs.value.filter(s => s.applicationStatus === 'pending').length : 0;
+            requestsAt.current = Date.now();
             setRequests(a + b);
         });
-        return () => { alive = false; };
     }, [currentUser, isAdmin, location.pathname, requestsTick]);
 
     if (!currentUser) {
@@ -298,6 +310,7 @@ function TabLink({ to, icon: Icon, label, badge = 0 }: { to: string; icon: React
         <NavLink
             to={to}
             aria-label={badge > 0 ? `${label}: ждут решения ${badge}` : undefined}
+            title={badge > 0 ? `Ждут вашего решения: ${badge} (срочные брони и анкеты)` : undefined}
             style={({ isActive }) => ({
                 position: 'relative',
                 display: 'flex',

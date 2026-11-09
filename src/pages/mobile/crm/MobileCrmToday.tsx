@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Calendar, RefreshCw, Plus, Plane } from 'lucide-react';
+import { Calendar, RefreshCw, Plus, Plane, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { crmApi, type CrmSession, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
@@ -8,7 +8,7 @@ import { useUserStore } from '../../../store/userStore';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { SessionActionSheet } from './SessionActionSheet';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
-import { useCrmDataVersion } from './crmDataVersion';
+import { useCrmCalendar, useCrmDataVersion } from './crmDataVersion';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -24,7 +24,8 @@ import { usePullToRefresh } from '../usePullToRefresh';
 import { RentalSessionSheet, rentalsWithoutSession } from '../../../components/crm/CrmWeekGrid';
 import type { BookingHistoryItem } from '../../../store/types';
 import { PullIndicator } from '../PullIndicator';
-import { partialPayment, sessionDebt } from '../../../utils/sessionMoney';
+import { isBillableStatus, partialPayment, sessionDebt, sessionPriceOf } from '../../../utils/sessionMoney';
+import { statusLabel } from '../../../design/statuses';
 
 const NO_SESSIONS: CrmSession[] = [];
 const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
@@ -72,6 +73,11 @@ export function MobileCrmToday() {
     const dataVersion = useCrmDataVersion();
     const [syncing, setSyncing] = useState(false);
     const [activeSheet, setActiveSheet] = useState<CrmSession | null>(null);
+    // 09.11: открыть шторку сразу на «Сколько заплатили?» (у сессии нет цены).
+    const [sheetPay, setSheetPay] = useState(false);
+    const openSheet = (s: CrmSession, pay = false) => { setSheetPay(pay); setActiveSheet(s); };
+    // 09.11 (ревью п. 6): без календаря кнопка ⟳ — тупик; вместо неё плашка «Как подключить».
+    const calendar = useCrmCalendar();
     const clients = useCrmStore(s => s.clients) as ClientWithStats[];
     const fetchClients = useCrmStore(s => s.fetchClients);
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
@@ -220,8 +226,10 @@ export function MobileCrmToday() {
         const now = Date.now();
         const sorted = [...sessions].sort((a, b) => parseUTC(a.date).getTime() - parseUTC(b.date).getTime());
         const live = sorted.filter(s => !CANCELLED.has(s.status));
-        const upcoming = live.filter(s => parseUTC(s.date).getTime() > now);
-        const started = live.filter(s => parseUTC(s.date).getTime() <= now);
+        // «Неявка · оплачивается» (NO_SHOW) — не «дальше», даже если время впереди
+        // (поздняя отмена): это долг, его закрывают на полке «Закрыть день».
+        const upcoming = live.filter(s => parseUTC(s.date).getTime() > now && s.status !== 'NO_SHOW');
+        const started = live.filter(s => parseUTC(s.date).getTime() <= now || s.status === 'NO_SHOW');
         const cancelled = sorted.filter(s => CANCELLED.has(s.status));
         // «Без следующей встречи»: была сессия в этот день, а будущей нет.
         // Только когда клиенты пришли со статистикой (nextSessionDate есть
@@ -294,22 +302,53 @@ export function MobileCrmToday() {
                             Сессия
                         </Button>
                     )}
-                    <Button
-                        variant="secondary"
-                        size="touch"
-                        disabled={syncing}
-                        onClick={handleSync}
-                        aria-label={syncing ? 'Синхронизируем с Google Календарём' : 'Синхронизировать с Google Календарём'}
-                        icon={<RefreshCw size={16} aria-hidden="true" style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />}
-                    />
+                    {calendar.connected !== false && (
+                        <Button
+                            variant="secondary"
+                            size="touch"
+                            disabled={syncing}
+                            onClick={handleSync}
+                            aria-label={syncing ? 'Синхронизируем с Google Календарём' : 'Синхронизировать с Google Календарём'}
+                            icon={<RefreshCw size={16} aria-hidden="true" style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />}
+                        />
+                    )}
                 </div>
             </div>
+
+            {calendar.connected === false && !viewingOther && (
+                <button
+                    type="button"
+                    onClick={() => calendar.openSetup?.()}
+                    className="press"
+                    data-calendar-plate
+                    style={calendarPlate}
+                >
+                    <CalendarOff size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontWeight: 600 }}>Календарь не подключён</span>
+                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                            Встречи из Google Календаря будут появляться здесь сами
+                        </span>
+                    </span>
+                    <span style={{ fontWeight: 600, textDecoration: 'underline', flexShrink: 0 }}>Как подключить</span>
+                </button>
+            )}
 
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
             {/* ── Лента недели (G6-24) ──────────────────────────────── */}
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div role="group" aria-label="Дни недели" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'stretch', gap: 2 }}>
+                <button
+                    type="button"
+                    onClick={() => shiftDay(-7)}
+                    aria-label="Предыдущая неделя"
+                    className="press"
+                    style={weekArrow}
+                >
+                    <ChevronLeft size={18} aria-hidden="true" />
+                </button>
+                <div role="group" aria-label="Дни недели" style={{ flex: 1, minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
                     {Array.from({ length: 7 }, (_, i) => addDaysYmd(monday, i)).map(ymd => {
                         const selected = ymd === dateStr;
                         const hasDot = weekDots?.monday === monday && weekDots.days.has(ymd);
@@ -339,6 +378,16 @@ export function MobileCrmToday() {
                             </button>
                         );
                     })}
+                </div>
+                <button
+                    type="button"
+                    onClick={() => shiftDay(7)}
+                    aria-label="Следующая неделя"
+                    className="press"
+                    style={weekArrow}
+                >
+                    <ChevronRight size={18} aria-hidden="true" />
+                </button>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                     {!isToday && (
@@ -396,7 +445,7 @@ export function MobileCrmToday() {
                     <section aria-labelledby="crm-shelf-next" style={shelfStyle}>
                         <h2 id="crm-shelf-next" style={shelfTitle}>Дальше</h2>
                         <div style={nextCard}>
-                            <button type="button" onClick={() => setActiveSheet(next)} className="press" style={nextCardButton}>
+                            <button type="button" onClick={() => openSheet(next)} className="press" style={nextCardButton}>
                                 <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8 }}>
                                     {formatStartsIn(parseUTC(next.date), {
                                         end: new Date(parseUTC(next.date).getTime() + (next.durationMinutes || 60) * 60000),
@@ -427,7 +476,7 @@ export function MobileCrmToday() {
                                         first={i === 0}
                                         time={startTime(s)}
                                         name={nameOf(s)}
-                                        onOpen={() => setActiveSheet(s)}
+                                        onOpen={() => openSheet(s)}
                                         right={(() => {
                                             const p = priceOf(s);
                                             // Будущая — цена нейтрально, без «ждёт оплаты» (G6-07/G6-15).
@@ -454,9 +503,21 @@ export function MobileCrmToday() {
                                         first={i === 0}
                                         time={startTime(s)}
                                         name={nameOf(s)}
-                                        onOpen={() => setActiveSheet(s)}
+                                        note={s.status === 'NO_SHOW' ? statusLabel('session', 'NO_SHOW') : undefined}
+                                        onOpen={() => openSheet(s)}
                                         right={s.isPaid ? (
                                             <StatusBadge kind="payment" status="paid" />
+                                        ) : !p && !viewingOther && isBillableStatusOrPast(s)
+                                            && sessionPriceOf(s, clientById.get(s.clientId)) <= 0 ? (
+                                            // 09.11 (решение 2): цены нет — оплата через «Сколько заплатили?».
+                                            <Button
+                                                variant="secondary"
+                                                size="touch"
+                                                onClick={() => openSheet(s, true)}
+                                                aria-label={`Отметить оплату: ${nameOf(s)} — указать сумму`}
+                                            >
+                                                Оплата…
+                                            </Button>
                                         ) : p && !viewingOther ? (
                                             // В5: оплата в один тап — на счёт клиента по умолчанию,
                                             // тост на 5 с «Вернуть». Защита от двойного тапа — в useQuickPay.
@@ -531,7 +592,7 @@ export function MobileCrmToday() {
                                     first={i === 0}
                                     time={startTime(s)}
                                     name={nameOf(s)}
-                                    onOpen={() => setActiveSheet(s)}
+                                    onOpen={() => openSheet(s)}
                                     right={<StatusBadge kind="session" status={s.status} />}
                                 />
                             ))}
@@ -550,9 +611,11 @@ export function MobileCrmToday() {
             )}
             {activeSheet && (
                 <SessionActionSheet
+                    key={`${activeSheet.id}-${sheetPay ? 'pay' : 'main'}`}
                     session={activeSheet}
+                    initialMode={sheetPay ? 'pay' : undefined}
                     client={clientById.get(activeSheet.clientId)}
-                    onClose={() => setActiveSheet(null)}
+                    onClose={() => { setActiveSheet(null); setSheetPay(false); }}
                     onChange={(updated) => {
                         patchOne(updated);
                         reloadClients();
@@ -574,8 +637,10 @@ export function MobileCrmToday() {
 }
 
 /** Строка сессии на полке: время, имя (тап — шторка), действие справа. */
-function SessionLine({ time, name, right, onOpen, first }: {
+function SessionLine({ time, name, note, right, onOpen, first }: {
     time: string; name: string; right?: React.ReactNode; onOpen: () => void; first: boolean;
+    /** Пометка под именем («Неявка · оплачивается»). */
+    note?: string;
 }) {
     return (
         <div style={{
@@ -584,7 +649,11 @@ function SessionLine({ time, name, right, onOpen, first }: {
         }}>
             <button type="button" onClick={onOpen} className="press" style={lineButton}>
                 <span className="num" style={{ fontWeight: 600, flexShrink: 0 }}>{time}</span>
-                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                {/* Ревью п. 18: имя не обрезаем кнопкой оплаты — переносим на 2 строки. */}
+                <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                    <span style={nameClamp}>{name}</span>
+                    {note && <span style={{ fontSize: 12, color: 'var(--status-danger-fg)', fontWeight: 600 }}>{note}</span>}
+                </span>
             </button>
             {right && <div style={{ flexShrink: 0 }}>{right}</div>}
         </div>
@@ -614,8 +683,9 @@ const shelfTitle: React.CSSProperties = {
     textTransform: 'uppercase', color: 'var(--color-ink-60)',
 };
 
+// Дизайн-ревью п. 1: большой тёмный блок — panel (в тёмной теме не становится светлым пятном, как ink).
 const nextCard: React.CSSProperties = {
-    background: 'var(--color-ink)', color: 'var(--color-on-ink)',
+    background: 'var(--color-panel)', color: 'var(--color-on-panel)',
     borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
 };
 
@@ -627,9 +697,32 @@ const nextCardButton: React.CSSProperties = {
 
 const onInkButton: React.CSSProperties = {
     alignSelf: 'flex-start', minHeight: 44, padding: '0 14px', borderRadius: 8,
-    background: 'var(--color-card)', color: 'var(--color-ink)', border: 'none',
+    background: 'var(--color-on-panel)', color: 'var(--color-panel)', border: 'none',
     fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer',
 };
+
+const nameClamp: React.CSSProperties = {
+    fontWeight: 600, overflow: 'hidden', overflowWrap: 'anywhere',
+    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.25,
+};
+
+const weekArrow: React.CSSProperties = {
+    width: 36, minHeight: 56, flexShrink: 0, border: 'none', borderRadius: 10, padding: 0,
+    background: 'transparent', color: 'var(--color-ink-60)', cursor: 'pointer',
+    display: 'grid', placeItems: 'center',
+};
+
+const calendarPlate: React.CSSProperties = {
+    margin: '0 16px', padding: '10px 12px', minHeight: 56, borderRadius: 12,
+    background: 'var(--color-sunken)', border: '1px solid var(--color-ink-10)',
+    color: 'var(--color-ink)', fontFamily: 'inherit', fontSize: 14, textAlign: 'left',
+    display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+};
+
+/** Прошла (или отмечена «неявка») — значит, по ней ждём оплату. */
+function isBillableStatusOrPast(s: CrmSession): boolean {
+    return isBillableStatus(s.status) || (s.status === 'PLANNED' && parseUTC(s.date).getTime() <= Date.now());
+}
 
 const listCard: React.CSSProperties = {
     background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',

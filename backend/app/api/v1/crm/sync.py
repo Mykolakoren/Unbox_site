@@ -15,7 +15,14 @@ from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
 from app.models.therapist_note import TherapistNote
-from app.api.v1.crm import get_crm_calendar_id
+from app.api.v1.crm import get_crm_calendar_id, profile_base_price
+
+# 09.11: раньше текст отправлял в «Настройки CRM» — на телефоне таких настроек не
+# было, тупик. Теперь — реальный путь и на телефоне, и на компьютере.
+CALENDAR_NOT_CONNECTED = (
+    "Google Календарь не подключён. Подключите его: на телефоне — «Psy-CRM ▾» → "
+    "«Календарь и счета», на компьютере — Psy-CRM → «Настройки» → «Google Календарь»."
+)
 
 
 def _try_move_linked_booking(
@@ -139,7 +146,7 @@ def _session_has_value(session: Session, ts: TherapySession) -> bool:
     статус «Проведена» (это долг клиента) или проставленная цена."""
     if ts.is_paid or ts.booking_id:
         return True
-    if ts.status == "COMPLETED" or ts.price is not None:
+    if ts.status in ("COMPLETED", "NO_SHOW") or ts.price is not None:
         return True
     inline = (ts.notes or "").strip()
     if inline and inline != _PUBLIC_REQUEST_NOTE:
@@ -176,6 +183,11 @@ def _keep_valuable_session(
     """
     if not _session_has_value(session, ts):
         return False
+    # 09.11: «Не пришёл / поздняя отмена — оплачивается» специалист поставил сам,
+    # и это долг клиента. Событие в календаре после неявки часто удаляют — сессию
+    # не отменяем (иначе долг молча пропал бы), статус не трогаем.
+    if ts.status == "NO_SHOW":
+        return True
     if ts.status not in _CANCELLED_STATUSES:
         if marks is not None:
             marks[str(ts.id)] = ts.status
@@ -525,7 +537,7 @@ def sync_from_calendar(
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
+        raise HTTPException(400, CALENDAR_NOT_CONNECTED)
 
     uid = str(current_user.id)
     clients = session.exec(
@@ -547,6 +559,9 @@ def sync_from_calendar(
     auto_created_clients = 0
     if auto_create_clients and not dry_run and result["unmatched"]:
         existing_codes = {c.alias_code for c in clients if c.alias_code}
+        # 09.11 (решение владельца 2): ставка нового клиента из календаря —
+        # «Базовая цена сессии» из анкеты (раньше 0: оплата без суммы терялась).
+        _default_price = profile_base_price(session, current_user.id)
         name_to_client: dict = {}
         for c in clients:
             name_to_client[_normalize_name(c.name)] = c
@@ -591,6 +606,7 @@ def sync_from_calendar(
                 specialist_id=uid,
                 name=display_name,
                 alias_code=alias,
+                base_price=_default_price,
                 pipeline_status="ACTIVE",
                 tags=["google-calendar"],
             )
@@ -1124,7 +1140,7 @@ def backfill_alias_codes(
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
+        raise HTTPException(400, CALENDAR_NOT_CONNECTED)
 
     uid = str(current_user.id)
     clients = session.exec(
@@ -1222,7 +1238,7 @@ def sync_client_history(
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
+        raise HTTPException(400, CALENDAR_NOT_CONNECTED)
 
     # Convert months_back to years_back if provided
     effective_years_back = years_back

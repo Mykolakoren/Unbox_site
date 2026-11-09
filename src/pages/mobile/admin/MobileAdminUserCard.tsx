@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronDown, Phone, Send, Mail, Plus, Wallet, CalendarPlus } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ChevronDown, ChevronRight, Phone, Send, Mail, Plus, Wallet, CalendarPlus } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
 import { useBookingStore } from '../../../store/bookingStore';
 import { bookingsApi } from '../../../api/bookings';
@@ -12,7 +12,11 @@ import { REASON_LABELS } from '../../../utils/ledgerReasons';
 import { computeDueByBooking } from '../../../utils/dueAmounts';
 import { applyAllocation, indexAllocation, ledgerRowLine, allocationHeadline } from '../../../utils/balanceAllocation';
 import { useClientAllocation } from '../../../hooks/useBalanceAllocation';
-import { batumiDayKey, bookingDayKey } from '../../../utils/adminToday';
+import { batumiDayKey, bookingDayKey, futureChargedDue } from '../../../utils/adminToday';
+import { cashBranchOfLastBooking } from '../../../utils/cashBranch';
+import { statusLabel } from '../../../design/statuses';
+import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
+import { humanizeMoneyText } from './branchLabel';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { formatDateLabel, formatDayMonth, formatGel, formatTime } from '../../../utils/format';
@@ -53,6 +57,8 @@ export function MobileAdminUserCard() {
     const setBookingForUser = useBookingStore(s => s.setBookingForUser);
     const [usersTried, setUsersTried] = useState(users.length > 0);
     const [topupOpen, setTopupOpen] = useState(false);
+    // Ревью 09.11 (№7): бронь в карточке нажимается — та же шторка, что в «Бронях».
+    const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
 
     useEffect(() => {
         if (users.length === 0) Promise.resolve(fetchUsers()).finally(() => setUsersTried(true));
@@ -86,6 +92,17 @@ export function MobileAdminUserCard() {
         const index = alloc ? indexAllocation([{ ...alloc, email: alloc.email ?? user.email }]) : null;
         return applyAllocation(computeDueByBooking(bookings, balanceOf), bookings, index, balanceOf);
     }, [bookings, user, balance, alloc]);
+
+    // «Принять оплату · весь долг» наверху карточки: минус на балансе без будущих
+    // броней, списанных заранее (их возьмут в свой день — решение 06.10).
+    const payTotal = useMemo(() => {
+        if (!user || !bookings) return Math.max(0, -balance);
+        const fut = futureChargedDue(bookings, dueMap, batumiDayKey());
+        const future = (fut.get(user.email) || 0) + (fut.get(String(user.id)) || 0);
+        return Math.max(0, Math.round((Math.max(0, -balance) - future) * 100) / 100);
+    }, [user, bookings, dueMap, balance]);
+    // Филиал кассы — по последней брони клиента, как на компьютере; нет — выберут сами.
+    const lastBranch = useMemo(() => (bookings ? cashBranchOfLastBooking(bookings) : undefined), [bookings]);
 
     const upcoming = useMemo(() => {
         if (!bookings) return [];
@@ -184,6 +201,19 @@ export function MobileAdminUserCard() {
                 </div>
             </section>
 
+            {/* Долг и «Принять оплату · весь долг» — сразу под балансом (ревью 09.11, №7). */}
+            {canCash && payTotal > 0 && (
+                <div data-card-debt style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ fontSize: 14, color: 'var(--status-danger-fg)', fontWeight: 600 }}>
+                        К оплате сейчас <span className="num">{formatGel(payTotal)}</span>
+                        {payTotal < debt && <span style={{ fontWeight: 400, color: 'var(--color-ink-60)' }}> · остальное — за будущие брони, их возьмут в свой день</span>}
+                    </div>
+                    <Button icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
+                        Принять оплату · {formatGel(payTotal)}
+                    </Button>
+                </div>
+            )}
+
             {/* Главные действия. */}
             <div style={{ display: 'grid', gridTemplateColumns: canCash ? '1fr 1fr' : '1fr', gap: 8 }}>
                 {canCash && (
@@ -198,7 +228,7 @@ export function MobileAdminUserCard() {
                         // Бронь от имени клиента — тот же механизм, что в мастере на
                         // компьютере (bookingForUser): в оформлении видно, у кого спишем.
                         setBookingForUser(user.email);
-                        navigate('/m/find');
+                        navigate('/m/find?admin=1');
                     }}
                 >
                     Новая бронь
@@ -221,24 +251,35 @@ export function MobileAdminUserCard() {
                         {upcoming.slice(0, 5).map(b => {
                             const info = dueMap.get(b.id);
                             return (
-                                <div key={b.id} style={rowStyle}>
+                                <button
+                                    key={b.id}
+                                    type="button"
+                                    onClick={() => setActiveBooking(b)}
+                                    className="press"
+                                    aria-label={`Бронь ${formatDateLabel(b.date as any)}, ${b.startTime} — перенести, отменить, принять оплату`}
+                                    style={{ ...rowStyle, width: '100%', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--color-ink)' }}
+                                >
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontSize: 14, fontWeight: 600 }}>
                                             {formatDateLabel(b.date as any, { capitalize: true })}, <span className="num">{b.startTime}</span>
                                         </div>
                                         <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                             {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
-                                            {b.status === 'pending_approval' ? ' · ждёт одобрения' : ''}
+                                            {b.status === 'pending_approval' ? ` · ${statusLabel('booking', 'pending_approval', 'staff').toLowerCase()}` : ''}
                                         </div>
                                     </div>
-                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
-                                </div>
+                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={b.status} method={b.paymentMethod as string | undefined} />
+                                    <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
+                                </button>
                             );
                         })}
                         {upcoming.length > 5 && (
-                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                И ещё {upcoming.length - 5} — все брони клиента в разделе «Брони».
-                            </div>
+                            <Link
+                                to={`/m/admin/bookings?q=${encodeURIComponent(user.email)}&past=0`}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 44, fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}
+                            >
+                                И ещё {upcoming.length - 5} — все брони клиента <ChevronRight size={16} aria-hidden="true" />
+                            </Link>
                         )}
                     </div>
                 )}
@@ -264,9 +305,24 @@ export function MobileAdminUserCard() {
                 </div>
             </section>
 
+            <AdminBookingSheets
+                booking={activeBooking}
+                getUserName={email => getAdminUserName(users, email)}
+                onClose={() => setActiveBooking(null)}
+                dueInfo={activeBooking ? dueMap.get(activeBooking.id) : undefined}
+                onChanged={() => { loadBookings(); void fetchUsers(); }}
+                acceptPayment={() => (payTotal > 0 ? {
+                    total: payTotal,
+                    sub: `Весь долг ${formatGel(payTotal)}`,
+                    onClick: () => { setActiveBooking(null); setTopupOpen(true); },
+                } : null)}
+            />
+
             {canCash && topupOpen && (
                 <TopupSheet
                     user={user}
+                    defaultAmount={payTotal > 0 ? payTotal : undefined}
+                    defaultBranch={lastBranch}
                     onClose={() => setTopupOpen(false)}
                     onDone={async () => { setTopupOpen(false); await fetchUsers(); loadBookings(); }}
                 />
@@ -350,11 +406,11 @@ function LedgerList({ userId, balance }: { userId: string; balance: number }) {
                     }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 14, fontWeight: 500 }}>
-                                {REASON_LABELS[e.reason] || `Прочее (${e.reason})`}
+                                {REASON_LABELS[e.reason] || 'Прочее движение'}
                             </div>
                             <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                                 {when ? `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}` : '—'}
-                                {e.description ? ` · ${e.description}` : ''}
+                                {e.description ? ` · ${humanizeMoneyText(e.description)}` : ''}
                             </div>
                             {allocLine && (
                                 <div data-alloc-line style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, lineHeight: 1.4 }}>

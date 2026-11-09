@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Sun, Check } from 'lucide-react';
+import { X, Sun, Check, ChevronDown } from 'lucide-react';
 import { batumiDayKey } from '../../../utils/adminToday';
+import { statusLabel } from '../../../design/statuses';
 
 /**
  * Excel #54 variant B — morning checklist as a *soft* reminder, not a
@@ -24,7 +25,8 @@ import { batumiDayKey } from '../../../utils/adminToday';
 export const CHECKLIST_ITEMS = [
     { key: 'open', label: 'Филиал открыт к первой брони, кабинеты и холл проверены по утреннему чек-листу' },
     { key: 'cash', label: 'Наличные пересчитаны и совпадают с остатком на сайте (не совпадают — написать вчерашнему администратору). Есть размен на 20 и 50 ₾' },
-    { key: 'requests', label: 'Срочные заявки «на подтверждении» разобраны — подтвердить или отклонить' },
+    // Одно слово для срочной брони на всех экранах персонала (ревью 09.11, №14).
+    { key: 'requests', label: `Срочные брони «${statusLabel('booking', 'pending_approval', 'staff')}» разобраны — одобрить или отклонить` },
     { key: 'pay', label: '«Принять оплату»: перед записью проверяю клиента и сумму' },
     { key: 'reason', label: 'Цену 0 ₾ и ручную правку баланса — только с причиной' },
     { key: 'evening', label: 'Вечером сверяю с таблицей строку «На сегодня», а не «Баланс» (завтрашние брони уже списаны)' },
@@ -36,6 +38,31 @@ function storageKey(userEmail: string): string {
     return `unbox_morning_checklist_${batumiDayKey()}_${userEmail}`;
 }
 
+/** Отмеченные за сегодня пункты — общие у окна (компьютер) и карточки «Утро» (телефон). */
+function progressKey(userEmail: string): string {
+    return `unbox_morning_checklist_progress_${batumiDayKey()}_${userEmail}`;
+}
+
+function readProgress(userEmail: string): Record<string, boolean> {
+    try {
+        const raw = localStorage.getItem(progressKey(userEmail));
+        const v = raw ? JSON.parse(raw) : null;
+        return v && typeof v === 'object' ? v : {};
+    } catch { return {}; }
+}
+
+function writeProgress(userEmail: string, v: Record<string, boolean>): void {
+    try { localStorage.setItem(progressKey(userEmail), JSON.stringify(v)); } catch { /* ignore */ }
+}
+
+function isDoneToday(userEmail: string): boolean {
+    try { return !!localStorage.getItem(storageKey(userEmail)); } catch { return false; }
+}
+
+function markDoneToday(userEmail: string): void {
+    try { localStorage.setItem(storageKey(userEmail), new Date().toISOString()); } catch { /* ignore */ }
+}
+
 interface Props {
     /** Current admin email — used to key the per-day seen flag. */
     adminEmail: string;
@@ -43,7 +70,12 @@ interface Props {
 
 export function MorningChecklistModal({ adminEmail }: Props) {
     const [isOpen, setIsOpen] = useState(false);
-    const [checked, setChecked] = useState<Record<string, boolean>>({});
+    const [checked, setCheckedRaw] = useState<Record<string, boolean>>(() => readProgress(adminEmail));
+    const setChecked = (fn: (c: Record<string, boolean>) => Record<string, boolean>) => {
+        const next = fn(checked);
+        setCheckedRaw(next);
+        writeProgress(adminEmail, next);
+    };
 
     useEffect(() => {
         if (!adminEmail) return;
@@ -60,11 +92,7 @@ export function MorningChecklistModal({ adminEmail }: Props) {
 
     const allDone = ITEMS.every(i => checked[i.key]);
 
-    const markSeen = () => {
-        try {
-            localStorage.setItem(storageKey(adminEmail), new Date().toISOString());
-        } catch { /* ignore */ }
-    };
+    const markSeen = () => markDoneToday(adminEmail);
 
     const handleDismiss = () => {
         // "Позже" — don't mark as done, just close for this session. Will
@@ -166,5 +194,96 @@ export function MorningChecklistModal({ adminEmail }: Props) {
             </div>
         </div>,
         document.body,
+    );
+}
+
+/**
+ * Карточка «Утро: 2 из 6» на «Сегодня» в мобильной админке (ревью 09.11, №17).
+ *
+ * Раньше чек-лист выскакивал окном на весь экран при каждом входе в «Кассу»,
+ * пока не отмечены все 6 пунктов, — клиент у стойки ждал, пока админ закроет
+ * окно. Теперь это спокойная карточка: по нажатию раскрывается список, галочки
+ * сохраняются (общие с окном на компьютере), когда отмечены все — карточка
+ * сворачивается в «Утро: всё проверено», и окно на компьютере сегодня тоже не
+ * появится.
+ */
+export function MorningChecklistCard({ adminEmail }: Props) {
+    const [checked, setCheckedRaw] = useState<Record<string, boolean>>(() => readProgress(adminEmail));
+    const [done, setDone] = useState(() => isDoneToday(adminEmail));
+    const [open, setOpen] = useState(false);
+    const count = ITEMS.filter(i => checked[i.key]).length;
+    const toggle = (key: string) => {
+        const next = { ...checked, [key]: !checked[key] };
+        setCheckedRaw(next);
+        writeProgress(adminEmail, next);
+        if (ITEMS.every(i => next[i.key])) {
+            markDoneToday(adminEmail);
+            setDone(true);
+            setOpen(false);
+        }
+    };
+    const allDone = done || count === ITEMS.length;
+    return (
+        <section data-morning-card aria-label="Чек-лист смены" style={{
+            background: 'var(--color-card)', border: '1px solid var(--color-ink-08)', borderRadius: 12,
+        }}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                aria-expanded={open}
+                className="press"
+                style={{
+                    width: '100%', minHeight: 48, display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer',
+                    fontFamily: 'inherit', textAlign: 'left', color: 'var(--color-ink)',
+                }}
+            >
+                <Sun size={18} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>
+                        {allDone ? 'Утро: всё проверено' : <>Утро: <span className="num">{count}</span> из <span className="num">{ITEMS.length}</span></>}
+                    </span>
+                    {!allDone && (
+                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>
+                            Чек-лист смены — нажмите, чтобы отметить
+                        </span>
+                    )}
+                </span>
+                <ChevronDown size={18} aria-hidden="true" style={{ color: 'var(--color-ink-60)', transform: open ? 'rotate(180deg)' : undefined }} />
+            </button>
+            {open && (
+                <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--color-ink-08)' }}>
+                    {ITEMS.map(item => {
+                        const isDone = !!checked[item.key];
+                        return (
+                            <button
+                                key={item.key}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={isDone}
+                                onClick={() => toggle(item.key)}
+                                style={{
+                                    display: 'flex', alignItems: 'flex-start', gap: 10, minHeight: 44,
+                                    padding: '10px 12px', background: 'none', border: 'none',
+                                    borderBottom: '1px solid var(--color-ink-08)', cursor: 'pointer',
+                                    fontFamily: 'inherit', textAlign: 'left',
+                                    color: isDone ? 'var(--color-ink-60)' : 'var(--color-ink)', fontSize: 14, lineHeight: 1.4,
+                                }}
+                            >
+                                <span aria-hidden="true" style={{
+                                    width: 20, height: 20, borderRadius: 6, flexShrink: 0, marginTop: 1,
+                                    display: 'grid', placeItems: 'center',
+                                    border: isDone ? 'none' : '2px solid var(--color-ink-20)',
+                                    background: isDone ? 'var(--status-ok-fg)' : 'transparent', color: 'var(--color-on-ink)',
+                                }}>
+                                    {isDone && <Check size={14} strokeWidth={3} />}
+                                </span>
+                                <span>{item.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </section>
     );
 }

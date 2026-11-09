@@ -166,7 +166,8 @@ export function AdminDashboard() {
         Promise.allSettled([cashboxApi.getBalance(), cashboxApi.getCurrentOpenShift()]).then(([b, s]) => {
             if (cancelled) return;
             setCash({
-                cash: b.status === 'fulfilled' ? Number(b.value?.cash ?? 0) : null,
+                // null — наличные скрыты от роли admin до закрытия смены (решение 3, 09.11).
+                cash: b.status === 'fulfilled' && b.value?.cash != null ? Number(b.value.cash) : null,
                 openedAt: s.status === 'fulfilled' ? (s.value?.openedAt ?? null) : null,
                 shiftKnown: s.status === 'fulfilled',
             });
@@ -426,7 +427,7 @@ function GridHouseToday({
                                             </td>
                                             <td style={{ padding: '10px 8px', textAlign: 'right' }}>
                                                 {/* «к оплате 11 ₾ из 20» может перенестись — колонка прежней ширины, имени клиента не тесно. */}
-                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="whitespace-normal h-auto py-1" />
+                                                <DueBadge due={r.due} paid={r.paid} charged={r.charged} uncharged={r.uncharged} price={r.price} className="whitespace-normal h-auto py-1" status={r.status} method={r.paymentMethod} />
                                             </td>
                                         </tr>
                                     );

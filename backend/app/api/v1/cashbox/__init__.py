@@ -30,6 +30,15 @@ def require_reports(current_user: User = Depends(deps.require_admin)) -> User:
     return current_user
 
 
+def cash_hidden_for(user: User) -> bool:
+    """Решение владельца 3 (09.11): сумму наличных в кассе до закрытия смены роль
+    admin не видит — сначала пересчитывает сама («слепое» закрытие). Старший админ
+    и владелец видят. Сервер отдаёт такому пользователю наличные пустыми (None) в
+    /balance, /shifts/preview и /day-summary; «ожидалось» он узнаёт из ответа на
+    закрытие смены (POST /shifts → expected_balance, discrepancy)."""
+    return getattr(user, "role", None) == "admin"
+
+
 def require_category_manage(current_user: User = Depends(require_cashbox)) -> User:
     """Categories can only be created/edited by senior_admin or owner."""
     if current_user.role not in ("senior_admin", "owner"):

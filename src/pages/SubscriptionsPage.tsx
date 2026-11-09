@@ -8,6 +8,9 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { PublicHeader } from '../components/public/PublicHeader';
 import { MobilePageHeader } from '../components/ui/PageHeader';
+import { useUserStore } from '../store/userStore';
+import { formatDayMonth } from '../utils/format';
+import type { Subscription } from '../store/types';
 
 /**
  * Тарифы — /subscriptions и /m/tariffs.
@@ -248,6 +251,8 @@ function GridHouseSubscriptions() {
     const toCatalog = useCatalogPath();
     const wide = useMediaQuery('(min-width: 768px)');
     useDocumentTitle('Тарифы');
+    // Гостю (без входа) currentUser нет — карточки как раньше.
+    const currentSub = useUserStore(s => s.currentUser?.subscription ?? null);
 
     return (
         <div style={{ minHeight: inShell ? undefined : '100vh', background: GH.paper, fontFamily: GH_SANS, color: GH.ink, overflowX: 'hidden' }}>
@@ -278,7 +283,7 @@ function GridHouseSubscriptions() {
                         gap: 12,
                     }}>
                         {PLANS.map(plan => (
-                            <PlanCard key={plan.id} plan={plan} wide={wide} />
+                            <PlanCard key={plan.id} plan={plan} wide={wide} current={currentSub} />
                         ))}
                     </div>
                     <p style={{ fontSize: 14, color: GH.ink60, margin: '12px 0 0', lineHeight: 1.5, maxWidth: 760 }}>
@@ -457,7 +462,15 @@ function GridHouseSubscriptions() {
     );
 }
 
-function PlanCard({ plan, wide }: { plan: (typeof PLANS)[number]; wide: boolean }) {
+/** Активный ли у человека этот тариф (ревью клиентской части 09.11, №16). */
+function isCurrentPlan(plan: { id: string; name: string }, sub: Subscription | null | undefined): boolean {
+    if (!sub) return false;
+    if (sub.expiryDate && new Date(sub.expiryDate).getTime() < Date.now()) return false;
+    return sub.planId === plan.id || sub.name === plan.name;
+}
+
+function PlanCard({ plan, wide, current }: { plan: (typeof PLANS)[number]; wide: boolean; current?: Subscription | null }) {
+    const mine = isCurrentPlan(plan, current);
     const hasList = plan.features.length > 0 || plan.bonuses.length > 0;
     return (
         <article
@@ -469,7 +482,11 @@ function PlanCard({ plan, wide }: { plan: (typeof PLANS)[number]; wide: boolean 
                 display: 'flex', flexDirection: 'column',
             }}
         >
-            {plan.badge && (
+            {mine ? (
+                <span style={{ ...ghsubMono, color: GH.label, marginBottom: 6 }}>
+                    Ваш тариф{current?.expiryDate ? ` · до ${formatDayMonth(current.expiryDate)}` : ''}
+                </span>
+            ) : plan.badge && (
                 <span style={{ ...ghsubMono, color: plan.popular ? GH.label : GH.ink60, marginBottom: 6 }}>
                     {plan.badge}
                 </span>
@@ -532,11 +549,12 @@ function PlanCard({ plan, wide }: { plan: (typeof PLANS)[number]; wide: boolean 
                 href={orderLink(plan.name)}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`Оформить абонемент «${plan.name}» — откроется Telegram`}
+                aria-label={`${mine ? 'Продлить' : 'Оформить'} абонемент «${plan.name}» в Telegram — откроется чат с администратором`}
                 className={`ui-btn ui-btn--touch ui-btn--block ${plan.popular ? 'ui-btn--primary' : 'ui-btn--secondary'}`}
                 style={{ marginTop: 16 }}
             >
-                Оформить абонемент
+                <MessageCircle size={16} aria-hidden="true" />
+                {mine ? 'Продлить в Telegram' : 'Оформить в Telegram'}
             </a>
             <style>{`
                 .subs-details > summary::-webkit-details-marker { display: none; }

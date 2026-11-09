@@ -79,6 +79,9 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
     // admin who typed the lifetime number (because the till physically
     // showed it) ended up with a phantom -82.5 ₾ "discrepancy" because the
     // backend was comparing against the algorithm number instead.
+    // Решение владельца 3 (09.11): роль admin «ожидалось» до закрытия не видит —
+    // сервер отдаёт его пустым (cashHidden); цифры придут в ответе на закрытие.
+    const blind = !!preview?.cashHidden || !!balances?.cashHidden;
     const lifetimeBalance = Number(selectedBranch ? (branchCash ?? 0) : (balances?.cash ?? 0));
     // Drive the headline number from the preview — same number the backend
     // will use to compute discrepancy on submit. Falls back to lifetime
@@ -88,7 +91,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
 
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
-    const discrepancy = hasAmount && !loadingBranchCash && preview
+    const discrepancy = hasAmount && !loadingBranchCash && preview && !blind
         ? Math.round((actualValue - expectedBalance) * 100) / 100
         : null;
 
@@ -118,10 +121,14 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                 branch: selectedBranch,
             });
             const disc = Number(report.discrepancy ?? 0);
+            // «Слепое» закрытие: «ожидалось» видно только теперь, из ответа сервера.
+            const expTail = blind && Number.isFinite(Number(report.expectedBalance))
+                ? ` (ожидалось ${formatGel(Number(report.expectedBalance))}, в кассе ${formatGel(actualValue)})`
+                : '';
             if (Math.abs(disc) < 0.01) {
-                toast.success('Смена закрыта — расхождений нет');
+                toast.success(`Смена закрыта — расхождений нет${expTail}`);
             } else {
-                toast.warning(`Смена закрыта — расхождение: ${formatGel(disc, { sign: true })}`);
+                toast.warning(`Смена закрыта — расхождение: ${formatGel(disc, { sign: true })}${expTail}`, blind ? { duration: 12000 } : undefined);
             }
             // Excel #75 — final lock-up reminder AFTER cash reconciliation.
             // Casa is now sealed in the report; admin can safely lock up and leave.
@@ -230,12 +237,18 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         ожидаемую сумму вместе с расхождением. Раньше ожидаемая стояла
                         первой — её переписывали в поле, и недостача пряталась.
                         Отправка смены (handleSubmit) не менялась — только порядок показа. */}
-                    {!hasAmount && (
+                    {blind && (
+                        <p data-blind-close className="text-xs text-ink-60 leading-snug -mt-2">
+                            Пересчитайте наличные и введите сумму. Сколько должно быть и расхождение покажем после закрытия смены.
+                            Если знаете, что не сойдётся (сдача, инкассация), напишите в комментарии.
+                        </p>
+                    )}
+                    {!hasAmount && !blind && (
                         <p className="text-xs text-ink-60 leading-snug -mt-2">
                             Пересчитайте наличные и введите сумму. Ожидаемый остаток и расхождение покажем после ввода.
                         </p>
                     )}
-                    {hasAmount && (
+                    {hasAmount && !blind && (
                         <>
                         {/* Expected cash balance — uses the SAME number the backend
                             will compare against on submit (preview.expected),

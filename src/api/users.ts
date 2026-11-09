@@ -23,6 +23,25 @@ export interface BalanceLedgerResponse {
     entries: BalanceLedgerEntry[];
 }
 
+/** Строка СВОЕЙ ленты баланса (клиент, /users/me/balance-ledger). */
+export interface MyBalanceLedgerEntry {
+    id: string;
+    date: string | null;
+    delta: number;
+    balanceAfter: number;
+    reason: string;
+    /** Только у недельной скидки и оплаты абонемента; иначе пусто. */
+    description: string;
+    /** Бронь, к которой относится строка (кабинет и время), если есть. */
+    booking: { date: string | null; startTime: string | null; duration: number | null; resourceName: string | null } | null;
+}
+
+export interface MyBalanceLedgerResponse {
+    balance: number;
+    truncated: boolean;
+    entries: MyBalanceLedgerEntry[];
+}
+
 export const usersApi = {
     /**
      * Default limit raised from 100 → 1000 so every active user fits in
@@ -115,6 +134,13 @@ export const usersApi = {
         const response = await api.get<BalanceLedgerResponse>(
             `/users/${encodeURIComponent(id)}/balance-ledger`,
         );
+        return response.data;
+    },
+
+    /** Клиент: своя лента баланса — пополнения, списания за брони, возвраты.
+     *  Только чтение и только свои строки (ревью клиентской части 09.11, №6). */
+    getMyBalanceLedger: async (limit = 200): Promise<MyBalanceLedgerResponse> => {
+        const response = await api.get<MyBalanceLedgerResponse>('/users/me/balance-ledger', { params: { limit } });
         return response.data;
     },
 

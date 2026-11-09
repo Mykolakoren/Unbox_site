@@ -141,7 +141,7 @@ def test_chessboard_due_mark_on_every_booking():
     src = _read(CHESS)
     d = src[src.index("// ── DESKTOP VIEW ──"):]
     assert "cell.colspan === 1 ? (" in d, "30-минутная бронь без отметки оплаты (нужна ветка colspan === 1)"
-    assert "<CellDueMark info={dueMap.get(b.id)} corner />" in d, "у 30-минутной брони нет значка в углу"
+    assert "<CellDueMark info={dueMap.get(b.id)} status={b.status} corner />" in d, "у 30-минутной брони нет значка в углу"
     # Сумма «к оплате» — на любой брони ≥ 1 ч; слово «к оплате» — от 2 ч (roomy):
     # в 1,5 ч оно обрезалось (доработка 01.10, guard_wave4_polish).
     # 03.10: у частично покрытой брони в плитке — «11 ₾ из 20 ₾» (без слова, чтобы не обрезалось).
@@ -155,7 +155,7 @@ def test_chessboard_due_mark_on_every_booking():
     assert "export function dueHint(" in due and "`${dueLabel(info)} — взять с клиента`" in due
     # Мобильная ветка — тоже с отметкой.
     m = src[src.index("// ── MOBILE VIEW ──"):src.index("// ── DESKTOP VIEW ──")]
-    assert "<CellDueMark info={dueMap.get(b.id)} />" in m, "на телефоне у брони нет отметки оплаты"
+    assert "<CellDueMark info={dueMap.get(b.id)} status={b.status} />" in m, "на телефоне у брони нет отметки оплаты"
 
 
 def test_chessboard_unpaid_is_danger_tone():
@@ -171,7 +171,7 @@ def test_chessboard_legend_explains_money():
     leg = _between(src, "data-chess-legend", "</div>")
     # 03.10: «✓ списано с баланса» и «◌ спишется с баланса» объединены в «✓ оплачено»
     # (решение владельца: брони, покрытые скидкой за прошлую неделю, — «оплачено»).
-    assert "к оплате" in leg and "оплачено — бронь покрыта деньгами клиента" in leg, \
+    assert "к оплате" in leg and "оплачено — деньги уже списаны" in leg and "с баланса — ещё не списано" in leg, \
         "легенда не объясняет «к оплате» / «оплачено»"
     assert "ui-badge--danger" in leg and "ui-badge--ok" in leg
 

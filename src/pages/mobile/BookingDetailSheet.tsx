@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors } from 'lucide-react';
+import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
@@ -22,8 +22,13 @@ import { Field as FormField, Input } from '../../components/ui/Field';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
-import { lateRescheduleLabel, lateRescheduleLeft } from '../../utils/subscription';
+import { hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../../utils/subscription';
 import { bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
+import { cancellationReasonText, cancelledRefund, reRentCaption, reRentConfirmBody, reRentToast, RE_RENT_TOO_EARLY_HINT } from './refundText';
+import { calculatePrice } from '../../utils/pricing';
+import { fmtHours, subscriptionHours } from '../../utils/paymentPriority';
+import { resourceKind } from '../../utils/subscriptionHours';
+import { format as fmtDate } from 'date-fns';
 
 const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
 
@@ -43,14 +48,19 @@ const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
  *
  * Порядок действий у будущей брони (G4-14): Перенести → Пересдать →
  * Отменить; «Повторить» — ниже, второстепенным.
+ *
+ * 09.11 (владелец): «Пересдать» — только меньше чем за сутки до начала. Больше
+ * суток — на месте кнопки подсказка «отмените бронь, деньги вернутся полностью».
  */
-export function BookingDetailSheet({ booking, onClose }: {
+export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
     booking: BookingHistoryItem;
     onClose: () => void;
+    /** Свайп «Отменить» в «Моих бронях» открывает сразу подтверждение (ревью №15). */
+    initialMode?: 'view' | 'confirmCancel';
 }) {
-    const { fetchBookings, currentUser } = useUserStore();
+    const { fetchBookings, currentUser, bookings } = useUserStore();
     const navigate = useNavigate();
-    const [mode, setMode] = useState<'view' | 'confirmCancel' | 'pickClient'>('view');
+    const [mode, setMode] = useState<'view' | 'confirmCancel' | 'pickClient'>(initialMode);
     const [trimming, setTrimming] = useState(false);
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
@@ -111,9 +121,21 @@ export function BookingDetailSheet({ booking, onClose }: {
         ? lateRescheduleLeft(currentUser?.subscription, hoursToStart)
         : 0;
     // Пересдать можно только подтверждённую бронь (сервер: status == confirmed).
-    const canReRent = isLive && booking.status === 'confirmed';
+    // 09.11 (владелец): пересдача — только когда до начала меньше суток. Раньше
+    // бронь просто отменяют с полным возвратом. Часы — по времени Тбилиси, как
+    // на сервере (_booking_hours_until_start), а не по часовому поясу телефона.
+    // Уже выставленную раньше (до правила) бронь можно снять с пересдачи всегда.
+    const reRentWindow = hoursUntilBookingStart(booking) < 24;
+    const canReRent = isLive && booking.status === 'confirmed' && (reRentWindow || !!booking.isReRentListed);
+    // Где раньше была «Пересдать», а до начала больше суток — подсказка вместо кнопки.
+    const reRentTooEarly = isLive && booking.status === 'confirmed' && !reRentWindow && !booking.isReRentListed;
 
     const place = bookingPlace(booking);
+    // Ревью №1: «Свободно» открываем на дне самой брони.
+    const rescheduleUrl = `/m/find?reschedule=${booking.id}${dt ? `&date=${fmtDate(dt, 'yyyy-MM-dd')}` : ''}`;
+    const isCancelled = booking.status === 'cancelled';
+    const refund = isCancelled ? cancelledRefund(booking) : null;
+    const reasonText = cancellationReasonText(booking);
     const route = mapsUrl(place.location);
 
     async function doCancel() {
@@ -126,6 +148,44 @@ export function BookingDetailSheet({ booking, onClose }: {
         } catch (e: any) {
             toastApiError(e, 'Не удалось отменить');
         } finally { setBusy(null); }
+    }
+
+    // Ревью №4 (09.11): «Продлить +30 минут» — с ценой и источником на кнопке и
+    // коротким подтверждением. Оценка — как считает сервер: абонементная бронь
+    // берёт 0,5 ч абонемента (+ пиковая доплата), если часов хватает, иначе деньги;
+    // остальные — разница цены (пик учтён) с баланса.
+    const extendQuote = (() => {
+        if (!dt || !endDt) return null;
+        const start = new Date(endDt);
+        const end = new Date(start.getTime() + 30 * 60000);
+        const p = calculatePrice({
+            format: (booking.format as 'individual' | 'group' | 'intervision') || 'individual',
+            startTime: start, endTime: end, extras: [], resourceId: booking.resourceId || undefined,
+            personalDiscountPercent: currentUser?.personalDiscountPercent, pricingSystem: currentUser?.pricingSystem,
+        });
+        const peak = p.peakSurcharge ?? 0;
+        if (booking.paymentMethod === 'subscription' && (Number(booking.hoursDeducted) || 0) > 0) {
+            const sub = subscriptionHours(currentUser?.subscription, {
+                format: (booking.format as 'individual' | 'group' | 'intervision') || 'individual',
+                bookingDate: dt, bookings, ownerEmail: currentUser?.email, resourceKind: resourceKind(booking.resourceId),
+            });
+            if (sub.ok && sub.remaining >= 0.5 - 0.01) {
+                return { short: `${fmtHours(0.5)} абонемента${peak > 0 ? ` + ${formatGel(peak)}` : ''}`,
+                    long: `Спишем ${fmtHours(0.5)} абонемента${peak > 0 ? ` и ${formatGel(peak)} за пиковое время с баланса` : ''}.` };
+            }
+        }
+        return { short: `≈ ${formatGel(p.finalPrice)} с баланса`, long: `Спишем ≈ ${formatGel(p.finalPrice)} с баланса (точная сумма — по цене брони).` };
+    })();
+
+    async function askExtend() {
+        const newEnd = endDt ? new Date(endDt.getTime() + 30 * 60000) : null;
+        const ok = await confirm({
+            title: 'Продлить бронь на 30 минут?',
+            body: `${newEnd ? `До ${String(newEnd.getHours()).padStart(2, '0')}:${String(newEnd.getMinutes()).padStart(2, '0')}. ` : ''}${extendQuote?.long ?? ''} Отменить продление потом нельзя.`,
+            confirmLabel: 'Продлить',
+            cancelLabel: 'Не надо',
+        });
+        if (ok) await doExtend();
     }
 
     async function doExtend() {
@@ -222,7 +282,7 @@ export function BookingDetailSheet({ booking, onClose }: {
         // Выставить на пересдачу — только после вопроса, как в списке броней (UX 24.10).
         if (!booking.isReRentListed && !(await confirm({
             title: 'Пересдать бронь?',
-            body: 'Слот появится у других как свободный. Если его заберут — вернём 50% стоимости занятого времени. Что не заберут — останется за вами.',
+            body: reRentConfirmBody(booking),
             confirmLabel: 'Пересдать',
             cancelLabel: 'Оставить',
         }))) return;
@@ -230,9 +290,7 @@ export function BookingDetailSheet({ booking, onClose }: {
         try {
             const updated = await bookingsApi.toggleReRent(booking.id);
             await fetchBookings();
-            toast.success(updated.isReRentListed
-                ? 'Бронь на пересдаче. Если её займут, вернём 50% на баланс.'
-                : 'Снято с пересдачи');
+            toast.success(updated.isReRentListed ? reRentToast(booking) : 'Снято с пересдачи');
             onClose();
         } catch (e: any) {
             toastApiError(e, 'Не удалось обновить');
@@ -341,7 +399,10 @@ export function BookingDetailSheet({ booking, onClose }: {
                         {isPast && booking.status !== 'cancelled' && <StatusBadge kind="booking" status="completed" />}
                         {booking.status === 'cancelled' && <StatusBadge kind="booking" status="cancelled" />}
                         {booking.isReRentListed && <StatusBadge kind="booking" status="re-rent-listed" />}
-                        <PaymentBadge status={booking.paymentStatus} />
+                        {/* Отменённая: не «Оплачено», а что вернули (ревью №7). */}
+                        {isCancelled
+                            ? (refund?.badge ? <StatusBadge kind="payment" status={refund.badge} /> : null)
+                            : <PaymentBadge status={booking.paymentStatus} />}
                         {(booking as any).recurringGroupId && <Tag tone="muted">Серия</Tag>}
                     </div>
 
@@ -366,9 +427,16 @@ export function BookingDetailSheet({ booking, onClose }: {
 
                     {/* Цена */}
                     <Field icon={<Wallet size={16} aria-hidden="true" />} label="Оплата">
-                        <span style={{ fontSize: TEXT.body, fontWeight: 600 }}>{priceLabel(booking)}</span>
-                        {booking.paymentMethod === 'balance' && booking.finalPrice != null && (
+                        <span style={{ fontSize: TEXT.body, fontWeight: 600, textDecoration: isCancelled ? 'line-through' : undefined, color: isCancelled ? COLOR.ink60 : undefined }}>
+                            {priceLabel(booking)}
+                        </span>
+                        {booking.paymentMethod === 'balance' && booking.finalPrice != null && !isCancelled && (
                             <span style={{ color: COLOR.ink60, marginLeft: 8 }}>с баланса</span>
+                        )}
+                        {refund && (
+                            <div style={{ fontSize: TEXT.small, fontWeight: 600, marginTop: 4, color: refund.badge === 'refunded' ? STATUS.ok.fg : COLOR.ink80 }}>
+                                {refund.text}
+                            </div>
                         )}
                         {extrasNames && (
                             // Допуслуги входят в цену — раньше на телефоне их не было видно (обход 10.10).
@@ -376,7 +444,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                 в т.ч. допуслуги: {extrasNames}
                             </div>
                         )}
-                        {booking.paymentStatus === 'pending' && dt && (
+                        {booking.paymentStatus === 'pending' && dt && !isCancelled && (
                             // Обычное состояние будущей брони — нейтрально, не янтарём (G4-08).
                             // Срочная бронь списывается при подтверждении админом
                             // (charge_hot_booking_on_approval), не «за сутки» (обход 10.10).
@@ -410,9 +478,10 @@ export function BookingDetailSheet({ booking, onClose }: {
                     )}
 
                     {/* Cancellation reason */}
-                    {booking.cancellationReason && (
+                    {/* По-русски, как на компьютере (ревью №10): без «User cancelled». */}
+                    {reasonText && (
                         <Field label="Причина отмены" subtle>
-                            <span style={{ color: COLOR.ink60 }}>{booking.cancellationReason}</span>
+                            <span style={{ color: COLOR.ink60 }}>{reasonText}</span>
                         </Field>
                     )}
 
@@ -422,10 +491,10 @@ export function BookingDetailSheet({ booking, onClose }: {
                             <ActionRow
                                 primary
                                 icon={<Plus size={18} />}
-                                label="Продлить +30 минут"
-                                sub="Если следующий слот свободен"
+                                label={`Продлить на 30 минут${extendQuote ? ` · ${extendQuote.short}` : ''}`}
+                                sub="Если следующие полчаса свободны — спросим подтверждение"
                                 busy={busy === 'extend'}
-                                onClick={doExtend}
+                                onClick={() => { void askExtend(); }}
                             />
                         )}
 
@@ -436,7 +505,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                     {lateLeft > 0
                                         ? 'До начала меньше 24 часов — отменить уже нельзя, но перенести можно: по абонементу есть бесплатные переносы.'
                                         : 'До начала меньше 24 часов — отменить или перенести уже нельзя.'}
-                                    {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50%.' : ''}
+                                    {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50 % тем же, чем платили.' : ''}
                                     {' '}Или напишите администратору.
                                 </div>
                                 {lateLeft > 0 && (
@@ -446,7 +515,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         sub="Не позже чем за 3 часа, в пределах срока абонемента"
                                         onClick={() => {
                                             onClose();
-                                            navigate(`/m/find?reschedule=${booking.id}`);
+                                            navigate(rescheduleUrl);
                                         }}
                                     />
                                 )}
@@ -456,7 +525,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                         sub={booking.isReRentListed
                                             ? 'Бронь снова станет только вашей'
-                                            : 'Если её займут — вернём 50% на баланс'}
+                                            : reRentCaption(booking)}
                                         busy={busy === 'rerent'}
                                         onClick={doToggleReRent}
                                     />
@@ -479,7 +548,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                                     sub="Выберите новое время в «Свободно»"
                                     onClick={() => {
                                         onClose();
-                                        navigate(`/m/find?reschedule=${booking.id}`);
+                                        navigate(rescheduleUrl);
                                     }}
                                 />
                                 )}
@@ -490,10 +559,15 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                         sub={booking.isReRentListed
                                             ? 'Бронь снова станет только вашей'
-                                            : 'Если её займут — вернём 50% на баланс'}
+                                            : reRentCaption(booking)}
                                         busy={busy === 'rerent'}
                                         onClick={doToggleReRent}
                                     />
+                                )}
+                                {reRentTooEarly && !isRequest && (
+                                    <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink60, padding: '0 4px' }}>
+                                        {RE_RENT_TOO_EARLY_HINT}
+                                    </div>
                                 )}
 
                                 <ActionRow
@@ -526,6 +600,17 @@ export function BookingDetailSheet({ booking, onClose }: {
                             sub={`${repeatDayLabel(repeatTargetDate(booking))} в ${booking.startTime}`}
                             onClick={doRepeat}
                         />
+
+                        {/* Ревью №11: правила — одной ссылкой из шторки. */}
+                        {isLive && (
+                            <button
+                                type="button"
+                                onClick={() => { onClose(); navigate('/m/booking-rules'); }}
+                                style={{ ...inlineLink, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44, alignSelf: 'flex-start' }}
+                            >
+                                <BookOpen size={16} aria-hidden="true" /> Правила отмены и переноса
+                            </button>
+                        )}
 
                         {/* Series actions — only when this booking is part of a recurring series. */}
                         {(booking as any).recurringGroupId && isLive && (

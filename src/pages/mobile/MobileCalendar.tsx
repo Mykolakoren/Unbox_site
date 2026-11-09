@@ -19,7 +19,8 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 // Compact enough that 09:00–22:00 (13h) fits within 2 phone-screens worth of
 // scroll while still leaving each row tappable. Earlier 56px wasted vertical
 // space and pushed labels to the top of the visible area.
-const HOUR_PX = 48;
+// 09.11: 64 — час делится на две половины (:00 / :30), каждой нужна высота под палец.
+const HOUR_PX = 64;
 const TIME_RAIL_PX = 44;   // left margin for hour labels
 const DAY_START = 9;
 const DAY_END = 22;
@@ -103,9 +104,15 @@ export function MobileCalendar() {
      *  длительность, формат, допуслуги и цена правятся уже ТАМ — на одной
      *  скроллящейся странице, где ничего не перекрывается (всплывающая панель
      *  прятала кнопку «Забронировать» и уводила от допов — убрали). */
-    const quickBook = (hour: number) => {
-        const startMin = hour * 60;
+    // 09.11 (ревью №17): старт с :00 или :30 (верхняя / нижняя половина часа),
+    // прошедшее время не нажимается — раньше вело на оформление с «уже началось».
+    const quickBook = (startMin: number) => {
         const endMin = startMin + 60;
+        const nowFrom = dayOffset < 0 ? Infinity : dayOffset === 0 ? tbilisiNow().totalMins : 0;
+        if (startMin <= nowFrom) {
+            toast.error('Это время уже прошло — выберите другое.');
+            return;
+        }
         if (roomBookings.some(x => x.startMin < endMin && x.endMin > startMin)) {
             toast.error('Это время уже занято — выберите другое.');
             return;
@@ -231,7 +238,7 @@ export function MobileCalendar() {
                         {/* Vertical timeline */}
                         <div style={{ padding: '0 16px' }}>
                             <p style={{ fontSize: 14, color: COLOR.ink60, margin: '0 0 8px' }}>
-                                Нажмите на свободный час, чтобы забронировать.
+                                Нажмите на свободный час: верх — начало в :00, низ — в :30. Прошедшее время закрыто.
                             </p>
                             <Timeline
                                 bookings={roomBookings}
@@ -315,7 +322,8 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
     bookings: { b: BookingHistoryItem; startMin: number; endMin: number }[];
     isOwnBooking: (b: BookingHistoryItem) => boolean;
     onTapOwn: (b: BookingHistoryItem) => void;
-    onTapEmpty: (hour: number) => void;
+    /** Минута начала (шаг 30). */
+    onTapEmpty: (startMin: number) => void;
     /** С какой минуты дня часы ещё впереди (подпись «+ Свободно»). */
     freeFromMin: number;
 }) {
@@ -332,37 +340,45 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
             overflow: 'hidden',
         }}>
             {/* Hour rows — clickable for quick-book */}
-            {Array.from({ length: totalHours }).map((_, i) => {
-                const hour = DAY_START + i;
-                // «+ Свободно» — только если весь час свободен: при брони
-                // с :30 подпись вводила бы в заблуждение.
-                const free = hour * 60 >= freeFromMin
-                    && !bookings.some(x => x.startMin < (hour + 1) * 60 && x.endMin > hour * 60);
+            {/* Каждый час — две половины: верхняя начинает бронь с :00,
+                нижняя — с :30 (ревью №17). Прошедшие половины не нажимаются. */}
+            {Array.from({ length: totalHours * 2 }).map((_, j) => {
+                const startMin = DAY_START * 60 + j * 30;
+                const hourStart = startMin % 60 === 0;
+                const past = startMin <= freeFromMin;
+                const slotFree = (from: number) => !bookings.some(x => x.startMin < from + 60 && x.endMin > from);
+                // «+ Свободно» — в верхней половине, если весь час свободен;
+                // «+ с :30» — в нижней, если с :30 свободен час, а с :00 — нет.
+                const label = past || startMin + 60 > DAY_END * 60 ? null
+                    : hourStart ? (slotFree(startMin) ? '+ Свободно' : null)
+                        : (slotFree(startMin) && (startMin - 30 <= freeFromMin || !slotFree(startMin - 30)) ? `+ с ${Math.floor(startMin / 60)}:30` : null);
+                const hh = `${Math.floor(startMin / 60)}:${hourStart ? '00' : '30'}`;
                 return (
                     <button
-                        key={hour}
-                        onClick={() => onTapEmpty(hour)}
+                        key={startMin}
+                        onClick={() => { if (!past) onTapEmpty(startMin); }}
+                        disabled={past}
                         style={{
                             position: 'absolute',
-                            top: i * HOUR_PX,
+                            top: j * (HOUR_PX / 2),
                             left: 0,
                             right: 0,
-                            height: HOUR_PX,
-                            background: 'transparent',
+                            height: HOUR_PX / 2,
+                            background: past ? COLOR.sunken : 'transparent',
                             border: 'none',
-                            borderTop: i === 0 ? 'none' : `1px solid ${COLOR.ink05}`,
+                            borderTop: j === 0 || !hourStart ? 'none' : `1px solid ${COLOR.ink05}`,
                             display: 'flex',
                             alignItems: 'center',
-                            cursor: 'pointer',
+                            cursor: past ? 'default' : 'pointer',
                             fontFamily: 'inherit',
-                            padding: `6px 12px 6px ${TIME_RAIL_PX + 8}px`,
+                            padding: `0 12px 0 ${TIME_RAIL_PX + 8}px`,
                             textAlign: 'left',
                             color: COLOR.ink60,
                             fontSize: 12,
                         }}
-                        aria-label={`Забронировать на ${hour}:00`}
+                        aria-label={past ? `${hh} — время прошло` : `Забронировать с ${hh}`}
                     >
-                        {free && <span aria-hidden="true">+ Свободно</span>}
+                        {label && <span aria-hidden="true">{label}</span>}
                     </button>
                 );
             })}

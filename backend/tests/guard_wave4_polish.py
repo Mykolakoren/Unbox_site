@@ -277,7 +277,8 @@ def test_mobile_admin_cash_gated():
 
     dash = _code(MADMIN + "MobileAdminDashboard.tsx")
     assert "const canCash = userCanAccessFinance(currentUser);" in dash
-    i = dash.index("{canCash && (")
+    # 09.11: одна кнопка «Принять оплату · N ₾» на всех строках «Должны» — payButton под canCash.
+    i = dash.index("const payButton = (amount: number, onClick: () => void) => canCash ? (")
     assert dash.find("Принять оплату", i) != -1, "«Принять оплату» в «Должны» без права на кассу"
     assert "{canCash && pay && (" in dash
 
@@ -294,8 +295,11 @@ def test_today_uncharged_and_covered_labels():
     # 03.10 (решение владельца «оплачено скидкой»): не списанная бронь, которую
     # целиком покрывает плюс на балансе, — «✓ оплачено» с подсказкой «спишется за
     # 24 ч до начала» (было «◌ спишется с баланса», 01.10).
-    assert "charged === false ? COVERED_HINT : PAID_HINT" in badge and "paidLabel = 'оплачено'" in badge, \
-        "не списанная бронь, покрытая плюсом баланса, — не «оплачено» с подсказкой"
+    # 09.11 (решение владельца 1, как в шахматке): снова три метки — не списанная,
+    # покрытая балансом, — «◌ с баланса», списанная без долга — «✓ оплачено».
+    assert "if (charged === false) {" in badge and "statusLabel('payment', 'covered', 'staff')" in badge \
+        and "paidLabel = statusLabel('payment', 'charged', 'staff')" in badge, \
+        "не списанная бронь, покрытая плюсом баланса, — не «◌ с баланса»"
     assert "ui-badge--pending" in badge and "statusLabel('payment', 'not_charged', 'staff')" in badge, \
         "нет плашки «не списана»"
     st = _read("src/design/statuses.ts")
@@ -334,7 +338,7 @@ def test_pay_from_due_list_keeps_branch():
     body = dash[i:dash.index("\n    };", i)]
     assert "branchOfBooking({ resourceId: first.cabinetId })" in body and "const first = c.rows[0];" in body, \
         "«Принять оплату» из «Должны» без филиала — шторка подставит «Unbox Uni»"
-    assert "onClick={() => openPayFor(c)}" in dash
+    assert "payButton(c.total, () => openPayFor(c))" in dash
 
 
 def test_user_card_no_double_decode():
@@ -379,8 +383,9 @@ def test_desktop_due_segment_counts_clients():
     dash = _code(ADMIN + "Dashboard.tsx")
     assert "label: `Должны · ${summary.clients}`" in dash, "«Должны · N» на компьютере снова считает брони, а не клиентов"
     mob = _code(MADMIN + "MobileAdminDashboard.tsx")
-    # 01.10 (guard_pay_clarity_2026_10): на телефоне «Должны · N» — только клиенты с today > 0, как на компьютере.
-    assert "`Должны · ${owingToday.length}`" in mob
+    # 09.11 (ревью admin-ux №15): на телефоне «Должны · N» — все, у кого долг (один список
+    # «Сегодня / Старые долги / Скоро уйдут за лимит»), а не только с бронью сегодня.
+    assert "`Должны · ${debtorsCount}`" in mob
 
 
 def test_cash_line_reloads_after_payment():

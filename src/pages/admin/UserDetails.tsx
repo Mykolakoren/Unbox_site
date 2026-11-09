@@ -377,7 +377,9 @@ export function AdminUserDetails() {
             tone: 'danger',
         });
         if (!ok) return;
-        cancelBooking(id);
+        try {
+            await cancelBooking(id);
+        } catch { return; /* причину (например, «нужна причина поздней отмены») показал стор */ }
         toast.success('Бронирование отменено');
     };
 

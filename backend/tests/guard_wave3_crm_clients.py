@@ -315,7 +315,8 @@ def test_generic_error_toasts_only_in_frozen_money_handlers():
     """X3-22: «Ошибка» без смысла — только в денежных обработчиках, которые
     по запрету не трогаем (quick-pay, снятие оплаты, «отметить все»)."""
     detail = _read("detail")
-    assert detail.count("|| 'Ошибка')") == 3, "новый пустой тост «Ошибка» в карточке клиента"
+    # 09.11: quick-pay в карточке показывает причину сервера (toastApiError) — осталось два.
+    assert detail.count("|| 'Ошибка')") == 2, "новый пустой тост «Ошибка» в карточке клиента"
     for key in ("clients", "notes", "finances"):
         assert "|| 'Ошибка')" not in _read(key), f"{FILES[key].name}: пустой тост «Ошибка»"
 

@@ -146,11 +146,13 @@ def test_mobile_today_split_groups():
     assert "owing.filter(c => !(c.today > 0))" in code, "телефон: нет группы «не сегодня»"
     assert "owingToday.map(c => renderOwing(c))" in code, "телефон: «сегодня» рисует не owingToday"
     assert "owingLater.map(c => renderOwing(c, true))" in code, "телефон: блок «не сегодня» не рисуется"
-    assert code.count("Принять оплату · ") == 1 and "renderOwing = (" in code, \
-        "«Принять оплату» на телефоне должна быть в общей карточке renderOwing (у обеих групп)"
+    # 09.11 (ревью admin-ux №15): одна кнопка «Принять оплату · N ₾» (payButton) на всех строках
+    # «Должны»; разделы «Сегодня / Старые долги / Скоро уйдут за лимит»; число — все с долгом.
+    assert code.count("Принять оплату · ") == 1 and "renderOwing = (" in code and "payButton(c.total, () => openPayFor(c))" in code, \
+        "«Принять оплату» на телефоне должна быть в общей кнопке payButton (у всех групп)"
     src = _read(MDASH)
-    assert LATER_TITLE in src and LATER_NOTE in src, "телефон: нет заголовка/пояснения блока «не сегодня»"
-    assert "`Должны · ${owingToday.length}`" in code, "телефон: счётчик «Должны» считает не только today > 0"
+    assert 'title="Старые долги"' in src and LATER_NOTE in src, "телефон: нет раздела «Старые долги» с пояснением"
+    assert "`Должны · ${debtorsCount}`" in code, "телефон: счётчик «Должны» — не все, у кого долг"
 
 
 # ── 3. Сводка «Взять N ₾ с K клиентов» — только today > 0 ────────────────

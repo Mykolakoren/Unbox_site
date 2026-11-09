@@ -30,6 +30,9 @@ interface Props {
     branch: string;
     /** Текущий баланс кассы по системе (для подсказки в форме). */
     systemBalance: number;
+    /** Решение владельца 3 (09.11): роль admin «ожидалось» до закрытия не видит —
+     *  ни после ввода суммы. Цифры придут в ответе на закрытие смены. */
+    blind?: boolean;
     onClose: () => void;
     onClosed: () => void;
 }
@@ -63,7 +66,7 @@ const CHECKLIST: ChecklistItem[] = [
     },
 ];
 
-export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed }: Props) {
+export function MobileCloseShiftSheet({ branch, systemBalance, blind: blindProp = false, onClose, onClosed }: Props) {
     const [checked, setChecked] = useState<Record<string, boolean>>({});
     const [actualBalance, setActualBalance] = useState<string>('');
     const [notes, setNotes] = useState<string>('');
@@ -91,10 +94,12 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
     const hasAmount = parsedActual !== null;
     const actualNum = parsedActual ?? 0;
     const amountError = !isMoneyInputBlank(actualBalance) && parsedActual === null ? MONEY_INPUT_ERROR : undefined;
+    // «Слепое» закрытие (решение 3): сервер не отдал «ожидалось» или роль admin.
+    const blind = blindProp || !!preview?.cashHidden;
     const expected = preview?.expected ?? systemBalance;
     // До тетри: без float-шума вида 0.1 + 0.2 в подписи расхождения.
-    const drift = hasAmount ? Math.round((actualNum - expected) * 100) / 100 : 0;
-    const hasDrift = hasAmount && Math.abs(drift) >= 0.01;
+    const drift = hasAmount && !blind ? Math.round((actualNum - expected) * 100) / 100 : 0;
+    const hasDrift = hasAmount && !blind && Math.abs(drift) >= 0.01;
     const canSubmit = allChecked && hasAmount && !submitting;
 
     const branchLabel = branch;
@@ -123,12 +128,22 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
         }
         setSubmitting(true);
         try {
-            await cashboxApi.endShift({
+            const report = await cashboxApi.endShift({
                 actual_balance: actualNum,
                 notes: notes.trim() || undefined,
                 branch,
             });
-            toast.success(`Смена закрыта — ${branchLabel}`);
+            if (blind) {
+                // «Ожидалось» — только теперь, из ответа сервера на закрытие.
+                const exp = Number(report?.expectedBalance);
+                const disc = Number(report?.discrepancy ?? 0);
+                const tail = Number.isFinite(exp)
+                    ? ` Ожидалось ${formatGel(exp)}, в кассе ${formatGel(actualNum)} — ${Math.abs(disc) < 0.01 ? 'расхождений нет' : `расхождение ${formatGel(disc, { sign: true })}`}.`
+                    : '';
+                (Math.abs(disc) < 0.01 ? toast.success : toast.warning)(`Смена закрыта — ${branchLabel}.${tail}`, { duration: 12000 });
+            } else {
+                toast.success(`Смена закрыта — ${branchLabel}`);
+            }
             onClosed();
         } catch (e: any) {
             toastApiError(e, 'Не удалось закрыть смену. Попробуйте ещё раз');
@@ -215,7 +230,9 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                 <Field
                     label="Сколько наличных в кассе — пересчитайте"
                     error={amountError}
-                    hint={hasAmount ? undefined : 'Ожидаемую сумму покажем после ввода'}
+                    hint={blind
+                        ? 'Сколько должно быть, покажем после закрытия смены'
+                        : hasAmount ? undefined : 'Ожидаемую сумму покажем после ввода'}
                 >
                     <Input
                         kind="money"
@@ -226,7 +243,7 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                     />
                 </Field>
 
-                {hasAmount && (
+                {hasAmount && !blind && (
                     <div aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: 'var(--color-ink-80)' }}>
                             <span>По системе должно быть</span>
@@ -251,6 +268,11 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                     </div>
                 )}
 
+                {blind && (
+                    <div data-blind-close style={{ fontSize: 12, color: 'var(--color-ink-60)', lineHeight: 1.4 }}>
+                        Если знаете, что сумма может не сойтись (сдача, инкассация), коротко напишите в «Заметках» — владелец увидит.
+                    </div>
+                )}
                 <Field
                     label={hasDrift ? 'Заметки — откуда расхождение' : 'Заметки'}
                     optional={!hasDrift}

@@ -166,7 +166,7 @@ export function PromptModal({
                         onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                         placeholder={placeholder}
                         autoFocus
-                        className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                        className="w-full px-4 py-3 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
                     />
                     {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
                 </div>

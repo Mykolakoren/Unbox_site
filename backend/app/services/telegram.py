@@ -616,18 +616,28 @@ class TelegramService:
         booking_id: Optional[str] = None,
         duration: Optional[int] = None,
         remaining: str = "",
+        refund_percent: float = 0.5,
+        not_charged: bool = False,
     ) -> bool:
         """Notify the original owner that their re-rent-listed slot was
         taken by someone else. They get the refund (50% by policy) and a
-        balance update line."""
+        balance update line.
+
+        09.11: пересдача, выставленная раньше правила «только меньше суток»,
+        забрана за сутки и больше до начала — возврат 100 % (refund_percent=1.0).
+        Бронь ещё не списана (not_charged) — пишем, что ничего не спишем, а не «+0,00 ₾»."""
         if not chat_id:
             return False
         date_label = self._fmt_date(date)
         loc_line = f" · {escape(location_name)}" if location_name else ""
-        bal_line = (
-            f"💰 Возвращено: <b>+{refund_amount:.2f} ₾</b> (50% за занятое время)\n"
-            f"💼 Баланс: <b>{new_balance:+.2f} ₾</b>"
-        )
+        pct_label = f"{refund_percent * 100:g}%"
+        if not_charged and refund_amount < 0.01:
+            bal_line = "💰 Бронь ещё не была оплачена — за это время ничего не спишем."
+        else:
+            bal_line = (
+                f"💰 Возвращено: <b>+{refund_amount:.2f} ₾</b> ({pct_label} за занятое время)\n"
+                f"💼 Баланс: <b>{new_balance:+.2f} ₾</b>"
+            )
         when = f"{escape(start_time)}, {duration} мин" if duration else escape(start_time)
         # Заняли часть брони — остальное время всё ещё за владельцем (04.11).
         rest_line = (f"🕐 Осталось за вами и на пересдаче: {escape(remaining)}\n\n" if remaining else "")

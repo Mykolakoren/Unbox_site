@@ -268,6 +268,14 @@ def _attach_unlinked(session: Session, day_bookings: list[Booking]) -> dict[str,
     return out
 
 
+def _canon_branch(name: Optional[str]) -> Optional[str]:
+    """«unbox_uni» → «Unbox Uni» (то же сопоставление, что branch_of_location)."""
+    if not name:
+        return name
+    from app.api.v1.analytics import CENTER_NAMES
+    return CENTER_NAMES.get(name.strip().lower(), name)
+
+
 def branch_of_location(location_id: Optional[str]) -> str:
     """Филиал кассы по локации брони — общее сопоставление бэкенда
     (analytics.CENTER_NAMES), а не название локации в базе: переименование
@@ -497,6 +505,9 @@ def compute_day_summary(
     blocks: dict[Optional[str], dict] = {}
 
     def block(name: Optional[str]) -> dict:
+        # Ревью 09.11 (admin-design №10): филиал кодом («unbox_uni») и названием
+        # («Unbox Uni») — одна карточка, а не две с разными суммами.
+        name = _canon_branch(name)
         if name not in blocks:
             blocks[name] = _new_block(name)
         return blocks[name]

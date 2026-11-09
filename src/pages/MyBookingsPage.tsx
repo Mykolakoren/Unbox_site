@@ -50,6 +50,7 @@ import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatSt
 import { ruCountWord } from '../utils/plural';
 import { seriesApprovalNote } from '../utils/approvalNote';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
+import { RE_RENT_TOO_EARLY_HINT } from './mobile/refundText';
 import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
 import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
@@ -1301,13 +1302,21 @@ function BookingsChessboard({
                             </div>
                             {canModify(activeBooking) ? (
                                 <div className="space-y-2">
-                                    <div className="grid grid-cols-3 gap-2">
+                                    {/* 09.11 (владелец): больше суток до начала — пересдачи нет,
+                                        бронь отменяют с полным возвратом. Уже выставленную
+                                        раньше (до правила) — можно снять с пересдачи. */}
+                                    <div className={`grid ${activeBooking.isReRentListed ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                                         <button onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-lg bg-sunken text-ink">Перенести</button>
-                                        <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-lg bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
-                                            {activeBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                                        </button>
+                                        {activeBooking.isReRentListed && (
+                                            <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-lg bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
+                                                Снять
+                                            </button>
+                                        )}
                                         <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-lg bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]">Отменить</button>
                                     </div>
+                                    {!activeBooking.isReRentListed && (
+                                        <div className="text-caption text-ink-60 text-center px-2">{RE_RENT_TOO_EARLY_HINT}</div>
+                                    )}
                                     {activeBooking.duration >= 120 && !activeBooking.isReRentListed && (
                                         <button
                                             onClick={() => { setTrimBooking(activeBooking); setActiveBooking(null); }}
@@ -2058,6 +2067,16 @@ function BookingsChessboard({
                                     <X size={12} /> Отменить
                                 </button>
                             </div>
+                            {/* 09.11: больше суток — пересдачи нет; выставленную раньше
+                                (до правила) бронь можно только снять с пересдачи. */}
+                            {activeBooking.isReRentListed && (
+                                <button
+                                    onClick={() => { setActiveBooking(null); onCancelReRent(activeBooking.id); }}
+                                    className="w-full py-2 rounded-lg border border-ink-10 text-ink-60 text-xs font-semibold hover:bg-ink-05 transition-all"
+                                >
+                                    Снять с пересдачи
+                                </button>
+                            )}
                             <button
                                 disabled={extending}
                                 onClick={async () => {
@@ -3158,13 +3177,17 @@ function BookingCard({
 
                         // Refund amount: parse from reason string ("· 18.00GEL"),
                         // fall back to half of finalPrice if missing.
+                        // 09.11: доля — из причины («100% refund» у пересдачи, выставленной
+                        // раньше чем за сутки до начала), по умолчанию 50 %.
+                        const pm = /(\d+(?:\.\d+)?)\s*%/.exec(reason);
+                        const pct = pm ? parseFloat(pm[1]) : 50;
                         const m = /([0-9]+(?:\.[0-9]+)?)\s*GEL/i.exec(reason);
-                        const refunded = m ? parseFloat(m[1]) : (booking.finalPrice || 0) * 0.5;
+                        const refunded = m ? parseFloat(m[1]) : (booking.finalPrice || 0) * pct / 100;
                         return (
                             <div className="mt-3 inline-flex flex-wrap items-center gap-2 bg-[var(--status-ok-bg)] px-3 py-1.5 text-small text-[var(--status-ok-fg)]">
                                 <Repeat size={14} aria-hidden="true" />
                                 <span className="font-semibold">Бронь пересдана</span>
-                                <span>· вернули 50 % · <span className="num font-semibold">{formatGel(refunded, { sign: true })}</span></span>
+                                <span>· вернули {pct}&nbsp;% · <span className="num font-semibold">{formatGel(refunded, { sign: true })}</span></span>
                             </div>
                         );
                     })()}

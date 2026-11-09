@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BellRing, CalendarDays, Check, Link as LinkIcon, Loader2, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
+import { BellRing, CalendarDays, Check, Info, Link as LinkIcon, Loader2, MessageCircle, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -26,10 +26,23 @@ import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeMod
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { catalogPath } from '../../utils/catalogPath';
+import { calculatePrice } from '../../utils/pricing';
+import { isHotStart, ymdOf } from '../../utils/bookingPolicy';
+import { fmtHours, paymentPlan, subscriptionHours } from '../../utils/paymentPriority';
+import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
+import { ruPlural } from '../../utils/plural';
+import { isBookingAdmin } from './crmAccess';
+import { resourceKind } from '../../utils/subscriptionHours';
+import { useAdminFlow } from './adminFlow';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
-const DURATIONS = [60, 90, 120, 180]; // minutes
+// 09.11 (ревью №12): + 2,5 и 4 ч; остальное до 9 ч — «Больше…» (шаг 30 минут).
+const DURATIONS = [60, 90, 120, 150, 180, 240]; // minutes
+const MAX_DURATION = 9 * 60;
+const MORE_DURATIONS = Array.from({ length: (MAX_DURATION - 60) / 30 + 1 }, (_, i) => 60 + i * 30);
+const isValidDuration = (n: number) => Number.isFinite(n) && n >= 60 && n <= MAX_DURATION && n % 30 === 0;
+const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
 
 /* Волна 2, пакет B (G4-04): последний выбор «Где / Тип / Сколько» запоминаем
  * на этом устройстве, чтобы сводка «Сегодня · 1 ч · оба центра» чаще всего
@@ -77,11 +90,16 @@ const GROUP_HALLS_SUB = (() => {
 
 const SPACE_WORD: Record<SpaceType, string> = { individual: 'кабинет', group: 'зал', capsule: 'капсула' };
 
-function pluralWindows(n: number): string {
-    const m10 = n % 10, m100 = n % 100;
-    if (m10 === 1 && m100 !== 11) return 'окно';
-    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'окна';
-    return 'окон';
+/** «19 вариантов времени» — число стартов, а не кнопок-кабинетов (ревью №13). */
+function timesWord(n: number): string {
+    return `${n} ${ruPlural(n, ['вариант', 'варианта', 'вариантов'])} времени`;
+}
+
+/** Сколько дней от сегодня до даты (полночь к полуночи). */
+function daysFromToday(d: Date): number {
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const x = new Date(d); x.setHours(0, 0, 0, 0);
+    return Math.round((x.getTime() - t0.getTime()) / 86400000);
 }
 
 
@@ -91,6 +109,7 @@ export function MobileFind() {
     const { confirm: askConfirm } = useConfirmDialog();
     // Селективные селекторы — ре-рендер только на изменение нужных полей.
     const currentUser = useUserStore(s => s.currentUser);
+    const users = useUserStore(s => s.users);
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
     // Занятость кабинетов. Пока она не загрузилась (или упала), показывать
@@ -124,6 +143,18 @@ export function MobileFind() {
         return bookings.find(b => b.id === rescheduleId) ?? null;
     }, [rescheduleId, bookings]);
     const rescheduleBooking = liveRescheduleMatch ?? rescheduleSnapshot;
+    // Админ переносит чужую бронь: в общем списке у неё может не быть владельца
+    // (публичная копия занятости без userId) — для имени клиента берём бронь
+    // по номеру с сервера (ревью админки №2г).
+    const [ownerSnapshot, setOwnerSnapshot] = useState<BookingHistoryItem | null>(null);
+    useEffect(() => {
+        if (!rescheduleId || !isBookingAdmin(useUserStore.getState().currentUser)) return;
+        let cancelled = false;
+        bookingsApi.getBookingById(rescheduleId)
+            .then(found => { if (!cancelled && found) setOwnerSnapshot(found); })
+            .catch(() => { /* имя клиента — не главное, перенос работает и без него */ });
+        return () => { cancelled = true; };
+    }, [rescheduleId]);
     useEffect(() => {
         if (liveRescheduleMatch) setRescheduleSnapshot(liveRescheduleMatch);
     }, [liveRescheduleMatch]);
@@ -168,18 +199,26 @@ export function MobileFind() {
     // return — chevral the entry as `?day=N` or `?date=YYYY-MM-DD`,
     // `?dur=60` so the URL is the source of truth.
     const [, setSearchParamsState] = useSearchParams();
-    const initialDayOffset = (() => {
-        const raw = searchParams.get('day');
-        if (raw == null) return 0;
-        const n = Number(raw);
-        return Number.isFinite(n) ? n : 0;
-    })();
     const initialCustomDate = (() => {
         const raw = searchParams.get('date');
         if (!raw) return null;
         const d = new Date(raw + 'T00:00:00');
         return Number.isFinite(d.getTime()) ? d : null;
     })();
+    // 09.11 (ревью №1): ?date= без ?day= раньше молча игнорировался — экран
+    // открывался на «Сегодня». Ближние дни — фишкой дня, дальние — «Другой».
+    const initialDayOffset = (() => {
+        const raw = searchParams.get('day');
+        if (raw == null) {
+            if (!initialCustomDate) return 0;
+            const k = daysFromToday(initialCustomDate);
+            return k >= 0 && k <= 8 ? k : -1;
+        }
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : 0;
+    })();
+    // День в ссылке уже задан — переносимая бронь его не перебивает.
+    const [hadDayInUrl] = useState(() => searchParams.has('day') || searchParams.has('date'));
     // Запоминаем выбор только в обычном поиске: предвыбор кабинета (?cab=),
     // перенос и привязка к сессии — разовые сценарии, их не сохраняем.
     const rememberPrefs = !searchParams.get('cab') && !rescheduleId && !linkSessionId;
@@ -187,13 +226,14 @@ export function MobileFind() {
     const initialDuration = (() => {
         const raw = searchParams.get('dur');
         if (!raw) {
-            return typeof savedPrefs.dur === 'number' && DURATIONS.includes(savedPrefs.dur) ? savedPrefs.dur : 60;
+            return typeof savedPrefs.dur === 'number' && isValidDuration(savedPrefs.dur) ? savedPrefs.dur : 60;
         }
         const n = Number(raw);
-        return DURATIONS.includes(n) ? n : 60;
+        return isValidDuration(n) ? n : 60;
     })();
     const [dayOffset, setDayOffset] = useState(initialDayOffset); // 0=today, 1=tomorrow, … or -1 = custom
-    const [customDate, setCustomDate] = useState<Date | null>(initialCustomDate);
+    const [customDate, setCustomDate] = useState<Date | null>(initialDayOffset === -1 ? initialCustomDate : null);
+    const [moreDurOpen, setMoreDurOpen] = useState(false);
     const [duration, setDuration] = useState(initialDuration);
 
     // Mirror state back to URL whenever it changes so the back-stack preserves
@@ -256,14 +296,32 @@ export function MobileFind() {
     // When entering reschedule mode, prefill the duration from the source
     // booking — typing it again would be silly. Location filter stays loose
     // so the user can move to a different cabinet/site.
+    const jumpedToBookingDay = useRef(false);
     useEffect(() => {
         if (rescheduleBooking) {
             // 28.10 (Егор): длительность переносимой брони — ровно как в брони.
             // Раньше 4 ч не было среди кнопок 1/1,5/2/3 ч, и перенос молча
             // делал из неё 1 час.
             setDuration(rescheduleBooking.duration ?? 60);
+            // 09.11 (ревью №1): открываем на ДНЕ переносимой брони, а не на
+            // «Сегодня» (ссылка без дня — например, из админки).
+            if (!hadDayInUrl && !jumpedToBookingDay.current) {
+                jumpedToBookingDay.current = true;
+                const ymd = bookingDay(rescheduleBooking);
+                if (ymd) jumpToDate(new Date(ymd + 'T00:00:00'));
+            }
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rescheduleBooking]);
+
+    /** Перейти на день: ближние — фишкой, дальние — «Другой день»; прошлое — сегодня. */
+    function jumpToDate(target: Date) {
+        const k = daysFromToday(target);
+        if (k < 0) { setDayOffset(0); setCustomDate(null); return; }
+        if (k <= 8) { setDayOffset(k); setCustomDate(null); return; }
+        setDayOffset(-1);
+        setCustomDate(target);
+    }
 
     // Link-session: pre-fill duration and jump to the session's date so the
     // first slot row the user sees is the correct day. We don't auto-narrow
@@ -271,7 +329,7 @@ export function MobileFind() {
     // cabinets near the session time.
     useEffect(() => {
         if (!linkSessionMeta) return;
-        if (DURATIONS.includes(linkSessionMeta.duration)) setDuration(linkSessionMeta.duration);
+        if (isValidDuration(linkSessionMeta.duration)) setDuration(linkSessionMeta.duration);
         if (linkSessionMeta.date) {
             const target = new Date(linkSessionMeta.date + 'T00:00:00');
             const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -331,7 +389,7 @@ export function MobileFind() {
     useEffect(() => {
         if (daysBack > 0) void ensureBookingsRange(targetDate, addDays(targetDate, 1));
     }, [daysBack, targetDate, ensureBookingsRange]);
-    const slots = useMemo(
+    const allSlots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
@@ -340,6 +398,80 @@ export function MobileFind() {
                                canBackdate ? daysBack : 0),
         [occupancy, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin, daysBack],
     );
+
+    // 09.11 (ревью №1): при переносе не-админа сервер откажет, если новое время
+    // в «срочном» окне (booking_policy.is_hot_start: меньше 12 ч, в выходные 24 ч,
+    // после 21:00 на утро), а старое — нет. Такие окна не показываем, а над
+    // списком честно пишем, что их переносит администратор.
+    const isAdminActor = isBookingAdmin(currentUser);
+    const restrictHot = useMemo(() => {
+        if (!rescheduleBooking || isAdminActor) return false;
+        const ymd = bookingDay(rescheduleBooking);
+        const st = rescheduleBooking.startTime;
+        if (!ymd || !st) return true;
+        const [h, m] = st.split(':').map(Number);
+        return !isHotStart(ymd, h * 60 + m);
+    }, [rescheduleBooking, isAdminActor]);
+    const targetYmd = ymdOf(targetDate);
+    const hotHidden = useMemo(
+        () => (restrictHot ? allSlots.filter(x => isHotStart(targetYmd, x.startMin)) : []),
+        [restrictHot, allSlots, targetYmd],
+    );
+    // Дальше по экрану «окна» — только те, что можно выбрать (без срочных при переносе).
+    const slots = useMemo(
+        () => (hotHidden.length ? allSlots.filter(x => !hotHidden.includes(x)) : allSlots),
+        [allSlots, hotHidden],
+    );
+    const hotUntil = hotHidden.length ? minsToHm(hotHidden[hotHidden.length - 1].startMin) : null;
+
+    // Админ-бронь / админ-перенос (ревью админки №2): для кого — в полоске внизу
+    // и в плашке переноса; после переноса чужой брони — обратно в админку.
+    const adminFlow = useAdminFlow(s => s.active) && isAdminActor;
+    const setAdminForName = useAdminFlow(s => s.setForName);
+    const bookingForUser = useBookingStore(s => s.bookingForUser);
+    const fetchUsers = useUserStore(s => s.fetchUsers);
+    const ownerSource = (ownerSnapshot && ownerSnapshot.id === rescheduleBooking?.id ? ownerSnapshot : null)
+        ?? (rescheduleBooking?.userId ? rescheduleBooking : null);
+    const rescheduleIsForeign = !!ownerSource && !!currentUser
+        && ownerSource.userId !== currentUser.email
+        && (ownerSource as { userUuid?: string }).userUuid !== currentUser.id;
+    useEffect(() => {
+        if (isAdminActor && (rescheduleIsForeign || bookingForUser) && users.length === 0) fetchUsers().catch(() => {});
+    }, [isAdminActor, rescheduleIsForeign, bookingForUser, users.length, fetchUsers]);
+    const rescheduleOwnerName = rescheduleIsForeign && ownerSource
+        ? (users.find(u => u.email === ownerSource.userId || u.id === (ownerSource as { userUuid?: string }).userUuid)?.name
+            || ownerSource.userId || null)
+        : null;
+    const forName = rescheduleBooking
+        ? (rescheduleIsForeign ? rescheduleOwnerName : (currentUser?.name ?? null))
+        : bookingForUser
+            ? (users.find(u => u.email === bookingForUser || u.id === bookingForUser)?.name || bookingForUser)
+            : null;
+    useEffect(() => {
+        if (adminFlow) setAdminForName(forName);
+    }, [adminFlow, forName, setAdminForName]);
+    const afterRescheduleTo = adminFlow || rescheduleIsForeign ? '/m/admin/bookings' : '/m/bookings';
+
+    // Цена на чипе (ревью №5): фактическая цена этого окна с пиком; у залов —
+    // «от … · группа …». Та же функция, что на оформлении (calculatePrice),
+    // со своей персональной скидкой. Недельную скидку покажет оформление.
+    const chipPrice = (startMin: number, rid: string): string | null => {
+        const r = RESOURCES.find(x => x.id === rid);
+        if (!r) return null;
+        const start = new Date(targetDate); start.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+        const end = new Date(start.getTime() + duration * 60000);
+        const price = (format: 'individual' | 'group') => calculatePrice({
+            format, startTime: start, endTime: end, extras: [], resourceId: rid,
+            personalDiscountPercent: currentUser?.personalDiscountPercent,
+            pricingSystem: currentUser?.pricingSystem,
+        }).finalPrice;
+        const unit = duration === 60 ? '/ч' : '';
+        const fmt = (n: number) => formatGel(n, { fraction: 'auto' });
+        const ind = price('individual');
+        const isHall = r.type !== 'capsule' && (r.capacity ?? 4) > 4 && (r.formats?.includes('group') ?? false);
+        if (isHall) return `от ${fmt(ind)}${unit} · группа ${fmt(price('group')).replace(/\s?₾$/, '')}`;
+        return `${fmt(ind)}${unit}`;
+    };
 
     const toggleLoc = (id: string) => {
         setLocs(prev => {
@@ -392,15 +524,64 @@ export function MobileFind() {
     const title = linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно';
     useDocumentTitle(title);
 
+    // crm-ux №9 (09.11): под сессию CRM — сначала короткое подтверждение с ценой
+    // и тем, чем заплатим, а не бронь с одного касания по слоту.
+    const [linkPick, setLinkPick] = useState<{ startMin: number; resourceId: string } | null>(null);
+
+    const bonusHoursAvail = useActiveBonusHours(linkSessionMeta ? currentUser?.id : null, false);
+    /** Сводка для шторки «Забронировать и привязать»: цена, чем заплатим, срочность. */
+    const linkSummary = useMemo(() => {
+        if (!linkPick) return null;
+        const r = RESOURCES.find(x => x.id === linkPick.resourceId);
+        const format = ((r?.formats?.[0] as 'individual' | 'group' | 'intervision') || 'individual');
+        const start = new Date(targetDate); start.setHours(Math.floor(linkPick.startMin / 60), linkPick.startMin % 60, 0, 0);
+        const end = new Date(start.getTime() + duration * 60000);
+        const price = calculatePrice({
+            format, startTime: start, endTime: end, extras: [], resourceId: linkPick.resourceId,
+            personalDiscountPercent: currentUser?.personalDiscountPercent, pricingSystem: currentUser?.pricingSystem,
+        });
+        const hours = duration / 60;
+        const sub = subscriptionHours(currentUser?.subscription, {
+            format, bookingDate: targetDate, bookings, ownerEmail: currentUser?.email,
+            resourceKind: resourceKind(linkPick.resourceId), liftPause: true,
+        });
+        // Сервер сам выбирает: бонус → абонемент → баланс (оплата «balance» = «реши сам»).
+        const plan = paymentPlan({ hours, bonusHours: bonusHoursAvail, sub, moneyPrice: price.finalPrice });
+        const peak = price.peakSurcharge ?? 0;
+        const pay = plan.auto === 'bonus'
+            ? (plan.bonusPartial
+                ? `${fmtHours(plan.bonusCovered)} бонусом + ${formatGel(plan.bonusMoney)} с баланса`
+                : `${fmtHours(hours)} бонусных часов`)
+            : plan.auto === 'subscription'
+                ? `${fmtHours(hours)} абонемента${peak > 0 ? ` + ${formatGel(peak)} за пиковые часы` : ''}`
+                : `${formatGel(price.finalPrice)} с баланса`;
+        const startMs = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours() - 4, start.getMinutes());
+        const hot = !isAdminActor && isHotStart(ymdOf(targetDate), linkPick.startMin);
+        const deferred = startMs - Date.now() > 24 * 3600 * 1000;
+        return {
+            room: [r?.name ?? linkPick.resourceId, LOCATIONS.find(l => l.id === r?.locationId)?.name].filter(Boolean).join(' · '),
+            time: `${formatDayMonth(targetDate)}, ${minsToHHMM(linkPick.startMin)}–${minsToHHMM(linkPick.startMin + duration)}`,
+            price: formatGel(price.finalPrice),
+            pay,
+            hot,
+            when: hot ? 'спишем, когда администратор подтвердит' : deferred ? 'спишем за сутки до начала' : 'спишем сразу',
+        };
+    }, [linkPick, targetDate, duration, currentUser, bookings, bonusHoursAvail, isAdminActor]);
+
+    /** Тап по чипу: под сессию CRM — сначала шторка подтверждения (crm-ux №9). */
+    function pickWindow(startMin: number, resourceId: string) {
+        if (!resourceId || inFlightRef.current) return;
+        if (linkSessionMeta) { setLinkPick({ startMin, resourceId }); return; }
+        void chooseWindow(startMin, resourceId);
+    }
+
     async function chooseWindow(startMin: number, resourceId: string) {
         if (!resourceId) return;
         if (inFlightRef.current) return;
-
-        // Link-session path: create the booking immediately (balance, no
-        // extras) and link it to the source CRM session. No checkout step —
-        // the user already committed by tapping "Привязать кабинет" in the
-        // session sheet. Failures during the link don't roll back the
-        // booking — the user can re-attach from the desktop CRM if needed.
+        // Link-session path: create the booking (server picks bonus →
+        // subscription → balance) and link it to the source CRM session.
+        // Failures during the link don't roll back the booking — the user
+        // can re-attach from the desktop CRM if needed.
         if (linkSessionMeta) {
             inFlightRef.current = true;
             setPendingChip(`${startMin}|${resourceId}`);
@@ -430,7 +611,13 @@ export function MobileFind() {
                     console.warn('CRM link failed (booking created)', linkErr);
                     toast.warning('Бронь создана, но привязать к сессии не получилось');
                 }
-                toast.success('Кабинет забронирован и привязан');
+                // Срочная бронь уходит админу на одобрение — так и говорим.
+                if ((created as { status?: string }).status === 'pending_approval') {
+                    toast.success('Отправили админу на подтверждение — кабинет за вами, пока он решает. Сессия привязана.', { duration: 6000 });
+                } else {
+                    toast.success('Кабинет забронирован и привязан');
+                }
+                setLinkPick(null);
                 navigate(`/m/crm/today${linkSessionMeta.date ? `?date=${linkSessionMeta.date}` : ''}`, { replace: true });
                 left = true;
             } catch (e: unknown) {
@@ -460,17 +647,62 @@ export function MobileFind() {
             const rateNote = oldRes && newRes && oldRes.hourlyRate !== newRes.hourlyRate
                 ? `${newRes.name} — ${formatGel(newRes.hourlyRate)}/ч (было ${formatGel(oldRes.hourlyRate)}/ч). `
                 : '';
+            // 09.11 (ревью №1): что изменится — словами, до нажатия.
+            const changes: string[] = [];
+            const durMin = rescheduleBooking.duration ?? duration;
+            const newStart = new Date(targetDate); newStart.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+            const newStartMs = Date.UTC(newStart.getFullYear(), newStart.getMonth(), newStart.getDate(),
+                newStart.getHours() - 4, newStart.getMinutes());
+            const hoursToNew = (newStartMs - Date.now()) / 3600000;
+            const oldYmd = bookingDay(rescheduleBooking);
+            const [oh, om] = oldStart.split(':').map(Number);
+            const oldStartMs = oldYmd
+                ? Date.UTC(+oldYmd.slice(0, 4), +oldYmd.slice(5, 7) - 1, +oldYmd.slice(8, 10), (oh || 0) - 4, om || 0)
+                : NaN;
+            const hoursToOld = (oldStartMs - Date.now()) / 3600000;
+            if (!isAdminActor && Number.isFinite(hoursToOld) && hoursToOld < 24) {
+                changes.push('Потратится один бесплатный перенос по абонементу.');
+            }
+            if (!isAdminActor && hoursToNew < 24) {
+                changes.push('До нового времени меньше суток — отменить бронь потом будет нельзя, только «Пересдать».');
+            }
+            // Публичная копия занятости без цены и способа оплаты — берём полную бронь.
+            const src = ownerSource ?? rescheduleBooking;
+            if (!src.paymentMethod && !(Number(src.finalPrice) > 0)) {
+                changes.push('Цена пересчитается по новому времени.');
+            } else if (src.paymentMethod === 'subscription') {
+                changes.push('Оплата — часами абонемента, как и раньше; пиковая доплата пересчитается по новому времени.');
+            } else if (src.paymentMethod === 'bonus') {
+                changes.push('Оплата бонусом сохранится; цена пересчитается по новому времени.');
+            } else {
+                const newPrice = calculatePrice({
+                    format: (src.format as 'individual' | 'group' | 'intervision') || 'individual',
+                    startTime: newStart, endTime: new Date(newStart.getTime() + durMin * 60000), extras: [],
+                    resourceId,
+                    // Скидка — того, чья бронь (админ переносит чужую — не своя).
+                    personalDiscountPercent: rescheduleIsForeign ? undefined : currentUser?.personalDiscountPercent,
+                    pricingSystem: rescheduleIsForeign ? undefined : currentUser?.pricingSystem,
+                }).finalPrice;
+                const oldPrice = Number(src.finalPrice) || 0;
+                if (Math.abs(newPrice - oldPrice) >= 0.5) {
+                    changes.push(`Цена станет ≈ ${formatGel(newPrice)} (было ${formatGel(oldPrice)}): ${newPrice > oldPrice ? 'разницу спишем с баланса' : 'разницу вернём на баланс'}.`);
+                } else {
+                    changes.push('Цена та же.');
+                }
+            }
             const ok = await askConfirm({
                 title: 'Перенести бронь?',
                 body: (
                     <>
+                        {rescheduleOwnerName && <div style={{ fontWeight: 600, marginBottom: 4 }}>Бронь: {rescheduleOwnerName}</div>}
                         <div>Было: {oldDay} в {oldStart} · {oldRes?.name ?? rescheduleBooking.resourceId}</div>
                         <div style={{ fontWeight: 600, marginTop: 4 }}>
                             Станет: {formatDayMonth(targetDate)} в {minsToHHMM(startMin)} · {newRes?.name ?? resourceId}
                         </div>
-                        <div style={{ marginTop: 8, color: COLOR.ink60 }}>
-                            {rateNote}Цена пересчитается по новому времени.
-                        </div>
+                        <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: COLOR.ink80, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {rateNote && <li>{rateNote.trim()}</li>}
+                            {changes.map(c => <li key={c}>{c}</li>)}
+                        </ul>
                     </>
                 ),
                 confirmLabel: 'Перенести',
@@ -490,8 +722,8 @@ export function MobileFind() {
                     newDuration: rescheduleBooking.duration ?? duration,
                 });
                 await fetchBookings();
-                toast.success('Бронь перенесена');
-                navigate('/m/bookings', { replace: true });
+                toast.success(rescheduleOwnerName ? `Бронь перенесена: ${rescheduleOwnerName}` : 'Бронь перенесена');
+                navigate(afterRescheduleTo, { replace: true });
                 left = true;
             } catch (e: any) {
                 const detail = e?.response?.data?.detail;
@@ -534,8 +766,12 @@ export function MobileFind() {
             slotStrs.push(`${resourceId}|${minsToHHMM(m)}`);
         }
         const resource = RESOURCES.find(r => r.id === resourceId);
+        // reset() стирал и «за кого бронь» — клиент, выбранный в карточке
+        // клиента админки, терялся на выборе слота (ревью админки №2).
+        const keepFor = adminFlow ? useBookingStore.getState().bookingForUser : null;
         reset();
         useBookingStore.setState({
+            bookingForUser: keepFor,
             locationId: resource?.locationId || 'unbox_one',
             date: targetDate,
             format: (resource?.formats?.[0] as any) || 'individual',
@@ -595,12 +831,9 @@ export function MobileFind() {
                     админ ловит когнитивный диссонанс «куда меня кинуло».
                     Не показываем для reschedule/linkSession — у них свои
                     баннеры. */}
-                {!rescheduleBooking && !linkSessionMeta && (
-                    currentUser?.role === 'owner' ||
-                    currentUser?.role === 'senior_admin' ||
-                    currentUser?.role === 'admin' ||
-                    currentUser?.isAdmin
-                ) && (
+                {/* 09.11: только в админ-брони (пришли из админки), а не когда
+                    админ бронирует себе своими вкладками. */}
+                {!rescheduleBooking && !linkSessionMeta && adminFlow && (
                     <div style={{ padding: '0 16px' }}>
                         <div style={{
                             background: STATUS.pending.bg,
@@ -611,10 +844,10 @@ export function MobileFind() {
                             fontSize: 12,
                             lineHeight: 1.4,
                         }}>
-                            <strong>Админ-бронь.</strong> Выберите слот — на
-                            следующем шаге появится поле «За кого
-                            бронируете?». Если бронируете для себя — просто
-                            оставьте его пустым.
+                            <strong>Админ-бронь{forName ? ` для: ${forName}` : ''}.</strong>{' '}
+                            {forName
+                                ? 'Выберите время — на следующем шаге проверите оплату.'
+                                : 'Выберите время — на следующем шаге выберите, для кого бронь (поиск по имени, телефону, почте).'}
                         </div>
                     </div>
                 )}
@@ -634,14 +867,14 @@ export function MobileFind() {
                         }}>
                             <Move size={18} />
                             <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>
-                                <b>Переносим:</b>{' '}
+                                <b>Переносим{rescheduleOwnerName ? ` бронь: ${rescheduleOwnerName}` : ''}:</b>{' '}
                                 {rescheduleBooking.date && formatDayMonth(rescheduleBooking.date)}
                                 {' '}в {rescheduleBooking.startTime}
                                 {' · '}
                                 {RESOURCES.find(r => r.id === rescheduleBooking.resourceId)?.name ?? rescheduleBooking.resourceId}
                             </div>
                             <button
-                                onClick={() => navigate('/m/bookings')}
+                                onClick={() => navigate(afterRescheduleTo)}
                                 aria-label="Отменить перенос"
                                 style={{ ...bannerCloseBtn, color: STATUS.pending.fg }}
                             >
@@ -712,10 +945,27 @@ export function MobileFind() {
                             Изменить
                         </span>
                     </button>
-                    {!linkSessionMeta && !rescheduleId && (
-                        <p style={{ fontSize: 12, color: STATUS.pending.fg, margin: '8px 0 0' }}>
-                            Пиковые часы 09–10 и 20–22: +5 ₾ за каждый час пика.
-                        </p>
+                    {/* 09.11 (ревью №5): пик уже в цене на кнопке кабинета — отдельная
+                        оранжевая строка больше не нужна. «Сообщить, когда
+                        освободится» — сразу под поиском, а не под всем списком (№13). */}
+                    {occupancyReady && waitlistEnabled && waitlistRooms.length > 0 && waitlistStarts.length > 0
+                        && slots.length > 0 && !waitlistPickerOpen && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setWaitlistPickerOpen(true);
+                                // Карточка подписки — под списком: подводим к ней.
+                                setTimeout(() => document.getElementById('m-find-waitlist')
+                                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+                            }}
+                            style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44,
+                                background: 'none', border: 'none', padding: 0, marginTop: 4,
+                                color: COLOR.accentInk, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
+                            }}
+                        >
+                            <BellRing size={16} aria-hidden="true" /> Нет нужного времени? Сообщить, когда освободится
+                        </button>
                     )}
                 </div>
 
@@ -725,7 +975,8 @@ export function MobileFind() {
                     <SectionTitle live>
                         {!occupancyReady
                             ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
-                            : slots.length === 0 ? 'Свободных окон нет' : `Найдено: ${slots.length}`}
+                            : slots.length === 0 ? 'Свободных окон нет'
+                                : `${timesWord(slots.length)} · с ${minsToHm(slots[0].startMin)} до ${minsToHm(slots[slots.length - 1].startMin)}`}
                     </SectionTitle>
                     {canBackdate && dayOffset === 0 && (
                         <Button variant="secondary" size="touch" onClick={() => setShowPast(v => !v)}
@@ -759,6 +1010,23 @@ export function MobileFind() {
                             и тап всегда брал первый из списка. Пользователь
                             думал что бронит Каб.2, а вписывался Каб.1. Теперь
                             каждый кабинет — отдельная кликабельная карточка. */}
+                        {occupancyReady && hotHidden.length > 0 && (
+                            <div role="note" style={{
+                                display: 'flex', gap: 8, alignItems: 'flex-start',
+                                background: STATUS.info.bg, color: STATUS.info.fg,
+                                borderRadius: 12, padding: '10px 12px', marginBottom: 8, fontSize: 13, lineHeight: 1.45,
+                            }}>
+                                <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                                <span>
+                                    Время до {hotUntil} не показываем: перенос на ближайшие часы (меньше 12 ч до начала,
+                                    в выходные — 24 ч) делает только администратор.{' '}
+                                    <a href={ADMIN_TG_URL} target="_blank" rel="noopener noreferrer"
+                                       style={{ color: 'inherit', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                        <MessageCircle size={14} aria-hidden="true" /> Написать администратору
+                                    </a>
+                                </span>
+                            </div>
+                        )}
                         {occupancyReady && slots.map(s => (
                             <div
                                 key={s.startMin}
@@ -785,7 +1053,7 @@ export function MobileFind() {
                                         return (
                                             <button
                                                 key={rid}
-                                                onClick={() => chooseWindow(s.startMin, rid)}
+                                                onClick={() => pickWindow(s.startMin, rid)}
                                                 disabled={chipsBusy}
                                                 aria-busy={isPending || undefined}
                                                 className="press"
@@ -823,11 +1091,13 @@ export function MobileFind() {
                                                     <span>{r?.name ?? rid}</span>
                                                     {/* Ставка прямо на чипе: цена не должна
                                                         появляться впервые только на оформлении. */}
-                                                    {r?.hourlyRate != null && (
-                                                        <span className="num" style={{ fontSize: 12, fontWeight: 500 }}>
-                                                            {formatGel(r.hourlyRate)}/ч
-                                                        </span>
-                                                    )}
+                                                    {(() => {
+                                                        // 09.11 (ревью №5): цена этого окна с пиком, у залов — «от … · группа …».
+                                                        const label = chipPrice(s.startMin, rid);
+                                                        return label ? (
+                                                            <span className="num" style={{ fontSize: 12, fontWeight: 500 }}>{label}</span>
+                                                        ) : null;
+                                                    })()}
                                                 </span>
                                                 {isPending
                                                     ? <Loader2 size={11} className="animate-spin" />
@@ -848,7 +1118,15 @@ export function MobileFind() {
                             hint="Выберите хотя бы один центр и тип помещения."
                         />
                     )}
-                    {occupancyReady && slots.length === 0 && locs.size > 0 && spaces.size > 0 && (
+                    {occupancyReady && allSlots.length > 0 && slots.length === 0 && (
+                        <EmptyState
+                            compact
+                            title="В этот день перенести можно только через администратора"
+                            hint="Выберите другой день — или напишите администратору."
+                            action={{ label: 'Изменить день', onClick: () => setFiltersOpen(true) }}
+                        />
+                    )}
+                    {occupancyReady && allSlots.length === 0 && locs.size > 0 && spaces.size > 0 && (
                         <EmptyState
                             compact
                             title="В этот день всё занято"
@@ -866,7 +1144,7 @@ export function MobileFind() {
                         открытая карточка, иначе — тихая кнопка под списком. */}
                     {occupancyReady && waitlistEnabled && waitlistRooms.length > 0 && waitlistStarts.length > 0 && (
                         (slots.length === 0 || waitlistPickerOpen) ? (
-                            <div style={{
+                            <div id="m-find-waitlist" style={{
                                 marginTop: 16,
                                 border: `1px solid ${COLOR.ink10}`,
                                 borderRadius: 16,
@@ -945,7 +1223,7 @@ export function MobileFind() {
                 footer={
                     <Button block onClick={() => setFiltersOpen(false)}>
                         {occupancyReady && slots.length > 0
-                            ? `Показать ${slots.length} ${pluralWindows(slots.length)}`
+                            ? `Показать: ${timesWord(slots.length)}`
                             : 'Готово'}
                     </Button>
                 }
@@ -1128,7 +1406,39 @@ export function MobileFind() {
                                     </button>
                                 );
                             })}
+                            {(() => {
+                                const custom = !DURATIONS.includes(duration);
+                                const active = custom || moreDurOpen;
+                                return (
+                                    <button
+                                        aria-pressed={active}
+                                        aria-expanded={moreDurOpen}
+                                        onClick={() => setMoreDurOpen(o => !o)}
+                                        style={{
+                                            background: active ? COLOR.ink : COLOR.sunken,
+                                            color: active ? COLOR.onInk : COLOR.ink,
+                                            border: 'none', borderRadius: 12, minHeight: 44, padding: '0 16px',
+                                            cursor: 'pointer', fontFamily: 'inherit', flex: '0 0 auto',
+                                        }}
+                                    >
+                                        <span style={{ fontWeight: 600, fontSize: 14 }}>
+                                            {custom ? formatBookingDuration(duration) : 'Больше…'}
+                                        </span>
+                                    </button>
+                                );
+                            })()}
                         </ChipsRow>
+                        {(moreDurOpen || !DURATIONS.includes(duration)) && (
+                            <div style={{ marginTop: 8 }}>
+                                <Field label="Длительность (до 9 часов)">
+                                    <Select value={String(duration)} onChange={e => setDuration(Number(e.target.value))}>
+                                        {MORE_DURATIONS.map(d => (
+                                            <option key={d} value={d}>{formatBookingDuration(d)}</option>
+                                        ))}
+                                    </Select>
+                                </Field>
+                            </div>
+                        )}
                     </FieldGroup>
                     )}
 
@@ -1172,6 +1482,45 @@ export function MobileFind() {
                     </FieldGroup>
 
                 </div>
+            </Sheet>
+
+            {/* crm-ux №9: подтверждение брони под сессию CRM — цена и чем заплатим. */}
+            <Sheet
+                open={!!linkPick}
+                onClose={() => { if (!linking) setLinkPick(null); }}
+                title="Забронировать кабинет под сессию?"
+                footer={linkPick ? (
+                    <>
+                        <Button block loading={linking} disabled={linking}
+                                onClick={() => { void chooseWindow(linkPick.startMin, linkPick.resourceId); }}>
+                            {linkSummary?.hot ? 'Отправить на подтверждение и привязать' : 'Забронировать и привязать'}
+                        </Button>
+                        <Button variant="secondary" block disabled={linking} onClick={() => setLinkPick(null)}>
+                            Выбрать другой слот
+                        </Button>
+                    </>
+                ) : undefined}
+            >
+                {linkSummary && (
+                    <dl style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
+                        {([
+                            ['Кабинет', linkSummary.room],
+                            ['Когда', linkSummary.time],
+                            ['Цена', linkSummary.price],
+                            ['Чем платите', `${linkSummary.pay} — ${linkSummary.when}`],
+                        ] as Array<[string, string]>).map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                                <dt style={{ color: COLOR.ink60 }}>{k}</dt>
+                                <dd style={{ margin: 0, fontWeight: 600, textAlign: 'right' }}>{v}</dd>
+                            </div>
+                        ))}
+                        {linkSummary.hot && (
+                            <div style={{ background: STATUS.pending.bg, color: STATUS.pending.fg, borderRadius: 12, padding: '10px 12px', lineHeight: 1.45 }}>
+                                Срочная бронь (меньше 12 часов до начала, в выходные — 24, или вечером на утро) — уйдёт администратору на подтверждение. Время за вами держится, пока он решает.
+                            </div>
+                        )}
+                    </dl>
+                )}
             </Sheet>
 
             {waitlistModalOpen && wlRoom && wlStart != null && (

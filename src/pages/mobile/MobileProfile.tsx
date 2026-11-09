@@ -8,7 +8,7 @@ import { useUserStore } from '../../store/userStore';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { getFavoriteCabinet, setFavoriteCabinet } from './favoriteCabinet';
-import { fmtHours, reservedSubscriptionHours } from '../../utils/paymentPriority';
+import { fmtHours, subscriptionOverview } from '../../utils/paymentPriority';
 import { extraPoolLabel } from '../../utils/subscriptionHours';
 import { resetTour } from './OnboardingTour';
 import { canBookCabinets } from '../../utils/permissions';
@@ -16,10 +16,10 @@ import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { catalogPath } from '../../utils/catalogPath';
 import { SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
-import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Field';
 import { canUsePsyCrm } from './crmAccess';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { mapsUrl } from './bookingView';
 
 const ADMIN_TG = 'UnboxCenter';
@@ -45,7 +45,7 @@ export function MobileProfile() {
     const { currentUser, logout, bookings } = useUserStore();
     const [bonuses, setBonuses] = useState<Bonus[] | null>(null);
     const [favCab, setFavCab] = useState<string | null>(() => getFavoriteCabinet(currentUser?.id));
-    const [topUpOpen, setTopUpOpen] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     useEffect(() => {
         // Только для строки «Бонусы · N ч». Сбой не мешает остальному экрану.
@@ -65,11 +65,21 @@ export function MobileProfile() {
     const debt = balance < 0 ? -balance : 0;
     const sub = currentUser.subscription;
     // Часы будущих, ещё не списанных броней «с абонемента» уже обещаны —
-    // без них «осталось 6 ч» обманывало (G4-client-mobile-M1).
-    const subReserved = reservedSubscriptionHours(sub, bookings, currentUser.email);
+    // без них «осталось 6 ч» обманывало (G4-client-mobile-M1). 09.11 (№3):
+    // справа — то же «свободно», что на «Абонементе» и в оплате.
+    const subView = subscriptionOverview(sub, bookings, currentUser.email);
     const bonusHours = bonuses ? bonuses.reduce((s, b) => s + (b.quantity || 0), 0) : null;
 
-    const handleLogout = () => {
+    // 09.11 (ревью №20): случайное нажатие больше не выбрасывает на вход.
+    const handleLogout = async () => {
+        const ok = await confirm({
+            title: 'Выйти из аккаунта?',
+            body: 'Чтобы снова бронировать, нужно будет войти заново.',
+            confirmLabel: 'Выйти',
+            cancelLabel: 'Остаться',
+            tone: 'danger',
+        });
+        if (!ok) return;
         logout();
         navigate('/login');
     };
@@ -94,17 +104,20 @@ export function MobileProfile() {
                     icon={<Wallet size={18} />}
                     label="Баланс"
                     value={<span className="num" style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink, fontWeight: 600 }}>{formatGel(balance, { fraction: 0 })}</span>}
-                    sub={debt > 0 ? 'Долг — как пополнить' : 'Как пополнить'}
-                    onClick={() => setTopUpOpen(true)}
+                    sub={debt > 0 ? 'Долг · история · Как пополнить баланс' : 'История · Как пополнить баланс'}
+                    onClick={() => navigate('/m/balance')}
                 />
                 <MenuRow
                     icon={<Ticket size={18} />}
                     label="Абонемент"
-                    value={sub
-                        ? <span className="num">{fmtHours(sub.remainingHours)} из {fmtHours(sub.totalHours)}</span>
+                    value={sub && subView
+                        ? <span className="num">{fmtHours(subView.free)} свободно</span>
                         : 'Нет'}
-                    sub={sub
-                        ? [subReserved > 0.01 ? `${sub.name} · ${fmtHours(subReserved)} уже в бронях` : sub.name, extraPoolLabel(sub)]
+                    sub={sub && subView
+                        ? [sub.name,
+                            subView.reserved > 0.01 ? `ещё ${fmtHours(subView.reserved)} в ваших бронях` : null,
+                            `всего ${fmtHours(subView.total)}`,
+                            extraPoolLabel(sub)]
                             .filter(Boolean).join(' · ')
                         : 'Час по абонементу дешевле — выбрать тариф'}
                     onClick={() => navigate('/m/subscription')}
@@ -245,36 +258,6 @@ export function MobileProfile() {
                 </Button>
             </div>
 
-            {/* G4-20: как пополнить баланс — раньше плитка «Баланс» молчала. */}
-            <Sheet
-                open={topUpOpen}
-                onClose={() => setTopUpOpen(false)}
-                title="Как пополнить баланс"
-                footer={
-                    <>
-                        <a
-                            href={adminTgLink('Здравствуйте! Хочу пополнить баланс.')}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ui-btn ui-btn--primary ui-btn--block"
-                            style={{ textDecoration: 'none' }}
-                        >
-                            Написать администратору
-                        </a>
-                        <Button variant="secondary" block onClick={() => setTopUpOpen(false)}>Понятно</Button>
-                    </>
-                }
-            >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: TEXT.body, lineHeight: 1.5 }}>
-                    <p style={{ margin: 0 }}>
-                        Сейчас на балансе <b className="num">{formatGel(balance, { fraction: 0 })}</b>.
-                    </p>
-                    <p style={{ margin: 0, color: COLOR.ink80 }}>
-                        Баланс пополняет администратор: наличными в центре или переводом. Напишите нам — подскажем,
-                        как удобнее, и зачислим деньги.
-                    </p>
-                </div>
-            </Sheet>
         </div>
     );
 }

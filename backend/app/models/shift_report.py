@@ -36,6 +36,9 @@ class ShiftReportCreate(SQLModel):
 
 
 class ShiftReportRead(ShiftReportBase):
+    # 09.11: роль admin до закрытия видит суммы пустыми (слепое закрытие).
+    expected_balance: Optional[float] = None
+    actual_balance: Optional[float] = None
     id: str
     admin_id: str
     admin_name: str

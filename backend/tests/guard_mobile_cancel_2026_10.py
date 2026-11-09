@@ -16,7 +16,8 @@ def test_mobile_cancel_sets_status():
     s = (ROOT / "src/pages/mobile/crm/SessionActionSheet.tsx").read_text(encoding="utf-8")
     assert "function CancelConfirm(" in s
     body = s[s.index("function CancelConfirm("):s.index("function DeleteConfirm(")]
-    assert "onStatus('CANCELLED_CLIENT')" in body and "onStatus('CANCELLED_THERAPIST')" in body
+    # 09.11: отмена — через onCancel (статус + галочки кабинета/календаря), плюс «неявка».
+    assert "onCancel('CANCELLED_CLIENT', opts)" in body and "onCancel('CANCELLED_THERAPIST', opts)" in body
     assert "deleteSession" not in body, "отмена не должна удалять сессию"
     assert "Записали по ошибке — удалить совсем" in body
     assert "onClick={onCancel}" in s and "onClick={onDelete}\n                />\n            </div>" not in s, \

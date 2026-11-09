@@ -20,7 +20,7 @@ from app.services import wallet
 from app.services.booking import check_availability, find_re_rent_conflicts
 from app.services.email import email_service
 from app.services.telegram import telegram_service
-from app.core.permissions import ADMIN_ROLES
+from app.core.permissions import ADMIN_ROLES, has_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -345,6 +345,63 @@ def _cut_taken_piece(session: Session, booking: Booking, taken_start: int, taken
     return piece, rest, old_event_id
 
 
+def _rr_add_taken_notification(session: Session, owner: User, piece: Booking, refund_meta: Any,
+                               refund_percent: float, remaining_parts: list) -> None:
+    """Уведомление в приложении владельцу брони на пересдаче: время забрали, что вернули.
+    Только текст — деньги и часы уже вернул _refund_booking_to_owner."""
+    from app.models.notification import Notification as _NotifRR
+    from app.models.resource import Resource as _ResRR
+    meta = refund_meta if isinstance(refund_meta, dict) else {}
+    pct = f"{refund_percent * 100:g} %"
+
+    def _h(x: float) -> str:
+        return f"{round(float(x), 2):g}".replace(".", ",") + " ч"
+
+    def _gel(x: float) -> str:
+        return f"{round(float(x), 2):g}".replace(".", ",") + " ₾"
+
+    parts: list[str] = []
+    bonus_h = round(float(piece.hours_deducted or 0) * refund_percent, 2) \
+        if piece.payment_method == "bonus" else 0.0
+    if bonus_h > 0:
+        parts.append(f"{_h(bonus_h)} бонуса")
+    if float(meta.get("refunded_hours") or 0) > 0:
+        parts.append(f"{_h(meta['refunded_hours'])} в абонемент")
+    money = float(meta.get("refunded_amount") or 0) + float(meta.get("refunded_peak_gel") or 0)
+    if money >= 0.01:
+        parts.append(f"{_gel(money)} на баланс")
+    if parts:
+        refund_text = f"Вернули {pct}: " + ", ".join(parts) + "."
+    elif meta.get("skipped_reason") in ("pending", "waived"):
+        refund_text = "Бронь ещё не была оплачена — за это время ничего не спишем."
+    else:
+        refund_text = "Возврата нет."
+    res = session.get(_ResRR, piece.resource_id) if piece.resource_id else None
+    try:
+        day = piece.date.strftime("%d.%m") if piece.date else ""
+    except Exception:  # noqa: BLE001
+        day = ""
+    try:
+        _sh, _sm = (int(x) for x in str(piece.start_time).split(":")[:2])
+        _end = _sh * 60 + _sm + int(piece.duration or 0)
+        time_label = f"{piece.start_time}–{_end // 60:02d}:{_end % 60:02d}"
+    except Exception:  # noqa: BLE001
+        time_label = str(piece.start_time or "")
+    where = res.name if res else (piece.resource_id or "")
+    rest = ""
+    if remaining_parts:
+        rest = " Остальное время осталось за вами и на пересдаче: " + ", ".join(
+            f"{r.start_time} ({int(r.duration or 0)} мин)" for r in remaining_parts) + "."
+    session.add(_NotifRR(
+        type="re_rent_taken",
+        title="Вашу бронь на пересдаче забрали",
+        description=f"{where} · {day} {time_label}. {refund_text}{rest}",
+        recipient_id=str(owner.id),
+        icon="Repeat",
+        link="/dashboard/bookings",
+    ))
+
+
 def _run_after_commit(session: Session, actions: list) -> None:
     """Telegram и календарь — только когда бронь уже записана: иначе отказ ниже по пути
     («недостаточно средств») оставлял бы ложное сообщение о возврате и удалённые события."""
@@ -355,6 +412,12 @@ def _run_after_commit(session: Session, actions: list) -> None:
             logger.warning("[re-rent after commit] %s", e)
     if actions:
         session.commit()
+
+
+# 09.11 (владелец): «Пересдать» — только меньше чем за сутки до начала брони.
+RE_RENT_MAX_HOURS_BEFORE_START = 24
+RE_RENT_TOO_EARLY_DETAIL = ("До начала больше суток — пересдавать не нужно: "
+                            "отмените бронь, деньги вернутся полностью.")
 
 
 def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, current_user: User,
@@ -393,11 +456,23 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
         refund_meta = {}
         refund_amount = 0.0
 
+        # 09.11 (владелец): пересдача — только меньше чем за сутки до начала. Бронь,
+        # выставленную раньше этого правила, могут забрать, когда до неё ещё сутки
+        # и больше, — тогда владелец мог бы её просто отменить с полным возвратом,
+        # и удерживать 50 % нельзя: всё, что снимаем с владельца, возвращаем на 100 %
+        # (бронь «заранее» ещё не списана — тогда ничего и не спишем). Часы — на
+        # момент, когда время забирают.
+        legacy_early = _booking_hours_until_start(listed_booking) >= RE_RENT_MAX_HOURS_BEFORE_START
+
         re_rent_booking, remaining_parts, split_event_id = _cut_taken_piece(
             session, listed_booking, taken_start, taken_end, current_user)
         # Не удалось отделить кусок: бронь снимается целиком, но возврат — только за занятое.
         refund_percent = RE_RENT_REFUND_PERCENT
-        if not remaining_parts and _full > 0 and _taken < _full:
+        if legacy_early:
+            # Снимается кусок — он и возвращается целиком; не удалось отделить —
+            # отменяется вся бронь, и она вся возвращается (как обычная отмена ≥24 ч).
+            refund_percent = 1.0
+        elif not remaining_parts and _full > 0 and _taken < _full:
             refund_percent = round(RE_RENT_REFUND_PERCENT * _taken / _full, 4)
 
         if re_rent_owner:
@@ -420,6 +495,19 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
         re_rent_booking.updated_at = datetime.now()
         session.add(re_rent_booking)
 
+        # 09.11 (ревью клиентской части №9): уведомление в приложении — раньше
+        # писали только в Telegram, и без привязанного бота человек просто видел,
+        # что бронь пропала. Что вернули — из refund_meta, тем же способом, что
+        # и возврат (деньги / часы абонемента / бонус). В одной транзакции с
+        # бронью: если создание новой брони откатится, уведомление тоже.
+        if re_rent_owner:
+            try:
+                _rr_add_taken_notification(session, re_rent_owner, re_rent_booking,
+                                           refund_meta, refund_percent, remaining_parts)
+            except Exception:  # noqa: BLE001 — уведомление никогда не ломает бронь
+                logger.warning("[re-rent] in-app notification failed for %s",
+                               re_rent_booking.id, exc_info=True)
+
         # Сессия CRM не держится за отменённую бронь — как при обычной отмене.
         from app.models.therapy_session import TherapySession as _TS
         for ts in session.exec(select(_TS).where(_TS.booking_id == str(re_rent_booking.id))).all():
@@ -430,7 +518,10 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
 
         # Notify the original owner via Telegram (best-effort — never blocks the booking).
         if re_rent_owner and re_rent_owner.telegram_id:
-            def _notify(owner=re_rent_owner, piece=re_rent_booking, amount=refund_amount, rest=tuple(remaining_parts)):
+            def _notify(owner=re_rent_owner, piece=re_rent_booking, amount=refund_amount, rest=tuple(remaining_parts),
+                        pct=refund_percent,
+                        not_charged=(isinstance(refund_meta, dict)
+                                     and refund_meta.get("skipped_reason") in ("pending", "waived"))):
                 from app.models.resource import Resource as ResModel
                 from app.models.location import Location as LocModel
                 rb_res = session.get(ResModel, piece.resource_id)
@@ -449,6 +540,8 @@ def _take_over_re_rent_bookings(session: Session, re_rent_conflicts: list, curre
                     booking_id=str(piece.id),
                     duration=int(piece.duration or 0),
                     remaining=", ".join(f"{r.start_time} ({int(r.duration or 0)} мин)" for r in rest),
+                    refund_percent=pct,
+                    not_charged=not_charged,
                 )
             after_commit.append(_notify)
 
@@ -572,6 +665,104 @@ def enrich_booking_status(booking: Booking) -> Booking:
     if booking.status == "confirmed" and booking.start_time and _is_past(booking):
         booking.status = "completed"
     return booking
+
+
+# 09.11 (владелец): админ МОЖЕТ отменить бронь меньше чем за 24 ч (и прошедшую),
+# но это обход правил — клиенту так нельзя. Поэтому: причина обязательна,
+# запись в «Историю изменений» клиента и сообщение владельцу в Telegram.
+LATE_CANCEL_REASON_MIN = 5
+
+
+def _is_staff_rule_override(user: User, b: Booking) -> bool:
+    """Отмена сотрудником (не владельцем) брони, которую клиент сам отменить не может."""
+    if user.role not in ADMIN_ROLES or user.role == "owner":
+        return False
+    if b.status == "pending_approval":
+        return False  # заявка — ещё не бронь, денег не брали
+    if _check_ownership(b, user):
+        return False  # своя бронь сотрудника — обычные правила клиента
+    return _booking_hours_until_start(b) < 24
+
+
+LATE_CANCEL_REASON_MAX = 500
+
+
+def _require_override_reason(reason: Optional[str]) -> str:
+    text = (reason or "").strip()[:LATE_CANCEL_REASON_MAX]
+    if len(text) < LATE_CANCEL_REASON_MIN:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "До начала меньше 24 часов — клиенту такая отмена недоступна, это отмена в обход правил. "
+                "Напишите причину (минимум 5 символов): её увидит владелец."
+            ),
+        )
+    return text
+
+
+def _report_rule_override(session: Session, background_tasks: Optional[BackgroundTasks], actor: User,
+                          items: list, reason: str) -> None:
+    """items: [(booking, owner_user|None, refund_percent, refund_meta)] — после коммита отмены."""
+    from html import escape as _esc
+    lines = []
+    for b, owner, pct, meta in items:
+        hours = _booking_hours_until_start(b)
+        when = f"{b.date.strftime('%d.%m')} {b.start_time}" if b.date else str(b.start_time)
+        price = b.final_price if b.final_price is not None else None
+        money = f"{int(round(pct * 100))} %" + (f" от {price:g} ₾" if price else "")
+        if b.payment_method == "subscription":
+            money += " (часы абонемента)"
+        who = owner.name if owner and owner.name else (b.user_id or "клиент")
+        lines.append(f"• {_esc(str(who))} — {_esc(when)}, {_esc(str(b.resource_id))}; "
+                     f"до начала {hours:.1f} ч; возврат {money}")
+        try:
+            timeline_service.log_event(
+                session=session,
+                actor_id=actor.id,
+                actor_role=actor.role,
+                target_id=str(owner.id) if owner else str(b.id),
+                target_type="user" if owner else "booking",
+                event_type="late_cancel_override",
+                description=(f"Отмена в обход правил: {actor.name or actor.email} отменил(а) бронь {when} "
+                             f"за {hours:.1f} ч до начала, возврат {money}. Причина: {reason}"),
+                metadata={"booking_id": str(b.id), "hours_until_start": hours,
+                          "refund_percent": pct, "reason": reason, "actor_email": actor.email},
+                commit=False,
+            )
+        except Exception:
+            logger.exception("[override] timeline log failed")
+    try:
+        session.commit()
+    except Exception:
+        logger.exception("[override] timeline commit failed")
+        session.rollback()
+    if len(lines) > 15:  # длинная серия — Telegram режет сообщения > 4096 символов
+        lines = lines[:15] + [f"… и ещё {len(lines) - 15}"]
+    text = ("⚠️ <b>Отмена в обход правил</b>\n"
+            f"Кто: {_esc(actor.name or actor.email)} ({_esc(actor.role)})\n"
+            + "\n".join(lines) + f"\nПричина: {_esc(reason)}")
+    if background_tasks is not None:
+        background_tasks.add_task(_send_owner_safe, text)
+    else:
+        _send_owner_safe(text)
+
+
+def _send_owner_safe(text: str) -> None:
+    try:
+        telegram_service.send_owner_summary(text)
+    except Exception:
+        logger.exception("[override] owner telegram failed")
+
+
+def _staff_may(user: User, permission: str) -> bool:
+    """09.11 (ревизия): сотрудник действует с ЧУЖОЙ бронью только при своём праве.
+
+    Раньше сервер смотрел лишь на роль, а галочки bookings.cancel_any /
+    reschedule_any / manage_rerent ничего не значили. Ролям admin/senior/owner
+    эти права выдаются по умолчанию (core/permissions.py) — для нынешних
+    сотрудников поведение прежнее.
+    """
+    return user.role in ADMIN_ROLES and has_permission(user, permission)
 
 
 def _check_ownership(booking: Booking, user: User) -> bool:
@@ -2223,6 +2414,16 @@ def create_booking(
         booking_data["created_by_name"] = current_user.name or ""
 
         booking_data["id"] = _new_booking_id
+        # 09.11: на пересдачу — только через PATCH /re-rent (там правило «меньше
+        # суток до начала»); флаг из тела запроса на создание не принимаем.
+        booking_data["is_re_rent_listed"] = False
+        # 09.11 (ревизия безопасности): служебные поля ставит только сервер —
+        # из тела запроса не принимаем (подставной gcal_event_id ломал событие
+        # календаря, а отмена удаляла чужое; «снятие штрафа» и отмена — аудит).
+        for _k in ("cancellation_reason", "cancelled_by", "gcal_event_id", "gcal_calendar_id",
+                   "waiver_reason", "waived_at", "waived_by"):
+            # charged_at / charge_amount сервер сам выставляет выше (paid / pending) — не трогаем.
+            booking_data.pop(_k, None)
         booking = Booking(**booking_data)
         # Из какого пула абонемента часы (доп. / основной). Для брони заранее
         # (pending) — прикидка; точную раскладку пишет крон T-24ч.
@@ -4297,6 +4498,8 @@ def dismiss_series_end_reminder(
 @router.delete("/recurring/{group_id}")
 def cancel_recurring_bookings(
     group_id: str,
+    # FastAPI подставляет по типу; None — прямой вызов из сторожей/скриптов.
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
     from_booking_id: Optional[str] = Query(
         None,
         description=(
@@ -4370,6 +4573,8 @@ def cancel_recurring_bookings(
     is_admin = current_user.role in ADMIN_ROLES
     if not is_owner and not is_admin:
         raise HTTPException(403, "Not authorized")
+    if not is_owner and not _staff_may(current_user, "bookings.cancel_any"):
+        raise HTTPException(status_code=403, detail="Нет права отменять чужие брони — попросите старшего администратора")
 
     # Штраф — только админу, как в cancel_booking. Клиент всегда получает 100%.
     if is_admin:
@@ -4407,6 +4612,9 @@ def cancel_recurring_bookings(
                         f"Отмените её отдельно через переаренду или администратора."
                     ),
                 )
+    series_overrides = [b for b in bookings if _is_staff_rule_override(current_user, b)]
+    if series_overrides:
+        reason = _require_override_reason(reason)
 
     from app.models.therapy_session import TherapySession as _TS
     from app.services.consecutive_pricing import recompute_user_chains_for_day
@@ -4501,6 +4709,11 @@ def cancel_recurring_bookings(
 
     session.commit()
 
+    if series_overrides:
+        _report_rule_override(
+            session, background_tasks, current_user,
+            [(b, _resolve_booking_owner(session, b), applied_refund, {}) for b in series_overrides], reason)
+
     return {
         "ok": True,
         "cancelled": cancelled,
@@ -4545,6 +4758,8 @@ def cancel_booking(
     is_admin = current_user.role in ADMIN_ROLES
     if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.cancel_any"):
+        raise HTTPException(status_code=403, detail="Нет права отменять чужие брони — попросите старшего администратора")
 
     if booking.status == "cancelled":
         return booking
@@ -4588,6 +4803,10 @@ def cancel_booking(
                 f"Можно поставить бронь на переаренду или связаться с администратором."
             ),
         )
+
+    rule_override = _is_staff_rule_override(current_user, booking)
+    if rule_override:
+        reason = _require_override_reason(reason)
 
     # ── Google Calendar Sync (Delete) ──
     # Scheduled, not awaited: we hold a row lock on the booking here (see the
@@ -4666,6 +4885,10 @@ def cancel_booking(
         notify_waitlist_for_freed_slot(session, booking)
     except Exception:
         logger.exception("Failed to notify waitlist on cancellation")
+
+    if rule_override:
+        _report_rule_override(session, background_tasks, current_user,
+                              [(booking, booking_owner, applied_refund, refund_meta)], reason)
 
     # ── Audit logging ──
     timeline_service.log_event(
@@ -4796,6 +5019,8 @@ def reschedule_booking(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.reschedule_any"):
+        raise HTTPException(status_code=403, detail="Нет права менять время чужих броней — попросите старшего администратора")
 
     if booking.status != "confirmed":
         raise HTTPException(
@@ -5457,6 +5682,8 @@ def trim_booking(
     is_admin = current_user.role in ADMIN_ROLES
     if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.reschedule_any"):
+        raise HTTPException(status_code=403, detail="Нет права менять время чужих броней — попросите старшего администратора")
 
     if booking.status == "cancelled":
         raise HTTPException(status_code=400, detail="Бронь уже отменена")
@@ -5935,6 +6162,8 @@ def reschedule_booking_series(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.reschedule_any"):
+        raise HTTPException(status_code=403, detail="Нет права менять время чужих броней — попросите старшего администратора")
 
     # Серию «эту и следующие» клиент позже суток не переносит: бесплатный
     # перенос абонемента (владелец 01.10) — только для одной брони. Без этой
@@ -6213,6 +6442,8 @@ def toggle_re_rent(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.manage_rerent"):
+        raise HTTPException(status_code=403, detail="Нет права пересдавать чужие брони — попросите старшего администратора")
 
     if booking.status != "confirmed":
         raise HTTPException(
@@ -6238,6 +6469,13 @@ def toggle_re_rent(
                 status_code=400,
                 detail=f"Слот уже начался ({booking.start_time}) — выставить на переаренду можно только до начала брони",
             )
+        # 09.11 (владелец): пересдача — только когда до начала меньше суток. Раньше
+        # бронь просто отменяют с полным возвратом (клиент делает это сам), и
+        # удерживать 50 % за «пересдачу» брони, которую можно бесплатно отменить,
+        # нельзя. Касается всех — и клиента, и администратора. Снятие с пересдачи
+        # (уже выставленной до правила) — по-прежнему всегда.
+        if _booking_hours_until_start(booking) >= RE_RENT_MAX_HOURS_BEFORE_START:
+            raise HTTPException(status_code=400, detail=RE_RENT_TOO_EARLY_DETAIL)
 
     was_listed_before = booking.is_re_rent_listed
     booking.is_re_rent_listed = not booking.is_re_rent_listed
@@ -7548,6 +7786,8 @@ def shorten_booking(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.reschedule_any"):
+        raise HTTPException(status_code=403, detail="Нет права менять время чужих броней — попросите старшего администратора")
 
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Сократить можно только подтверждённую бронь")
@@ -8034,6 +8274,8 @@ def split_booking(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+    if not is_owner and not _staff_may(current_user, "bookings.reschedule_any"):
+        raise HTTPException(status_code=403, detail="Нет права менять время чужих броней — попросите старшего администратора")
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Делить можно только подтверждённую бронь")
     if booking.payment_status == "waived":

@@ -446,7 +446,8 @@ def test_open_shift_prefill_is_per_branch():
     1018,40 вместо 193,35) — теперь preview закрытия по выбранному филиалу."""
     m = _src("src/components/admin/cashbox/OpenShiftModal.tsx")
     assert "cashboxApi.previewCloseShift(selectedBranch)" in m
-    assert "setStartingBalance(Number(p.expected ?? 0).toFixed(2))" in m
+    # 09.11 (решение 3): роль admin «ожидалось» не получает — поле пустое, а не 0.
+    assert "setStartingBalance(p.expected != null ? Number(p.expected).toFixed(2) : '')" in m
     assert "setTouched(true); setStartingBalance(e.target.value)" in m, "подсказка затирает вписанную сумму"
 
 
@@ -580,7 +581,10 @@ def test_no_crm_clients_for_non_crm():
 def test_layout_gates_without_render_navigate():
     a = _src("src/pages/mobile/admin/MobileAdminLayout.tsx")
     assert "if (!isAdmin) return <Navigate to=\"/m\" replace />;" in a
-    assert "if (!currentUser || !isAdmin) return;\n        if (Date.now() - requestsAt.current" in a
+    # 09.11 (ревью admin-ux №5): отметка времени — только после ответа, иначе первый
+    # отменённый запрос блокировал второй на минуту и число на «Заявках» не появлялось.
+    assert "if (!currentUser || !isAdmin) return;\n        const onInbox = location.pathname.startsWith('/m/admin/inbox');" in a
+    assert a.index("requestsAt.current = Date.now();") > a.index("Promise.allSettled(["), "отметка времени снова до запроса"
     assert "navigate('/m', { replace: true });\n        return null;" not in a
     c = _src("src/pages/mobile/crm/MobileCrmLayout.tsx")
     assert "return <Navigate to={isBookingAdmin(currentUser) ? '/m/admin' : '/m'} replace />;" in c

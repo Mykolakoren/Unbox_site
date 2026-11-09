@@ -17,6 +17,8 @@ import { COLOR, FONT, TEXT, Z } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
 import { Sheet } from '../../../components/ui/Sheet';
 import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
+import { useCrmStore } from '../../../store/crmStore';
+import { CalendarSetupSheet } from './CalendarSetupSheet';
 
 /**
  * Mobile CRM shell — separate workspace from /m (cabinet).
@@ -111,7 +113,22 @@ export function MobileCrmLayout() {
         document.addEventListener('visibilitychange', onVisible);
         return () => document.removeEventListener('visibilitychange', onVisible);
     }, [canUseCrm]);
-    const outletContext = useMemo<MobileCrmOutletContext>(() => ({ crmDataVersion }), [crmDataVersion]);
+    // 09.11 (ревью п. 6): подключён ли Google Календарь — от этого зависят кнопка
+    // синхронизации на «Сегодня» и пустой список клиентов. Шторка подключения
+    // «Календарь и счета» живёт здесь: её открывают меню «Psy-CRM ▾» и экраны.
+    const crmSettings = useCrmStore(s => s.crmSettings);
+    const fetchCrmSettings = useCrmStore(s => s.fetchCrmSettings);
+    const [calendarOpen, setCalendarOpen] = useState(false);
+    useEffect(() => {
+        if (canUseCrm) fetchCrmSettings();
+    }, [canUseCrm, fetchCrmSettings]);
+    // Не загрузилось — null: экраны ведут себя как раньше (кнопка ⟳ видна).
+    const calendarConnected: boolean | null = crmSettings ? !!crmSettings.calendarId : null;
+    const outletContext = useMemo<MobileCrmOutletContext>(() => ({
+        crmDataVersion,
+        calendarConnected,
+        openCalendarSetup: () => setCalendarOpen(true),
+    }), [crmDataVersion, calendarConnected]);
 
     if (!currentUser) {
         // X5-05: сразу оболочка с вкладками и скелетоном — экран не прыгает.
@@ -206,7 +223,10 @@ export function MobileCrmLayout() {
                 isAdmin={isBookingAdmin(currentUser)}
                 pathname={location.pathname}
                 onGo={(to) => { setSwitcherOpen(false); navigate(to); }}
+                onCalendar={() => { setSwitcherOpen(false); setCalendarOpen(true); }}
+                calendarConnected={calendarConnected}
             />
+            <CalendarSetupSheet open={calendarOpen} onClose={() => setCalendarOpen(false)} />
 
             {tourOpen && <MobileCrmTour onClose={() => setTourOpen(false)} />}
         </div>
@@ -271,12 +291,15 @@ function TabBar() {
  * по роли — как на сервере, isBookingAdmin) · Анкета · Часы приёма.
  * Текущий раздел отмечен галочкой.
  */
-function SectionSwitcher({ open, onClose, isAdmin, pathname, onGo }: {
+function SectionSwitcher({ open, onClose, isAdmin, pathname, onGo, onCalendar, calendarConnected }: {
     open: boolean;
     onClose: () => void;
     isAdmin: boolean;
     pathname: string;
     onGo: (to: string) => void;
+    /** 09.11: «Календарь и счета» — шторка подключения Google Календаря. */
+    onCalendar: () => void;
+    calendarConnected: boolean | null;
 }) {
     const inProfile = pathname.startsWith('/m/crm/profile');
     const inSchedule = pathname.startsWith('/m/crm/schedule');
@@ -318,6 +341,21 @@ function SectionSwitcher({ open, onClose, isAdmin, pathname, onGo }: {
                         {it.current && <Check size={18} aria-hidden="true" style={{ color: 'var(--color-accent)', flexShrink: 0 }} />}
                     </button>
                 ))}
+                <button
+                    type="button"
+                    onClick={onCalendar}
+                    className="press"
+                    style={{ ...switcherItem, borderTop: `1px solid ${COLOR.ink08}` }}
+                >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>Календарь и счета</span>
+                        <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>
+                            {calendarConnected === false
+                                ? 'Google Календарь не подключён — подключить'
+                                : 'Google Календарь, счета для оплаты'}
+                        </span>
+                    </span>
+                </button>
             </nav>
         </Sheet>
     );

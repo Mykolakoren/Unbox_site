@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronRight, ChevronLeft } from 'lucide-react';
-import { crmApi, type CrmDashboard } from '../../../api/crm';
+import { crmApi, type CrmDashboard, type CrmSession, type CrmClient } from '../../../api/crm';
+import { useCrmStore } from '../../../store/crmStore';
+import { UnpaidSessionsSheet } from '../../../components/crm/UnpaidSessionsSheet';
+import { earnedByCurrency, isBillableStatus } from '../../../utils/sessionMoney';
+import { totalInGel } from '../../../utils/currency';
 import { useCrmDataVersion } from './crmDataVersion';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -9,7 +13,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel, formatMoney, formatMonthLabel } from '../../../utils/format';
-import { tbilisiToday } from '../../../utils/crmNextSession';
+import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { usePullToRefresh } from '../usePullToRefresh';
 import { PullIndicator } from '../PullIndicator';
@@ -43,6 +47,15 @@ export function MobileCrmFinance() {
     const [failed, setFailed] = useState(false);
     const dataVersion = useCrmDataVersion();
     useDocumentTitle('Финансы · Psy-CRM');
+    const clients = useCrmStore(s => s.clients);
+    const fetchClients = useCrmStore(s => s.fetchClients);
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
+    // Ревью п. 13: тап по должнику — сразу список неоплаченных (оплата в 1 тап).
+    const [debtor, setDebtor] = useState<CrmClient | null>(null);
+    // Решение владельца 5: «Заработано за месяц» — проведённые и оплаченные сессии
+    // месяца по дате сессии (как «Заработано» на компьютере, earnedByCurrency).
+    const [monthSessions, setMonthSessions] = useState<{ month: string; list: CrmSession[] } | null>(null);
+    useEffect(() => { fetchClients(false, true).catch(() => {}); }, [fetchClients, dataVersion]);
 
     // Месяц по Батуми: «2026-10» + сдвиг.
     const monthParam = useMemo(() => {
@@ -68,6 +81,32 @@ export function MobileCrmFinance() {
     }, [monthParam]);
 
     useEffect(() => { load(); }, [load, dataVersion]);
+
+    useEffect(() => {
+        let alive = true;
+        const from = `${monthParam}-01`;
+        const [y, m] = monthParam.split('-').map(Number);
+        const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const to = `${monthParam}-${String(last).padStart(2, '0')}`;
+        // Сервер сравнивает в UTC — берём день запаса и оставляем дни месяца по Батуми.
+        crmApi.getSessions({ dateFrom: addDaysYmd(from, -1), dateTo: to })
+            .then(list => {
+                if (!alive) return;
+                setMonthSessions({
+                    month: monthParam,
+                    list: list.filter(s => (utcNaiveToTbilisi(s.date)?.date ?? '').startsWith(monthParam)),
+                });
+            })
+            .catch(() => { if (alive) setMonthSessions(null); });
+        return () => { alive = false; };
+    }, [monthParam, dataVersion]);
+
+    const earned = useMemo(() => {
+        if (!monthSessions || monthSessions.month !== monthParam) return null;
+        const byId = new Map(clients.map(c => [c.id, c]));
+        const byCur = earnedByCurrency(monthSessions.list, id => byId.get(id), s => isBillableStatus(s.status) && !!s.isPaid);
+        return { gel: Math.round(totalInGel(byCur) * 100) / 100, byCur };
+    }, [monthSessions, monthParam, clients]);
 
     const [refreshing, setRefreshing] = useState(false);
     const pull = usePullToRefresh(async () => {
@@ -135,6 +174,14 @@ export function MobileCrmFinance() {
                 </div>
                 <div style={totalsCard}>
                     <TotalCell
+                        label="Заработано за месяц"
+                        hint="Проведённые и оплаченные сессии этого месяца — по дате сессии"
+                        value={earned?.gel}
+                        extra={byCurrency(earned?.byCur)}
+                        loading={!earned && !failed}
+                        money
+                    />
+                    <TotalCell
                         label="Касса · с долгами"
                         hint="Все оплаты за месяц, вместе с оплатой старых долгов"
                         value={dashboard?.revenueThisMonth}
@@ -142,11 +189,11 @@ export function MobileCrmFinance() {
                         loading={pending}
                         money
                     />
-                    <TotalCell
-                        label="Сессий за месяц"
-                        value={dashboard?.sessionsThisMonth}
-                        loading={pending}
-                    />
+                </div>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '8px 2px 0' }}>
+                    Сессий за месяц: <span className="num" style={{ color: 'var(--color-ink)', fontWeight: 600 }}>
+                        {pending ? '…' : dashboard?.sessionsThisMonth ?? '—'}
+                    </span>
                 </div>
             </section>
 
@@ -180,11 +227,15 @@ export function MobileCrmFinance() {
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {debts.map(d => (
+                            <div key={d.clientId} style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
                             <button
-                                key={d.clientId}
-                                onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
+                                onClick={() => {
+                                    const c = clients.find(x => x.id === d.clientId);
+                                    if (c && !viewingOther) setDebtor(c);
+                                    else navigate(`/m/crm/clients/${d.clientId}`);
+                                }}
                                 className="press"
-                                aria-label={`${d.clientName}: долг ${formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })} — открыть карточку`}
+                                aria-label={`${d.clientName}: долг ${formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })} — отметить оплату`}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -216,6 +267,10 @@ export function MobileCrmFinance() {
                                     </div>
                                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                                         Без оплаты: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
+                                        {(d.partialSessionsCount ?? 0) > 0 && (
+                                            d.unpaidSessionsCount === 1 ? ', оплачена частично'
+                                                : `, ${d.partialSessionsCount === d.unpaidSessionsCount ? 'все' : `из них ${d.partialSessionsCount}`} частично`
+                                        )}
                                     </div>
                                 </div>
                                 <div className="num" style={{
@@ -227,12 +282,33 @@ export function MobileCrmFinance() {
                                 }}>
                                     {formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })}
                                 </div>
-                                <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" style={{ flexShrink: 0 }} />
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
+                                aria-label={`Карточка клиента: ${d.clientName}`}
+                                className="press"
+                                style={{
+                                    width: 44, flexShrink: 0, borderRadius: 10, cursor: 'pointer',
+                                    background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
+                                    display: 'grid', placeItems: 'center', color: 'var(--color-ink-60)',
+                                }}
+                            >
+                                <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />
+                            </button>
+                            </div>
                         ))}
                     </div>
                 )}
             </section>
+            {debtor && (
+                <UnpaidSessionsSheet
+                    open
+                    onClose={() => setDebtor(null)}
+                    client={debtor}
+                    onChanged={() => { load(); }}
+                />
+            )}
         </div>
     );
 }

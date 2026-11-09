@@ -45,7 +45,7 @@ import { undoToast } from '../../components/ui/undoToast';
 import { toastApiError } from '../../utils/errors';
 import { defaultPaymentAccount } from '../../utils/paymentAccounts';
 import { utcNaiveToTbilisi } from '../../utils/crmNextSession';
-import { sessionDebt, sessionCurrencyOf, earnedByCurrency, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
+import { sessionDebt, sessionCurrencyOf, earnedByCurrency, isBillableStatus, partialPayment, quickPayUndoable } from '../../utils/sessionMoney';
 
 /** «GEL» → «₾» в подписях полей («Цена, ₾»). */
 const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
@@ -65,7 +65,8 @@ function dayTime(d: Date): string {
 
 // Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
 const STATUS_LABELS: Record<string, string> = Object.fromEntries(
-    ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
+    // NO_SHOW (09.11) — «Неявка · оплачивается»: в долге, как «Прошла».
+    ['PLANNED', 'COMPLETED', 'NO_SHOW', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
 );
 
 /** Parse a CRM session's date string.
@@ -326,7 +327,8 @@ export function CrmSessions() {
         // Unpaid = completed but not paid (only completed, not planned/cancelled)
         const unpaidSessions = monthSessions.filter((s) => {
             const eff = getEffectiveStatus(s);
-            return eff === 'COMPLETED' && !s.isPaid;
+            // «Неявка · оплачивается» (NO_SHOW) — тоже долг.
+            return isBillableStatus(eff) && !s.isPaid;
         });
         const unpaidCount = unpaidSessions.length;
 
@@ -351,7 +353,7 @@ export function CrmSessions() {
         const earnedByCur = earnedByCurrency(
             monthSessions,
             (id) => clientMap.get(id),
-            (s) => getEffectiveStatus(s) === 'COMPLETED' && !!s.isPaid,
+            (s) => isBillableStatus(getEffectiveStatus(s)) && !!s.isPaid,
         );
         const earnedEntries = Object.entries(earnedByCur).filter(([, v]) => v > 0);
         const earnedLabel = earnedEntries.length > 0
@@ -742,7 +744,7 @@ function SessionEditPanel({
                         className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     >
                         {/* Слова — из общего словаря статусов (statuses.ts). */}
-                        {['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => (
+                        {['PLANNED', 'COMPLETED', 'NO_SHOW', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => (
                             <option key={k} value={k}>{STATUS_LABELS[k]}</option>
                         ))}
                     </select>
@@ -989,6 +991,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
         { key: 'all', label: 'Все' },
         { key: 'PLANNED', label: 'Запланированы' },
         { key: 'COMPLETED', label: 'Прошли' },
+        { key: 'NO_SHOW', label: 'Неявки' },
         { key: 'CANCELLED_CLIENT', label: 'Отменены' },
     ];
 

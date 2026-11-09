@@ -305,10 +305,15 @@ function ShiftLine({ shift, isToday, day }: { shift: DayShift; isToday: boolean;
                     {shift.closes > 1 && <> · закрывали {shift.closes} раза</>}
                 </span>
             ) : (
-                <span>
-                    наличных по записям {isToday ? 'сейчас' : 'на конец дня'}{' '}
-                    <span className="num" style={{ color: COLOR.ink }}>{formatGel(shift.cashByRecords)}</span>
-                </span>
+                shift.cashByRecords === null ? (
+                    // Решение владельца 3 (09.11): роль admin «должно быть в кассе» до закрытия не видит.
+                    <span data-cash-hidden>наличных по записям — скрыто до закрытия смены</span>
+                ) : (
+                    <span>
+                        наличных по записям {isToday ? 'сейчас' : 'на конец дня'}{' '}
+                        <span className="num" style={{ color: COLOR.ink }}>{formatGel(shift.cashByRecords)}</span>
+                    </span>
+                )
             )}
         />
     );

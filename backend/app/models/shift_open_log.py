@@ -45,6 +45,7 @@ class ShiftOpenLogCreate(SQLModel):
 
 
 class ShiftOpenLogRead(ShiftOpenLogBase):
+    starting_balance: Optional[float] = None  # 09.11: пусто для роли admin
     id: str
     admin_id: str
     admin_name: str

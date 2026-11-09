@@ -36,7 +36,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Field, Input, Select, TextArea } from '../../components/ui/Field';
 import { undoToast } from '../../components/ui/undoToast';
 import { statusLabel } from '../../design/statuses';
-import { paidLocally, partialPayment, sessionCurrencyOf, sessionDebt } from '../../utils/sessionMoney';
+import { isBillableStatus, paidLocally, partialPayment, sessionCurrencyOf, sessionDebt } from '../../utils/sessionMoney';
 import { accountLabel, accountSelectValue, defaultPaymentAccount, lastPaymentAccountOf } from '../../utils/paymentAccounts';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../mobile/admin/parseMoneyInput';
 
@@ -89,7 +89,8 @@ const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
 
 // Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
 const STATUS_LABELS: Record<string, string> = Object.fromEntries(
-    ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
+    // NO_SHOW (09.11) — «Неявка · оплачивается»: в долге, как «Прошла».
+    ['PLANNED', 'COMPLETED', 'NO_SHOW', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
 );
 
 /** «вт, 7 окт.» — коротко для кнопки «Записать на …» (как в NewSessionSheet). */
@@ -225,7 +226,8 @@ export function CrmClientDetail() {
 
     const stats = useMemo(() => {
         const completed = sessions.filter(s => s.status === 'COMPLETED').length;
-        const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
+        // «Неявка · оплачивается» (NO_SHOW) — тоже долг, как на сервере.
+        const unpaid = sessions.filter(s => !s.isPaid && isBillableStatus(s.status));
         const totalPaid = balance?.totalPaid ?? 0;
         const paidByCurrency: Record<string, number> = balance?.paidByCurrency ?? {};
         const debtByCurrency: Record<string, number> = balance?.debtByCurrency ?? {};
@@ -283,7 +285,8 @@ export function CrmClientDetail() {
             toast.success(`Оплата отмечена: ${formatMoney(addedNow, { currency: result.currency })}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
         } catch (e: any) {
-            toast.error(e.message || 'Ошибка');
+            // Причина сервера по-русски (а не «Request failed with status code 400»).
+            toastApiError(e, 'Не удалось отметить оплату');
         }
     };
 

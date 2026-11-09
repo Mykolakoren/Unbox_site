@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, CheckCircle2, XCircle, Clock, X } from 'lucide-react';
+import { Search, CheckCircle2, XCircle, Clock, X, Plus, AlertCircle } from 'lucide-react';
 import { crmApi, type CrmSession } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -14,19 +14,25 @@ import { COLOR } from '../../../design/tokens';
 import { formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
-import { useBookNext } from './crmFlows';
+import { aliasLabel, normalizeClientQuery, useBookNext } from './crmFlows';
+import { Button } from '../../../components/ui/Button';
+import {
+    isBillableStatus, isCancelledStatus, partialPayment, priceFromClientRate, sessionCurrencyOf, sessionDebt, sessionPriceOf,
+} from '../../../utils/sessionMoney';
 
 type Window = '7d' | '30d' | 'past7d' | 'past30d' | 'all';
 
+// Ревью п. 15: «Будущие 7 дней» включали утренние, уже прошедшие сессии —
+// называем честно «7 дней с сегодня»; «Прошедшие» путались со статусом.
 const WINDOW_LABEL: Record<Window, string> = {
-    '7d':     'Будущие 7 дней',
-    '30d':    'Будущие 30 дней',
-    'past7d': 'Прошедшие 7 дней',
-    'past30d':'Прошедшие 30 дней',
+    '7d':     '7 дней с сегодня',
+    '30d':    '30 дней с сегодня',
+    'past7d': 'Прошлые 7 дней',
+    'past30d':'Прошлые 30 дней',
     'all':    'Все даты',
 };
 
-type StatusFilter = 'all' | 'planned' | 'completed' | 'cancelled';
+type StatusFilter = 'all' | 'planned' | 'completed' | 'unpaid' | 'cancelled';
 
 /** Цвет плашки-значка — по тону статуса из общего словаря (statuses.ts). */
 const TONE_BG: Record<string, { bg: string; fg: string }> = {
@@ -113,7 +119,8 @@ export function MobileCrmSessions() {
     useEffect(() => { reload(); }, [period, dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const filtered = useMemo(() => {
-        const needle = q.trim().toLowerCase();
+        const needle = normalizeClientQuery(q);
+        const now = Date.now();
         return sessions
             .filter(s => {
                 // Запрос взят с запасом в день — оставляем свои дни по Батуми.
@@ -121,10 +128,16 @@ export function MobileCrmSessions() {
                 if (day && (day < range.from || day > range.to)) return false;
                 if (statusFilter === 'planned' && s.status !== 'PLANNED') return false;
                 if (statusFilter === 'completed' && s.status !== 'COMPLETED') return false;
-                if (statusFilter === 'cancelled' && !s.status?.startsWith('CANCELLED')) return false;
+                // «Неявка · оплачивается» — тоже отмена, но в долге: видна и в «Не оплачены».
+                if (statusFilter === 'cancelled' && !isCancelledStatus(s.status) && s.status !== 'NO_SHOW') return false;
+                if (statusFilter === 'unpaid') {
+                    const owes = isBillableStatus(s.status) || (s.status === 'PLANNED' && parseUTC(s.date).getTime() <= now);
+                    const client = clients.find(c => c.id === s.clientId);
+                    if (!owes || s.isPaid || sessionDebt(s, client).amount <= 0) return false;
+                }
                 if (needle) {
                     const client = clients.find(c => c.id === s.clientId);
-                    const hay = `${client?.name || ''} ${client?.aliasCode || ''}`.toLowerCase();
+                    const hay = `${client?.name || ''} ${(client?.aliasCode || '').replace(/^#+/, '')} ${client?.phone || ''}`.toLowerCase();
                     if (!hay.includes(needle)) return false;
                 }
                 return true;
@@ -141,9 +154,16 @@ export function MobileCrmSessions() {
 
     return (
         <div style={{ padding: '14px 14px 90px' }}>
-            <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 2px 12px' }}>
-                Все сессии
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 2px 12px' }}>
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1 }}>
+                    Все сессии
+                </h1>
+                {!viewingOther && (
+                    <Button size="touch" icon={<Plus size={16} aria-hidden="true" />} onClick={() => bookNext.open()}>
+                        Сессия
+                    </Button>
+                )}
+            </div>
 
             {/* Period chips */}
             <div role="group" aria-label="Период" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 8, paddingBottom: 4 }}>
@@ -159,7 +179,8 @@ export function MobileCrmSessions() {
                 {([
                     { id: 'all', label: 'Все' },
                     { id: 'planned', label: 'Запланированные' },
-                    { id: 'completed', label: 'Прошедшие' },
+                    { id: 'completed', label: 'Состоялись' },
+                    { id: 'unpaid', label: 'Не оплачены' },
                     { id: 'cancelled', label: 'Отменённые' },
                 ] as { id: StatusFilter; label: string }[]).map(f => (
                     <Chip key={f.id} selected={statusFilter === f.id} onClick={() => setStatusFilter(f.id)} style={{ flexShrink: 0 }}>
@@ -173,8 +194,8 @@ export function MobileCrmSessions() {
                 <Search size={16} color={COLOR.ink60} aria-hidden="true" style={{ position: 'absolute', left: 12, top: 14 }} />
                 <input
                     type="text"
-                    aria-label="Поиск по клиенту или коду"
-                    placeholder="Клиент или код"
+                    aria-label="Поиск: имя, код или телефон клиента"
+                    placeholder="Имя, код, телефон"
                     value={q}
                     onChange={e => setQ(e.target.value)}
                     style={{
@@ -225,10 +246,16 @@ export function MobileCrmSessions() {
                     {filtered.map(s => {
                         const client = clients.find(c => c.id === s.clientId);
                         const dt = parseUTC(s.date);
-                        const isCancelled = (s.status || '').startsWith('CANCELLED');
+                        const isCancelled = isCancelledStatus(s.status);
                         const isCompleted = s.status === 'COMPLETED';
                         const tone = TONE_BG[getStatusDef('session', s.status).tone];
-                        const cur = s.currency || client?.currency || 'GEL';
+                        const cur = sessionCurrencyOf(s, client);
+                        // Ревью п. 1, 8: одна цена (своя или ставка клиента) и частичная оплата.
+                        const price = sessionPriceOf(s, client);
+                        const partial = partialPayment(s, client);
+                        const owes = !s.isPaid && (isBillableStatus(s.status)
+                            || (s.status === 'PLANNED' && dt.getTime() <= Date.now()))
+                            && sessionDebt(s, client).amount > 0;
                         return (
                             <button
                                 key={s.id}
@@ -258,6 +285,7 @@ export function MobileCrmSessions() {
                                     flexShrink: 0,
                                 }}>
                                     {isCancelled ? <XCircle size={16} aria-hidden="true" />
+                                        : s.status === 'NO_SHOW' ? <AlertCircle size={16} aria-hidden="true" />
                                         : isCompleted ? <CheckCircle2 size={16} aria-hidden="true" />
                                         : <Clock size={16} aria-hidden="true" />}
                                 </div>
@@ -266,17 +294,18 @@ export function MobileCrmSessions() {
                                         fontWeight: 600, fontSize: 14, color: 'var(--color-ink)',
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                     }}>
-                                        {client?.aliasCode ? `${client.aliasCode} · ` : ''}{client?.name || 'Клиент'}
-                                        {!s.isPaid && isCompleted && (
-                                            <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600, marginLeft: 4 }}>
-                                                · {statusLabel('payment', 'unpaid')}
+                                        {client?.aliasCode ? `${aliasLabel(client.aliasCode)} · ` : ''}{client?.name || 'Клиент'}
+                                        {owes && (
+                                            <span style={{ color: partial ? 'var(--status-pending-fg)' : 'var(--status-danger-fg)', fontWeight: 600, marginLeft: 4 }}>
+                                                · {partial ? statusLabel('payment', 'partial') : statusLabel('payment', 'unpaid')}
                                             </span>
                                         )}
                                     </div>
                                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                                         {formatDayMonth(dt, { timeZone: BATUMI_TZ })}, {formatTime(dt, { timeZone: BATUMI_TZ })}
                                         {' · '}{statusLabel('session', s.status)}
-                                        {s.price ? ` · ${formatMoney(s.price, { currency: cur })}` : ''}
+                                        {price > 0 ? ` · ${formatMoney(price, { currency: cur })}${priceFromClientRate(s, client) ? ' (ставка)' : ''}` : ''}
+                                        {partial ? ` · оплачено ${formatMoney(partial.paid, { currency: cur })}, долг ${formatMoney(partial.remaining, { currency: cur })}` : ''}
                                     </div>
                                 </div>
                             </button>

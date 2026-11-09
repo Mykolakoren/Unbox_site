@@ -13,6 +13,7 @@ from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
 from app.models.therapist_note import TherapistNote
 from app.services import session_balance as sb
+from app.api.v1.crm import BILLABLE_STATUSES, profile_base_price
 
 router = APIRouter()
 
@@ -233,8 +234,8 @@ def list_clients(
         c_dict["lastPastSessionDate"] = max(past_dates).isoformat() if past_dates else None
         c_dict["nextSessionDate"] = min(future_dates).isoformat() if future_dates else None
 
-        # Unpaid sum — only COMPLETED sessions count as debt
-        unpaid = [s for s in sessions_all if not s.is_paid and s.status == "COMPLETED"]
+        # Unpaid sum — only COMPLETED (и NO_SHOW «неявка, оплачивается») count as debt
+        unpaid = [s for s in sessions_all if not s.is_paid and s.status in BILLABLE_STATUSES]
         c_dict["unpaidSum"] = round(sum(
             sb.remaining_in(s, c, pays_by_session.get(s.id, ()), rates, c.currency) for s in unpaid
         ), 2)
@@ -291,13 +292,13 @@ def get_client_balance(
             totals[m.currency] = round(totals.get(m.currency, 0) + m.remaining, 2)
         return totals
 
-    # Unpaid COMPLETED sessions only (future PLANNED sessions are not debt)
+    # Unpaid COMPLETED/NO_SHOW sessions only (future PLANNED sessions are not debt)
     unpaid_sessions = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.client_id == client_id,
             TherapySession.is_paid == False,
-            TherapySession.status == "COMPLETED",
+            TherapySession.status.in_(BILLABLE_STATUSES),
         )
     ).all()
 
@@ -348,8 +349,15 @@ def create_client(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
+    payload = data.model_dump()
+    # 09.11 (решение владельца 2): ставку не указали — берём «Базовую цену
+    # сессии» из анкеты специалиста. Раньше выходил 0, и «Отметить оплату»
+    # ставила «оплачено» без денег. Явно введённый 0 уважаем. Цена в анкете —
+    # в лари, поэтому подставляем только клиенту в лари.
+    if "base_price" not in data.model_fields_set and (payload.get("currency") or "GEL").upper() == "GEL":
+        payload["base_price"] = profile_base_price(session, current_user.id)
     client = TherapistClient(
-        **data.model_dump(),
+        **payload,
         specialist_id=str(current_user.id),
     )
     session.add(client)

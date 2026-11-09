@@ -10,7 +10,7 @@ from app.models.expense_category import ExpenseCategory
 from app.models.cashbox_transaction import CashboxTransaction
 from app.models.shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
 from app.models.shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
-from app.api.v1.cashbox import require_cashbox, require_reports
+from app.api.v1.cashbox import require_cashbox, require_reports, cash_hidden_for
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,26 @@ def preview_close_shift(
         tx_count_q = tx_count_q.where(CashboxTransaction.branch == branch)
     tx_count = int(session.exec(tx_count_q).one())
 
+    # Решение владельца 3 (09.11): роль admin до закрытия не видит ни «ожидалось»,
+    # ни цифр, из которых его можно сложить (остаток прошлой смены + приход − расход).
+    # Закрытие смены от этого не зависит: end_shift считает сам и возвращает
+    # expected_balance / discrepancy в ответе — экран показывает их ПОСЛЕ отправки.
+    if cash_hidden_for(current_user):
+        return {
+            "starting_balance": None,
+            "cash_in": None,
+            "cash_out": None,
+            "expected": None,
+            "window_expected": None,
+            "off_window": None,
+            "tx_count": tx_count,
+            "shift_start": shift_start.isoformat() if shift_start != datetime.min else None,
+            "now": now.isoformat(),
+            "branch": branch,
+            "prev_close_id": str(last_shift.id) if last_shift else None,
+            "cash_hidden": True,
+        }
+
     return {
         "starting_balance": round(starting_balance, 2),
         "cash_in": round(cash_in, 2),
@@ -226,6 +246,11 @@ def get_current_open_shift(
     if last_close and last_close.shift_end >= last_open.opened_at:
         return None  # close is newer → shift is closed
 
+    if cash_hidden_for(current_user):
+        # 09.11: остаток на открытии — точка отсчёта «ожидалось»; роли admin не отдаём.
+        data = ShiftOpenLogRead.model_validate(last_open, from_attributes=True)
+        data.starting_balance = None
+        return data
     return last_open
 
 
@@ -291,7 +316,18 @@ def list_shifts(
         .offset(skip)
         .limit(limit)
     )
-    return session.exec(stmt).all()
+    rows = session.exec(stmt).all()
+    if cash_hidden_for(current_user):
+        # 09.11: «фактически» прошлой смены = остаток на старте следующей; роли
+        # admin отдаём только расхождение (для разбора), без самих сумм.
+        out = []
+        for r in rows:
+            d = ShiftReportRead.model_validate(r, from_attributes=True)
+            d.expected_balance = None
+            d.actual_balance = None
+            out.append(d)
+        return out
+    return rows
 
 
 @router.post("/shifts", response_model=ShiftReportRead)
@@ -521,5 +557,7 @@ def get_analytics(
         "category_breakdown": category_breakdown,
         "total_income": round(total_income, 2),
         "total_expense": round(total_expense, 2),
-        "current_balance": round(float(cash_in) - float(cash_out), 2),
+        # 09.11 (ревизия безопасности): итог наличных — тот же «ожидалось»,
+        # роль admin его до закрытия смены не видит.
+        "current_balance": None if cash_hidden_for(current_user) else round(float(cash_in) - float(cash_out), 2),
     }

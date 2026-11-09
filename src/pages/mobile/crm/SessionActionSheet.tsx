@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     Check, X, MapPin, Calendar, Trash2, RotateCcw,
-    Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock,
+    Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock, FileText, Info,
 } from 'lucide-react';
 import { crmApi, type CrmSession, type CrmClient, type CrmNote, type CrmPayment } from '../../../api/crm';
 import { formatBatumi, parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -22,7 +22,12 @@ import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/
 import { useCrmStore } from '../../../store/crmStore';
 import { nextSessionLabel } from './crmFlows';
 import { SessionPaymentBlock } from '../../../components/crm/SessionPaymentBlock';
-import { paidLocally, partialPayment } from '../../../utils/sessionMoney';
+import {
+    isBillableStatus, isCancelledStatus, paidLocally, partialPayment, priceFromClientRate, sessionPriceOf,
+} from '../../../utils/sessionMoney';
+import { statusLabel } from '../../../design/statuses';
+import { useNotesHidden } from './notesPrivacy';
+import { RememberRateCheck } from '../../../components/crm/askPaymentAmount';
 import { accountSelectValue, defaultPaymentAccount } from '../../../utils/paymentAccounts';
 
 /** Resolve the active currency for a session: session.currency overrides
@@ -64,19 +69,30 @@ interface Props {
     /** Волна 3: первая строка «Записать следующую · вт, 7 окт., 19:00».
      *  Родитель закрывает эту шторку и открывает NewSessionSheet. */
     onBookNext?: (session: CrmSession) => void;
+    /** 09.11: открыть сразу шаг «Сколько заплатили?» (у сессии нет цены). */
+    initialMode?: 'pay';
 }
 
-type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'cancel' | 'delete' | 'cabinet';
+type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'cancel' | 'delete' | 'cabinet' | 'pay';
+
+/** Отменить бронь кабинета можно не позже чем за сутки (правило брони). */
+const CABINET_CANCEL_HOURS = 24;
 
 /** Служебная пометка, которую бэкенд ставит сессиям из заявок с сайта
  *  (specialist_schedule.py). Это не заметка специалиста — не предлагаем
  *  её «переносить» в Заметки. */
 const SITE_REQUEST_MARK = 'Заявка через публичный сайт';
 
-export function SessionActionSheet({ session, client, onClose, onChange, onDeleted, onBookNext }: Props) {
+export function SessionActionSheet({ session, client, onClose, onChange, onDeleted, onBookNext, initialMode }: Props) {
     // В «просмотре как специалист» записывать нельзя — строку не показываем.
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
-    const [mode, setMode] = useState<Mode>('main');
+    const [mode, setMode] = useState<Mode>(initialMode ?? 'main');
+    // 09.11 (решение 2): «Сколько заплатили?» — подсказка из «Базовой цены сессии» анкеты.
+    const defaultSessionPrice = useCrmStore(s => s.crmSettings?.defaultSessionPrice ?? 0);
+    const [payRaw, setPayRaw] = useState(() => (defaultSessionPrice > 0 ? String(defaultSessionPrice) : ''));
+    // У клиента нет своей ставки — «Запомнить как ставку клиента» (по умолчанию вкл.).
+    const canRememberRate = !!client && !(Number(client.basePrice) > 0);
+    const [rememberRate, setRememberRate] = useState(true);
     const [busy, setBusy] = useState(false);
     // Поля шагов живут здесь: кнопка шага — в подвале общей шторки.
     const [resDate, setResDate] = useState('');
@@ -141,6 +157,10 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const time = formatTime(when, TZ);
     // Wave 1: «вт, 29 сентября» (раньше «29 September, Tue»).
     const dateLabel = formatDateLabel(when, TZ);
+    // Кабинет сессии: «Кабинет 6» (коротко — для подзаголовка и тостов) и «Кабинет 6 · Unbox Uni».
+    const linked = useLinkedBooking(session, false);
+    const cabinetShort = linked.shortLabel;
+    const statusLine = sessionStatusWords(session, client, cabinetShort);
 
     const update = async (patch: Parameters<typeof crmApi.updateSession>[1], successMsg = 'Сохранено') => {
         setBusy(true);
@@ -161,8 +181,55 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const handleStatus = async (status: CrmSession['status']) => {
         const msg = status === 'COMPLETED' ? 'Сессия отмечена как прошедшая'
             : status === 'CANCELLED_CLIENT' || status === 'CANCELLED_THERAPIST' ? 'Сессия отменена'
+            : status === 'NO_SHOW' ? 'Отмечено: неявка — сессия остаётся в долге'
+            : status === 'PLANNED' ? 'Сессия снова в плане'
             : 'Статус обновлён';
         try { await update({ status }, msg); setMode('main'); } catch { /* toast already shown */ }
+    };
+
+    /**
+     * Отмена (09.11, ревью п. 5–6): статус + по галочкам «Освободить кабинет и
+     * вернуть деньги» (тот же путь, что шаг «Кабинет» → «Отменить бронь») и
+     * «Убрать из Google Календаря». Сначала статус — если бронь отменить не
+     * вышло, сессия всё равно отменена, а причину говорим тостом.
+     */
+    const handleCancel = async (
+        status: 'CANCELLED_CLIENT' | 'CANCELLED_THERAPIST' | 'NO_SHOW',
+        opts: { releaseCabinet: boolean; removeFromCalendar: boolean; cabinetLabel: string | null },
+    ) => {
+        setBusy(true);
+        let updated: CrmSession;
+        try {
+            updated = await crmApi.updateSession(session.id, {
+                status,
+                ...(opts.removeFromCalendar ? { removeFromCalendar: true } : {}),
+            });
+        } catch (e: unknown) {
+            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось отменить сессию. Попробуйте ещё раз');
+            setBusy(false);
+            return;
+        }
+        const head = status === 'NO_SHOW' ? 'Отмечено: неявка — сессия остаётся в долге' : 'Сессия отменена';
+        let cabinetPart = '';
+        if (opts.releaseCabinet && session.bookingId) {
+            try {
+                await crmApi.detachCabinet(session.id, true);
+                updated = { ...updated, bookingId: undefined, isBooked: false };
+                cabinetPart = ` · ${opts.cabinetLabel ?? 'Кабинет'} освобождён, оплата за него вернётся тем же способом (деньги, часы абонемента или бонус)`;
+            } catch (e: unknown) {
+                const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+                toast.warning(`${head}, но бронь кабинета отменить не удалось${typeof msg === 'string' ? `: ${msg}` : ''}`, { duration: 8000 });
+                onChange(updated);
+                setMode('main');
+                setBusy(false);
+                return;
+            }
+        }
+        onChange(updated);
+        toast.success(head + cabinetPart);
+        setMode('main');
+        setBusy(false);
     };
 
     const handlePaid = async (isPaid: boolean) => {
@@ -181,6 +248,13 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 tone: 'danger',
             });
             if (!ok) return;
+        }
+        // 09.11 (решение 2): цены нет — сначала «Сколько заплатили?». Отметка
+        // «оплачено» без суммы теряла деньги: ни в кассе, ни в долге.
+        if (isPaid && !partialPayment(session, client) && sessionPriceOf(session, client) <= 0) {
+            setPayRaw(defaultSessionPrice > 0 ? String(defaultSessionPrice) : '');
+            setMode('pay');
+            return;
         }
         setBusy(true);
         try {
@@ -206,6 +280,25 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(typeof msg === 'string' ? msg : 'Не удалось изменить оплату. Попробуйте ещё раз');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    /** «Сколько заплатили?» → оплата с суммой; сумма становится ценой сессии. */
+    const handlePayAmount = async (amount: number) => {
+        setBusy(true);
+        try {
+            const res = await crmApi.quickPaySession(session.id, undefined, amount, canRememberRate && rememberRate);
+            onChange({ ...session, price: amount, isPaid: true, remaining: 0, paidAmount: amount });
+            refreshSession();
+            // Ставку клиента запомнили — освежаем клиентов (подписи «по ставке клиента»).
+            if (canRememberRate && rememberRate) useCrmStore.getState().fetchClients(false, true).catch(() => {});
+            toast.success(`Оплачено: ${formatMoney(res.added ?? res.amount ?? amount, { currency: res.currency || sessionCurrency(session, client) })}`);
+            setMode('main');
+        } catch (e: unknown) {
+            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось отметить оплату. Попробуйте ещё раз');
         } finally {
             setBusy(false);
         }
@@ -298,7 +391,12 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const submitReschedule = async () => {
         // Build a Tbilisi wall-clock ISO; backend converts to UTC.
         const iso = `${resDate}T${resTime}:00`;
-        try { await update({ date: iso, durationMinutes: resDur }, 'Сессия перенесена'); setMode('main'); } catch { /* toast already shown */ }
+        // 09.11 (ревью п. 4): тост называет кабинет, который переехал вместе с сессией.
+        const when = `${formatDateLabel(resDate, { withYear: 'auto' })}, ${resTime}`;
+        const msg = session.isBooked
+            ? `Сессия и ${cabinetShort ?? 'кабинет'} перенесены на ${when}`
+            : `Сессия перенесена на ${when}`;
+        try { await update({ date: iso, durationMinutes: resDur }, msg); setMode('main'); } catch { /* toast already shown */ }
     };
     const submitPrice = async () => {
         if (parsedPrice === null) return;
@@ -321,7 +419,13 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         if (await handleAddNote(noteText)) setMode('main');
     };
 
-    const footer = mode === 'reschedule' ? (
+    const parsedPay = parseMoneyInput(payRaw);
+    const payOk = parsedPay !== null && parsedPay > 0;
+    const footer = mode === 'pay' ? (
+        <Button block loading={busy} disabled={!payOk} onClick={() => { if (payOk) handlePayAmount(parsedPay as number); }}>
+            {payOk ? `Отметить оплату · ${formatMoney(parsedPay as number, { currency: sessionCurrency(session, client) })}` : 'Отметить оплату'}
+        </Button>
+    ) : mode === 'reschedule' ? (
         <Button block loading={busy} disabled={!resDate || !resTime} onClick={submitReschedule}>
             Перенести сессию
         </Button>
@@ -340,7 +444,7 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             open
             onClose={onClose}
             title={client?.name ?? 'Клиент…'}
-            description={`${dateLabel}, ${time} · ${session.durationMinutes ?? 60} мин`}
+            description={`${dateLabel}, ${time} · ${session.durationMinutes ?? 60} мин${statusLine ? ` · ${statusLine}` : ''}`}
             footer={footer}
         >
             {mode === 'main' && (
@@ -369,8 +473,19 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     ) : undefined}
                 />
             )}
+            {mode === 'pay' && (
+                <PayAmountForm
+                    remember={canRememberRate ? { checked: rememberRate, onChange: setRememberRate } : null}
+                    value={payRaw}
+                    currency={sessionCurrency(session, client)}
+                    prefilled={defaultSessionPrice > 0}
+                    onChange={setPayRaw}
+                    onBack={() => setMode('main')}
+                />
+            )}
             {mode === 'reschedule' && (
                 <RescheduleForm
+                    cabinetLabel={session.isBooked ? (linked.label ?? 'Кабинет') : null}
                     date={resDate}
                     time={resTime}
                     dur={resDur}
@@ -418,8 +533,9 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             )}
             {mode === 'cancel' && (
                 <CancelConfirm
+                    session={session}
                     busy={busy}
-                    onStatus={handleStatus}
+                    onCancel={handleCancel}
                     onDelete={() => openMode('delete')}
                     onBack={() => setMode('main')}
                 />
@@ -434,6 +550,25 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
             )}
         </Sheet>
     );
+}
+
+/**
+ * Состояние сессии словами для подзаголовка шторки (09.11, ревью п. 3):
+ * «Прошла · не оплачена · Кабинет 6». Раньше статуса в шторке не было, а
+ * серая плитка «Запланирована» на месте «Прошла» читалась как статус.
+ */
+function sessionStatusWords(session: CrmSession, client: CrmClient | undefined, cabinet: string | null): string {
+    const isFuture = parseUTC(session.date).getTime() > Date.now();
+    const parts: string[] = [];
+    // Прошедшая, но не отмеченная — «Прошла» (её закроет автозавершение), как на компьютере.
+    const effective = session.status === 'PLANNED' && !isFuture ? 'COMPLETED' : session.status;
+    parts.push(statusLabel('session', effective));
+    const owes = isBillableStatus(effective);
+    if (session.isPaid) parts.push('оплачена');
+    else if (partialPayment(session, client)) parts.push('оплачена частично');
+    else if (owes) parts.push('не оплачена');
+    if (session.isBooked && !isCancelledStatus(session.status)) parts.push(cabinet ?? 'кабинет забронирован');
+    return parts.join(' · ');
 }
 
 function Main({
@@ -460,17 +595,87 @@ function Main({
     // G6-M4: у будущей сессии нет «Прошла» — случайный тап делал завтрашнюю
     // сессию долгом. Главное действие будущей — «Перенести».
     const isFuture = parseUTC(session.date).getTime() > Date.now();
-    const isCancelled = session.status === 'CANCELLED_CLIENT' || session.status === 'CANCELLED_THERAPIST';
+    const isCancelled = isCancelledStatus(session.status);
+    const isNoShow = session.status === 'NO_SHOW';
+    const isCompleted = session.status === 'COMPLETED';
     const cabinet = useLinkedBooking(session, false).label;
-    const latestNote = notes?.[0]?.content || legacyNote;
     const currency = sessionCurrency(session, client);
     const symbol = currencySymbol(currency);
     const currencyIcon = (
         <span aria-hidden="true" style={{ fontWeight: 600, fontSize: 16, lineHeight: 1 }}>{symbol}</span>
     );
-    const priceText = session.price ? formatMoney(session.price, { currency }) : null;
+    // 09.11 (ревью п. 1): одна цена везде — своя цена сессии или ставка клиента
+    // (её же берёт сервер при оплате). Раньше тут было «цена не указана».
+    const price = sessionPriceOf(session, client);
+    const fromRate = priceFromClientRate(session, client);
+    const priceText = price > 0
+        ? `${formatMoney(price, { currency })}${fromRate ? ' · по ставке клиента' : ''}`
+        : null;
     // Частично оплачена: внесено, но не всё — на кнопке остаток, а не «Отметить оплату».
     const partial = partialPayment(session, client);
+    const noteCount = (notes?.length ?? 0) + (legacyNote ? 1 : 0);
+    const lastNoteAt = notes?.[0]?.createdAt ? parseUTC(notes[0].createdAt) : null;
+
+    // Главные плитки (ревью п. 3): у прошедшей — «Оплата» и «Отменить», у будущей —
+    // «Перенести» и «Отменить». «Вернуть в план» — не на главном месте, а строкой ниже.
+    const payTile = (
+        <ActionTile
+            icon={session.isPaid ? <Check size={18} aria-hidden="true" /> : currencyIcon}
+            label={session.isPaid ? 'Оплачено' : partial ? 'Доплатить' : 'Оплата'}
+            sub={session.isPaid
+                ? (price > 0 ? formatMoney(price, { currency }) : undefined)
+                : partial ? formatMoney(partial.remaining, { currency })
+                : price > 0 ? formatMoney(price, { currency }) : 'указать сумму'}
+            tone={session.isPaid ? 'ok' : 'primary'}
+            pressed={!!session.isPaid}
+            disabled={busy}
+            onClick={() => onPaid(!session.isPaid)}
+        />
+    );
+    const cancelTile = (
+        <ActionTile
+            icon={<X size={18} aria-hidden="true" />}
+            label="Отменить"
+            tone="danger-soft"
+            disabled={busy}
+            onClick={onCancel}
+        />
+    );
+    const restoreTile = (
+        <ActionTile
+            icon={<RotateCcw size={18} aria-hidden="true" />}
+            label="Вернуть"
+            sub={isFuture ? 'в план' : 'в прошедшие'}
+            disabled={busy}
+            onClick={() => onStatus(isFuture ? 'PLANNED' : 'COMPLETED')}
+        />
+    );
+    const rescheduleTile = (
+        <ActionTile
+            icon={<CalendarClock size={18} aria-hidden="true" />}
+            label="Перенести"
+            disabled={busy}
+            onClick={onReschedule}
+        />
+    );
+    let tiles: ReactNode[];
+    if (isCancelled) tiles = isFuture ? [rescheduleTile, restoreTile] : [restoreTile];
+    else if (isNoShow) tiles = [payTile, restoreTile];
+    else if (isCompleted) tiles = [payTile, cancelTile];
+    else if (isFuture) tiles = [rescheduleTile, cancelTile];
+    else tiles = [
+        <ActionTile
+            key="done"
+            icon={<Check size={18} aria-hidden="true" />}
+            label="Прошла"
+            tone="primary"
+            disabled={busy}
+            onClick={() => onStatus('COMPLETED')}
+        />,
+        cancelTile,
+    ];
+    const hasPayTile = tiles.includes(payTile);
+    const hasRescheduleTile = tiles.includes(rescheduleTile);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -485,79 +690,46 @@ function Main({
                     onClick={onBookNext}
                 />
             )}
-            {/* Status quick toggle */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingBottom: 8, paddingTop: onBookNext ? 6 : 0 }}>
-                {session.status !== 'COMPLETED' && isFuture ? (
-                    <ActionTile
-                        icon={<CalendarClock size={18} aria-hidden="true" />}
-                        label="Перенести"
-                        disabled={busy}
-                        onClick={onReschedule}
-                    />
-                ) : session.status !== 'COMPLETED' ? (
-                    <ActionTile
-                        icon={<Check size={18} aria-hidden="true" />}
-                        label="Прошла"
-                        tone="primary"
-                        disabled={busy}
-                        onClick={() => onStatus('COMPLETED')}
-                    />
-                ) : (
-                    <ActionTile
-                        icon={<Calendar size={18} aria-hidden="true" />}
-                        label="Запланирована"
-                        disabled={busy}
-                        onClick={() => onStatus('PLANNED')}
-                    />
-                )}
-                {/* 08.10 (владелец): «Отменить» — как на компьютере: статус
-                    «Отменил клиент / специалист», сессия остаётся в истории.
-                    Удалить совсем (ошибочная запись) — шагом дальше. */}
-                {isCancelled ? (
-                    <ActionTile
-                        icon={<RotateCcw size={18} aria-hidden="true" />}
-                        label="Вернуть"
-                        disabled={busy}
-                        onClick={() => onStatus(isFuture ? 'PLANNED' : 'COMPLETED')}
-                    />
-                ) : (
-                    <ActionTile
-                        icon={<X size={18} aria-hidden="true" />}
-                        label="Отменить"
-                        tone="danger-soft"
-                        disabled={busy}
-                        onClick={onCancel}
-                    />
-                )}
+            <div style={{ display: 'grid', gridTemplateColumns: tiles.length > 1 ? '1fr 1fr' : '1fr', gap: 6, paddingBottom: 8, paddingTop: onBookNext ? 6 : 0 }}>
+                {tiles.map((t, i) => <div key={i} style={{ display: 'grid' }}>{t}</div>)}
             </div>
 
-            {/* Оплата: вся строка — кнопка. Раньше срабатывал только системный
-                чекбокс 22×22 внутри кнопки (вложенные элементы, мимо легко
-                промахнуться), а снятие оплаты удаляло платёж без вопроса. */}
-            <Row
-                icon={currencyIcon}
-                label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
-                sub={partial
-                    ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
-                    : (priceText ?? 'цена не указана')}
-                pressed={!!session.isPaid}
-                disabled={busy}
-                right={<CheckMark on={!!session.isPaid} />}
-                onClick={() => onPaid(!session.isPaid)}
-            />
+            {/* Оплата строкой — у будущей и отменённой (предоплата, снять оплату).
+                У прошедшей оплата — главная плитка выше, строку не дублируем. */}
+            {!hasPayTile && (
+                <Row
+                    icon={currencyIcon}
+                    label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
+                    sub={partial
+                        ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
+                        : (priceText ?? 'цены нет — спросим сумму')}
+                    pressed={!!session.isPaid}
+                    disabled={busy}
+                    right={<CheckMark on={!!session.isPaid} />}
+                    onClick={() => onPaid(!session.isPaid)}
+                />
+            )}
+            {hasPayTile && partial && (
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', padding: '0 2px 4px' }}>
+                    Оплачено {formatMoney(partial.paid, { currency })} из {formatMoney(partial.price, { currency })}, долг {formatMoney(partial.remaining, { currency })}
+                </div>
+            )}
             {paymentBlock}
             <Row
                 icon={currencyIcon}
                 label="Цена"
-                sub={priceText ?? '—'}
+                sub={priceText ?? 'не указана'}
                 onClick={onPrice}
             />
-            <Row
-                icon={<Calendar size={16} aria-hidden="true" />}
-                label="Перенести время"
-                sub="Дата · время · длительность"
-                onClick={onReschedule}
-            />
+            {/* Ревью п. 11: у будущей сессии есть плитка «Перенести» — строку не дублируем. */}
+            {!hasRescheduleTile && (
+                <Row
+                    icon={<Calendar size={16} aria-hidden="true" />}
+                    label="Перенести время"
+                    sub="Дата · время · длительность"
+                    onClick={onReschedule}
+                />
+            )}
             <Row
                 icon={<MapPin size={16} aria-hidden="true" />}
                 label={session.isBooked ? `Кабинет: ${cabinet ?? 'привязан'}` : 'Привязать кабинет'}
@@ -576,17 +748,66 @@ function Main({
                     }
                 }}
             />
+            {/* Ревью п. 10: на главном экране шторки — только число заметок, без
+                текста (её открывают отметить оплату, пока клиент рядом). */}
             <Row
-                icon={<ChevronRight size={16} aria-hidden="true" />}
-                label={notes && notes.length > 1 ? `Заметки · ${notes.length}` : 'Заметка'}
-                sub={notes === null && !legacyNote ? '…' : latestNote ? truncate(latestNote, 60) : 'добавить заметку'}
+                icon={<FileText size={16} aria-hidden="true" />}
+                label={noteCount > 0 ? `Заметки · ${noteCount}` : 'Заметки'}
+                sub={notes === null && !legacyNote ? '…'
+                    : noteCount === 0 ? 'добавить заметку'
+                    : lastNoteAt ? `последняя · ${formatDayMonth(lastNoteAt, TZ)}` : 'открыть'}
                 onClick={onNotes}
             />
+            {/* Ревью п. 3: «вернуть в план» — редкое действие, не на главном месте. */}
+            {isCompleted && (
+                <Row
+                    icon={<span aria-hidden="true" style={{ fontWeight: 600, fontSize: 16, lineHeight: 1 }}>↶</span>}
+                    label="Вернуть в план"
+                    sub="Если сессия на самом деле ещё не прошла"
+                    disabled={busy}
+                    onClick={() => onStatus('PLANNED')}
+                />
+            )}
         </div>
     );
 }
 
-function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
+/** «Сколько заплатили?» (09.11, решение владельца 2): у сессии нет цены —
+ *  без суммы оплату не отмечаем. Сумма становится ценой сессии. */
+function PayAmountForm({ remember, value, currency, prefilled, onChange, onBack }: {
+    /** Галочка «Запомнить как ставку клиента» — только если у клиента ставки нет. */
+    remember: { checked: boolean; onChange: (v: boolean) => void } | null;
+    value: string;
+    currency: string;
+    /** Сумма подставлена из «Базовой цены сессии» анкеты. */
+    prefilled: boolean;
+    onChange: (v: string) => void;
+    onBack: () => void;
+}) {
+    const parsed = parseMoneyInput(value);
+    const error = !isMoneyInputBlank(value) && (parsed === null || parsed <= 0) ? MONEY_INPUT_ERROR : undefined;
+    return (
+        <FormShell title="Сколько заплатили?" onBack={onBack}>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.45, color: 'var(--color-ink-60)' }}>
+                У этой сессии нет цены. Укажите сумму оплаты — она запишется в «Финансы» и станет ценой сессии.
+            </p>
+            <Field label="Сумма" error={error} hint={prefilled ? 'Подставлена базовая цена сессии из вашей анкеты' : undefined}>
+                <Input
+                    kind="money"
+                    suffix={currencySymbol(currency)}
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    autoFocus
+                />
+            </Field>
+            {remember && <RememberRateCheck checked={remember.checked} onChange={remember.onChange} />}
+        </FormShell>
+    );
+}
+
+function RescheduleForm({ cabinetLabel, date, time, dur, onDate, onTime, onDur, onBack }: {
+    /** 09.11 (ревью п. 4): к сессии привязан кабинет — он переедет вместе с ней. */
+    cabinetLabel: string | null;
     date: string;
     time: string;
     dur: number;
@@ -598,6 +819,14 @@ function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
     // Кнопка «Перенести сессию» — в подвале шторки (SessionActionSheet).
     return (
         <FormShell title="Перенос сессии" onBack={onBack}>
+            {cabinetLabel && (
+                <div style={{ ...infoBox, marginTop: 0 }} data-reschedule-cabinet>
+                    <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <span>
+                        {cabinetLabel} переедет на новое время, если он свободен. Цена брони может измениться.
+                    </span>
+                </div>
+            )}
             {/* Поле даты браузер рисует на языке телефона («10/07/2026», «Oct 7»).
                 Под ним — та же дата по-русски из format.ts, как в «Новой сессии». */}
             <Field label="Дата" hint={date ? formatDateLabel(date, { capitalize: true, withYear: 'auto' }) : undefined}>
@@ -683,6 +912,10 @@ function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onM
     onBack: () => void;
 }) {
     const isSiteMark = !!legacyNote && legacyNote.startsWith(SITE_REQUEST_MARK);
+    // 09.11 (ревью п. 10): «Скрывать текст» — общая настройка CRM; текст по тапу.
+    const [hidden] = useNotesHidden();
+    const [shown, setShown] = useState<Set<string>>(() => new Set());
+    const reveal = (id: string) => setShown(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
     return (
         <FormShell title="Заметки к сессии" onBack={onBack}>
             <Field label="Новая заметка" hint="Появится во вкладке «Заметки» и в истории клиента.">
@@ -709,7 +942,11 @@ function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onM
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
                         {isSiteMark ? 'Пометка' : 'Раньше записано здесь · видно только в этой сессии'}
                     </div>
-                    <div style={noteText}>{legacyNote}</div>
+                    {hidden && !isSiteMark && !shown.has('legacy') ? (
+                        <HiddenNoteText onShow={() => reveal('legacy')} />
+                    ) : (
+                        <div style={noteText}>{legacyNote}</div>
+                    )}
                     {!isSiteMark && (
                         <Button
                             variant="quiet"
@@ -729,7 +966,7 @@ function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onM
                     <div key={n.id} style={noteCard}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', flex: 1 }}>
-                                {formatDayMonth(created, TZ)}, {formatTime(created, TZ)}
+                                Заметка · {formatDayMonth(created, TZ)}, {formatTime(created, TZ)}
                             </span>
                             <button
                                 onClick={() => onDeleteNote(n)}
@@ -744,7 +981,11 @@ function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onM
                                 <Trash2 size={16} aria-hidden="true" />
                             </button>
                         </div>
-                        <div style={noteText}>{n.content}</div>
+                        {hidden && !shown.has(n.id) ? (
+                            <HiddenNoteText onShow={() => reveal(n.id)} />
+                        ) : (
+                            <div style={noteText}>{n.content}</div>
+                        )}
                     </div>
                 );
             })}
@@ -752,10 +993,27 @@ function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onM
     );
 }
 
+/** Скрытый текст заметки: «Показать текст» по тапу (настройка «Скрывать текст»). */
+function HiddenNoteText({ onShow }: { onShow: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onShow}
+            style={{
+                background: 'none', border: 'none', padding: 0, minHeight: 44,
+                color: 'var(--color-ink-60)', fontFamily: 'inherit', fontSize: 14,
+                textDecoration: 'underline', cursor: 'pointer', textAlign: 'left',
+            }}
+        >
+            Текст скрыт · показать
+        </button>
+    );
+}
+
 /** Бронь кабинета, привязанная к сессии: ищем в уже загруженных бронях
  *  пользователя («Сегодня» их грузит). Нет в сторе — подгружаем, но только
  *  в шаге «Кабинет» (fetchIfMissing), чтобы не тянуть все брони на каждую шторку. */
-function useLinkedBooking(session: CrmSession, fetchIfMissing = true): { booking: BookingHistoryItem | null; label: string | null } {
+function useLinkedBooking(session: CrmSession, fetchIfMissing = true): { booking: BookingHistoryItem | null; label: string | null; shortLabel: string | null } {
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
     const booking = session.bookingId ? bookings.find(b => b.id === session.bookingId) ?? null : null;
@@ -766,7 +1024,7 @@ function useLinkedBooking(session: CrmSession, fetchIfMissing = true): { booking
     const res = booking ? RESOURCES.find(r => r.id === booking.resourceId) : null;
     const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
     const label = res ? (loc ? `${res.name} · ${loc.name}` : res.name) : null;
-    return { booking, label };
+    return { booking, label, shortLabel: res ? res.name : null };
 }
 
 /** Начало брони (дата + время) — так же, как в BookingDetailSheet. */
@@ -859,33 +1117,121 @@ function CabinetForm({ session, busy, onDetach, onCancelBooking, onBack }: {
     );
 }
 
-function CancelConfirm({ busy, onStatus, onDelete, onBack }: {
+/**
+ * Отмена сессии (09.11, ревью п. 5–6, решение владельца 6).
+ *  - «Отменил клиент» / «Отменил специалист» — сессия не считается долгом;
+ *  - «Не пришёл / поздняя отмена — оплачивается» (NO_SHOW) — остаётся в долге;
+ *  - кабинет: больше суток до начала — галочка «Освободить кабинет и вернуть
+ *    деньги» (включена); меньше — одна строка про пересдачу в «Моих бронях»;
+ *  - «Убрать из Google Календаря» — если у сессии есть событие (включена).
+ */
+function CancelConfirm({ session, busy, onCancel, onDelete, onBack }: {
+    session: CrmSession;
     busy: boolean;
-    onStatus: (s: CrmSession['status']) => void;
+    onCancel: (
+        status: 'CANCELLED_CLIENT' | 'CANCELLED_THERAPIST' | 'NO_SHOW',
+        opts: { releaseCabinet: boolean; removeFromCalendar: boolean; cabinetLabel: string | null },
+    ) => void;
     onDelete: () => void;
     onBack: () => void;
 }) {
+    const navigate = useNavigate();
+    const { booking, label, shortLabel } = useLinkedBooking(session);
+    const calendarConnected = useCrmStore(s => !!s.crmSettings?.calendarId);
+    const hasCabinet = session.isBooked && !!session.bookingId;
+    const start = (booking && bookingStart(booking)) || parseUTC(session.date);
+    const hoursLeft = (start.getTime() - Date.now()) / 3600000;
+    const canRelease = hasCabinet && hoursLeft >= CABINET_CANCEL_HOURS;
+    const [release, setRelease] = useState(true);
+    const hasEvent = !!session.googleEventId && calendarConnected;
+    const [removeEvent, setRemoveEvent] = useState(true);
+    const opts = {
+        releaseCabinet: canRelease && release,
+        removeFromCalendar: hasEvent && removeEvent,
+        cabinetLabel: shortLabel ?? label,
+    };
     return (
         <FormShell title="Отменить сессию?" onBack={onBack}>
-            <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '0 0 12px' }}>
-                Сессия останется в истории со статусом отмены и не будет считаться долгом. Бронь кабинета и событие в Google Календаре не меняются.
+            <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: 0 }}>
+                Отменённая сессия остаётся в истории и не считается долгом.
             </p>
-            <Button variant="danger" block disabled={busy} onClick={() => onStatus('CANCELLED_CLIENT')}>
+
+            {hasCabinet && canRelease && (
+                <CheckRow checked={release} onChange={setRelease} disabled={busy}>
+                    Освободить {label ?? 'кабинет'} и вернуть деньги на баланс
+                </CheckRow>
+            )}
+            {hasCabinet && !canRelease && hoursLeft > 0 && (
+                <div style={{ ...warnBox, marginTop: 0 }}>
+                    Кабинет отменить уже нельзя — можно пересдать в «Моих бронях».{' '}
+                    <button
+                        type="button"
+                        onClick={() => navigate('/m/bookings')}
+                        style={{ background: 'none', border: 'none', padding: 0, minHeight: 44, color: 'inherit', textDecoration: 'underline', font: 'inherit', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                        Открыть мои брони
+                    </button>
+                </div>
+            )}
+            {hasEvent && (
+                <CheckRow checked={removeEvent} onChange={setRemoveEvent} disabled={busy}>
+                    Убрать из Google Календаря
+                </CheckRow>
+            )}
+
+            <Button variant="danger" block disabled={busy} onClick={() => onCancel('CANCELLED_CLIENT', opts)}>
                 Отменил клиент
             </Button>
-            <Button variant="secondary" block disabled={busy} onClick={() => onStatus('CANCELLED_THERAPIST')} style={{ marginTop: 8 }}>
+            <Button variant="secondary" block disabled={busy} onClick={() => onCancel('CANCELLED_THERAPIST', opts)}>
                 Отменил специалист
             </Button>
+            <div>
+                <Button
+                    variant="secondary"
+                    block
+                    disabled={busy}
+                    onClick={() => onCancel('NO_SHOW', opts)}
+                    data-no-show
+                    style={{ whiteSpace: 'normal', height: 'auto', minHeight: 44, paddingTop: 10, paddingBottom: 10, lineHeight: 1.3 }}
+                >
+                    Не пришёл / поздняя отмена — оплачивается
+                </Button>
+                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', margin: '6px 2px 0', lineHeight: 1.4 }}>
+                    Сессия останется в долге с пометкой «{statusLabel('session', 'NO_SHOW')}».
+                </div>
+            </div>
             <button
                 type="button"
                 data-delete-session
                 disabled={busy}
                 onClick={onDelete}
-                style={{ marginTop: 16, width: '100%', minHeight: 44, background: 'transparent', border: 'none', color: 'var(--status-danger-fg)', fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                style={{ marginTop: 4, width: '100%', minHeight: 44, background: 'transparent', border: 'none', color: 'var(--status-danger-fg)', fontSize: 14, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
                 <Trash2 size={14} aria-hidden="true" /> Записали по ошибке — удалить совсем
             </button>
         </FormShell>
+    );
+}
+
+/** Галочка строкой 44+ px (вся строка — метка). */
+function CheckRow({ checked, onChange, disabled, children }: {
+    checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; children: ReactNode;
+}) {
+    return (
+        <label style={{
+            display: 'flex', alignItems: 'center', gap: 10, minHeight: 44, padding: '6px 12px',
+            borderRadius: 10, background: 'var(--color-sunken)', cursor: disabled ? 'default' : 'pointer',
+            fontSize: 14, lineHeight: 1.4, color: 'var(--color-ink)',
+        }}>
+            <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={e => onChange(e.target.checked)}
+                style={{ width: 20, height: 20, flexShrink: 0, accentColor: 'var(--color-accent)' }}
+            />
+            <span>{children}</span>
+        </label>
     );
 }
 
@@ -981,33 +1327,41 @@ function CheckMark({ on }: { on: boolean }) {
     );
 }
 
-function ActionTile({ icon, label, onClick, tone, disabled }: {
+function ActionTile({ icon, label, sub, onClick, tone, pressed, disabled }: {
     icon: React.ReactNode;
     label: string;
+    /** Вторая строка (сумма, «в план»). */
+    sub?: string;
     onClick: () => void;
-    tone?: 'primary' | 'danger-soft';
+    tone?: 'primary' | 'danger-soft' | 'ok';
+    /** Для переключателя (оплата): состояние для экранного диктора. */
+    pressed?: boolean;
     disabled?: boolean;
 }) {
-    const bg = tone === 'primary' ? 'var(--color-ink)' : tone === 'danger-soft' ? 'var(--status-danger-bg)' : 'var(--color-sunken)';
-    const fg = tone === 'primary' ? 'var(--color-on-ink)' : tone === 'danger-soft' ? 'var(--status-danger-fg)' : 'var(--color-ink)';
+    const bg = tone === 'primary' ? 'var(--color-ink)' : tone === 'danger-soft' ? 'var(--status-danger-bg)'
+        : tone === 'ok' ? 'var(--status-ok-bg)' : 'var(--color-sunken)';
+    const fg = tone === 'primary' ? 'var(--color-on-ink)' : tone === 'danger-soft' ? 'var(--status-danger-fg)'
+        : tone === 'ok' ? 'var(--status-ok-fg)' : 'var(--color-ink)';
     return (
         <button
             onClick={onClick}
             disabled={disabled}
+            aria-pressed={pressed}
             className="press"
             style={{
                 background: bg, color: fg,
                 border: 'none', borderRadius: 12,
-                padding: '14px 12px',
+                padding: '12px 10px',
                 minHeight: 64,
                 fontWeight: 600, fontSize: 14, fontFamily: 'inherit',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
                 cursor: 'pointer',
                 opacity: disabled ? 0.6 : 1,
             }}
         >
             {icon}
-            {label}
+            <span>{label}</span>
+            {sub && <span className="num" style={{ fontSize: 12, fontWeight: 500, opacity: 0.85 }}>{sub}</span>}
         </button>
     );
 }
@@ -1034,6 +1388,13 @@ function FormShell({ title, onBack, children }: {
 function truncate(s: string, n: number) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
 // ─── styles ─────────────────────────────────────────────────────────────
+const infoBox: React.CSSProperties = {
+    display: 'flex', alignItems: 'flex-start', gap: 8,
+    background: 'var(--status-info-bg)', color: 'var(--status-info-fg)',
+    borderRadius: 10, padding: '10px 12px', marginTop: 12,
+    fontSize: 14, lineHeight: 1.4,
+};
+
 const warnBox: React.CSSProperties = {
     background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
     borderRadius: 10, padding: '10px 12px', marginTop: 12,

@@ -10,7 +10,7 @@ import {
     isSameDay, isToday, addDays, startOfDay,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle, UserRound } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban, AlertCircle, UserRound, CircleDashed } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -25,6 +25,7 @@ import { BookingMoneyHints } from './BookingMoneyHints';
 import { computeDueByBooking, dueLabel, dueMarkKind, dueHint, type DueInfo } from '../../utils/dueAmounts';
 import { applyAllocation } from '../../utils/balanceAllocation';
 import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
+import { hoursUntilBookingStart } from '../../utils/subscription';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type RefundOption } from './AdminCancelBookingModal';
 import { BookingPriceModal } from './BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -1123,6 +1124,7 @@ export function AdminChessboardView() {
                     ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${formatGel(cancelTarget.finalPrice)}`
                     : ''}
                 series={cancelSeries}
+                booking={cancelTarget}
             />
             <BookingPriceModal
                 booking={priceBooking}
@@ -1236,7 +1238,7 @@ export function AdminChessboardView() {
                                 </div>
                             )}
                         </div>
-                        <CellDueMark info={dueMap.get(b.id)} />
+                        <CellDueMark info={dueMap.get(b.id)} status={b.status} />
                     </button>
                 );
             }
@@ -1570,7 +1572,8 @@ export function AdminChessboardView() {
                                             && selectedBooking.appliedRule !== 'BONUS_HOUR' && selectedBooking.appliedRule !== 'BONUS_HOUR_PART' && (
                                             <button onClick={() => handleBonusHour(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink inline-flex items-center justify-center gap-1"><Gift size={14} aria-hidden="true" /> Час в подарок</button>
                                         )}
-                                        {!bCompleted && (
+                                        {/* 09.11: пересдача — только меньше чем за сутки */}
+                                        {!bCompleted && (selectedBooking.isReRentListed || hoursUntilBookingStart(selectedBooking) < 24) && (
                                             <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">
                                                 {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
                                             </button>
@@ -1851,19 +1854,19 @@ export function AdminChessboardView() {
                                                             )}
                                                             <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
-                                                        {/* «к оплате / ✓ оплачено» (В2; правило знаков — решение владельца 03.10) —
-                                                            на КАЖДОЙ брони, в т.ч. прошедшей. Два знака (dueMarkKind): к оплате —
+                                                        {/* Метки оплаты (решение владельца 09.11, одинаково с телефоном) —
+                                                            на КАЖДОЙ брони, в т.ч. прошедшей. Три знака (dueMarkKind): к оплате —
                                                             красный (!), у частично покрытой — «к оплате N из M» (взять только
-                                                            разницу); оплачено — зелёная ✓: списана и долга на ней нет ИЛИ ещё не
-                                                            списана, но её целиком покрывает плюс на балансе (скидка за прошлую
-                                                            неделю, предоплата). Списанная в долг — всегда «к оплате».
+                                                            разницу); оплачено — зелёная ✓: уже списана, долга нет; с баланса —
+                                                            пунктирный кружок: ещё не списана, баланса хватает, спишется сама.
+                                                            У брони «Ждёт подтверждения» метки нет. Списанная в долг — всегда «к оплате».
                                                             30-минутная (одна клетка) — значок в углу, подпись — в aria-label/title.
                                                             Сумма — только из dueMap. */}
                                                         {cell.colspan === 1 ? (
-                                                            <CellDueMark info={dueMap.get(b.id)} corner />
+                                                            <CellDueMark info={dueMap.get(b.id)} status={b.status} corner />
                                                         ) : (() => {
                                                             const d = dueMap.get(b.id);
-                                                            const kind = dueMarkKind(d);
+                                                            const kind = dueMarkKind(d, b.status);
                                                             const wide = (cell.colspan ?? 1) >= 3;
                                                             // Слова «к оплате» / «оплачено» влезают рядом со временем только
                                                             // от 2 часов (4 клетки). В 1,5 ч — «09:00 ✓»: слово обрезалось
@@ -1883,6 +1886,11 @@ export function AdminChessboardView() {
                                                                         <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-ok-fg)]" title={markLabel} aria-label={markLabel}>
                                                                             <Check size={12} strokeWidth={3} className="shrink-0" aria-hidden="true" />
                                                                             {roomy ? 'оплачено' : wide ? null : formatGel(b.finalPrice)}
+                                                                        </span>
+                                                                    ) : kind === 'covered' ? (
+                                                                        <span className="font-semibold inline-flex items-center gap-0.5 text-[var(--status-muted-fg)]" title={markLabel} aria-label={markLabel}>
+                                                                            <CircleDashed size={12} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />
+                                                                            {roomy ? 'с баланса' : wide ? null : formatGel(b.finalPrice)}
                                                                         </span>
                                                                     ) : (
                                                                         <span className="font-normal" title={b.paymentMethod === 'subscription' ? 'абонемент' : undefined}>
@@ -2015,7 +2023,8 @@ export function AdminChessboardView() {
                 {/* Деньги (В2; знаки — решение владельца 03.10) — первыми: это главный вопрос у стойки. */}
                 <span className="ui-badge ui-badge--danger"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 36 ₾ — взять с клиента</span>
                 <span className="ui-badge ui-badge--danger whitespace-normal h-auto py-1" title="Часть брони уже покрыта балансом клиента (например, скидкой за прошлую неделю) — взять только разницу"><AlertCircle size={14} aria-hidden="true" />(!) к оплате 11 ₾ из 20 — взять только разницу</span>
-                <span className="ui-badge ui-badge--ok whitespace-normal h-auto py-1" title="Уже списана с баланса без долга или спишется за 24 ч до начала из плюса на балансе (скидка за прошлую неделю, предоплата). Списанная в долг — всегда «к оплате»"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено — бронь покрыта деньгами клиента, брать ничего не нужно</span>
+                <span className="ui-badge ui-badge--ok whitespace-normal h-auto py-1" title="Деньги уже списаны с баланса, долга по брони нет. Списанная в долг — всегда «к оплате»"><Check size={14} strokeWidth={3} aria-hidden="true" />оплачено — деньги уже списаны, брать ничего не нужно</span>
+                <span className="ui-badge ui-badge--muted whitespace-normal h-auto py-1" title="Ещё не списано: баланса клиента хватает (скидка за прошлую неделю, предоплата), спишется само за 24 ч до начала"><CircleDashed size={14} aria-hidden="true" />с баланса — ещё не списано, баланса хватает, брать ничего не нужно</span>
                 <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
                 <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
                 <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
@@ -2023,7 +2032,7 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)]/30" label={statusLabel('booking', 'completed', 'staff')} />
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
                 <span className="flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> серия</span>
-                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный знак или галочка</span>
+                <span className="flex items-center gap-1.5"><AlertCircle size={14} aria-hidden="true" /> в углу короткой брони — тот же значок: восклицательный знак, галочка или пунктирный кружок</span>
             </div>
             </div>
             {/* ── Панель брони — справа от сетки, сетку не закрывает (G7-12). ── */}
@@ -2247,12 +2256,15 @@ export function AdminChessboardView() {
                                             <Gift size={14} aria-hidden="true" /> Час в подарок
                                         </button>
                                     )}
+                                    {(selectedBooking.isReRentListed || hoursUntilBookingStart(selectedBooking) < 24) && (
                                     <button
                                         onClick={() => handleToggleReRent(selectedBooking)}
                                         className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
+                                        title={selectedBooking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: до начала меньше суток, клиенту вернём 50 %, если время займут'}
                                     >
                                         {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
                                     </button>
+                                    )}
                                     <button
                                         onClick={() => handleCancel(selectedBooking.id)}
                                         className="py-1.5 text-xs font-medium rounded-lg bg-[var(--status-danger-bg)] hover:brightness-95 text-[var(--status-danger-fg)] transition-colors"
@@ -2355,19 +2367,21 @@ export function AdminChessboardView() {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-/** «к оплате / ✓ оплачено» в клетке шахматки (В2; правило знаков — владелец 03.10).
+/** Метка оплаты в клетке шахматки (решение владельца 09.11, как DueBadge на телефоне).
  *  corner — значок в углу 30-минутной брони (одна клетка): подпись целиком — в
- *  aria-label и title. Два знака (dueMarkKind): к оплате — красный (у частично
- *  покрытой подпись «к оплате N ₾ из M»); оплачено — зелёная ✓ (списана без долга
- *  или ещё не списана, но целиком покрыта плюсом на балансе — подсказка «спишется
- *  за 24 ч до начала»). Записи в dueMap нет — ничего. */
-function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corner?: boolean }) {
-    const kind = dueMarkKind(info);
+ *  aria-label и title. Три знака (dueMarkKind): к оплате — красный (у частично
+ *  покрытой «к оплате N ₾ из M»); оплачено — зелёная ✓ (уже списана, долга нет);
+ *  с баланса — пунктирный кружок (ещё не списана, баланса хватает). Записи нет
+ *  или бронь «Ждёт подтверждения» — ничего. */
+function CellDueMark({ info, status, corner = false }: { info: DueInfo | undefined; status?: string; corner?: boolean }) {
+    const kind = dueMarkKind(info, status);
     if (!info || !kind) return null;
     const label = dueHint(info);
     const icon = kind === 'owes'
         ? <AlertCircle size={12} strokeWidth={2.5} aria-hidden="true" />
-        : <Check size={12} strokeWidth={3} aria-hidden="true" />;
+        : kind === 'covered'
+            ? <CircleDashed size={12} strokeWidth={2.5} aria-hidden="true" />
+            : <Check size={12} strokeWidth={3} aria-hidden="true" />;
     if (corner) {
         return (
             <span
@@ -2378,6 +2392,7 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
                     'absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl',
                     kind === 'owes' && 'bg-[var(--status-danger-fg)] text-[var(--status-danger-bg)]',
                     kind === 'paid' && 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]',
+                    kind === 'covered' && 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)]',
                 )}
             >
                 {icon}
@@ -2386,12 +2401,12 @@ function CellDueMark({ info, corner = false }: { info: DueInfo | undefined; corn
     }
     return (
         <span
-            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : 'ui-badge--ok')}
+            className={clsx('ui-badge shrink-0', kind === 'owes' ? 'ui-badge--danger' : kind === 'covered' ? 'ui-badge--muted' : 'ui-badge--ok')}
             title={label}
             aria-label={label}
         >
             {icon}
-            <span className="num">{kind === 'owes' ? formatGel(info.due) : 'оплачено'}</span>
+            <span className="num">{kind === 'owes' ? formatGel(info.due) : kind === 'covered' ? 'с баланса' : 'оплачено'}</span>
         </span>
     );
 }

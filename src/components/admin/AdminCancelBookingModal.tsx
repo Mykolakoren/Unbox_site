@@ -5,6 +5,8 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { STATUS } from '../../design/tokens';
 import type { BookingHistoryItem } from '../../store/types';
 import { ruCountWord } from '../../utils/plural';
+import { hoursUntilBookingStart } from '../../utils/subscription';
+import { useUserStore } from '../../store/userStore';
 
 export type RefundOption = 'full' | 'half' | 'none';
 /** single — только эта бронь; series — эта и все следующие брони серии. */
@@ -67,6 +69,8 @@ interface Props {
      *  следующие». Раньше это спрашивал системный confirm, где «ОК» отменял
      *  всю серию (аудит 29.09). */
     series?: SeriesTail | null;
+    /** 09.11: сама бронь — чтобы понять, что отмена меньше чем за 24 ч (в обход правил). */
+    booking?: { date: string | Date; startTime?: string | null; status?: string } | null;
 }
 
 /**
@@ -81,7 +85,8 @@ interface Props {
  * so admins can justify the choice later. Required for anything other than
  * "full" so half/none penalties always have an audit trail.
  */
-export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLabel, series }: Props) {
+export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLabel, series, booking }: Props) {
+    const role = useUserStore(s => s.currentUser?.role);
     const [option, setOption] = useState<RefundOption>('full');
     const [reason, setReason] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -99,8 +104,13 @@ export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLab
 
     if (!isOpen) return null;
 
-    const penaltyRequiresReason = option !== 'full';
-    const reasonIsValid = !penaltyRequiresReason || reason.trim().length >= 3;
+    // 09.11 (владелец): поздняя отмена сотрудником — в обход правил (клиент так не может).
+    // Причина обязательна (сервер требует ≥5 символов), владельцу уходит уведомление.
+    const lateOverride = !!booking && role !== 'owner' && booking.status !== 'pending_approval'
+        && hoursUntilBookingStart(booking) < 24;
+    const penaltyRequiresReason = option !== 'full' || lateOverride;
+    const minReason = lateOverride ? 5 : 3;
+    const reasonIsValid = !penaltyRequiresReason || reason.trim().length >= minReason;
     const isSeries = !!series && scope === 'series';
     const seriesCountLabel = series ? ruCountWord(series.count, BOOKING_FORMS) : '';
 
@@ -204,10 +214,17 @@ export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLab
                     />
                 </div>
 
+                {lateOverride && (
+                    <div role="note" style={{ marginBottom: 12, padding: '10px 12px', fontSize: 13, lineHeight: 1.45, background: STATUS.danger.bg, color: GH.ink }}>
+                        До начала меньше 24 часов — клиент так отменить не может. Это отмена в обход правил:
+                        напишите причину, владелец получит уведомление, запись останется в истории клиента.
+                    </div>
+                )}
+
                 {penaltyRequiresReason && (
                     <div style={{ marginBottom: 18 }}>
                         <label style={{ ...monoLabel, display: 'block', marginBottom: 6 }}>
-                            Причина штрафа (аудит) *
+                            {lateOverride ? 'Причина (увидит владелец) *' : 'Причина штрафа (аудит) *'}
                         </label>
                         <textarea
                             value={reason}
@@ -223,7 +240,7 @@ export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLab
                         />
                         {!reasonIsValid && (
                             <div style={{ fontSize: 12, color: GH.danger, marginTop: 4 }}>
-                                Минимум 3 символа
+                                Минимум {minReason} символов
                             </div>
                         )}
                     </div>

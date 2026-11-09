@@ -14,9 +14,9 @@
 /** Нейтральные: бумага и чернила. Текст — не бледнее ink60 (5:1 на бумаге).
  *  ink40/ink30/ink20/ink10 — только линии, иконки и неактивное, НЕ текст. */
 export const COLOR = {
-    paper: '#FAFAF7',   // фон страницы
-    card: '#FDFDFB',    // карточки, шторки, поля (вместо чистого #FFF)
-    sunken: '#F4F4F2',  // углублённое: чипы, дорожка сегментов, скелетон
+    paper: '#F4F2EC',   // фон страницы — тёплая бумага (09.11)
+    card: '#FBFAF6',    // карточки, шторки, поля
+    sunken: '#EDEAE2',  // углублённое: чипы, дорожка сегментов, скелетон
     ink: '#0F0F10',     // основной текст
     ink80: 'rgba(15,15,16,0.80)',
     ink60: 'rgba(15,15,16,0.60)', // вторичный текст — минимум для любого текста
@@ -28,8 +28,8 @@ export const COLOR = {
     ink05: 'rgba(15,15,16,0.05)',
     onInk: '#FAFAF7',   // текст на тёмном
     overlay: 'rgba(15,15,16,0.45)', // затемнение фона под шторкой/окном
-    panel: '#0F0F10',   // большая тёмная панель/шапка: в тёмной теме не светлеет
-    onPanel: '#FAFAF7',
+    panel: '#22302F',   // большая тёмная панель/шапка — тёмная бирюза; в тёмной теме не светлеет
+    onPanel: '#F4F2EC',
     cellDead: '#F6F2E8', // нерабочая ячейка шахматки
     sidebar: '#F0ECDD',       // боковая панель админки
     sidebarNarrow: '#F3EFE2', // она же в узком виде
@@ -77,6 +77,25 @@ export const TEXT = {
     hero: 56,
 } as const;
 
+/** Роли текста (09.11) — готовые наборы для inline-стилей: style={{ ...TYPE.rowTitle }}.
+ *  Размеры только из TEXT, веса только 400/500/600. */
+export const TYPE = {
+    /** Заголовок экрана (шапка /m, крупная) — 28/600. */
+    screenTitle: { fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, letterSpacing: '-0.01em' },
+    /** Заголовок карточки, шторки, крупная сумма в строке — 20/600. */
+    cardTitle: { fontSize: TEXT.title, fontWeight: 600, lineHeight: 1.2 },
+    /** Название в строке списка — 16/600. */
+    rowTitle: { fontSize: TEXT.body, fontWeight: 600, lineHeight: 1.35 },
+    /** Основной текст — 16/400. */
+    text: { fontSize: TEXT.body, fontWeight: 400, lineHeight: 1.5 },
+    /** Вторичный текст, подзаголовок строки — 14/400 ink-60. */
+    secondary: { fontSize: TEXT.small, fontWeight: 400, lineHeight: 1.45 },
+    /** Подпись раздела «КОШЕЛЁК» — 12/600 капсом в разрядку, Sans (не Mono). */
+    overline: { fontSize: TEXT.caption, fontWeight: 600, lineHeight: 1.4, letterSpacing: '0.06em', textTransform: 'uppercase' as const },
+    /** Мелкая подпись — 12/500. Меньше 12 нельзя. */
+    note: { fontSize: TEXT.caption, fontWeight: 500, lineHeight: 1.4 },
+} as const;
+
 export const WEIGHT = { regular: 400, medium: 500, semibold: 600 } as const;
 export const LEADING = { body: 1.5, heading: 1.2 } as const;
 
@@ -86,6 +105,12 @@ export const SPACE = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 48 } as const;
 /** Три скругления: grid (0) — десктоп Grid House, control (8) — кнопки,
  *  поля, чипы, бейджи, sheet (16) — шторки и карточки на телефоне. */
 export const RADIUS = { grid: 0, control: 8, sheet: 16 } as const;
+
+/** Шкала скруглений для телефона и новых компонентов (09.11): ТОЛЬКО эти три.
+ *  control 8 — кнопки, поля, чипы, бейджи, ChoiceCard;
+ *  card 16 — карточки, группы строк, шторки (= RADIUS.sheet);
+ *  pill — круг/пилюля (аватар, точка, счётчик). 6/10/12/14/22 — нельзя. */
+export const SHAPE = { control: RADIUS.control, card: RADIUS.sheet, pill: 9999 } as const;
 
 /** Одна тень — только для всплывающего (шторки, меню, окна). */
 export const SHADOW = {
@@ -131,9 +156,9 @@ export const themed = (light: string, dark: string): string => (IS_DARK ? dark :
 
 if (IS_DARK) {
     Object.assign(COLOR, {
-        paper: '#141415',
-        card: '#1C1C1E',
-        sunken: '#242427',
+        paper: '#161513',
+        card: '#1E1D1B',
+        sunken: '#272623',
         ink: '#ECECE8',
         ink80: 'rgba(236,236,232,0.84)',
         ink60: 'rgba(236,236,232,0.66)',
@@ -143,13 +168,13 @@ if (IS_DARK) {
         ink10: 'rgba(236,236,232,0.13)',
         ink08: 'rgba(236,236,232,0.10)',
         ink05: 'rgba(236,236,232,0.06)',
-        onInk: '#141415',
+        onInk: '#161513',
         overlay: 'rgba(0,0,0,0.60)',
-        panel: '#2A2A2E',
-        onPanel: '#ECECE8',
-        cellDead: '#0E0E0F',
-        sidebar: '#19191A',
-        sidebarNarrow: '#19191A',
+        panel: '#22302F',
+        onPanel: '#ECEBE6',
+        cellDead: '#100F0E',
+        sidebar: '#1A1917',
+        sidebarNarrow: '#1A1917',
         accent: '#7FB3AF',
         accentHover: '#93C4C0',
         accentInk: '#8FC2BE',

@@ -257,23 +257,28 @@ export function MobileAdminSpecialists() {
                                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                     marginTop: 1,
                                 }}>
-                                    {CATEGORY_LABEL[r.category || ''] || '—'}
-                                    {r.applicationStatus === 'pending' ? (
-                                        <span style={{ marginLeft: 6, color: 'var(--status-pending-fg)', fontWeight: 600 }}>· ждёт проверки</span>
-                                    ) : !r.isVerified && (
-                                        <span style={{ marginLeft: 6 }}>· скрыт с сайта</span>
-                                    )}
+                                    {CATEGORY_LABEL[r.category || ''] || 'Направление не указано'}
+                                </div>
+                                {/* Состояние — своей строкой, чтобы не обрезалось (ревью 09.11, №23). */}
+                                <div style={{ marginTop: 4 }}>
+                                    {r.applicationStatus === 'pending'
+                                        ? <span className="ui-badge ui-badge--pending">Ждёт проверки</span>
+                                        : r.isVerified
+                                            ? <span className="ui-badge ui-badge--ok">На сайте</span>
+                                            : <span className="ui-badge ui-badge--muted">Скрыт с сайта</span>}
                                 </div>
                             </div>
                             <Button
-                                variant="secondary"
+                                variant="quiet"
                                 size="touch"
                                 loading={busyId === r.id}
-                                icon={r.isVerified ? <ShieldX size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
+                                icon={r.isVerified ? <ShieldX size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
                                 onClick={() => handleVerify(r, !r.isVerified)}
                                 aria-label={`${r.isVerified ? 'Скрыть с сайта' : 'Опубликовать'}: ${r.firstName} ${r.lastName}`}
+                                title={r.isVerified ? 'Скрыть с сайта' : 'Опубликовать на сайте'}
+                                style={{ flexShrink: 0 }}
                             >
-                                {r.isVerified ? 'Скрыть' : 'Опубликовать'}
+                                {r.isVerified ? 'Скрыть' : 'Показать'}
                             </Button>
                         </div>
                     ))}

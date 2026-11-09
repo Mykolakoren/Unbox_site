@@ -25,6 +25,7 @@ import { computeDueByBooking, type DueInfo } from '../../utils/dueAmounts';
 import { applyAllocation } from '../../utils/balanceAllocation';
 import { useAllocationIndex, usePaidVia, usePaidToday } from '../../hooks/useBalanceAllocation';
 import type { PaidViaItem, PaidTodayResponse } from '../../api/balanceAllocation';
+import { hoursUntilBookingStart } from '../../utils/subscription';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
 import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
@@ -286,6 +287,7 @@ export function AdminBookings() {
         // Excel #24 — бронь из серии: выбор «только эту / эту и следующие»
         // делается прямо в окне отмены.
         seriesGroupId?: string; series?: SeriesTail | null;
+        booking?: BookingHistoryItem | null;
     }>({ open: false, bookingId: '', label: '' });
 
     const handleCancel = async (bookingId: string) => {
@@ -306,6 +308,7 @@ export function AdminBookings() {
             open: true, bookingId, label,
             seriesGroupId: series ? b?.recurringGroupId : undefined,
             series,
+            booking: b ?? null,
         });
     };
 
@@ -507,6 +510,7 @@ export function AdminBookings() {
                 onConfirm={handleCancelConfirm}
                 bookingLabel={cancelModal.label}
                 series={cancelModal.series}
+                booking={cancelModal.booking}
             />
             <RejectBookingSheet
                 open={!!rejectFor}
@@ -759,6 +763,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                         >
                             Цена
                         </button>
+                        {/* 09.11 (владелец): пересдача — только меньше чем за сутки; раньше — обычная отмена. */}
+                        {(booking.isReRentListed || hoursUntilBookingStart(booking) < 24) && (
                         <button
                             onClick={() => handleReRent(booking.id)}
                             style={linkBtn(GH.ink60)}
@@ -766,6 +772,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                         >
                             {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                         </button>
+                        )}
                         <button
                             onClick={() => handleCancel(booking.id)}
                             style={linkBtn(GH.danger)}
@@ -1152,7 +1159,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             </div>
                                         </div>
                                         <div>
-                                            <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} />
+                                            <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} status={booking.status} method={booking.paymentMethod as string | undefined} />
                                             <PaidViaNote item={paidVia.get(booking.id)} />
                                             {!!rebateRow.get(booking.id) && (
                                                 <div data-weekly-rebate-note style={{ fontSize: 12, color: STATUS.ok.fg, marginTop: 4, lineHeight: 1.35 }}>
@@ -1257,7 +1264,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     )}
                                                 </td>
                                                 <td style={{ padding: '12px 10px' }}>
-                                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} />
+                                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} status={booking.status} method={booking.paymentMethod as string | undefined} />
                                                     <PaidViaNote item={paidVia.get(booking.id)} />
                                                 </td>
                                                 <td className="num" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 600, color: GH.ink }}>

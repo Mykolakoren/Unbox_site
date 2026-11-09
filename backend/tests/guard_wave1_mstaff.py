@@ -302,7 +302,8 @@ def test_desktop_links_and_team_wording():
     kb = _code(ROOT / "src/pages/mobile/admin/MobileAdminKB.tsx")
     assert '<DesktopLink href="/admin/knowledge-base">Открыть полную статью →</DesktopLink>' in kb
     team = _code(ROOT / "src/pages/mobile/admin/MobileAdminTeam.tsx")
-    assert "'Выключить' : 'Включить'" in team and "Отключить" not in team
+    # 09.11 (ревью admin-ux №24): is_active — только «показывать на сайте»; кнопка так и говорит.
+    assert "'Скрыть' : 'Показать'" in team and "'Скрыть с сайта' : 'Показать на сайте'" in team and "Отключить" not in team
     assert "opacity: m.isActive" not in team, "имя и роль выключенного сотрудника снова бледнее ink-60"
     assert '<DesktopLink href="/admin/team">' in team
 

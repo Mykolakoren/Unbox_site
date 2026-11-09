@@ -44,7 +44,8 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
     fetchBalance: async (branch?: string) => {
         try {
             const data = await cashboxApi.getBalance(branch);
-            set({ balance: data.balance, balances: data });
+            // balance/cash = null — сервер скрыл наличные от роли admin (решение 3, 09.11).
+            set({ balance: data.balance ?? 0, balances: data });
         } catch (error) {
             toast.error('Не удалось загрузить баланс кассы');
         }

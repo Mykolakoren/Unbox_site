@@ -4,7 +4,7 @@ import { Phone, Search, MessageCircle, X, Plus } from 'lucide-react';
 import type { CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { Button } from '../../../components/ui/Button';
-import { Segmented } from '../../../components/ui/Chip';
+import { Chip, Segmented } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
@@ -15,13 +15,15 @@ import { formatDayMonth, formatMoney } from '../../../utils/format';
 import { utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
-import { useCrmDataVersion } from './crmDataVersion';
-import { shortDay } from './crmFlows';
+import { useCrmCalendar, useCrmDataVersion } from './crmDataVersion';
+import { aliasLabel, normalizeClientQuery, shortDay } from './crmFlows';
 import { usePullToRefresh } from '../usePullToRefresh';
 import { PullIndicator } from '../PullIndicator';
 
 /** with_stats отдаёт ещё unpaidSum (долг по завершённым, в валюте клиента). */
 type ClientRow = CrmClient & { unpaidSum?: number };
+
+type ClientFilter = 'all' | 'debt' | 'noNext';
 
 /** Прокручивается документ, а не <main> оболочки — его и проверяем. */
 const docScroller = () => (document.scrollingElement as HTMLElement | null);
@@ -50,6 +52,9 @@ export function MobileCrmClients() {
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
     const [query, setQuery] = useState('');
     const [activeOnly, setActiveOnly] = useState(true);
+    // Ревью п. 12: «Все / С долгом / Без следующей».
+    const [filter, setFilter] = useState<ClientFilter>('all');
+    const calendar = useCrmCalendar();
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
     const [createOpen, setCreateOpen] = useState(false);
@@ -75,19 +80,28 @@ export function MobileCrmClients() {
     }, 70, docScroller);
 
     const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        const q = normalizeClientQuery(query);
+        const now = Date.now();
         let list = clients;
         if (activeOnly) list = list.filter(c => c.isActive);
+        if (filter === 'debt') list = list.filter(c => (Number(c.unpaidSum ?? 0) || 0) > 0);
+        if (filter === 'noNext') list = list.filter(c => !c.nextSessionDate || parseUTC(c.nextSessionDate).getTime() <= now);
         if (q) {
+            const digits = q.replace(/\D/g, '');
             list = list.filter(c =>
                 c.name?.toLowerCase().includes(q)
                 || c.phone?.toLowerCase().includes(q)
+                || (digits.length >= 3 && (c.phone || '').replace(/\D/g, '').includes(digits))
                 || c.email?.toLowerCase().includes(q)
-                || c.aliasCode?.toLowerCase().includes(q)
+                || (c.aliasCode || '').replace(/^#+/, '').toLowerCase().includes(q)
             );
         }
-        return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
-    }, [clients, query, activeOnly]);
+        const byName = (a: ClientRow, b: ClientRow) => (a.name || '').localeCompare(b.name || '', 'ru');
+        // «С долгом» — сначала самые большие долги.
+        return [...list].sort(filter === 'debt'
+            ? (a, b) => (Number(b.unpaidSum ?? 0) - Number(a.unpaidSum ?? 0)) || byName(a, b)
+            : byName);
+    }, [clients, query, activeOnly, filter]);
 
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -123,8 +137,8 @@ export function MobileCrmClients() {
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
-                        aria-label="Поиск клиента"
-                        placeholder="Имя, телефон, email…"
+                        aria-label="Поиск клиента: имя, код или телефон"
+                        placeholder="Имя, код, телефон"
                         style={{
                             flex: 1,
                             background: 'transparent',
@@ -160,6 +174,17 @@ export function MobileCrmClients() {
                     value={activeOnly ? 'active' : 'all'}
                     onChange={v => setActiveOnly(v === 'active')}
                 />
+                <div role="group" aria-label="Отбор клиентов" style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                    {([
+                        { id: 'all', label: 'Все' },
+                        { id: 'debt', label: 'С долгом' },
+                        { id: 'noNext', label: 'Без следующей' },
+                    ] as { id: ClientFilter; label: string }[]).map(f => (
+                        <Chip key={f.id} selected={filter === f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)} style={{ flexShrink: 0 }}>
+                            {f.label}
+                        </Chip>
+                    ))}
+                </div>
             </div>
 
             {failed && !loading && (
@@ -178,11 +203,26 @@ export function MobileCrmClients() {
                 <div style={{ padding: '0 16px' }}>
                     {query ? (
                         <EmptyState compact title="Никого не нашлось" hint="Попробуйте другое имя, телефон или код." />
+                    ) : filter !== 'all' && clients.length > 0 ? (
+                        <EmptyState
+                            compact
+                            title={filter === 'debt' ? 'Долгов нет' : 'У всех есть следующая встреча'}
+                            hint="Выберите «Все», чтобы увидеть весь список."
+                        />
+                    ) : calendar.connected === false ? (
+                        // Ревью п. 6: без календаря «появится после синхронизации» — неправда.
+                        <EmptyState
+                            compact
+                            title="Клиентов пока нет"
+                            hint="Добавьте клиента здесь. Чтобы клиенты и встречи появлялись сами из Google Календаря, подключите его."
+                            action={viewingOther ? undefined : { label: 'Добавить клиента', onClick: () => setCreateOpen(true) }}
+                            secondaryAction={!viewingOther && calendar.openSetup ? { label: 'Подключить календарь', onClick: calendar.openSetup } : undefined}
+                        />
                     ) : (
                         <EmptyState
                             compact
                             title="Клиентов пока нет"
-                            hint="Добавьте клиента здесь — или запишите встречу в Google Календарь, клиент появится после синхронизации."
+                            hint="Добавьте клиента здесь — или запишите встречу в Google Календарь, клиент появится после синхронизации (кнопка ⟳ на «Сегодня»)."
                             action={viewingOther ? undefined : { label: 'Добавить клиента', onClick: () => setCreateOpen(true) }}
                         />
                     )}
@@ -229,7 +269,7 @@ export function MobileCrmClients() {
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
+                                    {c.aliasCode ? `${aliasLabel(c.aliasCode)} · ${c.name}` : c.name}
                                 </div>
                                 <ClientSecondLine c={c} />
                             </div>
@@ -284,17 +324,18 @@ function ClientSecondLine({ c }: { c: ClientRow }) {
     const next = c.nextSessionDate ? utcNaiveToTbilisi(c.nextSessionDate) : null;
     const debt = Number(c.unpaidSum ?? 0) || 0;
     const parts: string[] = [];
-    if (next) parts.push(`след.: ${shortDay(next.date)}, ${next.time}`);
+    if (next) parts.push(`след. ${shortDay(next.date)}, ${next.time}`);
     else if (c.lastPastSessionDate) parts.push(`была ${formatDayMonth(parseUTC(c.lastPastSessionDate), { timeZone: BATUMI_TZ, withYear: 'auto' })}`);
     else parts.push(c.phone || c.email || (c.tags?.length ? c.tags.slice(0, 2).join(', ') : 'сессий ещё не было'));
+    // Ревью п. 12: долг — первым, его не съедает многоточие.
     return (
         <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {parts.join(' · ')}
             {debt > 0 && (
-                <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>
-                    {' · '}долг {formatMoney(debt, { currency: c.currency || 'GEL' })}
+                <span className="num" style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>
+                    долг {formatMoney(debt, { currency: c.currency || 'GEL' })}{' · '}
                 </span>
             )}
+            {parts.join(' · ')}
         </div>
     );
 }

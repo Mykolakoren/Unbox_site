@@ -153,7 +153,8 @@ def test_index_html_has_boot_placeholder():
     html = _read("index.html")
     m = re.search(r'<div id="root">(.*?)</div>\s*<script type="module"', html, re.S)
     assert m and 'class="boot"' in m.group(1), "index.html: #root снова пустой до загрузки"
-    assert "#FAFAF7" in html and "#F4F4F2" in html, "index.html: заглушка не на токенах бумаги"
+    # 09.11: палитра владельца — бумага #F4F2EC, sunken #EDEAE2 (были #FAFAF7 / #F4F4F2).
+    assert "#F4F2EC" in html and "#EDEAE2" in html, "index.html: заглушка не на токенах бумаги"
 
 
 # ─────────────────────────────────────────────────────────────────────────

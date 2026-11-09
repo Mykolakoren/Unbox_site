@@ -50,7 +50,9 @@ export function MobileSubscription() {
         if (currentUser && bookings.length === 0) fetchBookings().catch(() => {});
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentUser?.id]);
-    const reserved = reservedSubscriptionHours(sub, bookings, currentUser?.email);
+    // 09.11 (ревью №3): одно число на всех экранах — как в «Я»
+    // (subscriptionOverview) и в оплате: та же subscriptionHours.
+    const reservedAll = reservedSubscriptionHours(sub, bookings, currentUser?.email);
 
     if (!currentUser) {
         return (
@@ -76,14 +78,15 @@ export function MobileSubscription() {
                     />
                 ) : (() => {
                     // Пул сервера = часы тарифа + бонусные (у Профи+ 40 + 2).
-                    // Раньше знаменатель был только totalHours — «Свободно 42 ч из 40».
-                    const poolTotal = (Number(sub.totalHours) || 0) + (Number(sub.bonusHours) || 0);
-                    // «Свободно» — та же функция, что в оформлении (subscriptionHours →
-                    // subscriptionHoursLabel), чтобы цифры совпадали.
+                    // «Свободно» и «всего» — та же функция, что в оформлении и в «Я»
+                    // (subscriptionOverview → subscriptionHours), чтобы цифры совпадали.
                     const h = subscriptionHours(sub, {
-                        format: 'individual', bookingDate: new Date(), bookings, ownerEmail: currentUser.email,
+                        format: ((sub.includedFormats && sub.includedFormats[0]) || 'individual') as 'individual',
+                        bookingDate: new Date(), bookings, ownerEmail: currentUser.email,
                     });
-                    const free = h.ok ? h.free : Math.max(0, sub.remainingHours - reserved);
+                    const poolTotal = h.ok ? h.total : Math.max((Number(sub.totalHours) || 0) + (Number(sub.bonusHours) || 0), sub.remainingHours);
+                    const free = h.ok ? h.free : Math.max(0, sub.remainingHours - reservedAll);
+                    const reserved = h.ok ? h.reserved : reservedAll;
                     const usedRaw = Number((sub as any).usedHours);
                     const usedHours = Number.isFinite(usedRaw) && (sub as any).usedHours != null
                         ? usedRaw
@@ -122,7 +125,7 @@ export function MobileSubscription() {
                                 </div>
                                 {reserved > 0.01 && (
                                     <div style={{ fontSize: TEXT.small, lineHeight: 1.45 }}>
-                                        {fmtHours(reserved)} уже забронировано — спишутся за сутки до встреч.
+                                        Ещё {fmtHours(reserved)} в ваших бронях — спишутся за сутки до встреч.
                                     </div>
                                 )}
                                 {!!sub.bonusHours && (
@@ -139,8 +142,11 @@ export function MobileSubscription() {
                                 overflow: 'hidden',
                             }}>
                                 <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
-                                <InfoRow label="Осталось по абонементу" value={fmtHours(sub.remainingHours)} />
-                                <InfoRow label="Использовано" value={fmtHours(usedHours)} />
+                                {/* Свободно + в бронях + использовано = всего (как в герое). */}
+                                <InfoRow label="Свободно для брони" value={fmtHours(free)} />
+                                {reserved > 0.01 && <InfoRow label="В ваших бронях" value={fmtHours(reserved)} />}
+                                <InfoRow label="Уже использовано" value={fmtHours(usedHours)} />
+                                <InfoRow label="Всего в абонементе" value={fmtHours(poolTotal)} />
                                 {/* Доп. пул (владелец 01.10): часы капсулы / «4 ч индивидуально». */}
                                 {extraPool(sub) && (
                                     <InfoRow

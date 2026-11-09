@@ -57,11 +57,8 @@ export function UserBookingsTab({
         const hoursUntilStart = (bookingTime - now) / (1000 * 60 * 60);
 
         if (hoursUntilStart < 24) {
-            // Permission Check
-            if (currentUser?.role === 'admin') {
-                toast.error('Отменить бронь меньше чем за 24 часа может только старший админ или владелец.');
-                return;
-            }
+            // 09.11 (владелец): админ МОЖЕТ отменить позже 24 ч — с причиной; владельцу
+            // уходит уведомление «отмена в обход правил», запись — в историю клиента.
             // Причина обязательна — шторка с полем; её кнопка и есть подтверждение.
             setLateReason('');
             setLateError('');
@@ -77,20 +74,24 @@ export function UserBookingsTab({
             tone: 'danger',
         });
         if (!ok) return;
-        cancelBooking(id);
+        try {
+            await cancelBooking(id);
+        } catch { return; /* причину показал стор */ }
         toast.success('Бронь отменена');
         if (propOnCancel) propOnCancel(id);
     };
 
-    const submitLateCancel = () => {
+    const submitLateCancel = async () => {
         if (!lateCancel) return;
         const reason = lateReason.trim();
-        if (!reason) {
-            setLateError('Укажите причину — без неё позднюю отмену не провести');
+        if (reason.length < 5) {
+            setLateError('Напишите причину (минимум 5 символов) — её увидит владелец');
             return;
         }
         const { id } = lateCancel;
-        cancelBooking(id, false, reason, currentUser || undefined);
+        try {
+            await cancelBooking(id, false, reason, currentUser || undefined);
+        } catch { return; /* причину показал стор */ }
         toast.success('Бронь отменена, причина записана');
         setLateCancel(null);
         if (propOnCancel) propOnCancel(id);

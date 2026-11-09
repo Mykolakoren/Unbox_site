@@ -78,6 +78,8 @@ export interface TodayRow {
     cabinet: string;
     status: string;
     paymentStatus: string | null;
+    /** Способ оплаты брони (для метки «абонемент»). */
+    paymentMethod: string | null;
     price: number;
     /** Сколько взять за эту бронь, ₾. null — денежной записи нет (абонемент, прощённая…). */
     due: number | null;
@@ -212,7 +214,11 @@ export function todayRows({
         const start = hm(b.startTime) ?? 0;
         const duration = Number(b.duration) > 0 ? Number(b.duration) : 60;
         const u = idx.get(String(b.userId || ''));
-        const info = dueMap.get(b.id);
+        // 09.11 (решение владельца 1): заявка «Ждёт подтверждения» — ещё не бронь,
+        // денег не брали. Ни денежной метки, ни «Взять сегодня», ни «весь долг»: её
+        // строка идёт без записи dueMap. (В раскладке computeDueByBooking она по-прежнему
+        // держит плюс баланса — одобрят, и деньги понадобятся.)
+        const info = b.status === 'pending_approval' ? undefined : dueMap.get(b.id);
         const due = info ? round2(Number(info.due) || 0) : null;
         const cabinetId = b.resourceId || '';
         rows.push({
@@ -228,6 +234,7 @@ export function todayRows({
             cabinet: names.get(cabinetId) || cabinetId,
             status: b.status,
             paymentStatus: b.paymentStatus ?? null,
+            paymentMethod: b.paymentMethod ?? null,
             price: round2(Number(b.finalPrice) || 0),
             due,
             paid: !!info && due !== null && due <= 0,

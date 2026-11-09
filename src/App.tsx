@@ -100,6 +100,7 @@ const MobileAdminUserCard = lazy(() => import('./pages/mobile/admin/MobileAdminU
 const MobileAdminAccessRights = lazy(() => import('./pages/mobile/admin/MobileAdminAccessRights').then(m => ({ default: m.MobileAdminAccessRights })));
 const MobileSpecialists = lazy(() => import('./pages/mobile/MobileSpecialists').then(m => ({ default: m.MobileSpecialists })));
 const MobileSubscription = lazy(() => import('./pages/mobile/MobileSubscription').then(m => ({ default: m.MobileSubscription })));
+const MobileBalance = lazy(() => import('./pages/mobile/MobileBalance').then(m => ({ default: m.MobileBalance })));
 const MobileBonuses = lazy(() => import('./pages/mobile/MobileBonuses').then(m => ({ default: m.MobileBonuses })));
 const MobilePlaces = lazy(() => import('./pages/mobile/MobilePlaces').then(m => ({ default: m.MobilePlaces })));
 
@@ -397,7 +398,10 @@ function App() {
           <Route path="places" element={<MobilePlaces />} />
           <Route path="location/:locationId" element={<LocationDetailsPage />} />
           <Route path="cabinet/:resourceId" element={<CabinetPage />} />
-          <Route path="booking-rules" element={<BookingRulesPage />} />
+          {/* 09.11: мобильная шапка с «Назад» и выжимка из 5 пунктов сверху. */}
+          <Route path="booking-rules" element={<BookingRulesPage mobile />} />
+          {/* 09.11: история баланса клиента («куда ушли мои деньги?»). */}
+          <Route path="balance" element={<MobileBalance />} />
           {/* Анкета специалиста внутри мобильной оболочки: раньше с телефона
               она открывалась компьютерной страницей без нижнего меню. */}
           <Route path="become-specialist" element={<BecomeSpecialistPage />} />

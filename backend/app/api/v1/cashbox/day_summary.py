@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, col, select
 
-from app.api.v1.cashbox import require_reports
+from app.api.v1.cashbox import require_reports, cash_hidden_for
 from app.db.session import get_session
 from app.models.user import User
 from app.services import day_summary as ds
@@ -42,7 +42,24 @@ def get_day_summary(
     смена — по филиалу; недельные скидки и должники на конец дня — общие."""
     d = _parse_day(day, "date") or ds.tbilisi_today()
     br = (branch or "").strip()
-    return ds.compute_day_summary(session, d, None if br in ("", "all") else br)
+    out = ds.compute_day_summary(session, d, None if br in ("", "all") else br)
+    if cash_hidden_for(current_user):
+        _hide_cash_by_records(out)
+    return out
+
+
+def _hide_cash_by_records(out: dict) -> None:
+    """Решение владельца 3 (09.11): «наличных по записям» — та же сумма, что
+    «ожидалось» при закрытии смены. Роль admin её не видит, пока смена этого дня
+    не закрыта (сегодня — никогда до закрытия). «Ожидалось / по факту» закрытой
+    смены остаются: их видно уже после пересчёта."""
+    for blk in out.get("branches") or []:
+        sh = blk.get("shift")
+        if not sh:
+            continue
+        if out.get("is_today") or sh.get("status") != "closed":
+            sh["cash_by_records"] = None
+            sh["cash_hidden"] = True
 
 
 @router.get("/weekly-rebates")

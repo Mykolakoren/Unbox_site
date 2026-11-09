@@ -54,7 +54,8 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
         let alive = true;
         setStartingBalance('');
         cashboxApi.previewCloseShift(selectedBranch)
-            .then(p => { if (alive) setStartingBalance(Number(p.expected ?? 0).toFixed(2)); })
+            // Роль admin «ожидалось» не получает (решение 3, 09.11) — поле пустое, пересчитывает сама.
+            .then(p => { if (alive) setStartingBalance(p.expected != null ? Number(p.expected).toFixed(2) : ''); })
             .catch(() => {
                 cashboxApi.getBalance(selectedBranch)
                     .then(b => { if (alive && b.cash != null) setStartingBalance(Number(b.cash).toFixed(2)); })

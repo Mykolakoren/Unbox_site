@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus, Wallet } from 'lucide-react';
+import { UserRound, Check, X, Loader2, CalendarClock, Repeat, Banknote, Plus, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
@@ -17,6 +17,10 @@ import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 import { toastApiError } from '../../../utils/errors';
+import { DueBadge } from '../../../components/admin/DueBadge';
+import type { DueInfo } from '../../../utils/dueAmounts';
+import { hoursUntilStart, refundPreview } from './cancelRules';
+import { statusLabel } from '../../../design/statuses';
 
 /**
  * Шторки брони мобильной админки — ОДНИ на «Брони» и на «Дашборд».
@@ -44,14 +48,18 @@ export function getAdminUserName(users: User[], email: string | null | undefined
 
 /** Контроллер шторок: действия по брони + отмена + смена цены.
  *  После любого действия перечитывает ПОЛНЫЙ админский список броней. */
-export function AdminBookingSheets({ booking, getUserName, onClose, acceptPayment }: {
+export function AdminBookingSheets({ booking, getUserName, onClose, acceptPayment, dueInfo, onChanged }: {
     /** Бронь, по которой открыта шторка действий (null — закрыта). */
     booking: BookingHistoryItem | null;
     getUserName: (email: string | null | undefined) => string;
     onClose: () => void;
     /** Волна 4 (G9-24, В3): строка «Принять оплату» — открывает TopupSheet
-     *  у родителя. null — брать нечего, строку не показываем. */
-    acceptPayment?: (b: BookingHistoryItem) => { sub: string; onClick: () => void } | null;
+     *  у родителя. null — брать нечего, строку не показываем. total — весь долг (на кнопке). */
+    acceptPayment?: (b: BookingHistoryItem) => { sub: string; onClick: () => void; total?: number } | null;
+    /** Ревью 09.11 (admin-design №20): оплата брони в шапке шторки — та же метка, что в строке. */
+    dueInfo?: DueInfo;
+    /** После действия по брони (кроме общего списка) — например, карточка клиента перечитывает свои брони. */
+    onChanged?: () => void;
 }) {
     const navigate = useNavigate();
     const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
@@ -61,6 +69,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
     // Недельная скидка клиента с последнего понедельника — та же метка, что в
     // «Сегодня» (ревизия 02.10), чтобы её не вычли из «к оплате» второй раз.
     const currentUser = useUserStore(s => s.currentUser);
+    const isOwner = currentUser?.role === 'owner';
     const users = useUserStore(s => s.users);
     const rebates = useRecentWeeklyRebates(hasPermission(currentUser, 'finance.view_reports'));
     const rebateOf = (b: BookingHistoryItem): number => {
@@ -124,6 +133,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
         try {
             await bookingsApi.setPrice(b.id, num, reason || undefined);
             await fetchAllBookings();
+            onChanged?.();
             toast.success(`Цена обновлена: ${formatGel(current)} → ${formatGel(num)}`);
             setPriceTarget(null);
             onClose();
@@ -139,6 +149,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
         try {
             const res = await bookingsApi.approveBooking(b.id);
             await fetchAllBookings();
+            onChanged?.();
             toast.success(res.approvalNote || 'Одобрено');
             onClose();
         } catch (e: any) {
@@ -150,7 +161,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
 
     const doReschedule = (b: BookingHistoryItem) => {
         onClose();
-        navigate(`/m/find?reschedule=${b.id}`);
+        navigate(`/m/find?reschedule=${b.id}&admin=1`);
     };
 
     const doExtend = async (b: BookingHistoryItem) => {
@@ -165,6 +176,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
         try {
             await bookingsApi.extendBooking(b.id, 30);
             await fetchAllBookings();
+            onChanged?.();
             toast.success('Добавлено 30 минут');
             onClose();
         } catch (e: any) {
@@ -186,6 +198,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
         try {
             const updated = await bookingsApi.toggleReRent(b.id);
             await fetchAllBookings();
+            onChanged?.();
             toast.success(updated.isReRentListed
                 ? 'Бронь выставлена на пересдачу'
                 : 'Бронь снята с пересдачи');
@@ -214,6 +227,7 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
                     onExtend={() => doExtend(booking)}
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(booking.userId)}`)}
                     pay={canCash && acceptPayment ? acceptPayment(booking) : null}
+                    dueInfo={dueInfo}
                     rebateNote={rebateOf(booking) > 0 ? weeklyRebateNote(rebateOf(booking)) : null}
                 />
             )}
@@ -223,8 +237,9 @@ export function AdminBookingSheets({ booking, getUserName, onClose, acceptPaymen
                     booking={cancelTarget}
                     userName={getUserName(cancelTarget.userId)}
                     busy={busy === cancelTarget.id}
+                    isOwner={isOwner}
                     onClose={() => setCancelTarget(null)}
-                    onConfirm={(pct, reason) => performCancel(cancelTarget, pct, reason)}
+                    onConfirm={(pct, reason) => { void performCancel(cancelTarget, pct, reason).then(() => onChanged?.()); }}
                 />
             )}
 
@@ -279,7 +294,7 @@ function formatDurationStandalone(min: number): string {
 }
 
 function ActionSheet({
-    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser, pay, rebateNote,
+    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser, pay, rebateNote, dueInfo,
 }: {
     booking: BookingHistoryItem;
     userName: string;
@@ -293,9 +308,10 @@ function ActionSheet({
     onEditPrice: () => void;
     onExtend: () => void;
     onOpenUser: () => void;
-    pay?: { sub: string; onClick: () => void } | null;
+    pay?: { sub: string; onClick: () => void; total?: number } | null;
     /** «скидка за прошлую неделю +9 ₾ уже учтена в «к оплате»» — если была. */
     rebateNote?: string | null;
+    dueInfo?: DueInfo;
 }) {
     const canCancel = booking.status === 'confirmed' || booking.status === 'pending_approval';
     const canApprove = booking.status === 'pending_approval';
@@ -311,7 +327,13 @@ function ActionSheet({
         } catch { return false; }
     })();
     const canReschedule = isActive && isFuture;
-    const canReRent = isActive && isFuture;
+    const isReRented = (booking as any).isReRentListed === true;
+    // 09.11 (владелец): пересдача — только если до начала меньше суток. Раньше —
+    // обычная отмена с полным возвратом; снять старую пересдачу можно всегда.
+    const hoursLeft = hoursUntilStart(booking as any);
+    const reRentWindow = hoursLeft !== null && hoursLeft < 24;
+    const canReRent = isActive && isFuture && (reRentWindow || isReRented);
+    const reRentTooEarly = isActive && isFuture && !reRentWindow && !isReRented;
     // «Продлить» — будущие, а также СЕГОДНЯШНИЕ прошедшие: клиент занимался
     // дольше заказанного, админ доводит время по факту в тот же день. Бэкенд
     // тоже разрешает добор только сегодняшним прошедшим (для админа).
@@ -323,7 +345,6 @@ function ActionSheet({
         } catch { return false; }
     })();
     const canExtend = isActive && (isFuture || isToday);
-    const isReRented = (booking as any).isReRentListed === true;
     const discount = discountNote(booking);
     const priceLabel = booking.finalPrice > 0 ? ` · ${formatGel(booking.finalPrice)}` : '';
     return (
@@ -333,6 +354,16 @@ function ActionSheet({
             title={userName}
             description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${resourceName} · ${formatDurationStandalone(booking.duration ?? 60)}${priceLabel}`}
         >
+                {/* Главное — оплата (admin-design №20): та же метка, что в строке, и цена. */}
+                <div data-sheet-payment style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 12px' }}>
+                    {booking.status === 'pending_approval'
+                        ? <span className="ui-badge ui-badge--pending">{statusLabel('booking', 'pending_approval', 'staff')}</span>
+                        : <DueBadge due={dueInfo?.due} paid={!!dueInfo} charged={dueInfo?.charged} price={dueInfo?.price}
+                            status={booking.status} method={booking.paymentMethod as string | undefined} />}
+                    <span style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
+                        Цена <span className="num" style={{ fontWeight: 600, color: 'var(--color-ink)' }}>{formatGel(booking.finalPrice ?? 0)}</span>
+                    </span>
+                </div>
                 {discount && (
                     <p style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '0 0 12px' }}>
                         {discount}
@@ -356,7 +387,7 @@ function ActionSheet({
                     )}
                     {pay && (
                         <ActionRow
-                            label="Принять оплату"
+                            label={pay.total && pay.total > 0 ? `Принять оплату · ${formatGel(pay.total)}` : 'Принять оплату'}
                             sub={pay.sub}
                             tone="danger"
                             icon={<Wallet size={18} />}
@@ -392,6 +423,11 @@ function ActionSheet({
                             onClick={onToggleReRent}
                         />
                     )}
+                    {reRentTooEarly && (
+                        <div style={{ fontSize: 13, color: 'var(--color-ink-60)', padding: '4px 4px 8px' }}>
+                            Больше суток до начала — пересдавать не нужно: отмените бронь, деньги вернутся полностью.
+                        </div>
+                    )}
                     {isActive && (
                         <ActionRow
                             label="Изменить цену"
@@ -403,7 +439,7 @@ function ActionSheet({
                     )}
                     <ActionRow
                         label="Открыть карточку клиента"
-                        icon={<Search size={18} />}
+                        icon={<UserRound size={18} />}
                         onClick={onOpenUser}
                     />
                     {canCancel && (
@@ -458,16 +494,33 @@ function ActionRow({
 
 // ─── Шторки поверх шторки действий: отмена брони и смена цены ───────────────
 
-function CancelBookingSheet({ booking, userName, busy, onClose, onConfirm }: {
-    booking: BookingHistoryItem; userName: string; busy: boolean;
+/** Минимум символов причины для сотрудника (не владельца) при отмене меньше чем за 24 ч — как на сервере. */
+const LATE_REASON_MIN = 5;
+
+function CancelBookingSheet({ booking, userName, busy, isOwner, onClose, onConfirm }: {
+    booking: BookingHistoryItem; userName: string; busy: boolean; isOwner: boolean;
     onClose: () => void; onConfirm: (refundPercent: number, reason: string) => void;
 }) {
-    const [pct, setPct] = useState(100);
+    // Ревью 09.11 (№8): процент возврата заранее НЕ выбран — раньше стояло 100 %,
+    // и одно нажатие отдавало клиенту всё (поздняя отмена, неявка — деньги центра).
+    const isRequest = booking.status === 'pending_approval';
+    const [pct, setPct] = useState<number | null>(isRequest ? 100 : null);
     const [reason, setReason] = useState('');
-    const needReason = pct !== 100;
-    const price = booking.finalPrice ?? 0;
-    const refund = Math.round(price * pct) / 100;
-    const notCharged = booking.paymentStatus === 'pending';
+    const hours = hoursUntilStart(booking);
+    // Меньше суток до начала или уже началась/прошла — по правилам клиент сам не отменит.
+    const late = !isRequest && hours !== null && hours < 24;
+    // 09.11 (владелец): сотрудник не-владелец отменяет «в обход правил» — только с
+    // причиной (≥ 5 символов, сервер иначе 400); владелец получит уведомление.
+    const lateNeedsReason = late && !isOwner;
+    const reasonMin = lateNeedsReason ? LATE_REASON_MIN : (pct !== null && pct !== 100 ? 1 : 0);
+    const reasonOk = reason.trim().length >= reasonMin;
+    const showReason = lateNeedsReason || (pct !== null && pct !== 100);
+    const preview = pct !== null ? refundPreview(booking, pct / 100, formatGel) : '';
+    const cta = pct === null
+        ? 'Выберите, сколько вернуть'
+        : preview.startsWith('вернём ')
+            ? `Отменить и ${preview.replace(/^вернём/, 'вернуть')}`
+            : pct === 0 ? 'Отменить без возврата' : 'Отменить бронь';
     return (
         <Sheet
             open
@@ -480,33 +533,71 @@ function CancelBookingSheet({ booking, userName, busy, onClose, onConfirm }: {
                         variant="danger"
                         block
                         loading={busy}
-                        disabled={needReason && !reason.trim()}
-                        onClick={() => onConfirm(pct, reason.trim())}
+                        disabled={pct === null || !reasonOk}
+                        onClick={() => { if (pct !== null) onConfirm(pct, reason.trim()); }}
                     >
-                        Отменить бронь
+                        {cta}
                     </Button>
+                    {pct !== null && !reasonOk && (
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', textAlign: 'center' }}>
+                            {lateNeedsReason ? `Напишите причину — не короче ${LATE_REASON_MIN} символов` : 'Напишите причину'}
+                        </div>
+                    )}
                     <Button variant="secondary" block disabled={busy} onClick={onClose}>
                         Оставить бронь
                     </Button>
                 </>
             }
         >
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--color-ink)' }}>Сколько вернуть клиенту</div>
-            <Segmented
-                aria-label="Сколько вернуть клиенту"
-                options={[100, 50, 0].map(v => ({ value: String(v), label: `${v}%` }))}
-                value={String(pct)}
-                onChange={v => setPct(Number(v))}
-            />
-            <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 8 }}>
-                {notCharged && <div style={{ marginBottom: 4 }}>Оплата за эту бронь ещё не списывалась — при любом варианте с клиента ничего не спишется.</div>}
-                {pct === 100 && 'Бесплатная отмена — клиенту вернётся всё списанное.'}
-                {pct === 50 && `Вернётся половина${price > 0 ? ` (≈ ${formatGel(refund)} из ${formatGel(price)})` : ''}.`}
-                {pct === 0 && 'Без возврата — например, клиент не пришёл.'}
-            </div>
-            {needReason && (
+            {isRequest ? (
+                <p style={{ fontSize: 14, color: 'var(--color-ink-80)', margin: 0 }}>
+                    Это заявка «{statusLabel('booking', 'pending_approval', 'staff')}»: денег ещё не брали, возвращать нечего.
+                </p>
+            ) : (
+                <>
+                    {late && (
+                        <div data-late-cancel style={{ fontSize: 14, color: 'var(--status-pending-fg)', background: 'var(--status-pending-bg)', borderRadius: 12, padding: '8px 12px', marginBottom: 12, lineHeight: 1.4 }}>
+                            {hours !== null && hours < 0 ? 'Бронь уже началась или прошла.' : 'До начала меньше 24 часов.'}
+                            {' '}По правилам клиент сам уже не отменит — без возврата. Если время пересдать и его займут — клиенту 50 %.
+                        </div>
+                    )}
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--color-ink)' }}>Сколько вернуть клиенту</div>
+                    <div role="radiogroup" aria-label="Сколько вернуть клиенту" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {[100, 50, 0].map(v => {
+                            const selected = pct === v;
+                            return (
+                                <button
+                                    key={v}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    onClick={() => setPct(v)}
+                                    className="press"
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 10, minHeight: 52, padding: '8px 12px',
+                                        borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                                        background: selected ? 'var(--color-accent-soft)' : 'var(--color-card)',
+                                        border: selected ? '1px solid var(--color-accent)' : '1px solid var(--color-ink-10)',
+                                        color: 'var(--color-ink)',
+                                    }}
+                                >
+                                    <span style={{ fontSize: 16, fontWeight: 600, minWidth: 48 }} className="num">{v} %</span>
+                                    <span style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
+                                        {refundPreview(booking, v / 100, formatGel)}
+                                        {late && v === 0 ? ' · по правилам' : ''}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </>
+            )}
+            {showReason && (
                 <div style={{ marginTop: 16 }}>
-                    <Field label="Причина — видна в истории брони">
+                    <Field
+                        label={lateNeedsReason ? 'Причина (увидит владелец)' : 'Причина — видна в истории брони'}
+                        hint={lateNeedsReason ? 'До начала меньше 24 часов — клиент так отменить не может. Владелец получит уведомление' : undefined}
+                    >
                         <Input
                             value={reason}
                             onChange={e => setReason(e.target.value)}
@@ -530,6 +621,10 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
     const num = parseMoneyInput(raw);
     const valid = num !== null && num !== current;
     const priceError = !isMoneyInputBlank(raw) && num === null ? MONEY_INPUT_ERROR : undefined;
+    // Ревью 09.11 (№9): 0 ₾ или снижение больше чем на половину — только с причиной
+    // (чек-лист смены: «Цену 0 ₾ и ручную правку баланса — только с причиной»).
+    const needReason = valid && num !== null && (num === 0 || num < current * 0.5);
+    const reasonOk = !needReason || reason.trim().length > 0;
     return (
         <Sheet
             open
@@ -538,9 +633,14 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
             description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${userName} · сейчас ${formatGel(current)}`}
             footer={
                 <>
-                    <Button block loading={busy} disabled={!valid} onClick={() => { if (num !== null) onConfirm(num, reason.trim()); }}>
-                        {valid ? `Сохранить ${formatGel(num)}` : 'Сохранить'}
+                    <Button block loading={busy} disabled={!valid || !reasonOk} onClick={() => { if (num !== null && reasonOk) onConfirm(num, reason.trim()); }}>
+                        {valid ? `Сохранить ${formatGel(num)} (было ${formatGel(current)})` : 'Сохранить'}
                     </Button>
+                    {valid && !reasonOk && (
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', textAlign: 'center' }}>
+                            {num === 0 ? 'Напишите, почему бесплатно' : 'Напишите, почему цена ниже больше чем вдвое'}
+                        </div>
+                    )}
                     <Button variant="secondary" block disabled={busy} onClick={onClose}>
                         Не менять
                     </Button>
@@ -551,8 +651,8 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
                 <Field label="Новая цена" error={priceError}>
                     <Input kind="money" suffix="₾" value={raw} onChange={e => setRaw(e.target.value)} />
                 </Field>
-                <Field label="Причина" optional>
-                    <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Например: скидка по договорённости" />
+                <Field label="Причина" optional={!needReason}>
+                    <Input value={reason} onChange={e => setReason(e.target.value)} placeholder={num === 0 ? 'Почему бесплатно?' : 'Например: скидка по договорённости'} />
                 </Field>
             </div>
         </Sheet>

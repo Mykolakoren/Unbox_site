@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Sparkles, Plus } from 'lucide-react';
+import { Search, Sparkles, Plus, SlidersHorizontal, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
@@ -18,6 +18,18 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { COLOR } from '../../../design/tokens';
 import { formatDateLabel, formatDayMonth } from '../../../utils/format';
 import { useArchivedClients } from '../../../hooks/useArchivedClients';
+import { Sheet } from '../../../components/ui/Sheet';
+import { Button } from '../../../components/ui/Button';
+import { Segmented } from '../../../components/ui/Chip';
+import { matchesPerson } from './searchMatch';
+
+/** 1 прошедшая, 2 прошедшие, 5 прошедших. */
+function plural(n: number, one: string, few: string, many: string): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+}
 
 /**
  * Mobile admin — bookings overview.
@@ -49,13 +61,17 @@ export function MobileAdminBookings() {
         return fmtDate(new Date(), 'yyyy-MM-dd');
     });
     const [loc, setLoc] = useState<LocFilter>('all');
-    const [query, setQuery] = useState('');
+    // ?q=<почта> — из карточки клиента («И ещё N — все брони клиента»): все его
+    // брони с сегодняшнего дня, а не один день (ревью 09.11, №7).
+    const [query, setQuery] = useState(() => searchParams.get('q') || '');
+    const [clientMode, setClientMode] = useState(() => !!searchParams.get('q'));
+    const [filtersOpen, setFiltersOpen] = useState(false);
     const [sheet, setSheet] = useState<BookingHistoryItem | null>(null);
     // 2026-06-03 owner: один тоггл вместо 5-чипа статуса. По умолчанию
     // показываем только актуальные брони (confirmed + pending_approval).
     // Чекбокс «Показать прошедшие» добавляет отменённые / завершённые /
     // перенесённые / пересданные / no-show в список.
-    const [showPast, setShowPast] = useState(false);
+    const [showPast, setShowPast] = useState(() => searchParams.get('past') === '1');
     // Волна 4 (В2, G9-24): «к оплате / ✓» в строке и «Принять оплату» в шторке.
     const dueMap = useAdminDueMap(bookings, users);
     const [pay, setPay] = useState<AcceptPayment | null>(null);
@@ -88,9 +104,9 @@ export function MobileAdminBookings() {
     }, [users]);
     const missingUserIds = useMemo(
         () => bookings
-            .filter(b => b.userId && !knownUserIds.has(b.userId) && bookingDayKey(b) === dayKey)
+            .filter(b => b.userId && !knownUserIds.has(b.userId) && (clientMode || bookingDayKey(b) === dayKey))
             .map(b => b.userId),
-        [bookings, knownUserIds, dayKey],
+        [bookings, knownUserIds, dayKey, clientMode],
     );
     const archived = useArchivedClients(missingUserIds);
     const archivedNameOf = (email: string | null | undefined): string | undefined =>
@@ -124,22 +140,23 @@ export function MobileAdminBookings() {
     const PAST_STATUSES = new Set(['cancelled', 'completed', 'rescheduled', 're-rented', 'no_show']);
 
     const dayBookings = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        const q = query.trim();
         return bookings
             .filter(b => {
-                if (bookingDayKey(b) !== dayKey) return false;
+                // Режим «все брони клиента»: с сегодняшнего дня, без фильтра по дню.
+                if (clientMode ? bookingDayKey(b) < todayKey : bookingDayKey(b) !== dayKey) return false;
                 if (!showPast && PAST_STATUSES.has(b.status)) return false;
                 if (loc !== 'all' && b.locationId !== loc) return false;
                 if (q) {
-                    const name = getUserName(b.userId).toLowerCase();
-                    const email = (b.userId || '').toLowerCase();
-                    const res = (RESOURCES.find(r => r.id === b.resourceId)?.name || '').toLowerCase();
-                    if (!name.includes(q) && !email.includes(q) && !res.includes(q)) return false;
+                    // Телефон — по цифрам, имя — словами в любом порядке (ревью 09.11, №6).
+                    const u = users.find(x => x.email === b.userId || x.id === b.userId);
+                    const res = RESOURCES.find(r => r.id === b.resourceId)?.name || '';
+                    if (!matchesPerson(q, { name: getUserName(b.userId), email: b.userId, phone: u?.phone, extra: [res] })) return false;
                 }
                 return true;
             })
-            .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-    }, [bookings, dayKey, showPast, loc, query, users]);
+            .sort((a, b) => `${bookingDayKey(a)} ${a.startTime || ''}`.localeCompare(`${bookingDayKey(b)} ${b.startTime || ''}`));
+    }, [bookings, dayKey, showPast, loc, query, users, clientMode, todayKey]);
 
     const counts = useMemo(() => {
         const dayAll = bookings.filter(b => bookingDayKey(b) === dayKey);
@@ -164,11 +181,17 @@ export function MobileAdminBookings() {
                     {/* P0-fix: было #666 на #fff = 3.4:1 (FAIL). Теперь ink-60
                         через rgba — реальный контраст 5.4:1 (AA pass). */}
                     <p style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {formatDateLabel(targetDate, { capitalize: true })}
-                        {' · '}
-                        {showPast
-                            ? `всего ${counts.active + counts.past}`
-                            : `активных ${counts.active}${counts.past > 0 ? ` (${counts.past} прошедших скрыто)` : ''}`}
+                        {clientMode
+                            ? `Брони клиента с сегодняшнего дня · ${dayBookings.length}`
+                            : <>
+                                {formatDateLabel(targetDate, { capitalize: true })}
+                                {' · '}
+                                {showPast
+                                    ? `всего ${counts.active + counts.past}`
+                                    : `активных ${counts.active}${counts.past > 0
+                                        ? ` (${counts.past} ${plural(counts.past, 'прошедшая скрыта', 'прошедшие скрыты', 'прошедших скрыто')})`
+                                        : ''}`}
+                            </>}
                     </p>
                 </div>
                 {/* 2026-06-06 owner: «+ Новая бронь» для админа. Ведёт на /m/find —
@@ -176,7 +199,7 @@ export function MobileAdminBookings() {
                     «За кого бронируешь?» (isAdminActor). Бронь от своего имени:
                     сбрасываем «бронь за клиента». */}
                 <Link
-                    to="/m/find"
+                    to="/m/find?admin=1"
                     aria-label="Новая бронь"
                     onClick={() => setBookingForUser(null)}
                     className="press"
@@ -192,74 +215,36 @@ export function MobileAdminBookings() {
                 </Link>
             </div>
 
-            {/* ── КОГДА ── Day chips + date picker.
-                Group label делает иерархию читаемой: было 13 чипов в один
-                стек, читались как одна стена. */}
-            <div style={{ padding: '0 16px' }}>
-                <GroupLabel>Когда</GroupLabel>
-                <div role="group" aria-label="День" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
-                    {Array.from({ length: 32 }, (_, i) => i - 1).map(off => {
-                        const d = addDays(new Date(), off);
-                        const key = fmtDate(d, 'yyyy-MM-dd');
-                        const active = dayKey === key;
-                        const label = off === 0 ? 'Сегодня'
-                            : off === 1 ? 'Завтра'
-                            : off === -1 ? 'Вчера'
-                            : formatDayMonth(key);
-                        return (
-                            <Chip
-                                key={off}
-                                selected={active}
-                                onClick={() => setDayKey(key)}
-                                style={{ flexShrink: 0 }}
-                            >
-                                {label}
-                            </Chip>
-                        );
-                    })}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                    <input
-                        type="date"
-                        value={dayKey}
-                        onChange={e => e.target.value && setDayKey(e.target.value)}
-                        className="tap-target"
-                        style={{
-                            flex: 1,
-                            background: 'var(--color-card)',
-                            border: '1px solid var(--color-ink-08)',
-                            borderRadius: 10,
-                            padding: '0 12px',
-                            fontSize: 14,
-                            fontFamily: 'inherit',
-                            color: 'var(--color-ink)',
-                        }}
-                    />
-                    {dayKey !== todayKey && (
+            {/* Ревью 09.11 (№16): фильтры — одной строкой «Сегодня · Все филиалы ▾»
+                (шторка по нажатию), поиск остаётся. Раньше «Когда» и «Что» занимали
+                больше половины экрана, и первая бронь начиналась на 490 px. */}
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {clientMode ? (
+                        <Chip selected onClick={() => { setClientMode(false); setQuery(''); }} style={{ flexShrink: 0 }}>
+                            Все брони клиента <X size={14} aria-hidden="true" style={{ marginLeft: 4 }} />
+                        </Chip>
+                    ) : (
                         <button
-                            onClick={() => setDayKey(todayKey)}
-                            className="press tap-target"
+                            type="button"
+                            onClick={() => setFiltersOpen(true)}
+                            aria-label="Фильтры: день, филиал, прошедшие"
+                            className="press"
                             style={{
-                                background: 'var(--color-sunken)',
-                                border: 'none',
-                                borderRadius: 10,
-                                padding: '0 14px',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                color: 'var(--color-ink)',
+                                flex: 1, minWidth: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 8,
+                                padding: '0 12px', borderRadius: 12, border: '1px solid var(--color-ink-10)',
+                                background: 'var(--color-card)', color: 'var(--color-ink)', fontFamily: 'inherit',
+                                fontSize: 14, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                             }}
                         >
-                            Сегодня
+                            <SlidersHorizontal size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {dayChipLabel(dayKey, todayKey)} · {LOC_LABEL[loc]}{showPast ? ' · с прошедшими' : ''}
+                            </span>
+                            <span aria-hidden="true" style={{ color: 'var(--color-ink-60)' }}>▾</span>
                         </button>
                     )}
                 </div>
-            </div>
-
-            {/* ── ЧТО ── Search + status + location filters */}
-            <div style={{ padding: '0 16px' }}>
-                <GroupLabel>Что</GroupLabel>
                 <div style={{
                     display: 'flex', alignItems: 'center',
                     background: 'var(--color-sunken)', borderRadius: 12,
@@ -270,54 +255,14 @@ export function MobileAdminBookings() {
                         value={query}
                         onChange={e => setQuery(e.target.value)}
                         aria-label="Поиск брони"
-                        placeholder="Имя, email, кабинет…"
+                        placeholder="Имя, телефон, кабинет…"
                         style={{
                             flex: 1, background: 'transparent', border: 'none',
-                            outline: 'none', fontSize: 14, fontFamily: 'inherit', minWidth: 0,
+                            outline: 'none', fontSize: 16, fontFamily: 'inherit', minWidth: 0,
                             color: 'var(--color-ink)',
                         }}
                     />
                 </div>
-
-                <div role="group" aria-label="Филиал" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    {([
-                        { id: 'all' as LocFilter, label: 'Все локации' },
-                        { id: 'unbox_one' as LocFilter, label: 'Unbox One' },
-                        { id: 'unbox_uni' as LocFilter, label: 'Unbox Uni' },
-                    ]).map(f => (
-                        <Chip key={f.id} selected={loc === f.id} onClick={() => setLoc(f.id)}>{f.label}</Chip>
-                    ))}
-                </div>
-
-                {/* 2026-06-03 owner: вместо 5 чипов статуса (Все/Подтв./Ожидает/
-                    Отмена/Завершено) одна понятная галочка. Default —
-                    показываем только активные/подтверждённые брони,
-                    отменённые и завершённые скрыты пока галочка не стоит. */}
-                <label
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        marginTop: 10, padding: '10px 12px',
-                        background: 'var(--color-ink-04)', borderRadius: 10,
-                        cursor: 'pointer', fontSize: 14, fontWeight: 600,
-                        color: 'var(--color-ink)',
-                        minHeight: 44,
-                    }}
-                >
-                    <input
-                        type="checkbox"
-                        checked={showPast}
-                        onChange={e => setShowPast(e.target.checked)}
-                        style={{ width: 20, height: 20, cursor: 'pointer', flexShrink: 0 }}
-                    />
-                    <span style={{ flex: 1 }}>Показать прошедшие и отменённые</span>
-                    {counts.past > 0 && (
-                        <span style={{
-                            fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)',
-                            background: 'var(--color-card)',
-                            padding: '2px 8px', borderRadius: 999,
-                        }}>{counts.past}</span>
-                    )}
-                </label>
             </div>
 
             {/* Booking list */}
@@ -327,8 +272,8 @@ export function MobileAdminBookings() {
                 {dayBookings.length === 0 && (
                     <EmptyState
                         compact
-                        title="На этот день броней нет"
-                        hint="Выберите соседний день в строке выше."
+                        title={clientMode ? 'Будущих броней не нашлось' : 'На этот день броней нет'}
+                        hint={clientMode ? 'Снимите «Все брони клиента», чтобы искать по дням.' : 'Выберите другой день в фильтре выше.'}
                     />
                 )}
                 {dayBookings.map(b => {
@@ -344,7 +289,7 @@ export function MobileAdminBookings() {
                         || b.status === 'rescheduled'
                         || b.status === 're-rented';
                     const due = dueMap.get(b.id);
-                    const owes = !!due && due.due > 0;
+                    const owes = !!due && due.due > 0 && b.status !== 'pending_approval';
                     return (
                         <button
                             key={b.id}
@@ -390,8 +335,15 @@ export function MobileAdminBookings() {
                                     {isArchived && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>архив</span>}
                                 </div>
                                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                                    {clientMode ? `${formatDayMonth(bookingDayKey(b))} · ` : ''}
                                     {r?.name || b.resourceId} · {l?.name || ''} · {formatDuration(b.duration ?? 60)}
                                 </div>
+                                {/* Статус — второй строкой под именем, чтобы имя не резалось (№16). */}
+                                {!isBlocker && b.status !== 'confirmed' && (
+                                    <div style={{ marginTop: 4 }}>
+                                        <StatusBadge kind="booking" status={b.status} audience="staff" />
+                                    </div>
+                                )}
                             </div>
                             {isBlocker
                                 ? <span style={{
@@ -404,16 +356,81 @@ export function MobileAdminBookings() {
                                 : (
                                     // G9-14: «Подтверждена» на каждой строке — шум; бейдж
                                     // статуса только у нестандартных, плюс «к оплате / ✓» (В2).
-                                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                                        {b.status !== 'confirmed' && <StatusBadge kind="booking" status={b.status} audience="staff" />}
-                                        <DueBadge due={due?.due} paid={!!due} charged={due?.charged} price={due?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
-                                    </span>
+                                    <DueBadge due={due?.due} paid={!!due} charged={due?.charged} price={due?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={b.status} method={b.paymentMethod as string | undefined} />
                                 )
                             }
                         </button>
                     );
                 })}
             </div>
+
+            <Sheet
+                open={filtersOpen}
+                onClose={() => setFiltersOpen(false)}
+                title="Какие брони показать"
+                footer={<Button block onClick={() => setFiltersOpen(false)}>Показать · {dayBookings.length}</Button>}
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                        <GroupLabel>Когда</GroupLabel>
+                        <div role="group" aria-label="День" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {[-1, 0, 1, 2].map(off => {
+                                const key = fmtDate(addDays(new Date(), off), 'yyyy-MM-dd');
+                                return (
+                                    <Chip key={off} selected={dayKey === key} onClick={() => setDayKey(key)}>
+                                        {dayChipLabel(key, todayKey)}
+                                    </Chip>
+                                );
+                            })}
+                        </div>
+                        <input
+                            type="date"
+                            aria-label="Другая дата"
+                            value={dayKey}
+                            onChange={e => e.target.value && setDayKey(e.target.value)}
+                            className="tap-target"
+                            style={{
+                                width: '100%', marginTop: 8,
+                                background: 'var(--color-card)',
+                                border: '1px solid var(--color-ink-08)',
+                                borderRadius: 10,
+                                padding: '0 12px',
+                                fontSize: 16,
+                                fontFamily: 'inherit',
+                                color: 'var(--color-ink)',
+                            }}
+                        />
+                    </div>
+                    <div>
+                        <GroupLabel>Филиал</GroupLabel>
+                        <Segmented<LocFilter>
+                            aria-label="Филиал"
+                            options={(['all', 'unbox_one', 'unbox_uni'] as LocFilter[]).map(id => ({ value: id, label: LOC_LABEL[id] }))}
+                            value={loc}
+                            onChange={setLoc}
+                        />
+                    </div>
+                    <label
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '10px 12px',
+                            background: 'var(--color-ink-04)', borderRadius: 10,
+                            cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                            color: 'var(--color-ink)',
+                            minHeight: 44,
+                        }}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={showPast}
+                            onChange={e => setShowPast(e.target.checked)}
+                            style={{ width: 20, height: 20, cursor: 'pointer', flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>Показать прошедшие и отменённые</span>
+                        {counts.past > 0 && <span className="num" style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>{counts.past}</span>}
+                    </label>
+                </div>
+            </Sheet>
 
             {/* Шторки общие с дашбордом (bookingSheets.tsx). */}
             <AdminBookingSheets
@@ -423,10 +440,12 @@ export function MobileAdminBookings() {
                     return arch ? `${arch} (архив)` : getAdminUserName(users, email);
                 }}
                 onClose={() => setSheet(null)}
+                dueInfo={sheet ? dueMap.get(sheet.id) : undefined}
                 acceptPayment={b => {
                     const p = acceptPaymentFor(b, bookings, users, dueMap);
                     if (!p) return null;
                     return {
+                        total: p.total,
                         sub: p.today > 0
                             ? `Весь долг ${formatGel(p.total)}, из них за сегодня ${formatGel(p.today)}`
                             : `Весь долг ${formatGel(p.total)}`,
@@ -467,3 +486,14 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
     );
 }
 
+/** Филиал по-человечески — без кодов unbox_one / unbox_uni. */
+const LOC_LABEL: Record<LocFilter, string> = { all: 'Все филиалы', unbox_one: 'One', unbox_uni: 'Uni' };
+
+/** «Сегодня» / «Завтра» / «Вчера» / «12 ноября». */
+function dayChipLabel(key: string, todayKey: string): string {
+    const off = Math.round((new Date(key + 'T00:00:00').getTime() - new Date(todayKey + 'T00:00:00').getTime()) / 86_400_000);
+    if (off === 0) return 'Сегодня';
+    if (off === 1) return 'Завтра';
+    if (off === -1) return 'Вчера';
+    return formatDayMonth(key);
+}

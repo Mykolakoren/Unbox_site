@@ -16,6 +16,22 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { formatDateLabel, formatGel } from '../../../utils/format';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { statusLabel } from '../../../design/statuses';
+import { bookingDayKey } from '../../../utils/adminToday';
+
+/** «через 9 ч» / «через 40 мин» / «уже началась» — время до начала (день и время — Тбилиси). */
+function startsIn(b: BookingHistoryItem): string | null {
+    const day = bookingDayKey(b.date as any);
+    const m = /^(\d{1,2}):(\d{2})/.exec(b.startTime || '');
+    if (!day || !m) return null;
+    const [y, mo, d] = day.split('-').map(Number);
+    const min = Math.round((Date.UTC(y, mo - 1, d, Number(m[1]) - 4, Number(m[2])) - Date.now()) / 60_000);
+    if (min <= 0) return 'уже началась';
+    if (min < 60) return `через ${min} мин`;
+    const h = Math.round(min / 60);
+    return h < 48 ? `через ${h} ч` : `через ${Math.round(h / 24)} дн.`;
+}
 
 /** Формат брони по-русски (с сервера приходит код: individual / group …). */
 const FORMAT_LABEL: Record<string, string> = {
@@ -44,6 +60,7 @@ export function MobileAdminInbox() {
     const [busy, setBusy] = useState<string | null>(null);
     const [rejecting, setRejecting] = useState<BookingHistoryItem | null>(null);
     const [rejectReason, setRejectReason] = useState('');
+    const { confirm } = useConfirmDialog();
 
     // Волна 4 (G9-admin-mobile-M2): анкеты специалистов на проверке — здесь
     // же, а не только внутри «Специалистов».
@@ -70,6 +87,16 @@ export function MobileAdminInbox() {
     const userByEmail = (email?: string) => users?.find(u => u.email === email);
 
     const approve = async (b: BookingHistoryItem) => {
+        // Ревью 09.11 (№21): «Одобрить» спрашивает подтверждение — вернуть одобренную
+        // бронь в «ждёт» сервер не умеет, поэтому «Вернуть» после нажатия не предлагаем.
+        const who = userByEmail(b.userId)?.name || b.userId;
+        const ok = await confirm({
+            title: 'Одобрить бронь?',
+            body: `${who}: ${b.date ? formatDateLabel(b.date as any) : ''}, ${b.startTime}. Отменить одобрение потом можно только отменой брони.`,
+            confirmLabel: 'Одобрить',
+            cancelLabel: 'Не сейчас',
+        });
+        if (!ok) return;
         setBusy(b.id);
         try {
             const res = await bookingsApi.approveBooking(b.id);
@@ -112,6 +139,7 @@ export function MobileAdminInbox() {
                     </h1>
                     <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
                         Срочные брони и анкеты специалистов, которые ждут вашего решения.
+                        Число на вкладке «Заявки» — сколько их; колокольчик наверху — это уведомления, он считает другое.
                     </p>
                 </div>
 
@@ -169,7 +197,11 @@ export function MobileAdminInbox() {
                         const resource = RESOURCES.find(r => r.id === b.resourceId);
                         const dateLabel = b.date ? formatDateLabel(b.date as any) : '—';
                         const isThisItemBusy = busy === b.id;
-                        const formatLabel = b.format ? (FORMAT_LABEL[b.format] ?? b.format) : null;
+                        const formatLabel = b.format ? (FORMAT_LABEL[b.format] ?? null) : null;
+                        const price = Number(b.finalPrice ?? 0);
+                        const bal = user ? Number(user.balance ?? 0) : null;
+                        const short = bal !== null ? Math.round((price - bal) * 100) / 100 : null;
+                        const when = startsIn(b);
                         return (
                             <div key={b.id} style={{
                                 background: 'var(--color-card)',
@@ -182,15 +214,42 @@ export function MobileAdminInbox() {
                             }}>
                                 <div>
                                     <span className="ui-badge ui-badge--pending">
-                                        <Clock size={14} aria-hidden="true" /> Срочная бронь · ждёт ответа
+                                        <Clock size={14} aria-hidden="true" /> {statusLabel('booking', 'pending_approval', 'staff')}{when ? ` · ${when}` : ''}
                                     </span>
                                 </div>
 
-                                <div style={{ fontSize: 16, fontWeight: 600 }}>
-                                    {user?.name || b.userId}
+                                {/* Цифры для решения — наверху (admin-design №15): хватает ли баланса. */}
+                                <div data-decision-numbers style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>Цена{formatLabel ? ` · ${formatLabel}` : ''}</div>
+                                        <div className="num" style={{ fontSize: 16, fontWeight: 600 }}>{formatGel(price)}</div>
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>Баланс клиента</div>
+                                        <div className="num" style={{ fontSize: 16, fontWeight: 600, color: bal !== null && bal < 0 ? 'var(--status-danger-fg)' : undefined }}>
+                                            {bal !== null ? formatGel(bal) : '—'}
+                                        </div>
+                                    </div>
                                 </div>
+                                {short !== null && (
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: short > 0 ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)', marginTop: -4 }}>
+                                        {short > 0 ? `не хватает ${formatGel(short)}` : 'баланса хватает'}
+                                    </div>
+                                )}
+
+                                {user ? (
+                                    <Link
+                                        to={`/m/admin/users/${encodeURIComponent(user.email)}`}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 44, fontSize: 16, fontWeight: 600, color: 'var(--color-ink)', textDecoration: 'none' }}
+                                    >
+                                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name || user.email}</span>
+                                        <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
+                                    </Link>
+                                ) : (
+                                    <div style={{ fontSize: 16, fontWeight: 600 }}>{b.userId}</div>
+                                )}
                                 {user?.email && user.email !== user.name && (
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: -4 }}>
+                                    <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: -8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                         {user.email}
                                     </div>
                                 )}
@@ -204,13 +263,6 @@ export function MobileAdminInbox() {
                                     {resource?.name ?? b.resourceId}
                                 </div>
 
-                                <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
-                                    {formatGel(b.finalPrice ?? 0)}
-                                    {formatLabel && <> · {formatLabel}</>}
-                                    {user && (
-                                        <> · Баланс: <span style={{ color: (user.balance ?? 0) < 0 ? 'var(--status-danger-fg)' : undefined }}>{formatGel(user.balance ?? 0)}</span></>
-                                    )}
-                                </div>
 
                                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                                     <Button

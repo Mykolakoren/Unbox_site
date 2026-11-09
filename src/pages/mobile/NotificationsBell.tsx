@@ -95,6 +95,9 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
             <button
                 onClick={openSheet}
                 aria-label={unread > 0 ? `Уведомления, новых: ${unread}` : 'Уведомления'}
+                // Ревью 09.11 (admin-design №14): колокольчик считает непрочитанные
+                // уведомления, а число на вкладке «Заявки» — что ждёт решения. Разные вещи.
+                title={unread > 0 ? `Непрочитанные уведомления: ${unread}. Заявки, которые ждут решения, — на вкладке «Заявки»` : 'Уведомления'}
                 style={{
                     position: 'relative',
                     background: 'transparent',

@@ -53,7 +53,8 @@ SESS = "src/pages/crm/CrmSessions.tsx"
 # валюта «Заработано»: суммы берутся через earnedByCurrency (session.currency, нет — валюта клиента),
 # а не по client.currency (сессия 100 ₾ у клиента с USDT раньше считалась как 100 USDT ≈ 269 ₾).
 # Долг и «Касса · с долгами» не тронуты. Поведение держит guard_earned_currency_2026_10.py.
-STATS_FINGERPRINT = "40481679279bfd88c660a9bc0e5260dcc8c5efd9093336d0a2320f0154bd3113"
+# 09.11: «Неявка · оплачивается» (NO_SHOW) — в «Не оплачено» и «Заработано», как на сервере (решение владельца 6).
+STATS_FINGERPRINT = "051b4aea0d2a16fd5fe25e94efce7c94e8366fb23dfd6754688b2d579942b40f"
 
 
 def _read(rel: str) -> str:

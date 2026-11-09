@@ -73,10 +73,11 @@ export function ShiftReportsTable() {
                                     <span className="text-gray-700">{r.adminName}</span>
                                 </td>
                                 <td className="py-3 align-top text-right font-medium text-gray-700 num">
-                                    {formatGel(expected)}
+                                    {/* 09.11: роли admin сервер суммы не отдаёт (слепое закрытие) */}
+                                    {r.expectedBalance == null ? '—' : formatGel(expected)}
                                 </td>
                                 <td className="py-3 align-top text-right font-medium text-gray-900 num">
-                                    {formatGel(actual)}
+                                    {r.actualBalance == null ? '—' : formatGel(actual)}
                                 </td>
                                 <td className={`py-3 align-top text-right font-bold num ${discColor}`}>
                                     {Math.abs(disc) < 0.01 ? formatGel(0) : formatGel(disc, { sign: true })}

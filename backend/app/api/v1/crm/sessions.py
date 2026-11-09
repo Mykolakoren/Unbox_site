@@ -16,9 +16,24 @@ from app.models.therapy_session import (
 from app.models.therapist_payment import TherapistPayment
 from app.services.finance_bridge import push_payment, retract_payment
 from app.services import session_balance as sb
-from app.api.v1.crm import get_crm_calendar_id
+from app.api.v1.crm import get_crm_calendar_id, SESSION_STATUSES, CANCELLED_STATUSES, profile_base_price
+
 
 router = APIRouter()
+
+
+def _room_label(db: Session, resource_id: Optional[str]) -> str:
+    """«Кабинет 6 · Unbox Uni» вместо служебного «unbox_uni_room_6» (для текстов ошибок)."""
+    try:
+        from app.models.resource import Resource
+        from app.models.location import Location
+        res = db.get(Resource, resource_id) if resource_id else None
+        if res is None:
+            return "кабинет"
+        loc = db.get(Location, res.location_id) if res.location_id else None
+        return f"{res.name} · {loc.name}" if loc is not None else res.name
+    except Exception:  # noqa: BLE001 — подпись не должна ронять перенос
+        return "кабинет"
 
 
 def _sessions_with_money(db: Session, uid: str, sessions, client_id: Optional[str] = None) -> List[TherapySessionRead]:
@@ -403,6 +418,12 @@ def update_session(
         raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
 
     update_data = data.model_dump(exclude_unset=True)
+    # 09.11: «Убрать из Google Календаря» при отмене — флаг запроса, не поле сессии.
+    _remove_from_calendar = bool(update_data.pop("remove_from_calendar", None))
+    # 09.11: статус — только из известных (в т.ч. NO_SHOW «неявка, оплачивается»).
+    # Раньше принималась любая строка, и опечатка выбрасывала сессию из долга.
+    if "status" in update_data and update_data["status"] not in SESSION_STATUSES:
+        raise HTTPException(400, "Неизвестный статус сессии")
     # Same Tbilisi-naive → UTC-naive normalisation as create_session.
     if "date" in update_data and update_data["date"] is not None:
         from app.services.crm_calendar import tbilisi_naive_to_utc_naive
@@ -531,13 +552,16 @@ def update_session(
                     lock_rows=True,
                 )
                 if not available:
+                    # 09.11: название кабинета по-человечески («Кабинет 6 · Unbox Uni»),
+                    # без служебного id и технической приписки в скобках.
+                    logger.info("[autosync] move refused for booking %s: %s", bk.id, conflict_msg)
                     raise HTTPException(
                         status_code=409,
                         detail=(
-                            f"Не могу перенести сессию на {new_start_time}: "
-                            f"в это время кабинет {bk.resource_id} занят. "
-                            f"Освободите слот или отвяжите бронь от сессии. "
-                            f"({conflict_msg})"
+                            f"Не получилось перенести сессию на {new_start_time}: "
+                            f"{_room_label(session, bk.resource_id)} в это время занят. "
+                            f"Выберите другое время или сначала отвяжите кабинет от сессии "
+                            f"(шаг «Кабинет»)."
                         ),
                     )
                 logger.info(
@@ -644,6 +668,26 @@ def update_session(
             ):
                 ts.is_paid = True
     calendar_warning: Optional[str] = None
+
+    # 09.11: отмена с галочкой «Убрать из Google Календаря» — удаляем событие
+    # сессии в личном календаре и забываем его id (иначе синк увидел бы
+    # пропажу события и тронул бы сессию). Только для отмены и неявки.
+    if (
+        _remove_from_calendar and ts.google_event_id
+        and ts.status in CANCELLED_STATUSES + ("NO_SHOW",)
+    ):
+        _rm_cal = get_crm_calendar_id(current_user)
+        if _rm_cal:
+            try:
+                from app.services.crm_calendar import delete_calendar_event
+                delete_calendar_event(_rm_cal, ts.google_event_id)
+                ts.google_event_id = None
+            except Exception as e:
+                logger.warning(f"[update_session] GCal delete on cancel failed: {e}")
+                calendar_warning = (
+                    "Сессия отменена, но событие в Google Календаре удалить не удалось — "
+                    "удалите его вручную."
+                )
 
     # Этап 2 календарного плана (27.08): перенос/смена длительности сессии из
     # CRM двигает ТО ЖЕ событие в личном календаре (по ключу google_event_id).
@@ -1084,6 +1128,38 @@ def quick_pay_session(
         ts.price = client.base_price
         price = client.base_price
 
+    # 09.11 (решение владельца 2): «оплачено» без суммы больше не ставим. Раньше
+    # при цене 0 сессия становилась оплаченной, а платёж не создавался — деньги
+    # «растворялись» (ни в кассе, ни в долге). Нет цены — нужна сумма в запросе
+    # («Сколько заплатили?» на телефоне); она же становится ценой сессии.
+    if not price or price <= 0:
+        raw_amount = payload.get("amount") if isinstance(payload, dict) else None
+        try:
+            amount = round(float(raw_amount), 2) if raw_amount is not None else 0.0
+        except (TypeError, ValueError):
+            amount = 0.0
+        if not (amount > 0) or amount != amount or amount > 1_000_000:
+            # Структурный ответ: фронт по code спрашивает «Сколько заплатили?»
+            # (подсказка — «Базовая цена сессии» анкеты, галочка «Запомнить как
+            # ставку клиента», если у клиента ставки нет). message — для людей.
+            raise HTTPException(400, detail={
+                "code": "price_required",
+                "message": "У сессии не указана цена — отметить оплату без суммы нельзя. "
+                           "Укажите, сколько заплатили, или сначала задайте цену сессии.",
+                "client_base_price": float(client.base_price or 0),
+                "currency": ts.currency or client.currency or "GEL",
+                "default_price": profile_base_price(session, current_user.id),
+            })
+        ts.price = amount
+        price = amount
+        # 09.11: «Запомнить как ставку клиента» — только если у клиента ставки
+        # нет и валюта сессии = валюта клиента (явное действие специалиста).
+        if (payload.get("remember_rate") is True and not client.base_price
+                and (ts.currency or client.currency) == client.currency):
+            client.base_price = amount
+            client.updated_at = datetime.now()
+            session.add(client)
+
     # Freeze currency & account on the session at payment time.
     # 09.09: если валюта/счёт УЖЕ проставлены на сессии (заморозка истории
     # или ручная правка) — они главнее текущих значений клиента: сессия в
@@ -1182,6 +1258,7 @@ def mark_all_sessions_paid(
     ).all()
 
     count = 0
+    skipped_no_price = 0
     created_payments = []
     # Платёж на сессию один (uq_therapist_payment_session). Если по сессии уже
     # внесена часть, второй платёж не создаём: дописываем остаток в тот же.
@@ -1190,6 +1267,12 @@ def mark_all_sessions_paid(
     fallback_account = _default_payment_account(session, client, uid)
     for ts in unpaid:
         price = ts.price if ts.price is not None else client.base_price or 0
+        # 09.11 (решение владельца 2): сессию без цены и без внесённых денег
+        # «оплаченной» не ставим — оплата без суммы терялась бы. Её отмечают
+        # по одной, указав сумму.
+        if (not price or price <= 0) and existing_by_session.get(ts.id) is None:
+            skipped_no_price += 1
+            continue
         # Fill session price from client base_price if NULL
         if ts.price is None and client.base_price:
             ts.price = client.base_price
@@ -1229,4 +1312,4 @@ def mark_all_sessions_paid(
         # После commit: у платежей уже есть id, и падение моста не тронет CRM.
         for payment in created_payments:
             push_payment(payment, client.name)
-    return {"ok": True, "marked": count}
+    return {"ok": True, "marked": count, "skipped_no_price": skipped_no_price}

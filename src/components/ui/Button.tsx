@@ -6,13 +6,18 @@ import clsx from 'clsx';
  * Button — общая кнопка дизайн-системы (wave 1, 30.09).
  *
  * Варианты:
- *   primary   — главное действие экрана (бирюза Unbox). Одно на экран/шторку.
+ *   primary   — ГЛАВНОЕ действие экрана: единственная залитая бирюзой кнопка
+ *               Unbox. ОДНА на экран / шторку (в шапке экрана или в подвале
+ *               шторки). Чёрных и круглых «главных» кнопок не бывает.
  *   secondary — второе действие («Оставить», «Отмена»): тонкая рамка.
  *   quiet     — третье, «тихое»: без рамки и заливки.
  *   danger    — необратимое («Удалить», «Отменить 6 броней»).
  *
  * Размер по умолчанию — из плотности (--control-h): 44 px на телефоне и в /m,
  * 36 px на компьютере. size="touch" / "compact" — задать явно.
+ * size="sm" — действие ВНУТРИ строки списка: видно 36 px, текст 14, палец
+ * попадает в 44 px. Только с secondary или quiet — в строке не бывает
+ * primary («Оплата · 120 ₾» в строке — secondary sm, а не бирюзовая).
  *
  * Текст называет действие: «Пополнить на 20 ₾», а не «ОК» и не «Да».
  *
@@ -23,7 +28,8 @@ export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: ButtonVariant;
-    size?: 'auto' | 'touch' | 'compact';
+    /** sm — тихое действие в строке списка (с variant="secondary" | "quiet"). */
+    size?: 'auto' | 'touch' | 'compact' | 'sm';
     /** Растянуть на всю ширину (главная кнопка в шторке на телефоне). */
     block?: boolean;
     loading?: boolean;
@@ -50,6 +56,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     ref,
 ) {
     const iconOnly = !children && !!(icon || iconRight);
+    if (import.meta.env.DEV && size === 'sm' && (variant === 'primary' || variant === 'danger')) {
+        console.warn('Button size="sm" — действие в строке: берите variant="secondary" или "quiet", главная кнопка одна на экран.');
+    }
     return (
         <button
             ref={ref}

@@ -25,6 +25,7 @@ import { fmtHours } from '../../utils/paymentPriority';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { TelegramConnectCard, isTelegramLinked } from './TelegramConnectCard';
 import { canUsePsyCrm } from './crmAccess';
 import {
     bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, isLiveBooking, mapsUrl, paymentLine,
@@ -381,6 +382,14 @@ export function MobileToday() {
                             <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
                             <span>{creditWarn.text}</span>
                         </div>
+                    </div>
+                )}
+
+                {/* Ревью №9 (09.11): пока бот не подключён — подтверждения, напоминания
+                    и «пересдачу забрали» человек не получит. Скрывается на неделю. */}
+                {canBook && !isTelegramLinked(currentUser) && (
+                    <div style={sectionPad}>
+                        <TelegramConnectCard user={currentUser} />
                     </div>
                 )}
 

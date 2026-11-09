@@ -445,11 +445,15 @@ def _link_appointment_to_crm(
         ).first()
 
     if client is None:
+        # 09.11 (решение владельца 2): ставка нового клиента — «Базовая цена
+        # сессии» из анкеты (клиент в лари, своей ставки нет), как в CRM и синке.
+        from app.api.v1.crm import profile_base_price as _profile_price
         client = TherapistClient(
             specialist_id=user_id_str,
             name=appointment.client_name,
             phone=appointment.client_phone,
             email=appointment.client_email,
+            base_price=_profile_price(session, user_id_str),
             pipeline_status="LEAD",  # новый лид с публичного сайта
             notes_text="Записался через публичную страницу /specialists",
         )

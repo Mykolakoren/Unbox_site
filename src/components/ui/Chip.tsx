@@ -1,18 +1,26 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { Check } from 'lucide-react';
 import clsx from 'clsx';
 
 /**
- * Chip — переключатель-фильтр (wave 1, 30.09). Высота 44 px на телефоне.
- * Выбранный — бирюза Unbox (подложка + рамка + вес + галочка), а не только
- * цвет; состояние озвучивается через aria-pressed.
+ * Chip — переключатель-фильтр (wave 1, 30.09; 09.11 — без галочки).
+ * Высота 44 px на телефоне.
+ *
+ * Выбранный — ОДИН язык «выбрано» на всё приложение (как ChoiceCard и
+ * Segmented): подложка accent-soft, рамка accent 1.5 px, текст accent-ink 600.
+ * Галочки нет: она добавляла ~24 px, и ряд фильтров переносился или
+ * обрезался. Выбранное отличается не только цветом (рамка + вес), а для
+ * диктора — aria-pressed. Чёрной заливки для «выбрано» нет.
  *
  *   <div className="ui-chip-row" role="group" aria-label="Филиал">
  *     <Chip selected={loc === 'one'} onClick={() => setLoc('one')}>Unbox One</Chip>
  *   </div>
+ *
+ * Ряд, который листается вбок, — className="ui-chip-row ui-chip-row--scroll"
+ * (затухание справа подсказывает, что есть ещё).
  */
 export interface ChipProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'> {
     selected?: boolean;
+    /** Значок слева — одинаковый в обоих состояниях (ширина не прыгает). */
     icon?: ReactNode;
 }
 
@@ -28,7 +36,7 @@ export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
             className={clsx('ui-chip', className)}
             {...rest}
         >
-            {selected ? <Check size={16} strokeWidth={2.5} aria-hidden="true" /> : icon}
+            {icon}
             {children}
         </button>
     );

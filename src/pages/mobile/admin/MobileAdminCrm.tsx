@@ -10,6 +10,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel } from '../../../utils/format';
+import { matchesPerson } from './searchMatch';
 
 /**
  * Mobile admin — CRM pipeline.
@@ -81,15 +82,10 @@ export function MobileAdminCrm() {
     }, [stageByEmail]);
 
     const stageClients = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        // Телефон — по цифрам, имя — словами в любом порядке (ревью 09.11, №6).
         return users
             .filter(u => stageByEmail.get(u.email) === stage)
-            .filter(u => {
-                if (!q) return true;
-                return (u.name || '').toLowerCase().includes(q)
-                    || (u.email || '').toLowerCase().includes(q)
-                    || (u.phone || '').toLowerCase().includes(q);
-            })
+            .filter(u => matchesPerson(query, { name: u.name, email: u.email, phone: u.phone }))
             .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
     }, [users, stageByEmail, stage, query]);
 

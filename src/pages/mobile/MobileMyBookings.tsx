@@ -25,6 +25,8 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Segmented } from '../../components/ui/Chip';
 import { Button } from '../../components/ui/Button';
 import { bookingPlace, bookingStartDate, bookingTimeRange, isLiveBooking } from './bookingView';
+import { cancelledRefund, reRentConfirmBody, reRentToast } from './refundText';
+import { hoursUntilBookingStart } from '../../utils/subscription';
 
 type Tab = 'upcoming' | 'series' | 'past';
 
@@ -41,6 +43,9 @@ export function MobileMyBookings() {
     const loaded = bookingsLoadedAt != null;
     const [tab, setTab] = useState<Tab>('upcoming');
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
+    // Свайп «Отменить» — сразу шаг «Отменить бронь?» (ревью №15).
+    const [openMode, setOpenMode] = useState<'view' | 'confirmCancel'>('view');
+    const open = (b: BookingHistoryItem, mode: 'view' | 'confirmCancel' = 'view') => { setOpenMode(mode); setOpenBooking(b); };
     // Подтверждение постановки на пересдачу: свайп — жест лёгкий, а действие
     // денежное (если слот заберут, вернётся 50%). «Отменить» подтверждение уже
     // спрашивает — здесь было несимметрично. Снятие с пересдачи не спрашиваем:
@@ -52,16 +57,14 @@ export function MobileMyBookings() {
         bookingsApi.toggleReRent(b.id)
             .then(updated => {
                 fetchBookings();
-                toast.success(updated.isReRentListed
-                    ? 'Выставлено на пересдачу'
-                    : 'Снято с пересдачи');
+                toast.success(updated.isReRentListed ? reRentToast(b) : 'Снято с пересдачи');
             })
             .catch(e => toastApiError(e, 'Не удалось обновить'));
     };
     const askReRent = async (b: BookingHistoryItem) => {
         const ok = await confirm({
             title: 'Пересдать бронь?',
-            body: 'Слот появится у других как свободный. Если его заберут — вернём 50% стоимости. Если не заберут — бронь останется за вами.',
+            body: reRentConfirmBody(b),
             confirmLabel: 'Пересдать',
             cancelLabel: 'Оставить',
         });
@@ -197,13 +200,17 @@ export function MobileMyBookings() {
                                 <h2 style={groupTitle}>{group.label}</h2>
                                 <div style={listCard}>
                                     {group.items.map(({ b, dt }, idx) => {
-                                        const hoursToStart = (dt!.getTime() - Date.now()) / 3600000;
+                                        // Часы до начала — по времени Тбилиси, как на сервере
+                                        // (_booking_hours_until_start), а не по поясу телефона.
+                                        const hoursToStart = hoursUntilBookingStart(b);
                                         const within24h = hoursToStart >= 0 && hoursToStart < 24;
                                         // Бронь на одобрении: ни отменить (меньше суток),
                                         // ни пересдать (только подтверждённую) — без свайпа.
                                         const pendingApproval = b.status === 'pending_approval';
                                         // Within 24h, swiping cancel doesn't refund — surface
                                         // the "Re-rent" action as the primary instead.
+                                        // 09.11 (владелец): «Пересдать» — ТОЛЬКО меньше суток до
+                                        // начала; раньше — «Отменить» с полным возвратом.
                                         const primary = within24h
                                             ? {
                                                 label: 'Пересдать',
@@ -218,12 +225,12 @@ export function MobileMyBookings() {
                                             : {
                                                 label: 'Отменить',
                                                 color: STATUS.danger.fg,
-                                                onAction: () => setOpenBooking(b),
+                                                onAction: () => open(b, 'confirmCancel'),
                                             };
                                         const secondary = {
                                             label: 'Детали',
                                             color: COLOR.ink60,
-                                            onAction: () => setOpenBooking(b),
+                                            onAction: () => open(b),
                                         };
                                         return (
                                             <SwipeRow key={b.id} primary={primary} secondary={secondary} disabled={pendingApproval}>
@@ -233,7 +240,7 @@ export function MobileMyBookings() {
                                                     withDate={group.withDate}
                                                     first={idx === 0}
                                                     today={group.key === 'today'}
-                                                    onTap={() => setOpenBooking(b)}
+                                                    onTap={() => open(b)}
                                                 />
                                             </SwipeRow>
                                         );
@@ -257,7 +264,7 @@ export function MobileMyBookings() {
                                         .map(b => ({ b, dt: bookingStartDate(b) }))
                                         .filter(x => x.dt && x.dt.getTime() > Date.now())
                                         .sort((a, b) => a.dt!.getTime() - b.dt!.getTime())[0];
-                                    if (nextUpcoming) setOpenBooking(nextUpcoming.b);
+                                    if (nextUpcoming) open(nextUpcoming.b);
                                 }}
                             />
                         ))
@@ -275,7 +282,7 @@ export function MobileMyBookings() {
                                         dimmed
                                         withDate
                                         first={idx === 0}
-                                        onTap={() => setOpenBooking(b)}
+                                        onTap={() => open(b)}
                                         onRepeat={() => {
                                             if (prepareRepeat(b)) navigate('/m/checkout');
                                         }}
@@ -288,8 +295,10 @@ export function MobileMyBookings() {
 
             {openBooking && (
                 <BookingDetailSheet
+                    key={`${openBooking.id}-${openMode}`}
                     booking={openBooking}
-                    onClose={() => setOpenBooking(null)}
+                    initialMode={openMode}
+                    onClose={() => { setOpenBooking(null); setOpenMode('view'); }}
                 />
             )}
 
@@ -340,14 +349,26 @@ function Row({ booking, dt, dimmed, withDate, first, today, onTap, onRepeat }: {
                 роняла вторичный текст ниже читаемого (3:1). */}
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: TEXT.body, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink }}>
-                    {withDate && <>{formatDateLabel(dt)} · </>}
-                    <span className="num">{bookingTimeRange(booking, dt)}</span>
+                    {withDate && <span style={{ whiteSpace: 'nowrap' }}>{formatDateLabel(dt)} · </span>}
+                    <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span>
                 </div>
                 <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
                     {place.title} · {formatBookingDuration(booking.duration ?? 60)}
                     {(booking as any).recurringGroupId && <> · серия</>}
                 </div>
-                {badges && <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>{badges}</div>}
+                {/* Ревью №19: сумма и способ оплаты — своей строкой под местом,
+                    рядом со статусом, а не справа (сдавливала название). */}
+                <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {!onRepeat && booking.status !== 'cancelled' && (
+                        <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink }}>
+                            {priceLabel(booking)}
+                        </span>
+                    )}
+                    {booking.status === 'cancelled' && (
+                        <span style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>{cancelledRefund(booking).text}</span>
+                    )}
+                    {badges}
+                </div>
             </div>
             {onRepeat ? (
                 <Button
@@ -359,13 +380,7 @@ function Row({ booking, dt, dimmed, withDate, first, today, onTap, onRepeat }: {
                     Повторить
                 </Button>
             ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        {priceLabel(booking)}
-                    </span>
-                    {/* Строка и так нажимается — хватит шеврона (было «тапни →»). */}
-                    <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
-                </div>
+                <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />
             )}
         </div>
     );

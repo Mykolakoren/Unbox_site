@@ -96,10 +96,12 @@ export function CrmFinances() {
 
     // Fetch ALL unpaid completed sessions (no date filter) for total debt calculation
     useEffect(() => {
-        crmApi.getSessions({
-            status: 'COMPLETED',
+        // Долг — «Прошла» и «Неявка · оплачивается» (NO_SHOW, 09.11), как на сервере.
+        Promise.all(['COMPLETED', 'NO_SHOW'].map(status => crmApi.getSessions({
+            status,
             specialistId: viewAsSpecialistId ?? undefined,
-        }).then(all => {
+        }))).then(lists => {
+            const all = lists.flat();
             setAllUnpaidSessions(all.filter(s => !s.isPaid));
             setDebtLoadFailed(false);
         }).catch(() => setDebtLoadFailed(true));

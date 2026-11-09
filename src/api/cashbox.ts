@@ -61,8 +61,8 @@ export interface ExpenseCategoryCreate {
 
 export interface ShiftReport {
     id: string;
-    expectedBalance: number;
-    actualBalance: number;
+    expectedBalance: number | null;  // null — роль admin (слепое закрытие)
+    actualBalance: number | null;
     discrepancy: number;
     notes?: string;
     shiftStart: string;
@@ -126,8 +126,10 @@ export interface DayShift {
     actual: number | null;
     discrepancy: number | null;
     closes: number;
-    /** Наличные по записям кассы филиала на конец дня («должно быть в кассе»). */
-    cashByRecords: number;
+    /** Наличные по записям кассы филиала на конец дня («должно быть в кассе»).
+     *  null — скрыто от роли admin до закрытия смены (решение 3, 09.11). */
+    cashByRecords: number | null;
+    cashHidden?: boolean;
 }
 
 export interface DayBranchBlock {
@@ -200,16 +202,19 @@ export interface CashboxAnalytics {
     categoryBreakdown: { categoryName: string; total: number; percentage: number }[];
     totalIncome: number;
     totalExpense: number;
-    currentBalance: number;
+    currentBalance: number | null;  // null — роль admin до закрытия смены
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
 
 export interface CashboxBalances {
-    balance: number;
-    cash: number;
+    /** null — наличные скрыты (роль admin до закрытия смены, решение владельца 3, 09.11). */
+    balance: number | null;
+    cash: number | null;
     card_tbc: number;  // snake_case from backend
     card_bog: number;
+    /** true — сервер скрыл наличные и общий итог для этой роли. */
+    cashHidden?: boolean;
 }
 
 export const cashboxApi = {
@@ -334,10 +339,12 @@ export const cashboxApi = {
      *  startingBalance. Don't reach for the snake_case names here — they're
      *  undefined on the wire and silently crashed EndShiftModal in Safari. */
     previewCloseShift: async (branch?: string): Promise<{
-        startingBalance: number;
-        cashIn: number;
-        cashOut: number;
-        expected: number;
+        /** null у роли admin (решение 3, 09.11): «ожидалось» — только после закрытия. */
+        startingBalance: number | null;
+        cashIn: number | null;
+        cashOut: number | null;
+        expected: number | null;
+        cashHidden?: boolean;
         txCount: number;
         shiftStart: string | null;
         now: string;

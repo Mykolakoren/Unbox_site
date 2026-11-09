@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, EyeOff } from 'lucide-react';
+import { Search, Eye, EyeOff } from 'lucide-react';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { crmApi, type CrmNote, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
@@ -11,6 +11,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatDayMonth, formatTime } from '../../../utils/format';
+import { useNotesHidden } from './notesPrivacy';
 
 /**
  * Mobile CRM — recent notes across all clients, newest first.
@@ -24,28 +25,18 @@ import { formatDayMonth, formatTime } from '../../../utils/format';
  *
  * Волна 3 (G6-25): лента не раскрывает конфиденциальный текст целиком —
  * две строки, а «Скрывать текст» прячет его совсем (имя и дата остаются).
- * Выбор помним на этом телефоне (localStorage — удобство, не данные).
+ * 09.11 (ревью п. 10): «Скрывать текст» — общая настройка всей мобильной CRM
+ * (notesPrivacy.ts), по умолчанию ВКЛЮЧЕНА; действует и в карточке клиента,
+ * и в шторке сессии.
  */
-const HIDE_KEY = 'unbox.mcrm.notes.hideText';
-
-function readHide(): boolean {
-    try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; }
-}
 export function MobileCrmNotes() {
     const [notes, setNotes] = useState<CrmNote[]>([]);
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
-    const [hideText, setHideText] = useState(readHide);
+    const [hideText, toggleHide] = useNotesHidden();
     const { clients, fetchClients } = useCrmStore();
     useDocumentTitle('Заметки · Psy-CRM');
-    const toggleHide = () => {
-        setHideText(v => {
-            const next = !v;
-            try { localStorage.setItem(HIDE_KEY, next ? '1' : '0'); } catch { /* приватный режим — просто не запомним */ }
-            return next;
-        });
-    };
 
     const loadNotes = () => {
         setLoading(true);
@@ -122,13 +113,15 @@ export function MobileCrmNotes() {
                         }}
                     />
                 </div>
+                {/* Дизайн-ревью п. 23: подпись и значок по состоянию, aria-pressed. */}
                 <Chip
                     selected={hideText}
+                    aria-pressed={hideText}
                     onClick={toggleHide}
-                    icon={<EyeOff size={16} aria-hidden="true" />}
+                    icon={hideText ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
                     style={{ marginTop: 8 }}
                 >
-                    Скрывать текст
+                    {hideText ? 'Текст скрыт · показать' : 'Скрыть текст'}
                 </Chip>
             </div>
 
@@ -184,7 +177,7 @@ export function MobileCrmNotes() {
                             </div>
                             {hideText ? (
                                 <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
-                                    Текст скрыт — откройте карточку клиента
+                                    Текст скрыт — нажмите «Текст скрыт · показать»
                                 </div>
                             ) : (
                                 <div style={{

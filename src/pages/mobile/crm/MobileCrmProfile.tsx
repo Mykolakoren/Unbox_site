@@ -197,7 +197,9 @@ export function MobileCrmProfile() {
                     to="/m/crm/schedule"
                     style={{
                         display: 'flex', alignItems: 'center', gap: 12,
-                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
+                        // Дизайн-ревью п. 1: большой тёмный блок — panel, а не ink
+                        // (ink в тёмной теме светлый — получалось светлое пятно).
+                        background: 'var(--color-panel)', color: 'var(--color-on-panel)',
                         borderRadius: 14, padding: '14px 14px',
                         textDecoration: 'none',
                     }}
@@ -205,7 +207,7 @@ export function MobileCrmProfile() {
                     <CalendarClock size={22} aria-hidden="true" style={{ flexShrink: 0 }} />
                     <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>Часы приёма</span>
-                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-on-ink)', opacity: 0.8, marginTop: 2 }}>
+                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-on-panel)', opacity: 0.8, marginTop: 2 }}>
                             Клиенты записываются к вам на сайте только в эти часы
                         </span>
                     </span>

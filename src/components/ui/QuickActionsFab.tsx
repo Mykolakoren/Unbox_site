@@ -102,11 +102,11 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                         style={{
                             padding: '12px 14px',
                             borderBottom: '1px solid var(--color-ink-08)',
-                            fontSize: 11,
-                            letterSpacing: '0.18em',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
-                            color: themed('#6b7280', 'var(--color-ink-60)'),
-                            fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+                            color: 'var(--color-ink-60)',
                         }}
                     >
                         {label}
@@ -174,8 +174,9 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                     width: 52,
                     height: 52,
                     borderRadius: '50%',
-                    background: open ? themed('#111', 'var(--color-ink)') : 'var(--color-accent)',
-                    color: themed('#fff', open ? 'var(--color-on-ink)' : 'var(--color-on-accent)'),
+                    // Открыто — тёмная панель (panel), а не ink: ink в тёмной теме светлый.
+                    background: open ? 'var(--color-panel)' : 'var(--color-accent)',
+                    color: open ? 'var(--color-on-panel)' : 'var(--color-on-accent)',
                     border: 'none',
                     cursor: 'pointer',
                     boxShadow: '0 10px 30px rgba(71,109,107,0.35)',
@@ -186,10 +187,10 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                     transform: open ? 'rotate(90deg)' : 'none',
                 }}
                 onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = open ? themed('#000', 'var(--color-ink-80)') : themed('#3c5b5a', 'var(--color-accent-hover)');
+                    (e.currentTarget as HTMLButtonElement).style.background = open ? 'var(--color-panel)' : 'var(--color-accent-hover)';
                 }}
                 onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = open ? themed('#111', 'var(--color-ink)') : 'var(--color-accent)';
+                    (e.currentTarget as HTMLButtonElement).style.background = open ? 'var(--color-panel)' : 'var(--color-accent)';
                 }}
             >
                 {open ? <X size={22} /> : <Zap size={22} />}

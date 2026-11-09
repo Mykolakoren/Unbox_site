@@ -122,7 +122,7 @@ export function ChessboardScroller({
                 tabIndex={0}
                 className={scrollClassName
                     ? `${scrollClassName} scrollbar-visible focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40`
-                    : 'overflow-x-auto scrollbar-visible rounded-xl border border-unbox-light shadow-sm bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40'}
+                    : 'overflow-x-auto scrollbar-visible rounded-2xl border border-unbox-light shadow-sm bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40'}
             >
                 {children}
             </div>

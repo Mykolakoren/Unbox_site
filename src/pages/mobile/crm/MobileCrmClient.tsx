@@ -28,12 +28,17 @@ import { formatDateLabel, formatDayMonth, formatMoney, formatTime, formatTimeRan
 import { SessionActionSheet } from './SessionActionSheet';
 import { ClientEditSheet } from './ClientEditSheet';
 import { undoToast } from '../../../components/ui/undoToast';
-import { linkCabinetPath, nextSessionLabel, useBookNext } from './crmFlows';
-import { sessionDebt } from '../../../utils/sessionMoney';
+import { aliasLabel, linkCabinetPath, nextSessionLabel, useBookNext } from './crmFlows';
+import {
+    isBillableStatus, partialPayment, priceFromClientRate, sessionCurrencyOf, sessionDebt, sessionPriceOf,
+} from '../../../utils/sessionMoney';
+import { useNotesHidden } from './notesPrivacy';
 
 /** Дата/время из базы (UTC) — по Батуми. */
 const TZ = { timeZone: BATUMI_TZ };
 const CANCELLED = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
+/** Лента клиента показывается порциями (ревью п. 16): было молча 30 последних. */
+const FEED_PAGE = 30;
 
 /** 1 сессия, 2 сессии, 5 сессий. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -102,6 +107,8 @@ export function MobileCrmClient() {
     const [noteOpen, setNoteOpen] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [pausing, setPausing] = useState(false);
+    const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+    useEffect(() => { setFeedLimit(FEED_PAGE); }, [clientId]);
     // Без имени клиента: вкладку видно при показе экрана, и она остаётся в истории браузера.
     useDocumentTitle('Клиент · Psy-CRM');
 
@@ -183,8 +190,9 @@ export function MobileCrmClient() {
             const ts = n.createdAt ? parseUTC(n.createdAt).getTime() : 0;
             if (Number.isFinite(ts) && ts > 0) out.push({ kind: 'note', ts, note: n });
         }
-        return out.sort((a, b) => b.ts - a.ts).slice(0, 30);
+        return out.sort((a, b) => b.ts - a.ts);
     }, [sessions, payments, notes]);
+    const sessionById = useMemo(() => new Map(sessions.map(s => [s.id, s])), [sessions]);
 
     if (loading) {
         return (
@@ -279,7 +287,7 @@ export function MobileCrmClient() {
                     {client.name}
                     {client.aliasCode && (
                         <span className="num" style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-ink-60)', marginLeft: 8 }}>
-                            #{client.aliasCode}
+                            {aliasLabel(client.aliasCode)}
                         </span>
                     )}
                 </h1>
@@ -413,16 +421,16 @@ export function MobileCrmClient() {
                 <div style={{ padding: '0 16px' }}>
                     <div style={debtBox}>
                         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-                            <div className="num" style={{ fontSize: 16, fontWeight: 600 }}>Долг {debtTotal}</div>
+                            {/* Дизайн-ревью п. 7: сумма долга — один раз; цифры моноширинным только в сумме. */}
+                            <div style={{ fontSize: 16, fontWeight: 600 }}>Долг <span className="num">{debtTotal}</span></div>
                             <div style={{ fontSize: 14 }}>
                                 {unpaid.length} {plural(unpaid.length, 'сессия', 'сессии', 'сессий')} без оплаты
                             </div>
                         </div>
                         {!viewingOther && (
-                            // Кнопка только открывает список неоплаченных — подпись не
-                            // обещает мгновенную оплату (оплата — по строке в шторке).
-                            <Button size="touch" onClick={() => setUnpaidOpen(true)}>
-                                {`Долг ${debtTotal} · Оплатить`}
+                            // Кнопка только открывает список неоплаченных — оплата по строке.
+                            <Button variant="secondary" size="touch" onClick={() => setUnpaidOpen(true)}>
+                                Отметить оплату…
                             </Button>
                         )}
                     </div>
@@ -434,7 +442,7 @@ export function MobileCrmClient() {
                 <div style={{ padding: '0 16px', fontSize: 14, color: 'var(--color-ink-80)' }}>
                     {[
                         client.basePrice > 0 ? `Ставка ${formatMoney(client.basePrice, { currency: cur })}` : '',
-                        `оплачено всего ${formatMoney(balance.totalPaid ?? 0, { currency: cur })}`,
+                        `оплачено за всё время ${formatMoney(balance.totalPaid ?? 0, { currency: cur })}`,
                         (balance.prepayment ?? 0) > 0 ? `аванс ${formatMoney(balance.prepayment, { currency: cur })}` : '',
                     ].filter(Boolean).join(' · ')}
                 </div>
@@ -465,14 +473,21 @@ export function MobileCrmClient() {
                     />
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {timeline.map(item => (
+                        {timeline.slice(0, feedLimit).map(item => (
                             <TimelineRow
                                 key={`${item.kind}-${itemId(item)}`}
                                 item={item}
+                                client={client}
+                                sessionById={sessionById}
                                 onOpenSession={setActiveSheet}
                                 onEditPayment={viewingOther ? undefined : setEditingPayment}
                             />
                         ))}
+                        {timeline.length > feedLimit && (
+                            <Button variant="secondary" block onClick={() => setFeedLimit(n => n + FEED_PAGE)}>
+                                {`Показать ещё ${Math.min(FEED_PAGE, timeline.length - feedLimit)} · всего ${timeline.length}`}
+                            </Button>
+                        )}
                     </div>
                 )}
             </div>
@@ -651,8 +666,10 @@ function itemId(item: TimelineItem): string {
 }
 
 /** Строка ленты клиента. Сессия — кнопка: открывает шторку сессии. */
-function TimelineRow({ item, onOpenSession, onEditPayment }: {
+function TimelineRow({ item, client, sessionById, onOpenSession, onEditPayment }: {
     item: TimelineItem;
+    client: CrmClient;
+    sessionById: Map<string, CrmSession>;
     onOpenSession: (s: CrmSession) => void;
     /** Карандаш «Изменить оплату» на платеже; нет — «просмотр как специалист». */
     onEditPayment?: (p: CrmPayment) => void;
@@ -663,6 +680,7 @@ function TimelineRow({ item, onOpenSession, onEditPayment }: {
         const s = item.session;
         const isCancelled = s.status?.startsWith('CANCELLED');
         const isPlanned = s.status === 'PLANNED';
+        const money = sessionMoneyLine(s, client, isPlanned && item.ts > Date.now());
         // Прошла, но не отмечена — как на экране дня: янтарным, а не «Запланирована».
         const isUnmarked = isPlanned && item.ts + (s.durationMinutes ?? 60) * 60000 < Date.now();
         // Цвет — по тону статуса из общего словаря; «не отмечена» — янтарное «ждём».
@@ -692,8 +710,7 @@ function TimelineRow({ item, onOpenSession, onEditPayment }: {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                         {formatDateLabel(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
-                        {s.price ? ` · ${formatMoney(s.price, { currency: s.currency || 'GEL' })}` : ''}
-                        {s.isPaid ? ` · ${statusLabel('payment', 'paid').toLowerCase()}` : ''}
+                        {money ? ` · ${money}` : ''}
                     </div>
                 </div>
                 <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
@@ -702,6 +719,8 @@ function TimelineRow({ item, onOpenSession, onEditPayment }: {
     }
     if (item.kind === 'payment') {
         const p = item.payment;
+        // Ревью п. 8: за какую сессию платёж («за 3 нояб.»).
+        const forSession = p.sessionId ? sessionById.get(p.sessionId) : undefined;
         return (
             <div style={{ ...rowBase, cursor: 'default' }}>
                 <div style={{
@@ -717,6 +736,7 @@ function TimelineRow({ item, onOpenSession, onEditPayment }: {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
                         {formatDayMonth(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
+                        {forSession ? ` · за ${formatDayMonth(parseUTC(forSession.date), TZ)}` : ''}
                         {p.account ? ` · ${accountLabel(p.account, paymentAccounts)}` : ''}
                     </div>
                 </div>
@@ -757,12 +777,35 @@ const NOTE_PREVIEW_CHARS = 140;
  *  Длинная заметка обрезается, тап раскрывает её целиком. */
 function NoteRow({ note: n }: { note: CrmNote }) {
     const [expanded, setExpanded] = useState(false);
+    // Ревью п. 10: «Скрывать текст» (общая настройка, по умолчанию вкл.) —
+    // «Заметка · 9 нояб.», текст по тапу.
+    const [hidden] = useNotesHidden();
+    const [revealed, setRevealed] = useState(false);
     const content = n.content || '';
     const isLong = content.length > NOTE_PREVIEW_CHARS;
+    const masked = hidden && !revealed;
+    if (masked) {
+        return (
+            <button
+                type="button"
+                onClick={() => setRevealed(true)}
+                aria-label="Заметка — показать текст"
+                style={noteRowStyle(true)}
+            >
+                <div style={noteIcon}><FileText size={14} aria-hidden="true" /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+                        Заметка{n.createdAt ? ` · ${formatDayMonth(parseUTC(n.createdAt), TZ)}` : ''}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>Текст скрыт · нажмите, чтобы показать</div>
+                </div>
+            </button>
+        );
+    }
     return (
         <button
             type="button"
-            onClick={() => { if (isLong) setExpanded(v => !v); }}
+            onClick={() => { if (isLong) setExpanded(v => !v); else if (hidden) setRevealed(false); }}
             aria-expanded={isLong ? expanded : undefined}
             // Заметка — нейтральная карточка: цвет только для статуса.
             style={{
@@ -799,4 +842,36 @@ function NoteRow({ note: n }: { note: CrmNote }) {
             </div>
         </button>
     );
+}
+
+const noteIcon: React.CSSProperties = {
+    width: 30, height: 30, borderRadius: 8,
+    background: 'var(--color-card)', color: 'var(--color-ink-80)',
+    display: 'grid', placeItems: 'center', flexShrink: 0,
+};
+
+function noteRowStyle(clickable: boolean): React.CSSProperties {
+    return {
+        background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
+        borderRadius: 10, padding: '9px 12px', minHeight: 52,
+        display: 'flex', alignItems: 'center', gap: 10,
+        width: '100%', textAlign: 'left', fontFamily: 'inherit',
+        cursor: clickable ? 'pointer' : 'default', color: 'var(--color-ink)',
+    };
+}
+
+/**
+ * Деньги сессии строкой (ревью п. 1, 8): «120 ₾ · оплачено 60, долг 60».
+ * Цена — своя или ставка клиента (как считает сервер); у будущей — только цена.
+ */
+function sessionMoneyLine(s: CrmSession, client: CrmClient, future: boolean): string {
+    const price = sessionPriceOf(s, client);
+    const currency = sessionCurrencyOf(s, client);
+    const parts: string[] = [];
+    if (price > 0) parts.push(`${formatMoney(price, { currency })}${priceFromClientRate(s, client) ? ' (ставка)' : ''}`);
+    const partial = partialPayment(s, client);
+    if (s.isPaid) parts.push(statusLabel('payment', 'paid').toLowerCase());
+    else if (partial) parts.push(`оплачено ${formatMoney(partial.paid, { currency })}, долг ${formatMoney(partial.remaining, { currency })}`);
+    else if (!future && (isBillableStatus(s.status) || s.status === 'PLANNED') && sessionDebt(s, client).amount > 0) parts.push('не оплачено');
+    return parts.join(' · ');
 }

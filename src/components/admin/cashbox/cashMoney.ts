@@ -34,7 +34,7 @@ export interface AnalyticsLike {
     categoryBreakdown: { categoryName: string; total: number; percentage: number }[];
     totalIncome: number;
     totalExpense: number;
-    currentBalance?: number;
+    currentBalance?: number | null;
 }
 
 /** Корректировка — не деньги (не приход и не расход кассы). */

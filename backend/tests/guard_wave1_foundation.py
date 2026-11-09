@@ -80,10 +80,11 @@ def _contrast(fg: str, bg: str) -> float:
 # ─────────────────────────────────────────────────────────────────────────
 
 EXPECTED = {
-    "--color-paper": "#FAFAF7",
-    "--color-card": "#FDFDFB",
-    "--color-surface": "#FDFDFB",
-    "--color-sunken": "#F4F4F2",
+    # 09.11: палитра по макету владельца — тёплая бумага (были #FAFAF7 / #FDFDFB / #F4F4F2).
+    "--color-paper": "#F4F2EC",
+    "--color-card": "#FBFAF6",
+    "--color-surface": "#FBFAF6",
+    "--color-sunken": "#EDEAE2",
     "--color-ink": "#0F0F10",
     "--color-ink-60": "rgba(15,15,16,0.60)",
     "--color-ink-30": "rgba(15,15,16,0.30)",

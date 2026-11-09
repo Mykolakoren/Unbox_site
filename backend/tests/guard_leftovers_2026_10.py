@@ -91,7 +91,7 @@ def test_bookings_new_booking_button_in_header():
     assert src.index("Все брони") < btn < src.index("<GroupLabel>Когда</GroupLabel>"), \
         "«+ Бронь» не в шапке «Броней»"
     link = src[src.rfind("<Link", 0, btn):src.index("</Link>", btn)]
-    assert 'to="/m/find"' in link, "«+ Бронь» ведёт не в общий поиск слота /m/find"
+    assert 'to="/m/find?admin=1"' in link, "«+ Бронь» ведёт не в общий поиск слота /m/find"
     assert "onClick={() => setBookingForUser(null)}" in link, "«+ Бронь» не сбрасывает «бронь за клиента»"
     # Заметная, как на «Сегодня»: тёмная, с подписью «Бронь», палец попадает (44 px).
     assert "background: 'var(--color-ink)'" in link and "minHeight: 44" in link, "«+ Бронь» в шапке стала незаметной"

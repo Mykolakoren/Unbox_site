@@ -75,7 +75,11 @@ export function MobileAdminTasks() {
     const [tasks, setTasks] = useState<AdminTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
-    const [tab, setTab] = useState<FilterTab>('mine');
+    const [tab, setTabRaw] = useState<FilterTab>('mine');
+    // Ревью 09.11 (№18): у руководителя своих задач нет — открываем «Команду», а не
+    // пустой экран «У вас нет открытых задач». Выбрал вкладку сам — не трогаем.
+    const tabTouched = useRef(false);
+    const setTab = (t: FilterTab) => { tabTouched.current = true; setTabRaw(t); };
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
     const [query, setQuery] = useState('');
     const [openTask, setOpenTask] = useState<AdminTask | null>(null);
@@ -110,6 +114,15 @@ export function MobileAdminTasks() {
         () => tasks.filter(t => t.assigneeId === currentUser?.id && t.status !== 'DONE').length,
         [tasks, currentUser?.id],
     );
+    useEffect(() => {
+        if (loading || tabTouched.current || tab !== 'mine') return;
+        if (myCount === 0 && tasks.some(t => !!t.assigneeId && t.status !== 'DONE')) setTabRaw('team');
+    }, [loading, myCount, tasks, tab]);
+    // Числа на вкладках — с учётом «Открытые / Все / Сделано» (раньше «Команда · 7»
+    // считала и выполненные, а в списке было 5 открытых).
+    const byStatus = useMemo(() => tasks.filter(t =>
+        statusFilter === 'open' ? t.status !== 'DONE' : statusFilter === 'done' ? t.status === 'DONE' : true,
+    ), [tasks, statusFilter]);
 
     const filtered = useMemo(() => {
         let list = tasks;
@@ -249,10 +262,10 @@ export function MobileAdminTasks() {
                 <div style={{ padding: '0 16px' }}>
                     <div role="group" aria-label="Чьи задачи" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
                         {([
-                            ['mine', 'Мои', myCount],
-                            ['team', 'Команда', tasks.filter(t => !!t.assigneeId).length],
-                            ['overdue', 'Просроченные', overdueCount],
-                            ['all', 'Все', tasks.length],
+                            ['mine', 'Мои', byStatus.filter(t => t.assigneeId === currentUser?.id).length],
+                            ['team', 'Команда', byStatus.filter(t => !!t.assigneeId).length],
+                            ['overdue', 'Просроченные', byStatus.filter(isOverdue).length],
+                            ['all', 'Все', byStatus.length],
                         ] as Array<[FilterTab, string, number]>).map(([id, label, count]) => {
                             const active = tab === id;
                             const urgent = id === 'overdue' && count > 0 && !active;
@@ -426,7 +439,9 @@ function TaskRow({ task: t, assigneeName, onTap, onAdvanceStatus }: {
                     textDecoration: t.status === 'DONE' ? 'line-through' : 'none',
                 }}>
                     {t.priority === 'HIGH' && (
-                        <AlertTriangle size={14} aria-label="Срочная" style={{ color: 'var(--status-danger-fg)', marginRight: 4, verticalAlign: '-2px' }} />
+                        <span style={{ color: 'var(--status-danger-fg)', marginRight: 6, whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 }}>
+                            <AlertTriangle size={14} aria-hidden="true" style={{ marginRight: 2, verticalAlign: '-2px' }} />срочно
+                        </span>
                     )}
                     {t.title}
                 </div>
@@ -526,6 +541,14 @@ function TaskDetailSheet({ task, assigneeName, onClose, onChange, onDelete }: {
             const updated = await adminTasksApi.update(task.id, { labels });
             onChange(updated);
         } catch { toast.error('Не удалось сохранить повтор. Попробуйте ещё раз'); } finally { setBusy(false); }
+    };
+    const setDeadline = async (day: string | null) => {
+        setBusy(true);
+        try {
+            const deadline = day ? endOfDayIso(day) : null;
+            const updated = await adminTasksApi.update(task.id, { deadline });
+            onChange(updated);
+        } catch { toast.error('Не удалось поменять срок. Попробуйте ещё раз'); } finally { setBusy(false); }
     };
     const currentRecurrence = getRecurrence(task);
     const remove = async () => {
@@ -658,16 +681,31 @@ function TaskDetailSheet({ task, assigneeName, onClose, onChange, onDelete }: {
                     )}
                 </div>
 
-                {/* Deadline */}
-                {task.deadline && (
-                    <div>
-                        <div style={fieldLabel}>Срок</div>
-                        <div style={{ fontSize: 14, color: isOverdue(task) ? 'var(--status-danger-fg)' : 'var(--color-ink)', fontWeight: 600 }}>
+                {/* Срок — можно поменять с телефона (ревью 09.11, №19). */}
+                <div>
+                    <div style={fieldLabel}>Срок</div>
+                    {task.deadline && (
+                        <div style={{ fontSize: 14, color: isOverdue(task) ? 'var(--status-danger-fg)' : 'var(--color-ink)', fontWeight: 600, marginBottom: 6 }}>
                             {formatDateLabel(new Date(task.deadline), { capitalize: true })}
                             {isOverdue(task) && <span style={{ marginLeft: 8 }}>· просрочена</span>}
                         </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                            type="date"
+                            aria-label={task.deadline ? 'Перенести срок' : 'Поставить срок'}
+                            value={task.deadline ? localDayKey(new Date(task.deadline)) : ''}
+                            disabled={busy}
+                            onChange={e => { if (e.target.value) setDeadline(e.target.value); }}
+                            style={dateInputStyle}
+                        />
+                        {task.deadline && (
+                            <Button variant="secondary" size="touch" disabled={busy} onClick={() => setDeadline(null)}>
+                                Без срока
+                            </Button>
+                        )}
                     </div>
-                )}
+                </div>
 
                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
                     Создал: {task.createdByName} · {formatDayMonth(new Date(task.createdAt))}, {formatTime(new Date(task.createdAt))}
@@ -701,7 +739,8 @@ function CreateTaskSheet({ onClose, onCreated }: {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [assigneeId, setAssigneeId] = useState<string | null>(currentUser?.id ?? null);
-    const [deadlinePreset, setDeadlinePreset] = useState<'today' | 'tomorrow' | 'week' | 'none'>('none');
+    const [deadlinePreset, setDeadlinePreset] = useState<'today' | 'tomorrow' | 'week' | 'none' | 'custom'>('none');
+    const [customDay, setCustomDay] = useState('');
     const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
     const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
     const [busy, setBusy] = useState(false);
@@ -710,12 +749,13 @@ function CreateTaskSheet({ onClose, onCreated }: {
 
     const deadline = useMemo(() => {
         if (deadlinePreset === 'none') return null;
+        if (deadlinePreset === 'custom') return customDay ? new Date(endOfDayIso(customDay)) : null;
         const d = new Date();
         d.setHours(23, 59, 0, 0);
         if (deadlinePreset === 'tomorrow') d.setDate(d.getDate() + 1);
         if (deadlinePreset === 'week') d.setDate(d.getDate() + 7);
         return d;
-    }, [deadlinePreset]);
+    }, [deadlinePreset, customDay]);
 
     const submit = async () => {
         if (!title.trim()) {
@@ -826,7 +866,8 @@ function CreateTaskSheet({ onClose, onCreated }: {
                             ['today', 'Сегодня'],
                             ['tomorrow', 'Завтра'],
                             ['week', 'Через неделю'],
-                        ] as Array<['today' | 'tomorrow' | 'week' | 'none', string]>).map(([id, label]) => (
+                            ['custom', 'Дата…'],
+                        ] as Array<['today' | 'tomorrow' | 'week' | 'none' | 'custom', string]>).map(([id, label]) => (
                             <Chip
                                 key={id}
                                 selected={deadlinePreset === id}
@@ -836,6 +877,16 @@ function CreateTaskSheet({ onClose, onCreated }: {
                             </Chip>
                         ))}
                     </div>
+                    {deadlinePreset === 'custom' && (
+                        <input
+                            type="date"
+                            aria-label="Дата срока"
+                            value={customDay}
+                            min={localDayKey(new Date())}
+                            onChange={e => setCustomDay(e.target.value)}
+                            style={{ ...dateInputStyle, marginTop: 8, width: '100%' }}
+                        />
+                    )}
                 </div>
 
                 <div>
@@ -876,6 +927,24 @@ function CreateTaskSheet({ onClose, onCreated }: {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────
+/** «2026-11-12» — день по часам телефона (срок задачи — локальный конец дня). */
+function localDayKey(d: Date): string {
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Конец выбранного дня (23:59 по часам телефона) — как у «Сегодня / Завтра». */
+function endOfDayIso(day: string): string {
+    const [y, m, d] = day.split('-').map(Number);
+    return new Date(y, m - 1, d, 23, 59, 0, 0).toISOString();
+}
+
+const dateInputStyle: React.CSSProperties = {
+    flex: 1, minHeight: 44, padding: '0 12px', borderRadius: 8,
+    border: '1px solid var(--color-ink-20)', background: 'var(--color-card)',
+    fontSize: 16, fontFamily: 'inherit', color: 'var(--color-ink)',
+};
+
 function isOverdue(t: AdminTask): boolean {
     if (t.status === 'DONE') return false;
     if (!t.deadline) return false;

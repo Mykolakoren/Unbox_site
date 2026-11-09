@@ -74,6 +74,10 @@ export interface SubscriptionHours {
     reserved: number;
     /** Свободно для новой брони: пул минус уже забронированное. */
     free: number;
+    /** Объём абонемента целиком («всего 10 ч»): часы тарифа + бонусные
+     *  (+ доп. пул, если он подходит брони); у недельного пакета — неделя.
+     *  Одно число на всех экранах (ревью 09.11, №3). */
+    total: number;
     /** Из `remaining`/`pool` — часы доп. пула (капсула / «индивидуально»),
      *  которые подходят этой брони (владелец 01.10; сервер тратит их первыми). */
     extra: number;
@@ -134,7 +138,7 @@ export function subscriptionHours(
         liftPause?: boolean;
     },
 ): SubscriptionHours {
-    const empty = { remaining: 0, pool: 0, reserved: 0, free: 0, extra: 0 };
+    const empty = { remaining: 0, pool: 0, reserved: 0, free: 0, extra: 0, total: 0 };
     if (!sub) return { ok: false, active: false, reason: 'Нет абонемента', ...empty };
     const life = subscriptionLifecycle(sub as any, opts.now);
     // На паузе: «действует» он станет, только если бронь снимет паузу — это
@@ -156,13 +160,15 @@ export function subscriptionHours(
     if (!formats.includes(opts.format)) {
         if (extra > 0) {
             // Формат не входит в основной пул — платить может только доп. пул.
-            return { ok: true, active, reason: '', remaining: extra, pool: extra, reserved: 0, free: extra, extra, extraLabel, paused };
+            return { ok: true, active, reason: '', remaining: extra, pool: extra, reserved: 0, free: extra, extra, extraLabel, paused,
+                total: extraPool(sub)?.total ?? extra };
         }
         return {
             ok: false,
             active,
             reason: `Абонемент только для ${formats.includes('individual') ? 'индивидуальной' : 'групповой'} работы`,
             remaining: mainRemaining, pool: mainRemaining, reserved: 0, free: mainRemaining, extra: 0, paused,
+            total: planTotal(sub, mainRemaining),
         };
     }
     const remaining = mainRemaining + extra;
@@ -173,6 +179,8 @@ export function subscriptionHours(
     if (weekly && sub.packageWeek && week > sub.packageWeek) {
         pool = Number(sub.weeklyHours) || Number(sub.totalHours) || mainRemaining;
     }
+    const total = (weekly ? (Number(sub.weeklyHours) || planTotal(sub, pool)) : planTotal(sub, mainRemaining))
+        + (extra > 0 ? (extraPool(sub)?.total ?? extra) : 0);
 
     const reserved = reservedSubscriptionHours(sub, opts.bookings, opts.ownerEmail, {
         weekOf: opts.bookingDate,
@@ -190,17 +198,46 @@ export function subscriptionHours(
         extra,
         extraLabel,
         paused,
+        total: Math.max(total, pool + extra),
     };
 }
 
-/** Подпись остатка: «Осталось 6 ч» или «Свободно 2 ч из 6 — 4 ч уже в бронях». */
-export function subscriptionHoursLabel(s: SubscriptionHours): string {
+/** Часы тарифа + бонусные (у Профи+ 40 + 2); не меньше остатка. */
+function planTotal(sub: Subscription, remaining: number): number {
+    const t = (Number(sub.totalHours) || 0) + (Number((sub as { bonusHours?: number }).bonusHours) || 0);
+    return Math.max(t, remaining);
+}
+
+/**
+ * Остаток абонемента для экранов «Я» и «Абонемент» — та же математика, что в
+ * оформлении (subscriptionHours), чтобы на всех экранах было ОДНО число
+ * (ревью 09.11, №3: было «7 из 10», «2 из 10» и «2 из 7» у одного абонемента).
+ * На паузе / после срока subscriptionHours не считает — тогда остаток минус
+ * уже обещанное будущим броням.
+ */
+export function subscriptionOverview(
+    sub: Subscription | null | undefined,
+    bookings: BookingHistoryItem[],
+    ownerEmail: string | null | undefined,
+): { free: number; reserved: number; total: number; extraLabel?: string; extra: number } | null {
+    if (!sub) return null;
+    const format = ((sub.includedFormats && sub.includedFormats[0]) || 'individual') as Format;
+    const h = subscriptionHours(sub, { format, bookingDate: new Date(), bookings, ownerEmail });
+    if (h.ok) return { free: h.free, reserved: h.reserved, total: h.total, extra: h.extra, extraLabel: h.extraLabel };
+    const reserved = reservedSubscriptionHours(sub, bookings, ownerEmail);
+    const remaining = Math.max(0, Number(sub.remainingHours) || 0);
+    return { free: Math.max(0, remaining - reserved), reserved, total: planTotal(sub, remaining), extra: 0 };
+}
+
+/** Подпись остатка — одна форма на всех экранах (ревью 09.11, №3):
+ *  «Свободно 2 ч · ещё 5 ч в ваших бронях · всего 10 ч» или «Свободно 7 ч из 10 ч». */
+export function subscriptionHoursLabel(s: Pick<SubscriptionHours, 'free' | 'reserved' | 'total' | 'extra' | 'extraLabel'>): string {
     // «из них 1 ч капсулы» — часы доп. пула идут первыми (владелец 01.10).
     const x = s.extra > 0.01 ? ` (из них ${fmtHours(s.extra)} — ${(s.extraLabel || '').toLowerCase()})` : '';
     if (s.reserved > 0.01) {
-        return `Свободно ${Number(s.free.toFixed(1))} из ${fmtHours(s.pool)}${x} — ${fmtHours(s.reserved)} уже в бронях`;
+        return `Свободно ${fmtHours(s.free)}${x} · ещё ${fmtHours(s.reserved)} в ваших бронях · всего ${fmtHours(s.total)}`;
     }
-    return `Осталось ${fmtHours(s.pool)}${x}`;
+    return `Свободно ${fmtHours(s.free)} из ${fmtHours(s.total)}${x}`;
 }
 
 export interface PaymentPlan {

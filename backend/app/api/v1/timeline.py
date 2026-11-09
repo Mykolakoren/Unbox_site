@@ -11,6 +11,9 @@ from app.core.permissions import ADMIN_ROLES
 
 router = APIRouter()
 
+# События, которые видит только персонал (не сам клиент в своей истории).
+STAFF_ONLY_EVENT_TYPES = ("late_cancel_override",)
+
 @router.get("/", response_model=List[TimelineEventRead])
 def read_timeline_events(
     session: Session = Depends(get_session),
@@ -51,6 +54,10 @@ def read_timeline_events(
             raise HTTPException(status_code=403, detail="Not authorized for that target_id")
 
     query = select(TimelineEvent)
+    if current_user.role not in ADMIN_ROLES:
+        # 09.11 (ревизия безопасности): служебные записи — только для персонала.
+        # Причина «отмены в обход правил» пишется для владельца, клиент её не видит.
+        query = query.where(TimelineEvent.event_type.notin_(STAFF_ONLY_EVENT_TYPES))
     if target_id:
         query = query.where(TimelineEvent.target_id == target_id)
     if event_type:

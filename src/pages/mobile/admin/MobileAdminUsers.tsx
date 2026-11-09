@@ -10,6 +10,7 @@ import { COLOR } from '../../../design/tokens';
 import { formatGel } from '../../../utils/format';
 import { TopupSheet } from './TopupSheet';
 import { userCanAccessFinance } from '../../../utils/permissions';
+import { matchesPerson } from './searchMatch';
 
 /**
  * Mobile admin — users search & quick view.
@@ -56,7 +57,7 @@ export function MobileAdminUsers() {
     }, [users, fetchUsers]);
 
     const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        const q = query.trim();
         const list = users || [];
         let pool = list;
         // Filter chips — owner+admins 2026-05-29: a flat list of 200+ users
@@ -75,11 +76,9 @@ export function MobileAdminUsers() {
         }
         const sorted = [...pool].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
         if (!q) return sorted;
-        return sorted.filter(u =>
-            u.name?.toLowerCase().includes(q)
-            || u.email?.toLowerCase().includes(q)
-            || u.phone?.toLowerCase().includes(q)
-        );
+        // Ревью 09.11 (№6): «599123456» находит «+995 599 12 34 56», «Миронова Елена» —
+        // «Елена Миронова» (телефон по цифрам, имя словами в любом порядке).
+        return sorted.filter(u => matchesPerson(q, { name: u.name, email: u.email, phone: u.phone }));
     }, [users, query, filter]);
 
     const counts = useMemo(() => {

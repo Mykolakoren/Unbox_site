@@ -58,6 +58,14 @@ export const STATUS_DICTIONARY: Record<StatusKind, Record<string, StatusDef>> = 
         not_charged: { label: 'Не списана', tone: 'pending', icon: 'alert' },
         waived:   { label: 'Без оплаты', tone: 'muted', icon: 'minus' },
         refunded: { label: 'Возвращено', tone: 'muted', icon: 'undo' },
+        // Метки оплаты у брони для сотрудников (решение владельца 09.11, как в
+        // компьютерной шахматке): «к оплате N ₾» / «✓ оплачено» (уже списано, долга
+        // нет) / «◌ с баланса» (ещё не списано, баланса хватает — спишется само) /
+        // «абонемент». У брони «Ждёт подтверждения» денежной метки нет вовсе.
+        // Псевдокоды: с сервера не приходят, их выбирает DueBadge.
+        charged:      { label: 'Оплачено', staffLabel: 'оплачено', tone: 'ok', icon: 'check' },
+        covered:      { label: 'С баланса', staffLabel: 'с баланса', tone: 'muted', icon: 'clock' },
+        subscription: { label: 'Абонемент', staffLabel: 'абонемент', tone: 'muted', icon: 'repeat' },
     },
     // Сессия с клиентом в Psy-CRM (CrmSession.status)
     session: {
@@ -65,6 +73,9 @@ export const STATUS_DICTIONARY: Record<StatusKind, Record<string, StatusDef>> = 
         COMPLETED:           { label: 'Прошла', tone: 'muted', icon: 'check' },
         CANCELLED_CLIENT:    { label: 'Отменил клиент', tone: 'danger', icon: 'x' },
         CANCELLED_THERAPIST: { label: 'Отменил специалист', tone: 'danger', icon: 'x' },
+        // 09.11 (решение владельца 6): «Не пришёл / поздняя отмена — оплачивается».
+        // Остаётся в долге, как проведённая.
+        NO_SHOW:             { label: 'Неявка · оплачивается', tone: 'danger', icon: 'alert' },
     },
 };
 

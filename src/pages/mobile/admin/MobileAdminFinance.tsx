@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, TrendingUp, TrendingDown, Wallet, Check, Lock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Wallet, Check, Lock, Trash2, ChevronLeft, ChevronRight, EyeOff, UserRound } from 'lucide-react';
 import { MobileCloseShiftSheet } from './MobileCloseShiftSheet';
-import { MorningChecklistModal } from '../../../components/admin/cashbox/MorningChecklistModal';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -26,6 +25,10 @@ import { formatDayMonth, formatGel, formatMonthLabel, formatTime } from '../../.
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 import { DaySummary } from '../../../components/admin/cashbox/DaySummary';
 import { WeeklyRebates } from '../../../components/admin/cashbox/WeeklyRebates';
+import type { User } from '../../../store/types';
+import { branchLabel, humanizeMoneyText } from './branchLabel';
+import { ClientPickSheet } from './ClientPickSheet';
+import { TopupSheet } from './TopupSheet';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
 type Branch = typeof BRANCHES[number];
@@ -104,13 +107,10 @@ export function MobileAdminFinance() {
     const currentUser = useUserStore(s => s.currentUser);
     if (!currentUser) return null;
     if (!userCanAccessFinance(currentUser)) return <Navigate to="/m/admin/dashboard" replace />;
-    // Чек-лист смены — раз в день, как на компьютере (владелец 13.10).
-    return (
-        <>
-            {currentUser.email && <MorningChecklistModal adminEmail={currentUser.email} />}
-            <MobileAdminFinanceScreen />
-        </>
-    );
+    // Чек-лист смены на телефоне — карточкой «Утро: 2 из 6» на «Сегодня»
+    // (MorningChecklistCard), а не окном поверх «Кассы» (ревью 09.11, №17):
+    // клиент у стойки не должен ждать, пока админ закроет окно.
+    return <MobileAdminFinanceScreen />;
 }
 
 function MobileAdminFinanceScreen() {
@@ -135,6 +135,14 @@ function MobileAdminFinanceScreen() {
     const canEditTx = (_t: { date: string }) => currentUser?.role === 'owner';
     const [showAdd, setShowAdd] = useState(false);
     const [closeShiftOpen, setCloseShiftOpen] = useState(false);
+    // Операция не-владельца — только просмотр (ревью 09.11, №22).
+    const [viewingTx, setViewingTx] = useState<import('../../../api/cashbox').CashboxTransaction | null>(null);
+    // «Деньги от клиента?» → поиск клиента → «Пополнить баланс» (ревью 09.11, №13).
+    const [pickClient, setPickClient] = useState(false);
+    const [topupUser, setTopupUser] = useState<User | null>(null);
+    // Решение владельца 3 (09.11): сумму наличных до закрытия смены роль admin не
+    // видит — сначала пересчитывает сама («слепое» закрытие). Старший и владелец видят.
+    const hideCash = currentUser?.role === 'admin' || !!balances.cashHidden || balances.cash === null;
     // «Закрыть смену» при «Все» — сначала выбрать филиал (каждый филиал — своя смена).
     const [pickShiftBranch, setPickShiftBranch] = useState(false);
 
@@ -312,7 +320,9 @@ function MobileAdminFinanceScreen() {
                     {/* axios-интерсептор клиента конвертит snake_case → camelCase
                         автоматически (см. api/client.ts). Поэтому реально
                         прилетает cardTbc/cardBog, а не card_tbc/card_bog. */}
-                    <BalanceTile label="Наличные" value={balances.cash} />
+                    {hideCash
+                        ? <HiddenCashTile />
+                        : <BalanceTile label="Наличные" value={balances.cash} />}
                     <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
                     <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
                 </div>
@@ -416,7 +426,7 @@ function MobileAdminFinanceScreen() {
                         <TransactionRow
                             key={t.id}
                             tx={t}
-                            onTap={canEditTx(t) ? () => setEditingTx(t) : undefined}
+                            onTap={canEditTx(t) ? () => setEditingTx(t) : () => setViewingTx(t)}
                         />
                     ))}
                 </div>
@@ -450,6 +460,7 @@ function MobileAdminFinanceScreen() {
                     branch={branch === 'all' ? undefined : branch}
                     categories={categories}
                     onClose={() => setShowAdd(false)}
+                    onClientPayment={() => { setShowAdd(false); setPickClient(true); }}
                     onSubmit={async (payload) => {
                         try {
                             await createWithUndo(payload);
@@ -488,6 +499,23 @@ function MobileAdminFinanceScreen() {
                 />
             )}
 
+            {viewingTx && <TransactionViewSheet tx={viewingTx} onClose={() => setViewingTx(null)} />}
+
+            {pickClient && (
+                <ClientPickSheet
+                    onClose={() => setPickClient(false)}
+                    onPick={u => { setPickClient(false); setTopupUser(u); }}
+                />
+            )}
+            {topupUser && (
+                <TopupSheet
+                    user={topupUser}
+                    defaultBranch={branch === 'all' ? undefined : branch}
+                    onClose={() => setTopupUser(null)}
+                    onDone={async () => { setTopupUser(null); await reloadAll(); }}
+                />
+            )}
+
             <Sheet
                 open={pickShiftBranch}
                 onClose={() => setPickShiftBranch(false)}
@@ -515,7 +543,8 @@ function MobileAdminFinanceScreen() {
             {closeShiftOpen && branch !== 'all' && (
                 <MobileCloseShiftSheet
                     branch={branch}
-                    systemBalance={balances.cash}
+                    systemBalance={balances.cash ?? 0}
+                    blind={hideCash}
                     onClose={() => setCloseShiftOpen(false)}
                     onClosed={async () => {
                         setCloseShiftOpen(false);
@@ -563,6 +592,26 @@ function BalanceTile({ label, value }: { label: string; value: number | undefine
     );
 }
 
+/** Наличные для роли admin до закрытия смены — скрыты (решение владельца 3, 09.11). */
+function HiddenCashTile() {
+    return (
+        <div data-cash-hidden style={{
+            background: 'var(--color-card)',
+            border: '1px solid var(--color-ink-08)',
+            borderRadius: 12,
+            padding: '10px 10px 12px',
+        }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
+                Наличные
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', display: 'flex', gap: 4, alignItems: 'flex-start', lineHeight: 1.3 }}>
+                <EyeOff size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+                скрыто до закрытия смены
+            </div>
+        </div>
+    );
+}
+
 function TotalCell({ icon, label, value, positive }: { icon: React.ReactNode; label: string; value: number | undefined | null; positive?: boolean }) {
     // Нет числа (итоги ещё грузятся) — «…», а не ложный «0 ₾».
     const loaded = typeof value === 'number';
@@ -590,10 +639,16 @@ function TransactionRow({ tx, onTap }: {
     const isIncome = tx.type === 'income';
     // Дата из базы — UTC; показываем по Батуми, как десктопная касса.
     const when = parseUTC(tx.date);
+    // Филиал — названием, не кодом «unbox_uni»; способ — по-русски (ревью 09.11, №12).
     const meta = [
-        METHOD_LABEL[tx.paymentMethod] || tx.paymentMethod,
-        tx.branch,
+        METHOD_LABEL[tx.paymentMethod] || 'Другой способ',
+        branchLabel(tx.branch),
         `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}`,
+    ].filter(Boolean).join(' · ');
+    // От кого деньги и кто записал — чтобы в конце смены сверить без компьютера.
+    const who = [
+        txClient(tx),
+        tx.adminName ? `записал(а) ${tx.adminName}` : '',
     ].filter(Boolean).join(' · ');
     return (
         <div
@@ -623,8 +678,13 @@ function TransactionRow({ tx, onTap }: {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {tx.categoryName || tx.description || (isIncome ? 'Доход' : 'Расход')}
+                    {tx.categoryName || humanizeMoneyText(tx.description) || (isIncome ? 'Доход' : 'Расход')}
                 </div>
+                {who && (
+                    <div data-tx-who style={{ fontSize: 12, color: 'var(--color-ink-80)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {who}
+                    </div>
+                )}
                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {meta}
                 </div>
@@ -640,6 +700,49 @@ function TransactionRow({ tx, onTap }: {
         </div>
     );
 }
+/** Имя клиента операции: client_name, иначе из описания «Пополнение баланса: Имя». */
+function txClient(tx: { clientName?: string; description?: string; clientId?: string }): string {
+    if (tx.clientName) return tx.clientName;
+    const m = /:\s*(.+)$/.exec(tx.description || '');
+    if (tx.clientId && m) return m[1].trim();
+    return '';
+}
+
+/** Просмотр операции для не-владельца: менять может только владелец (ревью 09.11, №22). */
+function TransactionViewSheet({ tx, onClose }: {
+    tx: import('../../../api/cashbox').CashboxTransaction;
+    onClose: () => void;
+}) {
+    const when = parseUTC(tx.date);
+    const isIncome = tx.type === 'income';
+    const rows: Array<[string, string]> = [
+        ['Сумма', formatGel(isIncome ? tx.amount : -tx.amount, { sign: true })],
+        ['Статья', tx.categoryName || (isIncome ? 'Доход' : 'Расход')],
+        ['Способ', METHOD_LABEL[tx.paymentMethod] || 'Другой способ'],
+        ['Филиал', branchLabel(tx.branch) || 'не указан'],
+        ['Когда', `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}`],
+        ['Клиент', txClient(tx) || '—'],
+        ['Записал(а)', tx.adminName || '—'],
+        ['Комментарий', humanizeMoneyText(tx.description) || '—'],
+    ];
+    return (
+        <Sheet open onClose={onClose} title={isIncome ? 'Доход' : 'Расход'} description="Изменить или удалить операцию может только владелец. Своя ошибка сегодня — кнопкой «Вернуть» сразу после записи или через старшего админа.">
+            <dl style={{ margin: 0, display: 'flex', flexDirection: 'column' }}>
+                {rows.map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--color-ink-08)' }}>
+                        <dt style={{ width: 110, flexShrink: 0, fontSize: 14, color: 'var(--color-ink-60)' }}>{k}</dt>
+                        <dd style={{ margin: 0, fontSize: 14, color: 'var(--color-ink)', minWidth: 0, overflowWrap: 'anywhere' }}>{v}</dd>
+                    </div>
+                ))}
+            </dl>
+        </Sheet>
+    );
+}
+
+/** Статьи дохода, которые обычно платит клиент: без клиента спросим «Кто платит?». */
+const CLIENT_INCOME_CATEGORY_IDS = new Set(['cat-rent', 'cat-subscription']);
+const CLIENT_INCOME_CATEGORY_NAMES = new Set(['аренда кабинетов', 'абонементы']);
+
 // ── Add Transaction Sheet ──────────────────────────────────────────────────
 
 interface AddPayload {
@@ -661,11 +764,14 @@ function AddTransactionSheet({
     onSubmit,
     initial,
     onDelete,
+    onClientPayment,
 }: {
     branch?: string;
     categories: ReturnType<typeof useCashboxStore.getState>['categories'];
     onClose: () => void;
     onSubmit: (p: AddPayload) => Promise<void>;
+    /** «Деньги от клиента?» → поиск клиента и «Пополнить баланс». Нет — подсказки нет (правка). */
+    onClientPayment?: () => void;
     /** Если задано — режим редактирования: поля пред-заполнены, кнопка
      *  «Сохранить», доступно удаление (owner 2026-06-28). */
     initial?: import('../../../api/cashbox').CashboxTransaction;
@@ -687,6 +793,23 @@ function AddTransactionSheet({
     const parsedAmount = parseMoneyInput(amount);
     const amountError = !isMoneyInputBlank(amount) && parsedAmount === null ? MONEY_INPUT_ERROR : undefined;
     const needBranch = !isEdit && !branch;
+    // «Аренда кабинетов» / «Абонементы» без клиента — сначала «Кто платит?» (№13):
+    // так оплату клиента записывали простым доходом, долг оставался, и деньги брали дважды.
+    const [notClientConfirmed, setNotClientConfirmed] = useState(false);
+    const categoryName = useMemo(() => {
+        const walk = (nodes: typeof categories): string => {
+            for (const n of nodes) {
+                if (n.id === categoryId) return n.name;
+                const inner = n.children?.length ? walk(n.children) : '';
+                if (inner) return inner;
+            }
+            return '';
+        };
+        return walk(categories);
+    }, [categories, categoryId]);
+    const clientCategory = !isEdit && type === 'income'
+        && (CLIENT_INCOME_CATEGORY_IDS.has(categoryId) || CLIENT_INCOME_CATEGORY_NAMES.has(categoryName.trim().toLowerCase()));
+    const askWhoPays = clientCategory && !notClientConfirmed;
 
     // Flatten categories for the picker, scoped to the chosen type.
     const flatCats = useMemo(() => {
@@ -713,6 +836,10 @@ function AddTransactionSheet({
         }
         if (needBranch) {
             toast.error('Выберите филиал — иначе операция не попадёт в остаток кассы');
+            return;
+        }
+        if (askWhoPays) {
+            toast.error('Сначала ответьте «Кто платит?»');
             return;
         }
         setSaving(true);
@@ -765,7 +892,7 @@ function AddTransactionSheet({
                     <Button
                         block
                         loading={saving}
-                        disabled={!parsedAmount || needBranch}
+                        disabled={!parsedAmount || needBranch || askWhoPays}
                         icon={<Check size={16} aria-hidden="true" />}
                         onClick={handleSave}
                     >
@@ -774,6 +901,11 @@ function AddTransactionSheet({
                     {needBranch && !!parsedAmount && (
                         <div style={{ fontSize: 12, color: 'var(--color-ink-60)', textAlign: 'center' }}>
                             Выберите филиал
+                        </div>
+                    )}
+                    {!needBranch && askWhoPays && !!parsedAmount && (
+                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', textAlign: 'center' }}>
+                            Ответьте «Кто платит?»
                         </div>
                     )}
 
@@ -803,8 +935,33 @@ function AddTransactionSheet({
                         { value: 'income', label: 'Доход' },
                     ]}
                     value={type}
-                    onChange={t => { setType(t); setCategoryId(''); }}
+                    onChange={t => { setType(t); setCategoryId(''); setNotClientConfirmed(false); }}
                 />
+
+                {/* «Доход» — первым делом про клиента (ревью 09.11, №13): оплата клиента
+                    здесь не закрывает его долг, её надо вносить на баланс. */}
+                {!isEdit && type === 'income' && onClientPayment && (
+                    <button
+                        type="button"
+                        data-client-payment-hint
+                        onClick={onClientPayment}
+                        className="press"
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 10, minHeight: 52, padding: '10px 12px',
+                            borderRadius: 12, border: '1px solid var(--color-ink-10)', background: 'var(--color-sunken)',
+                            fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer', color: 'var(--color-ink)',
+                        }}
+                    >
+                        <UserRound size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <span style={{ flex: 1 }}>
+                            <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>Деньги от клиента? → Пополнить баланс клиента</span>
+                            <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>
+                                Тогда долг клиента закроется, и следующий админ не возьмёт деньги второй раз
+                            </span>
+                        </span>
+                        <ChevronRight size={18} aria-hidden="true" />
+                    </button>
+                )}
 
                 <Field label="Сумма" error={amountError}>
                     <Input
@@ -833,17 +990,41 @@ function AddTransactionSheet({
                         {['Unbox One', 'Unbox Uni', 'Neo School'].map(b => (
                             <option key={b} value={b}>{b}</option>
                         ))}
+                        {/* Старое значение кодом («unbox_uni») — показываем названием. */}
+                        {branch && !['Unbox One', 'Unbox Uni', 'Neo School'].includes(branch) && (
+                            <option value={branch}>{branchLabel(branch)}</option>
+                        )}
                     </Select>
                 </Field>
 
                 <Field label="Категория">
-                    <Select value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+                    <Select value={categoryId} onChange={e => { setCategoryId(e.target.value); setNotClientConfirmed(false); }}>
                         <option value="">Без категории</option>
                         {flatCats.map(c => (
                             <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                     </Select>
                 </Field>
+
+                {askWhoPays && (
+                    <div data-who-pays role="group" aria-label="Кто платит?" style={{
+                        background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
+                        borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+                    }}>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>Кто платит?</div>
+                        <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+                            «{categoryName || 'Эта статья'}» обычно платит клиент. Его деньги нужно вносить на баланс — иначе долг останется.
+                        </div>
+                        {onClientPayment && (
+                            <Button block onClick={onClientPayment} icon={<UserRound size={16} aria-hidden="true" />}>
+                                Клиент — пополнить его баланс
+                            </Button>
+                        )}
+                        <Button block variant="secondary" onClick={() => setNotClientConfirmed(true)}>
+                            Не клиент — записать доход в кассу
+                        </Button>
+                    </div>
+                )}
 
                 <Field label="Комментарий" optional>
                     <Input

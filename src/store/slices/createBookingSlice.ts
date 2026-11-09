@@ -341,7 +341,8 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
     cancelBooking: async (id, _isFreeReschedule = false, _reason, _adminUser, opts) => {
         try {
-            const cancelledBooking = await bookingsApi.cancelBooking(id, opts);
+            // 09.11: причина поздней отмены сотрудником обязательна на сервере — передаём её.
+            const cancelledBooking = await bookingsApi.cancelBooking(id, _reason && !opts?.reason ? { ...(opts || {}), reason: _reason } : opts);
             set((state) => ({
                 bookings: state.bookings.map(b =>
                     b.id === id ? cancelledBooking : b

@@ -39,6 +39,11 @@
   }
   .ui-btn--touch   { --btn-h: 44px; font-size: 1rem; }
   .ui-btn--compact { --btn-h: 36px; font-size: 0.875rem; padding: 0 var(--space-3); }
+  /* sm — тихое действие внутри строки списка («Оплата · 120 ₾», «Выключить»):
+   * видно 36 px, текст 14, а палец попадает в 44 px (невидимый запас ::after). */
+  .ui-btn--sm      { --btn-h: 36px; font-size: var(--text-small); padding: 0 var(--space-3); position: relative; }
+  .ui-btn--sm::after { content: ""; position: absolute; inset: -4px 0; }
+  .ui-btn--sm.ui-btn--icon { padding: 0; }
   .ui-btn--block   { width: 100%; }
   .ui-btn--icon    { padding: 0; width: var(--btn-h); }
 
@@ -112,7 +117,7 @@
     width: 36px;
     height: 4px;
     margin: var(--space-2) auto 0;
-    border-radius: 2px;
+    border-radius: var(--radius-pill);
     background: var(--color-ink-20);
   }
   .ui-sheet__header {
@@ -207,7 +212,7 @@
   .ui-badge--muted   { background: var(--status-muted-bg);   color: var(--status-muted-fg); }
   /* Точка + текст — для плотных таблиц Grid House */
   .ui-badge--dot { background: transparent; padding: 0; min-height: 0; color: var(--color-ink-80); font-weight: 500; font-size: var(--text-small); }
-  .ui-badge__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: currentColor; }
+  .ui-badge__dot { width: 8px; height: 8px; border-radius: var(--radius-pill); flex: none; background: currentColor; }
   .ui-badge--dot.ui-badge--ok .ui-badge__dot      { background: var(--status-ok-fg); }
   .ui-badge--dot.ui-badge--pending .ui-badge__dot { background: var(--status-pending-fg); }
   .ui-badge--dot.ui-badge--danger .ui-badge__dot  { background: var(--status-danger-fg); }
@@ -313,15 +318,30 @@
   @media (hover: hover) and (pointer: fine) {
     .ui-chip:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--color-sunken); }
   }
-  /* Выбрано — бирюза Unbox: подложка, рамка, вес и галочка (не только цвет) */
+  /* ВЫБРАНО — один язык на всё приложение (09.11): подложка accent-soft,
+   * рамка accent 1.5 px (1 px border + 0.5 px тень внутрь — ширина не меняется),
+   * текст accent-ink 600. Без галочки: она расширяла чип, и ряд фильтров
+   * переносился. Чёрной заливки для «выбрано» нет: в тёмной теме она белая. */
   .ui-chip[aria-pressed="true"] {
     background: var(--color-accent-soft);
     border-color: var(--color-accent);
+    box-shadow: inset 0 0 0 0.5px var(--color-accent);
     color: var(--color-accent-ink);
     font-weight: 600;
   }
   .ui-chip:disabled { color: var(--color-ink-40); border-color: var(--color-ink-10); cursor: not-allowed; }
   .ui-chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  /* Ряд, который листается вбок (а не переносится): мягкое затухание справа
+   * подсказывает, что дальше есть ещё. */
+  .ui-chip-row--scroll {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-right: var(--space-5);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  }
+  .ui-chip-row--scroll::-webkit-scrollbar { display: none; }
 
   .ui-segmented {
     display: flex;
@@ -354,13 +374,18 @@
   @media (hover: hover) and (pointer: fine) {
     .ui-segmented__item:hover:not([aria-pressed="true"]) { background: var(--color-ink-05); }
   }
+  /* Выбранный сегмент — тот же язык «выбрано», что у Chip и ChoiceCard
+   * (было: подложка + подчёркивание 2 px — гибрид вкладки и кнопки). */
   .ui-segmented__item[aria-pressed="true"] {
     background: var(--color-accent-soft);
     color: var(--color-accent-ink);
     font-weight: 600;
-    box-shadow: inset 0 -2px 0 var(--color-accent);
+    border-radius: var(--radius-control);
+    box-shadow: inset 0 0 0 1.5px var(--color-accent);
   }
   .ui-segmented__item:focus-visible { outline-offset: -2px; }
+  .ui-segmented__item[aria-pressed="true"],
+  .ui-segmented__item[aria-pressed="true"] + .ui-segmented__item { border-left-color: transparent; }
 
   /* ── ErrorBar ───────────────────────────────────────────────────────── */
   .ui-errorbar {
@@ -473,4 +498,374 @@
     white-space: nowrap;
   }
   .ui-m-header__slot { flex: none; display: flex; align-items: center; }
+
+  /* ── MobilePageHeader: подзаголовок и крупный вариант (09.11) ──────────
+   * bar   — липкая строка 56 px для внутренних экранов («←» + 20 px);
+   * large — корень раздела: заголовок 28, подзаголовок 14, действие справа,
+   *         поля 16; «←» (если есть) — строкой выше. */
+  .ui-m-header__titles { flex: 1; min-width: 0; padding: 0 var(--space-2); }
+  .ui-m-header__titles .ui-m-header__title { padding: 0; }
+  .ui-m-header__sub {
+    margin: 2px 0 0;
+    font-size: var(--text-small);
+    line-height: 1.4;
+    color: var(--color-ink-60);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ui-m-header-lg {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) var(--space-4) var(--space-4);
+    font-family: var(--font-sans);
+  }
+  /* Стрелка «←» стоит своим значком на линии полей 16, а не своей рамкой 44 */
+  .ui-m-header-lg__top { display: flex; align-items: center; min-height: 44px; margin-left: calc(var(--space-3) * -1); }
+  .ui-m-header-lg__row { display: flex; align-items: flex-end; gap: var(--space-3); }
+  .ui-m-header-lg__titles { flex: 1; min-width: 0; }
+  .ui-m-header-lg__title {
+    margin: 0;
+    font-size: var(--text-heading);
+    line-height: var(--leading-heading);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+    overflow-wrap: anywhere;
+  }
+  .ui-m-header-lg__sub {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-small);
+    line-height: 1.45;
+    color: var(--color-ink-60);
+  }
+  .ui-m-header-lg__slot { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+
+  /* ── Подпись раздела «КОШЕЛЁК»: Sans 12/600 капсом, не Mono ─────────── */
+  .ui-overline {
+    font-family: var(--font-sans);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-60);
+  }
+
+  /* ── ListGroup / ListRow (09.11) ─────────────────────────────────────
+   * Группа = одна поверхность (card, рамка ink-10, радиус 16) с тонкими
+   * линиями между строками. Строка: слева время/значок/аватар, в середине
+   * название + подпись (переносятся, не обрезаются), справа сумма/бейдж/
+   * стрелка/тихое действие. Вся строка нажимается, если есть onClick/to. */
+  .ui-list-group { font-family: var(--font-sans); min-width: 0; }
+  .ui-list-group + .ui-list-group { margin-top: var(--space-5); }
+  .ui-list-group__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin: 0 0 var(--space-2);
+    padding: 0 var(--space-1);
+  }
+  .ui-list-group__title {
+    margin: 0;
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-60);
+  }
+  .ui-list-group__aside { font-size: var(--text-small); line-height: 1.4; color: var(--color-ink-60); white-space: nowrap; }
+  .ui-list-group__foot {
+    margin: var(--space-2) 0 0;
+    padding: 0 var(--space-1);
+    font-size: var(--text-small);
+    line-height: 1.45;
+    color: var(--color-ink-60);
+  }
+
+  .ui-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--color-card);
+    border: 1px solid var(--color-ink-10);
+    border-radius: var(--radius-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  /* Внутри шторки или другой карточки — без своей поверхности */
+  .ui-list--bare { background: transparent; border: 0; border-radius: var(--radius-grid); }
+  .ui-list--bare > .ui-row > .ui-row__main { padding-left: 0; padding-right: 0; }
+  .ui-list--bare > .ui-row + .ui-row::before { left: 0; }
+
+  .ui-row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    min-height: 48px;
+  }
+  /* Линия между строками — с отступом слева, по краю текста */
+  .ui-row + .ui-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: var(--space-4);
+    right: 0;
+    height: 1px;
+    background: var(--color-ink-10);
+    pointer-events: none;
+  }
+  .ui-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .ui-row--with-action > .ui-row__main { padding-right: var(--space-2); }
+  button.ui-row__main,
+  a.ui-row__main {
+    cursor: pointer;
+    transition: background-color var(--dur-ui) ease;
+  }
+  /* Нажатие строки — подложка, а не сжатие: строка во всю ширину от 0.97 «едет» */
+  button.ui-row__main:active:not(:disabled),
+  a.ui-row__main:active { background: var(--color-ink-05); }
+  @media (hover: hover) and (pointer: fine) {
+    button.ui-row__main:hover:not(:disabled),
+    a.ui-row__main:hover { background: var(--color-ink-05); }
+  }
+  .ui-row__main:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  /* Подложка нажатия и рамка фокуса повторяют скругление группы */
+  .ui-list > .ui-row:first-child > .ui-row__main {
+    border-top-left-radius: calc(var(--radius-card) - 1px);
+    border-top-right-radius: calc(var(--radius-card) - 1px);
+  }
+  .ui-list > .ui-row:last-child > .ui-row__main {
+    border-bottom-left-radius: calc(var(--radius-card) - 1px);
+    border-bottom-right-radius: calc(var(--radius-card) - 1px);
+  }
+  .ui-list > .ui-row--with-action > .ui-row__main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .ui-row__main:disabled { cursor: not-allowed; }
+
+  .ui-row__lead { flex: none; display: flex; align-items: center; justify-content: center; color: var(--color-ink-60); }
+  .ui-row__time { flex: none; width: 52px; display: flex; flex-direction: column; }
+  .ui-row__time-start { font-size: var(--text-body); font-weight: 600; line-height: 1.25; color: var(--color-ink); white-space: nowrap; }
+  .ui-row__time-end { font-size: var(--text-caption); line-height: 1.35; color: var(--color-ink-60); white-space: nowrap; }
+  .ui-row__icon { flex: none; width: 24px; display: flex; align-items: center; justify-content: center; color: var(--color-ink-60); }
+  .ui-row__avatar {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: var(--radius-pill);
+    background: var(--color-sunken);
+    color: var(--color-ink-80);
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1;
+  }
+  .ui-row__avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+  .ui-row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ui-row__title { font-size: var(--text-body); font-weight: 600; line-height: 1.35; color: var(--color-ink); overflow-wrap: anywhere; }
+  .ui-row__subtitle { font-size: var(--text-small); line-height: 1.45; color: var(--color-ink-60); overflow-wrap: anywhere; }
+  .ui-row__meta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+  .ui-row--dimmed .ui-row__title,
+  .ui-row--disabled .ui-row__title { color: var(--color-ink-60); }
+
+  /* Справа — короткое: сумма, бейдж, «Абонемент». Не переносится и не режется;
+   * длинное («2 ч из абонемента + 5 ₾») — в подпись строки или во вторую строку справа. */
+  .ui-row__trail { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+  .ui-row__trail-main { font-size: var(--text-small); font-weight: 600; line-height: 1.35; color: var(--color-ink); white-space: nowrap; }
+  .ui-row__trail-sub { font-size: var(--text-caption); line-height: 1.35; color: var(--color-ink-60); white-space: nowrap; }
+  .ui-row__chevron { flex: none; color: var(--color-ink-40); margin-right: calc(var(--space-1) * -1); }
+  .ui-row__action { flex: none; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-4); }
+
+  /* Полоса слева — «к оплате» (danger) или «ждёт» (pending). Только вместе
+   * со словом в строке или скрытой подписью для диктора — не цвет вместо смысла. */
+  .ui-row__stripe {
+    position: absolute;
+    left: 0;
+    top: var(--space-2);
+    bottom: var(--space-2);
+    width: 3px;
+    border-radius: var(--radius-pill);
+    pointer-events: none;
+  }
+  .ui-row__stripe--danger  { background: var(--status-danger-fg); }
+  .ui-row__stripe--pending { background: var(--status-pending-fg); }
+
+  /* ── ChoiceCard (09.11): выбор способа оплаты, типа помещения, фильтра ──
+   * Тот же язык «выбрано», что у Chip: accent-soft + рамка accent + accent-ink.
+   * Отметка — кружок 20 px, который есть всегда (ширина не меняется). */
+  .ui-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--choice-cols, 1), minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+  .ui-choice {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-width: 0;
+    min-height: var(--control-h, 44px);
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--color-ink-20);
+    border-radius: var(--radius-control);
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    text-align: left;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    transition:
+      transform var(--dur-press) var(--ease-out-strong),
+      background-color var(--dur-ui) ease,
+      border-color var(--dur-ui) ease;
+  }
+  .ui-choice:active:not(:disabled) { transform: scale(0.97); }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-choice:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--color-sunken); }
+  }
+  .ui-choice[aria-pressed="true"] {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    box-shadow: inset 0 0 0 0.5px var(--color-accent);
+  }
+  .ui-choice__icon { flex: none; display: flex; color: var(--color-ink-60); }
+  .ui-choice__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ui-choice__title { font-size: var(--text-body); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .ui-choice__desc { font-size: var(--text-small); line-height: 1.45; color: var(--color-ink-60); overflow-wrap: anywhere; }
+  .ui-choice__trail { flex: none; font-size: var(--text-small); font-weight: 600; line-height: 1.35; color: var(--color-ink-80); white-space: nowrap; }
+  .ui-choice[aria-pressed="true"] .ui-choice__title,
+  .ui-choice[aria-pressed="true"] .ui-choice__icon { color: var(--color-accent-ink); }
+  .ui-choice__mark {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--color-ink-30);
+    border-radius: var(--radius-pill);
+    color: var(--color-on-accent);
+  }
+  .ui-choice[aria-pressed="true"] .ui-choice__mark { background: var(--color-accent); border-color: var(--color-accent); }
+  .ui-choice:disabled { cursor: not-allowed; color: var(--color-ink-40); border-color: var(--color-ink-10); }
+  .ui-choice:disabled .ui-choice__desc,
+  .ui-choice:disabled .ui-choice__trail { color: var(--color-ink-40); }
+  /* Плитка — для 2–3 коротких вариантов в ряд («Кабинет · Зал · Капсула») */
+  .ui-choice--tile {
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--space-1);
+    min-height: 72px;
+    padding: var(--space-3) var(--space-2);
+    text-align: center;
+  }
+  .ui-choice--tile .ui-choice__body { flex: none; align-items: center; }
+  .ui-choice--tile .ui-choice__title { font-size: var(--text-small); }
+  .ui-choice--tile .ui-choice__desc { font-size: var(--text-caption); }
+  .ui-choice--tile .ui-choice__mark { position: absolute; top: var(--space-1); right: var(--space-1); width: 16px; height: 16px; border-width: 0; }
+  .ui-choice--tile:not([aria-pressed="true"]) .ui-choice__mark { display: none; }
+
+  /* ── Money: тон денег (09.11) ─────────────────────────────────────────
+   * Приход — зелёный ok; расход — чернила (НЕ красный: красный только долг);
+   * долг / минус на балансе — danger; ноль — серый ink-60 обычным весом. */
+  .ui-money { white-space: nowrap; }
+  .ui-money--in   { color: var(--status-ok-fg); }
+  .ui-money--out  { color: var(--color-ink); }
+  .ui-money--debt { color: var(--status-danger-fg); }
+  .ui-money--zero { color: var(--color-ink-60); font-weight: 400; }
+
+  /* ── EmptyState: спокойная картинка и второе действие (09.11) ─────── */
+  .ui-empty__art { width: 120px; height: 120px; margin-bottom: var(--space-2); color: var(--color-ink-40); }
+  .ui-empty--compact .ui-empty__art { width: 80px; height: 80px; margin-bottom: var(--space-1); }
+  .ui-empty__art svg { display: block; width: 100%; height: 100%; }
+  .ui-empty__actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); margin-top: var(--space-2); }
+  .ui-empty__actions .ui-empty__action { margin-top: 0; }
+
+  /* ── SummaryCard: итог экрана (09.11) ──────────────────────────────── */
+  .ui-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    background: var(--color-card);
+    border: 1px solid var(--color-ink-10);
+    border-radius: var(--radius-card);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  .ui-summary__top { display: flex; align-items: flex-end; gap: var(--space-3); }
+  .ui-summary__main { flex: 1 1 auto; min-width: 0; }
+  .ui-summary__label {
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-60);
+  }
+  .ui-summary__value {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    column-gap: var(--space-2);
+    margin-top: var(--space-1);
+    font-size: var(--text-heading);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ui-summary--lg .ui-summary__value { font-size: var(--text-display); }
+  .ui-summary__unit { font-size: var(--text-title); font-weight: 500; letter-spacing: 0; color: var(--color-ink-60); }
+  .ui-summary__caption { margin-top: var(--space-1); font-size: var(--text-small); line-height: 1.45; color: var(--color-ink-60); }
+  .ui-summary__aside { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+  .ui-summary__stats { display: grid; gap: var(--space-2); }
+  .ui-summary__stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--color-sunken);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  button.ui-summary__stat { cursor: pointer; transition: transform var(--dur-press) var(--ease-out-strong); }
+  button.ui-summary__stat:active { transform: scale(0.97); }
+  .ui-summary__stat-label { font-size: var(--text-caption); line-height: 1.35; color: var(--color-ink-60); }
+  .ui-summary__stat-value { font-size: var(--text-body); font-weight: 600; line-height: 1.3; white-space: nowrap; }
+  /* Тёмная плита — только panel / on-panel (в тёмной теме не светлеет) */
+  .ui-summary--panel { background: var(--color-panel); color: var(--color-on-panel); border-color: transparent; }
+  .ui-summary--panel .ui-summary__label,
+  .ui-summary--panel .ui-summary__unit,
+  .ui-summary--panel .ui-summary__caption,
+  .ui-summary--panel .ui-summary__stat-label { color: var(--color-on-panel); opacity: 0.72; }
+  .ui-summary--panel .ui-summary__stat { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-on-panel) 24%, transparent); }
 }

@@ -1,23 +1,25 @@
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { PublicHeader } from '../components/public/PublicHeader';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { MobilePageHeader } from '../components/ui/PageHeader';
 
 /** Booking-rules / public offer page.
  *  Linked from the landing footer, the SubscriptionsPage CTA, the
  *  user dashboard sidebar and the CRM sidebar. Plain typographic page —
  *  no heavy chrome, the goal is comfortable reading.
  */
-export function BookingRulesPage() {
+export function BookingRulesPage({ mobile = false }: { mobile?: boolean } = {}) {
     useDocumentTitle('Правила бронирования');
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-            {/* G1-21: общая шапка сайта вместо «← На главную / Тарифы →»
-                (в /m её рисует оболочка, PublicHeader там сам не рисуется).
-                Текст оферты не менялся — выжимка ждёт решения владельца (G1-22). */}
-            <PublicHeader />
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: mobile ? undefined : '100vh' }}>
+            {/* G1-21: общая шапка сайта вместо «← На главную / Тарифы →».
+                09.11 (ревью клиентской части №11): в /m — мобильная шапка с «Назад»
+                и сверху короткая выжимка; полный текст оферты ниже, без изменений. */}
+            {mobile ? <MobilePageHeader title="Правила бронирования" fallbackTo="/m/me" /> : <PublicHeader />}
+            {mobile && <RulesSummary />}
 
-            <main style={{ maxWidth: 920, margin: '0 auto', padding: 'clamp(24px, 5vw, 48px) clamp(16px, 4vw, 32px)' }}>
-                <div style={mono}>ПУБЛИЧНАЯ ОФЕРТА</div>
+            <main id="rules-full" style={{ maxWidth: 920, margin: '0 auto', padding: mobile ? '8px 16px 32px' : 'clamp(24px, 5vw, 48px) clamp(16px, 4vw, 32px)' }}>
+                <div style={mono}>{mobile ? 'ПОЛНЫЙ ТЕКСТ · ПУБЛИЧНАЯ ОФЕРТА' : 'ПУБЛИЧНАЯ ОФЕРТА'}</div>
                 <h1 style={{ fontSize: 'clamp(28px, 4vw, 44px)', fontWeight: 700, margin: '8px 0 24px', letterSpacing: '-0.02em' }}>
                     Правила бронирования и&nbsp;аренды
                 </h1>
@@ -89,10 +91,12 @@ export function BookingRulesPage() {
 
                 <Section num="3" title="Пересдать бронь">
                     <Item n="3.1">
-                        Если вы понимаете, что не сможете воспользоваться слотом, его можно
-                        пересдать (кнопка «Пересдать» у брони). В этом случае слот становится доступен другим
-                        пользователям центра на общих условиях ценообразования (включая текущие
-                        акции и скидки).
+                        Если до начала брони осталось менее 24 часов и вы понимаете, что не сможете
+                        воспользоваться слотом, его можно пересдать (кнопка «Пересдать» у брони). В
+                        этом случае слот становится доступен другим пользователям центра на общих
+                        условиях ценообразования (включая текущие акции и скидки). Если до начала брони
+                        осталось 24 часа и более, пересдача не предусмотрена: бронирование отменяется в
+                        порядке п. 2.1 с возвратом его стоимости в полном объёме.
                     </Item>
                     <Item n="3.2">
                         Если на этот слот находится новый клиент и он подтверждает бронь, вам
@@ -213,6 +217,56 @@ export function BookingRulesPage() {
                 </div>
             </main>
         </div>
+    );
+}
+
+/** Главное из правил — 5 пунктов простым языком (ревью клиентской части №11).
+ *  Те же правила, что проверяет сервер: отмена не позже чем за 24 ч, списание
+ *  за сутки до начала, срочная бронь (booking_policy.is_hot_start) — через
+ *  администратора, пересдача — только меньше чем за сутки до начала (09.11), 50 %
+ *  тем же способом, каким платили, бесплатные переносы абонемента позже суток. */
+const SUMMARY: Array<{ title: string; text: string }> = [
+    {
+        title: 'Отменить бесплатно — не позже чем за 24 часа',
+        text: 'Позже отменить уже нельзя: бронь оплачивается полностью. Остаётся «Пересдать» или написать администратору.',
+    },
+    {
+        title: 'Деньги или часы списываются за сутки до начала',
+        text: 'До этого бронь просто держит время. Срочная бронь списывается, когда её подтвердит администратор.',
+    },
+    {
+        title: 'Срочная бронь подтверждает администратор',
+        text: 'Срочная — меньше 12 часов до начала (в субботу и воскресенье — 24 часа) или вечером после 21:00 на утро до 12:00. Время за вами держится, пока администратор решает.',
+    },
+    {
+        title: '«Пересдать» — если до начала меньше суток',
+        text: 'Время станет свободным для других. Займут — вернём 50 % тем же, чем платили: деньгами на баланс, часами абонемента или бонусом. Займут часть — вернём за эту часть. Если до начала больше суток, пересдавать не нужно — просто отмените бронь, деньги вернутся полностью.',
+    },
+    {
+        title: 'Перенести — не позже чем за 24 часа',
+        text: 'С абонементом есть бесплатные переносы позже суток (Тёплый старт — 1, Регулярный практик — 2, Профи+ — 3), но не позже чем за 3 часа до начала. На ближайшие часы переносит администратор.',
+    },
+];
+
+function RulesSummary() {
+    return (
+        <section aria-label="Коротко о главном" style={{ padding: '8px 16px 0' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '8px 0 12px', letterSpacing: '-0.01em' }}>Коротко о главном</h2>
+            <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {SUMMARY.map((p, i) => (
+                    <li key={p.title} style={{ display: 'flex', gap: 12, background: GH.sunken, borderRadius: 12, padding: '12px 14px' }}>
+                        <span style={{ ...mono, color: GH.ink60, paddingTop: 3, flexShrink: 0 }}>{i + 1}</span>
+                        <div>
+                            <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>{p.title}</div>
+                            <div style={{ fontSize: 14, lineHeight: 1.5, color: GH.ink80, marginTop: 4 }}>{p.text}</div>
+                        </div>
+                    </li>
+                ))}
+            </ol>
+            <a href="#rules-full" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44, fontSize: 14, fontWeight: 600, color: GH.ink, textDecoration: 'underline', marginTop: 4 }}>
+                Полный текст правил ↓
+            </a>
+        </section>
     );
 }
 

@@ -328,11 +328,13 @@ console.log(JSON.stringify({{
     f = res["first"]
     assert f["time"] == "01:30" and f["endTime"] == "02:00" and f["client"] == "Борис" and f["cabinet"] == "r3", f
     assert f["due"] is None and f["paid"] is False, "у абонемента без записи dueMap не должно быть «к оплате»"
-    assert res["sum"]["amount"] == res["manual"] == 86, f"«взять» ≠ Σ due>0 сегодняшних: {res['sum']} vs {res['manual']}"
-    assert res["sum"]["clients"] == 2, res["sum"]
-    assert res["sum"]["label"] == "взять 86 ₾ с 2 клиентов", res["sum"]["label"]
+    # 09.11 (решение владельца 1): заявка «Ждёт подтверждения» (b1, Борис) в «Взять сегодня»
+    # и «весь долг» не входит — денег не брали, решение не принято.
+    assert res["sum"]["amount"] == res["manual"] == 56, f"«взять» ≠ Σ due>0 сегодняшних: {res['sum']} vs {res['manual']}"
+    assert res["sum"]["clients"] == 1, res["sum"]
+    assert res["sum"]["label"] == "взять 56 ₾ с 1 клиента", res["sum"]["label"]
     assert res["cl"][0] == ["Анна", 56, 96, 96, 50, True], res["cl"]
-    assert res["cl"][1] == ["Борис", 30, 0, 30, 0, False], res["cl"]  # ещё не списана — в «весь долг» входит
+    assert res["cl"][1] == ["Борис", 0, 0, 0, 0, False], res["cl"]  # 09.11: заявка «Ждёт подтверждения» — не долг
     assert res["dayLate"] == "2026-10-02" and res["dayEarly"] == "2026-10-01", "«сегодня» не по Батуми (UTC+4)"
     assert res["keyZ"] == "2026-10-02", "момент с поясом не переведён в день по Батуми"
     assert res["keyNaive"] == "2026-10-01", "naive-дату из базы надо брать как есть (это день по Батуми)"

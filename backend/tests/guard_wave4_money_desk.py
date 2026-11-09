@@ -107,8 +107,8 @@ MONEY_FINGERPRINTS = [
     (UD, "const handleAssignSubscription = async", "const handleCancelBooking", "0e87ef371b30558b", "продажа абонемента"),
     (UD, "const handleToSubscription = async", "// Excel #59", "883771eeb8c1df0e", "«На абонемент»"),
     (UD, "const handleTopup = async", "setTopupSaving(false);", "a1fb7859b68a87c9", "пополнение часов абонемента"),
-    (CASH_API, "export const cashboxApi = {", "\n};", "d3cd209a7a4cf49c", "все тела cashboxApi.*"),
-    (END_SHIFT, "const handleSubmit = async", "return createPortal(", "233e73ad83be0edb", "отправка закрытия смены"),
+    (CASH_API, "export const cashboxApi = {", "\n};", "40acd3c55884f9a7", "все тела cashboxApi.*"),  # 09.11: только тип previewCloseShift (null + cashHidden, решение 3); прежний d3cd209a7a4cf49c
+    (END_SHIFT, "const handleSubmit = async", "return createPortal(", "79baff275dc29335", "отправка закрытия смены"),  # 09.11: у роли admin «ожидалось» в тосте после закрытия (решение 3), поля те же; прежний 233e73ad83be0edb
     (TX_TABLE, "const handleDelete = async", "if (isLoading)", "1899d119091c944b", "удаление операции в журнале"),
     (TX_TABLE, "const isOwner = currentUser?.role === 'owner';", "// Flatten categories", "fec6d962bb0f0382", "canEditTx / canDeleteTx"),
     (ADD_TX, "                    type,\n                    amount: value,", "} as any);", "3d9f8cf6e9f97d97", "тело «Новой операции»"),
@@ -303,7 +303,7 @@ def test_end_shift_expected_only_after_fact():
     src = _strip_comments(_read(END_SHIFT))
     form = _body(src, "<form onSubmit={handleSubmit}", "</form>")
     fact = form.find("Сколько наличных в кассе сейчас")
-    gate = form.find("{hasAmount && (")
+    gate = form.find("{hasAmount && !blind && (")  # 09.11: у роли admin — только после закрытия (решение 3)
     exp = form.find("Ожидаемый остаток наличных")
     disc = form.find("{discrepancy !== null && (")
     assert -1 not in (fact, gate, exp, disc), "не нашёл поле факта / ожидаемую / расхождение"

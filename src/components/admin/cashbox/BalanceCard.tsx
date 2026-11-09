@@ -56,10 +56,10 @@ export function BalanceCard({ filteredTransactions, periodLabel, branchLabel, su
     const b: any = balances || {};
     const accounts = [
         // Счета различаем значком и подписью, не цветом (Grid House).
-        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote },
+        { key: 'cash', label: 'Наличные', value: b.cash === null ? null : (b.cash ?? 0), icon: Banknote },
         { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard },
         { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark },
-        { key: 'total', label: 'Всего на счетах', value: b.balance ?? 0, icon: Wallet },
+        { key: 'total', label: 'Всего на счетах', value: b.balance === null ? null : (b.balance ?? 0), icon: Wallet },
     ];
     const nowLabel = formatTime(new Date(), { timeZone: BATUMI_TZ });
 
@@ -77,9 +77,14 @@ export function BalanceCard({ filteredTransactions, periodLabel, branchLabel, su
                             <acc.icon size={16} className="text-ink-60 mt-0.5 shrink-0" aria-hidden="true" />
                             <div className="min-w-0">
                                 <div className="text-caption text-ink-60">{acc.label}</div>
-                                <div className={`num text-title font-semibold leading-tight ${Number(acc.value) < 0 ? 'text-[var(--status-danger-fg)]' : 'text-ink'}`}>
-                                    {formatGel(Number(acc.value ?? 0))}
-                                </div>
+                                {acc.value === null ? (
+                                    // Решение владельца 3 (09.11): роль admin наличные до закрытия смены не видит.
+                                    <div data-cash-hidden className="text-caption text-ink-60 leading-tight mt-1">скрыто до закрытия смены</div>
+                                ) : (
+                                    <div className={`num text-title font-semibold leading-tight ${Number(acc.value) < 0 ? 'text-[var(--status-danger-fg)]' : 'text-ink'}`}>
+                                        {formatGel(Number(acc.value ?? 0))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}

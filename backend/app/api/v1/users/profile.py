@@ -79,6 +79,83 @@ def get_discount_progress(
     }
 
 
+# 09.11 (ревью клиентской части №6): «куда ушли мои деньги?» — у клиента не было
+# истории баланса, лента была только у админа (/users/{id}/balance-ledger). Тот же
+# источник (balance_ledger), только СВОИ строки, только чтение. Служебное наружу не
+# отдаём: ни кто из сотрудников провёл операцию, ни текст ручных корректировок
+# (там бывают внутренние заметки) — описание только у строк, где оно и есть смысл
+# (недельная скидка, оплата абонемента). К строкам по брони — кабинет и время.
+_CLIENT_LEDGER_DESCRIPTION_REASONS = {"weekly_rebate", "subscription_purchase"}
+
+
+@router.get("/me/balance-ledger")
+def read_my_balance_ledger(
+    *,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.get_current_user),
+    limit: int = 200,
+) -> Any:
+    from uuid import UUID
+    from app.models.balance_ledger import BalanceLedger
+    from app.models.resource import Resource
+
+    limit = max(1, min(int(limit or 200), 500))
+    rows = session.exec(
+        select(BalanceLedger)
+        .where(BalanceLedger.user_id == str(current_user.id))
+        .order_by(BalanceLedger.created_at.desc())  # type: ignore
+        .limit(limit)
+    ).all()
+
+    # Брони, на которые ссылаются строки, — одним запросом, и только СВОИ
+    # (строка ленты своя, но лишняя проверка владельца ничего не стоит).
+    booking_ids = []
+    for r in rows:
+        if r.ref_type == "booking" and r.ref_id:
+            try:
+                booking_ids.append(UUID(str(r.ref_id)))
+            except ValueError:
+                pass
+    bookings: dict[str, Booking] = {}
+    if booking_ids:
+        for b in session.exec(select(Booking).where(Booking.id.in_(booking_ids))).all():  # type: ignore[attr-defined]
+            if b.user_uuid == current_user.id or (b.user_id and b.user_id == current_user.email):
+                bookings[str(b.id)] = b
+    res_names: dict[str, str] = {}
+    res_ids = {b.resource_id for b in bookings.values() if b.resource_id}
+    if res_ids:
+        for res in session.exec(select(Resource).where(Resource.id.in_(list(res_ids)))).all():  # type: ignore[attr-defined]
+            res_names[res.id] = res.name
+
+    def _booking_info(ref_id: str | None) -> dict | None:
+        b = bookings.get(str(ref_id)) if ref_id else None
+        if not b:
+            return None
+        return {
+            "date": b.date.strftime("%Y-%m-%d") if b.date else None,
+            "startTime": b.start_time,
+            "duration": b.duration,
+            "resourceName": res_names.get(b.resource_id or "", b.resource_id),
+        }
+
+    return {
+        "balance": round(float(current_user.balance or 0), 2),
+        "truncated": len(rows) >= limit,
+        "entries": [
+            {
+                "id": str(r.id),
+                "date": r.created_at.isoformat() if r.created_at else None,
+                "delta": round(float(r.delta or 0), 2),
+                "balanceAfter": round(float(r.balance_after or 0), 2),
+                "reason": r.reason,
+                "description": (r.description or "") if r.reason in _CLIENT_LEDGER_DESCRIPTION_REASONS else "",
+                "booking": _booking_info(r.ref_id) if r.ref_type == "booking" else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/{user_id}/avatar")
 def read_user_avatar(user_id: str, session: Session = Depends(get_session)):
     """Фото профиля, сохранённое в базе текстом (data:image/…;base64,…), — как

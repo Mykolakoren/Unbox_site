@@ -197,7 +197,10 @@ def test_sheet_24h_rule_matches_server():
     s = src.index('label="Отменить эту и следующие"')
     assert src.rfind("{!lateForClient && (", 0, s) > src.index("Продлить серию"), "отмена серии видна клиенту < 24 ч"
     # Пересдать — только подтверждённую (сервер: status == confirmed).
-    assert "const canReRent = isLive && booking.status === 'confirmed';" in src
+    # 09.11 (владелец): и только меньше чем за сутки до начала; уже выставленную —
+    # снять можно всегда (сторож guard_rerent_24h_2026_11).
+    assert ("const canReRent = isLive && booking.status === 'confirmed' && "
+            "(reRentWindow || !!booking.isReRentListed);") in src
 
 
 def test_sheet_on_shared_sheet_and_order():

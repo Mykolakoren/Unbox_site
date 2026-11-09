@@ -17,10 +17,10 @@
   /* ── Нейтральные: бумага и чернила ──
    * Текст — не бледнее ink-60 (5.0:1 на бумаге, 4.9:1 на sunken).
    * ink-40/30/20/10 — только линии, иконки и неактивное, НЕ текст. */
-  --color-paper:   #FAFAF7;   /* фон страницы */
-  --color-card:    #FDFDFB;   /* карточки, шторки, поля — вместо чистого #FFF */
-  --color-surface: #FDFDFB;   /* старое имя поверхности = card */
-  --color-sunken:  #F4F4F2;   /* углублённое: чипы, дорожка сегментов, скелетон */
+  --color-paper:   #F4F2EC;   /* фон страницы — тёплая бумага (09.11, макет владельца) */
+  --color-card:    #FBFAF6;   /* карточки, шторки, поля — светлее бумаги, тот же тёплый тон */
+  --color-surface: #FBFAF6;   /* старое имя поверхности = card */
+  --color-sunken:  #EDEAE2;   /* углублённое: чипы, дорожка сегментов, скелетон — темнее бумаги */
   --color-ink:     #0F0F10;   /* основной текст и заголовки */
   --color-ink-80:  rgba(15,15,16,0.80);
   --color-ink-60:  rgba(15,15,16,0.60);   /* вторичный текст — минимум для текста */
@@ -32,9 +32,12 @@
   --color-ink-05:  rgba(15,15,16,0.05);   /* подложка при наведении */
   --color-ink-04:  rgba(15,15,16,0.04);
   --color-on-ink:  #FAFAF7;   /* текст на тёмном */
+  /* Легаси bg-white / text-white (116 мест) — тёплый «белый» карточки, а не
+   * холодный #FFF на тёплой бумаге (09.11). Настоящий белый поверх фото — .text-photo. */
+  --color-white:   #FBFAF6;
   --color-overlay: rgba(15,15,16,0.45);   /* затемнение фона под шторкой/окном */
-  --color-panel:    #0F0F10;   /* большая тёмная панель/шапка: в тёмной теме не становится светлой, как ink */
-  --color-on-panel: #FAFAF7;
+  --color-panel:    #22302F;   /* большая тёмная панель/шапка — глубокая тёмная бирюза (не чёрный); в тёмной теме не светлеет, как ink */
+  --color-on-panel: #F4F2EC;
   --color-sidebar:        #F0ECDD;   /* боковая панель админки */
   --color-sidebar-narrow: #F3EFE2;   /* она же в узком (свёрнутом) виде */
 
@@ -78,10 +81,13 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* ── Скругления: три значения ── */
+  /* ── Скругления (09.11): на телефоне только 8 / 16 / круг ──
+   * grid 0 — только десктоп Grid House. Других значений (6, 10, 12, 14, 22…) нет. */
   --radius-grid:    0px;    /* десктоп Grid House: карточки, таблицы, сетка, окна */
-  --radius-control: 8px;    /* кнопки, поля, чипы, бейджи */
+  --radius-control: 8px;    /* кнопки, поля, чипы, бейджи, ChoiceCard */
   --radius-sheet:   16px;   /* шторки и карточки на телефоне */
+  --radius-card:    16px;   /* = sheet: карточки, группы строк (ListGroup) */
+  --radius-pill:    9999px; /* круг и пилюля: аватар, точка, ручка шторки, счётчик */
 
   /* ── Тень: одна, только для всплывающего (шторки, меню, окна) ── */
   --shadow-pop: 0 12px 32px -8px rgba(15,15,16,0.18), 0 2px 6px rgba(15,15,16,0.06);
@@ -172,6 +178,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 body {
+  /* 09.11: фон по умолчанию — тёплая бумага (раньше браузерный #FFF под экранами без своего фона) */
+  background-color: var(--color-paper);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -287,9 +295,26 @@ html [data-sonner-toast] [data-button] {
   color: var(--color-on-ink);
 }
 
-/* Деньги и время — моно-цифрами Plex Mono, цифры не прыгают (tabular-nums).
- * Если остаёмся в Sans (крупный заголовок) — просто класс tabular-nums. */
+/* Деньги и время (09.11): IBM Plex Sans с ровными цифрами — tabular-nums
+ * (все цифры одной ширины, столбцы сумм и времени не прыгают) и lining-nums
+ * (цифры по высоте прописных). Раньше здесь был Plex Mono: крупные суммы
+ * выглядели «как терминал», а в одной строке смешивались два шрифта.
+ * Пробелы в Sans обычной ширины — сужать их не нужно. */
 .num {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0;
+  word-spacing: normal;
+}
+/* Число внутри фразы («осталось 7 из 10 ч»): шрифт и вес — как у фразы,
+ * только ровные цифры. <Money inline> ставит этот класс. */
+.num-inline {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+/* Моноширинный Plex Mono — ТОЛЬКО коды (#4821, номер счёта) и плотные
+ * таблицы ≤ 14 px, где столбцы с буквами должны совпасть до знака.
+ * .mono и .code — одно и то же; .mono.num можно ставить на сумму в такой таблице. */
+.mono, .code, .mono.num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -583,10 +608,10 @@ html [data-sonner-toast] [data-button] {
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --color-paper:   #141415;
-  --color-card:    #1C1C1E;
-  --color-surface: #1C1C1E;
-  --color-sunken:  #242427;
+  --color-paper:   #161513;
+  --color-card:    #1E1D1B;
+  --color-surface: #1E1D1B;
+  --color-sunken:  #272623;
   --color-ink:     #ECECE8;
   --color-ink-80:  rgba(236,236,232,0.84);
   --color-ink-60:  rgba(236,236,232,0.66);
@@ -597,12 +622,12 @@ html [data-sonner-toast] [data-button] {
   --color-ink-08:  rgba(236,236,232,0.10);
   --color-ink-05:  rgba(236,236,232,0.06);
   --color-ink-04:  rgba(236,236,232,0.05);
-  --color-on-ink:  #141415;
+  --color-on-ink:  #161513;
   --color-overlay: rgba(0,0,0,0.60);
-  --color-panel:    #2A2A2E;
-  --color-on-panel: #ECECE8;
-  --color-sidebar:        #19191A;
-  --color-sidebar-narrow: #19191A;
+  --color-panel:    #22302F;
+  --color-on-panel: #ECEBE6;
+  --color-sidebar:        #1A1917;
+  --color-sidebar-narrow: #1A1917;
 
   --color-accent:       #7FB3AF;
   --color-accent-hover: #93C4C0;
@@ -616,10 +641,10 @@ html [data-sonner-toast] [data-button] {
   --color-unbox-grey:   #A3A9B2;
   --color-unbox-accent: #7FB3AF;
 
-  --color-white: #1C1C1E;
-  --color-gray-50:  #202022;
-  --color-gray-100: #27272A;
-  --color-gray-200: #34343A;
+  --color-white: #1E1D1B;
+  --color-gray-50:  #21201E;
+  --color-gray-100: #282725;
+  --color-gray-200: #353431;
   --color-gray-300: #46464C;
   --color-gray-400: #77777E;
   --color-gray-500: #A0A0A7;
@@ -664,12 +689,12 @@ html [data-sonner-toast] [data-button] {
   --shadow-card: 0 1px 3px rgba(0,0,0,0.40), 0 4px 16px rgba(0,0,0,0.25);
   --shadow-card-hover: 0 4px 12px rgba(0,0,0,0.45), 0 12px 32px rgba(0,0,0,0.35);
   --shadow-glass: 0 8px 32px 0 rgba(0,0,0,0.35);
-  --color-glass-bg: rgba(28,28,30,0.72);
-  --color-glass-bg-light: rgba(28,28,30,0.55);
+  --color-glass-bg: rgba(30,29,27,0.72);
+  --color-glass-bg-light: rgba(30,29,27,0.55);
   --color-glass-border: rgba(236,236,232,0.12);
 }
 :root[data-theme="dark"] body { background-color: var(--color-paper); }
-:root[data-theme="dark"] .glass-card { background: rgba(28,28,30,0.88); border-color: rgba(236,236,232,0.10); }
+:root[data-theme="dark"] .glass-card { background: rgba(30,29,27,0.88); border-color: rgba(236,236,232,0.10); }
 :root[data-theme="dark"] .bg-striped {
   background-color: rgba(127,179,175,0.10);
   background-image: repeating-linear-gradient(-45deg, rgba(127,179,175,0.18), rgba(127,179,175,0.18) 5px, transparent 5px, transparent 12px);
@@ -678,7 +703,7 @@ html [data-sonner-toast] [data-button] {
 :root[data-theme="dark"] .stat-accent { border-left-color: #7FB3AF; }
 :root[data-theme="dark"] ::selection { background: rgba(127,179,175,0.35); color: #ECECE8; }
 :root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-track { background: rgba(236,236,232,0.06); }
-:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb { background: rgba(236,236,232,0.40); border-color: rgba(20,20,21,0.6); }
+:root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb { background: rgba(236,236,232,0.40); border-color: rgba(22,21,19,0.6); }
 :root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb:hover { background: rgba(236,236,232,0.55); }
 :root[data-theme="dark"] .scrollbar-visible::-webkit-scrollbar-thumb:active { background: rgba(236,236,232,0.70); }
 @supports (scrollbar-width: auto) {

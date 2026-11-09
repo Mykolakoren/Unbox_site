@@ -32,6 +32,17 @@ export function shortDay(ymd: string): string {
     return `${formatWeekdayShort(ymd, { capitalize: false })}, ${formatDayMonthShort(ymd)}`;
 }
 
+/** Код клиента всегда «#4150» (ревью п. 7). */
+export function aliasLabel(code: string | null | undefined): string {
+    const c = (code || '').replace(/^#+/, '').trim();
+    return c ? `#${c}` : '';
+}
+
+/** Поисковый запрос: без ведущих «#» и пробелов — код копируют из календаря как «#4150». */
+export function normalizeClientQuery(q: string): string {
+    return q.trim().replace(/^#+\s*/, '').trim().toLowerCase();
+}
+
 /** «вт, 7 окт., 19:00» — когда будет «следующая» после этой сессии. */
 export function nextSessionLabel(
     lastSession: CrmSession | null | undefined,

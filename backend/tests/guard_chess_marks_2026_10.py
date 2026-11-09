@@ -87,16 +87,17 @@ def _chunk(code: str, start: str, end: str) -> str:
     return code[a:code.index(end, a)]
 
 
-# ── 1. Выбор знака (логика) — 03.10: два знака ──────────────────────────
+# ── 1. Выбор знака (логика) — 09.11: снова три знака, как на телефоне ────
 
 def test_mark_kind_source():
     code = _code(DUE)
     assert "export function dueMarkKind(" in code, "нет dueMarkKind в dueAmounts.ts"
     body = _chunk(code, "export function dueMarkKind(", "\n}\n")
     assert "if (!info) return null;" in body, "нет записи — должно быть ничего (null)"
-    assert "return info.due > 0 ? 'owes' : 'paid';" in body, \
-        "03.10: due > 0 — owes, иначе paid (и у ещё не списанной, покрытой плюсом)"
-    assert "export type DueMarkKind = 'owes' | 'paid';" in code, "вернулся третий знак covered"
+    assert "if (status === 'pending_approval') return null;" in body, "у заявки «Ждёт подтверждения» снова метка"
+    assert "if (info.due > 0) return 'owes';" in body
+    assert "return info.charged === false ? 'covered' : 'paid';" in body, "нет третьего знака «с баланса»"
+    assert "export type DueMarkKind = 'owes' | 'paid' | 'covered';" in code
 
 
 def test_mark_kind_node():
@@ -108,6 +109,7 @@ console.log(JSON.stringify({{
   partial:     m.dueMarkKind({{ due: 11, price: 20, charged: false }}),
   paid:        m.dueMarkKind({{ due: 0, price: 20, charged: true }}),
   covered:     m.dueMarkKind({{ due: 0, price: 20, charged: false }}),
+  request:     m.dueMarkKind({{ due: 20, price: 20, charged: false }}, 'pending_approval'),
   none:        m.dueMarkKind(undefined),
   nul:         m.dueMarkKind(null),
   hintCovered: m.dueHint({{ due: 0, price: 20, charged: false }}),
@@ -116,14 +118,13 @@ console.log(JSON.stringify({{
     if res is None:
         return  # нет node ≥ 22.6 — проверки исходников всё равно идут
     hint = res.pop("hintCovered")
-    assert res == {"owes": "owes", "owesPending": "owes", "partial": "owes", "paid": "paid", "covered": "paid",
-                   "none": None, "nul": None}, res
-    assert "спишется с баланса за 24 ч до начала" in hint, hint
+    assert res == {"owes": "owes", "owesPending": "owes", "partial": "owes", "paid": "paid", "covered": "covered",
+                   "request": None, "none": None, "nul": None}, res
+    assert "спишется само за 24 ч до начала" in hint, hint
 
 
 def test_calc_still_marks_covered_node():
-    """Расчёт не менялся: у клиента с плюсом на балансе будущая бронь — due 0, charged false
-    (знак теперь «✓ оплачено», подсказка — «спишется за 24 ч до начала»)."""
+    """Расчёт не менялся: у клиента с плюсом на балансе будущая бронь — due 0, charged false → «с баланса»."""
     res = _node_run(f"""
 const m = await import('{(ROOT / DUE).as_posix()}');
 const bk = (id, price, paymentStatus) => ({{ id, userId: 'u1', date: '2030-01-10T00:00:00', startTime: '10:00',
@@ -141,7 +142,7 @@ console.log(JSON.stringify({{
 """)
     if res is None:
         return
-    assert res["covered"] == [{"due": 0, "price": 20, "charged": False}, "paid"], res["covered"]
+    assert res["covered"] == [{"due": 0, "price": 20, "charged": False}, "covered"], res["covered"]
     assert res["owes"] == [{"due": 20, "price": 20, "charged": False}, "owes"], res["owes"]
     assert res["paid"] == [{"due": 0, "price": 20, "charged": True}, "paid"], res["paid"]
     assert res["partial"] == [{"due": 11, "price": 20, "charged": False}, "к оплате 11 ₾ из 20"], res["partial"]
@@ -150,39 +151,39 @@ console.log(JSON.stringify({{
 # ── 2. Клетка шахматки ───────────────────────────────────────────────────
 
 def test_cell_due_mark_three_branches():
-    """(имя прежнее) 03.10: две ветки — owes и paid; подписи из dueHint."""
     code = _code(CHESS)
     cell = code[code.index("function CellDueMark("):code.index("function LegendItem(")]
-    assert "dueMarkKind(info)" in cell, "CellDueMark не выбирает знак через dueMarkKind"
-    assert "'owes'" in cell and "'paid'" in cell and "'covered'" not in cell, "в CellDueMark снова третий знак"
+    assert "dueMarkKind(info, status)" in cell, "CellDueMark не выбирает знак через dueMarkKind (со статусом)"
+    assert "'owes'" in cell and "'paid'" in cell and "'covered'" in cell, "в CellDueMark не три знака"
     assert "const label = dueHint(info);" in cell, "у знака нет подробного title/aria-label"
     icon = _chunk(cell, "const icon =", ";\n    if (corner)")
-    assert "<AlertCircle" in icon and "<Check" in icon and "CircleDashed" not in icon
+    assert "<AlertCircle" in icon and "<Check" in icon and "<CircleDashed" in icon
     assert "kind === 'paid' && 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]'" in cell
-    assert "kind === 'owes' ? 'ui-badge--danger' : 'ui-badge--ok'" in cell
-    assert "'оплачено'" in cell and "'списано с баланса'" not in cell
+    assert "kind === 'covered' && 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)]'" in cell
+    assert "'оплачено'" in cell and "'с баланса'" in cell and "'списано с баланса'" not in cell
+    assert code.count("status={b.status}") >= 2 and "<CellDueMark info={dueMap.get(b.id)} />" not in code, \
+        "клетка без статуса — у заявки покажется метка"
 
 
 def test_regular_tile_three_branches():
-    """(имя прежнее) 03.10: в обычной плитке две ветки; частичное — «к оплате N из M»."""
     code = _code(CHESS)
-    tile = _chunk(code, "const kind = dueMarkKind(d);", "})()}")
-    assert "kind === 'owes' && d ?" in tile and "kind === 'paid' ?" in tile, "в обычной плитке не две ветки owes/paid"
-    assert "kind === 'covered'" not in tile and "CircleDashed" not in tile and "COVERED_SHORT" not in tile, \
-        "в плитке снова «◌ спишется с баланса»"
+    tile = _chunk(code, "const kind = dueMarkKind(d, b.status);", "})()}")
+    assert "kind === 'owes' && d ?" in tile and "kind === 'paid' ?" in tile and "kind === 'covered' ?" in tile
+    assert "<CircleDashed" in tile and "'с баланса'" in tile
+    assert "COVERED_SHORT" not in tile
     assert "const markLabel = dueHint(d);" in tile, "у знака в плитке нет подробного title/aria-label"
     assert "roomy && partial ? ` из ${formatGel(d.price)}` : ''" in tile, "частично покрытая без «из M»"
-    assert "{roomy && !partial ? 'к оплате ' : ''}" in tile, "у частично покрытой в плитке снова длинная подпись"
+    assert "{roomy && !partial ? 'к оплате ' : ''}" in tile
     paid = tile[tile.index("kind === 'paid' ? ("):]
     assert "<Check" in paid and "'оплачено'" in paid, "ветка paid потеряла «✓ оплачено»"
-    assert "d && d.due > 0 ? (" not in tile, "осталась старая развилка due > 0 / иначе ✓"
+    assert "d && d.due > 0 ? (" not in tile
 
 
 def test_covered_text_constants():
     code = _code(DUE)
-    assert "COVERED_SHORT" not in code, "вернулась подпись «спишется с баланса» для значка"
-    assert ("export const COVERED_HINT = 'Оплачено плюсом на балансе клиента: спишется с баланса "
-            "за 24 ч до начала, брать ничего не нужно';") in code
+    assert "COVERED_SHORT" not in code
+    assert ("export const COVERED_HINT = 'Ещё не списано: баланса клиента хватает, спишется само "
+            "за 24 ч до начала — брать ничего не нужно';") in code
     assert "export function dueHint(" in code
 
 
@@ -191,26 +192,33 @@ def test_covered_text_constants():
 def test_legend_items():
     code = _read(CHESS)
     legend = code[code.index("data-chess-legend"):code.index("{/* ── Панель брони")]
-    assert "(!) к оплате 36 ₾ — взять с клиента" in legend, "в легенде нет «(!) к оплате … — взять с клиента»"
-    assert "(!) к оплате 11 ₾ из 20 — взять только разницу" in legend, "в легенде нет частичного покрытия"
-    assert "оплачено — бронь покрыта деньгами клиента, брать ничего не нужно" in legend
-    assert "Списанная в долг — всегда «к оплате»" in legend, "нет пояснения (title) про списанную в долг"
-    assert legend.count("whitespace-normal") >= 2, "длинные плашки легенды снова в одну строку — обрезаются"
-    assert "спишется с баланса —" not in legend and "<CircleDashed" not in legend, "в легенде снова третий знак"
-    assert "<Check" in legend and "<AlertCircle" in legend, \
-        "в легенде нет значков (!) и галочки (сами символы ✓ в тексте не пишем — эмодзи-сторож)"
+    assert "(!) к оплате 36 ₾ — взять с клиента" in legend
+    assert "(!) к оплате 11 ₾ из 20 — взять только разницу" in legend
+    assert "оплачено — деньги уже списаны, брать ничего не нужно" in legend
+    assert "с баланса — ещё не списано, баланса хватает, брать ничего не нужно" in legend
+    assert "Списанная в долг — всегда «к оплате»" in legend
+    assert legend.count("whitespace-normal") >= 3
+    assert "<Check" in legend and "<AlertCircle" in legend and "<CircleDashed" in legend
 
 
 # ── 4. Список броней / «Сегодня» / телефон: один DueBadge ───────────────
 
 def test_due_badge_covered_not_checkmark():
-    """(имя прежнее) 03.10: «оплачено» у покрытой плюсом — та же галочка, подсказка другая."""
+    """09.11 (решение владельца 1, «Метки оплаты у сотрудников»): в админке три
+    метки — «к оплате N ₾», «✓ оплачено» (уже списано), «◌ с баланса» (ещё не
+    списано, баланса хватает); у брони «Ждёт подтверждения» метки нет; бронь по
+    абонементу — «абонемент». Выбор знака — как у шахматки 01.10
+    (due ≤ 0 и charged === false → с баланса)."""
     code = _code(BADGE)
-    tail = code[code.index("if (!paid) return null;"):]
-    assert "charged === false ? COVERED_HINT : PAID_HINT" in tail, "у покрытой плюсом нет подсказки «спишется за 24 ч»"
-    assert "'ui-badge--ok'" in tail and "<Check" in tail and "CircleDashed" not in code
-    assert "спишется с баланса" not in code, "в DueBadge снова «спишется с баланса»"
-    head = code[:code.index("if (!paid) return null;")]
+    assert "if (status === 'pending_approval') return null;" in code, "у заявки снова денежная метка"
+    tail = code[code.index("if (!paid) {"):]
+    cov = tail[tail.index("if (charged === false) {"):]
+    assert "<CircleDashed" in cov.split("return (", 2)[1] and "statusLabel('payment', 'covered', 'staff')" in cov, \
+        "у не списанной брони, покрытой балансом, нет «◌ с баланса»"
+    assert "'ui-badge--ok'" in tail and "<Check" in tail, "нет «✓ оплачено» у списанной"
+    assert "method === 'subscription'" in tail and "statusLabel('payment', 'subscription', 'staff')" in tail
+    assert "спишется с баланса" not in code, "в DueBadge длинная подпись «спишется с баланса»"
+    head = code[:code.index("if (!paid) {")]
     assert "partial &&" in head and "из <span" in head, "нет «к оплате N из M»"
 
 

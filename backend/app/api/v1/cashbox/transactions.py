@@ -9,7 +9,8 @@ from app.models.expense_category import ExpenseCategory
 from app.models.cashbox_transaction import (
     CashboxTransaction, CashboxTransactionCreate, CashboxTransactionRead,
 )
-from app.api.v1.cashbox import require_cashbox
+from app.api.v1.cashbox import require_cashbox, cash_hidden_for
+from app.core.permissions import has_permission
 
 router = APIRouter()
 
@@ -76,6 +77,16 @@ def get_balance(
         bal = round(float(inc) - float(exp), 2)
         balances[method] = bal
         total += bal
+    # Решение владельца 3 (09.11): роль admin наличные (и общий итог, из которого
+    # их легко вычесть) до закрытия смены не видит — пересчитывает сама.
+    if cash_hidden_for(current_user):
+        return {
+            "balance": None,
+            "cash": None,
+            "card_tbc": balances["card_tbc"],
+            "card_bog": balances["card_bog"],
+            "cash_hidden": True,
+        }
     return {
         "balance": round(total, 2),
         "cash": balances["cash"],
@@ -501,6 +512,10 @@ def create_transaction(
         if not client_name and lookup_user is not None:
             client_name = lookup_user.name
     elif payload.credit_user_balance and payload.type == "income" and payload.client_id:
+        # 09.11 (ревизия): зачислить на баланс клиента — отдельное право
+        # «Пополнение баланса», а не любое финансовое (раньше хватало «отчётов»).
+        if not has_permission(current_user, "finance.topup_balance"):
+            raise HTTPException(403, "Нет права пополнять баланс клиентов — попросите старшего администратора")
         target_user = lookup_user
         if not target_user:
             raise HTTPException(

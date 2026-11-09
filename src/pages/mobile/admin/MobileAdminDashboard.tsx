@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-    AlertTriangle, ChevronRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus, Contact, KeyRound, Wallet,
+    ChevronRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus, Contact, KeyRound, Wallet,
 } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
 import { useBookingStore } from '../../../store/bookingStore';
 import { bookingsApi } from '../../../api/bookings';
-import type { BookingHistoryItem } from '../../../store/types';
+import type { BookingHistoryItem, User } from '../../../store/types';
+import { statusLabel } from '../../../design/statuses';
+import { MorningChecklistCard } from '../../../components/admin/cashbox/MorningChecklistModal';
 import { RESOURCES } from '../../../utils/data';
 import { futureChargedDue, todayRows, todaySummary, byClient, batumiDayKey, type TodayRow, type TodayClient } from '../../../utils/adminToday';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
@@ -66,7 +68,6 @@ export function MobileAdminDashboard() {
     const [seg, setSeg] = useState<Seg>('all');
     // Прогноз должников: у кого будущие pending-списания уведут за лимит.
     const [forecast, setForecast] = useState<Awaited<ReturnType<typeof bookingsApi.getLimitForecast>> | null>(null);
-    const [forecastExpanded, setForecastExpanded] = useState(false);
 
     const loadApprovals = () => {
         setApprovalsFailed(false);
@@ -117,6 +118,7 @@ export function MobileAdminDashboard() {
         return [...rowsToday, ...rowsTomorrow].filter(r => r.userId && !known.has(r.userId)).map(r => r.userId);
     }, [rowsToday, rowsTomorrow, users]);
     const archived = useArchivedClients(missingUserIds);
+    const futureDue = useMemo(() => futureChargedDue(bookings, dueMap, todayKey), [bookings, dueMap, todayKey]);
     const owing = useMemo(
         () => byClient(rowsToday, users, futureChargedDue(bookings, dueMap, todayKey)).filter(c => c.today > 0 || c.total > 0),
         [rowsToday, users, bookings, dueMap, todayKey],
@@ -125,6 +127,34 @@ export function MobileAdminDashboard() {
     // другим броням (today = 0: брони уже списаны с баланса, брать не сегодня).
     const owingToday = useMemo(() => owing.filter(c => c.today > 0), [owing]);
     const owingLater = useMemo(() => owing.filter(c => !(c.today > 0)), [owing]);
+
+    // Ревью 09.11 (№15): ОДИН список «Должны» — все, у кого долг, а не только те,
+    // у кого бронь сегодня. Долг без сегодняшней брони = минус на балансе минус
+    // будущие брони, списанные заранее (их возьмут в свой день, решение 06.10),
+    // плюс «долги по броням вне списка». Число на вкладке — все эти клиенты.
+    const otherDebtors = useMemo(() => {
+        const inOwing = new Set<string>();
+        for (const c of owing) for (const r of c.rows) { inOwing.add(r.userId); inOwing.add(c.userId); }
+        const hiddenOf = new Map<string, number>();
+        for (const h of hidden) { hiddenOf.set(h.userId, h.amount); if (h.email) hiddenOf.set(h.email, h.amount); }
+        const out: OtherDebtor[] = [];
+        for (const u of users || []) {
+            const keys = [String(u.id || ''), u.email || ''].filter(Boolean);
+            if (keys.some(k => inOwing.has(k))) continue;
+            const bal = Number(u.balance ?? 0);
+            const future = keys.reduce((s, k) => s + (futureDue.get(k) || 0), 0);
+            const amount = Math.round((Math.max(0, -bal) - future) * 100) / 100;
+            if (!(amount > 0)) continue;
+            const hiddenAmount = keys.map(k => hiddenOf.get(k)).find(v => v !== undefined) ?? 0;
+            out.push({ user: u, amount, hidden: hiddenAmount > 0 });
+        }
+        out.sort((a, b) => b.amount - a.amount || (a.user.name || '').localeCompare(b.user.name || '', 'ru'));
+        return out;
+    }, [owing, hidden, users, futureDue]);
+    const debtorsCount = owing.filter(c => c.total > 0).length + otherDebtors.length;
+    const debtTotal = Math.round((owing.reduce((s, c) => s + c.total, 0) + otherDebtors.reduce((s, d) => s + d.amount, 0)) * 100) / 100;
+    const forecastCount = forecast?.count ?? 0;
+    const urgentCount = pendingApprovals?.length ?? 0;
 
     // Брони могли уже лежать в сторе (открывали «Брони») — тогда показываем их.
     const bookingsPending = !bookingsLoaded && bookings.length === 0;
@@ -151,6 +181,18 @@ export function MobileAdminDashboard() {
             branch: first ? branchOfBooking({ resourceId: first.cabinetId }) : undefined,
         });
     };
+
+    /** «Принять оплату · N ₾» — одна кнопка на всех строках «Должны». */
+    const payButton = (amount: number, onClick: () => void) => canCash ? (
+        <Button
+            block
+            icon={<Wallet size={16} aria-hidden="true" />}
+            disabled={!(amount > 0)}
+            onClick={onClick}
+        >
+            Принять оплату · {formatGel(amount)}
+        </Button>
+    ) : null;
 
     // Карточка должника «Должны»; later — долг не за сегодня (нейтральная рамка).
     const renderOwing = (c: TodayClient, later = false) => {
@@ -183,19 +225,28 @@ export function MobileAdminDashboard() {
             {rebate > 0 && (
                 <div data-weekly-rebate-note style={{ fontSize: 12, color: 'var(--status-ok-fg)' }}>{weeklyRebateNote(rebate)}</div>
             )}
-            {canCash && (
-                <Button
-                    block
-                    icon={<Wallet size={16} aria-hidden="true" />}
-                    disabled={!(c.total > 0)}
-                    onClick={() => openPayFor(c)}
-                >
-                    Принять оплату · {formatGel(c.total)}
-                </Button>
-            )}
+            {payButton(c.total, () => openPayFor(c))}
         </div>
         );
     };
+
+    /** Должник без сегодняшней брони — строка ≥ 44 px с «Принять оплату · весь долг». */
+    const renderOther = (d: OtherDebtor) => (
+        <div key={String(d.user.id || d.user.email)} data-other-debtor style={{
+            background: 'var(--color-card)', border: '1px solid var(--color-ink-10)', borderRadius: 12,
+            padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+            <Link to={`/m/admin/users/${encodeURIComponent(d.user.email || String(d.user.id))}`}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, color: 'var(--color-ink)', textDecoration: 'none' }}>
+                <span style={{ minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.user.name || d.user.email}</span>
+                    {d.hidden && <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>долг по броням вне списка</span>}
+                </span>
+                <span className="num" style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-danger-fg)', whiteSpace: 'nowrap' }}>{formatGel(d.amount)}</span>
+            </Link>
+            {payButton(d.amount, () => setPay({ user: d.user, total: d.amount, today: 0 }))}
+        </div>
+    );
 
     return (
         <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -212,7 +263,7 @@ export function MobileAdminDashboard() {
                 </div>
                 {/* Бронь от своего имени: сбрасываем «бронь за клиента». */}
                 <Link
-                    to="/m/find"
+                    to="/m/find?admin=1"
                     aria-label="Новая бронь"
                     onClick={() => setBookingForUser(null)}
                     className="press"
@@ -234,62 +285,67 @@ export function MobileAdminDashboard() {
                 </div>
             )}
 
-            {/* Срочные брони ждут решения — самое срочное. */}
-            {pendingApprovals && pendingApprovals.length > 0 && (
-                <div style={{ padding: '0 16px' }}>
-                    <Link to="/m/admin/inbox" style={bannerStyle}>
-                        <AlertTriangle size={20} aria-hidden="true" />
-                        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>
-                            Ждут вашего решения: {pendingApprovals.length} {plural(pendingApprovals.length, 'срочная бронь', 'срочные брони', 'срочных броней')}
-                        </span>
-                        <ChevronRight size={18} aria-hidden="true" />
-                    </Link>
-                </div>
-            )}
-
-            {/* Сводка «Взять сегодня» — ответ «кто должен» без тапов; тап — «Должны». */}
+            {/* Сводка сразу под датой (ревью 09.11, admin-design №12): «Взять сегодня ·
+                Должны · За лимит · Ждёт подтверждения». Ненулевая ячейка — своим тоном и
+                ведёт на свой экран; нулевая — серая. Денежные предупреждения больше не
+                внизу под лентой, а «Сегодня брать не с кого» — тихая серая надпись. */}
             <div style={{ padding: '0 16px' }}>
                 {bookingsPending ? (
                     <SkeletonList count={1} label="Считаем, кто должен" cardHeight={72} />
                 ) : (
-                    <button
-                        type="button"
-                        onClick={() => setSeg('due')}
-                        aria-label={summary.amount > 0
-                            ? `Взять сегодня ${formatGel(summary.amount)} с ${summary.clients} ${plural(summary.clients, 'клиента', 'клиентов', 'клиентов')} — показать должников`
-                            : 'Сегодня брать не с кого'}
-                        className="press"
-                        style={{
-                            width: '100%', textAlign: 'left', fontFamily: 'inherit', cursor: 'pointer',
-                            background: summary.amount > 0 ? 'var(--status-danger-bg)' : 'var(--status-ok-bg)',
-                            color: summary.amount > 0 ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)',
-                            border: 'none', borderRadius: 16, padding: '14px 16px',
-                            display: 'flex', alignItems: 'center', gap: 12,
-                        }}
-                    >
-                        <Wallet size={22} aria-hidden="true" />
-                        <span style={{ flex: 1 }}>
-                            <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>
-                                {summary.amount > 0 ? 'Взять сегодня' : 'Сегодня брать не с кого'}
-                            </span>
-                            {summary.amount > 0 && (
-                                <span style={{ display: 'block', fontSize: 28, fontWeight: 600, lineHeight: 1.2 }}>
-                                    <span className="num">{formatGel(summary.amount)}</span>
-                                    <span style={{ fontSize: 16 }}> · {summary.clients} {plural(summary.clients, 'клиент', 'клиента', 'клиентов')}</span>
-                                </span>
-                            )}
-                        </span>
-                        {summary.amount > 0 && <ChevronRight size={18} aria-hidden="true" />}
-                    </button>
+                    <div data-today-summary role="group" aria-label="Сводка дня" style={{
+                        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6,
+                    }}>
+                        <SummaryCell
+                            label="Взять сегодня"
+                            value={summary.amount > 0 ? formatGel(summary.amount) : null}
+                            sub={summary.amount > 0
+                                ? `${summary.clients} ${plural(summary.clients, 'клиент', 'клиента', 'клиентов')}`
+                                : 'брать не с кого'}
+                            tone="danger"
+                            ariaLabel={summary.amount > 0
+                                ? `Взять сегодня ${formatGel(summary.amount)} с ${summary.clients} ${plural(summary.clients, 'клиента', 'клиентов', 'клиентов')} — показать должников`
+                                : 'Сегодня брать не с кого'}
+                            onClick={() => setSeg('due')}
+                        />
+                        <SummaryCell
+                            label="Должны всего"
+                            value={debtorsCount > 0 ? formatGel(debtTotal) : null}
+                            sub={debtorsCount > 0 ? `${debtorsCount} ${plural(debtorsCount, 'клиент', 'клиента', 'клиентов')}` : 'долгов нет'}
+                            tone="danger"
+                            onClick={() => setSeg('due')}
+                        />
+                        <SummaryCell
+                            label="Уйдут за лимит"
+                            value={forecastCount > 0 ? String(forecastCount) : null}
+                            sub={forecastCount > 0 ? plural(forecastCount, 'клиент', 'клиента', 'клиентов') : 'никто'}
+                            tone="pending"
+                            onClick={() => setSeg('due')}
+                        />
+                        <SummaryCell
+                            label={statusLabel('booking', 'pending_approval', 'staff')}
+                            value={urgentCount > 0 ? String(urgentCount) : null}
+                            sub={urgentCount > 0 ? plural(urgentCount, 'срочная бронь', 'срочные брони', 'срочных броней') : 'срочных нет'}
+                            tone="pending"
+                            to="/m/admin/inbox"
+                        />
+                    </div>
                 )}
             </div>
+
+            {/* Чек-лист смены — карточкой здесь, а не окном поверх «Кассы» (ревью 09.11, №17). */}
+            {currentUser?.email && (
+                <div style={{ padding: '0 16px' }}>
+                    <MorningChecklistCard adminEmail={currentUser.email} />
+                </div>
+            )}
 
             <div style={{ padding: '0 16px' }}>
                 <Segmented<Seg>
                     aria-label="Что показать"
                     options={[
                         { value: 'all', label: bookingsPending ? 'Все' : `Все · ${rowsToday.length}` },
-                        { value: 'due', label: bookingsPending ? 'Должны' : `Должны · ${owingToday.length}` },
+                        { value: 'due', label: bookingsPending ? 'Должны' : `Должны · ${debtorsCount}` },
                         { value: 'tomorrow', label: bookingsPending ? 'Завтра' : `Завтра · ${rowsTomorrow.length}` },
                     ]}
                     value={seg}
@@ -301,21 +357,60 @@ export function MobileAdminDashboard() {
                 {bookingsPending ? (
                     <SkeletonList count={4} label="Загружаем брони" cardHeight={56} />
                 ) : seg === 'due' ? (
-                    owing.length === 0 ? (
-                        <EmptyState compact title="Сегодня никто не должен" hint="Все сегодняшние брони списаны с баланса или идут по абонементу." />
+                    owing.length === 0 && otherDebtors.length === 0 && forecastCount === 0 ? (
+                        <EmptyState compact title="Никто не должен" hint="Все брони списаны с баланса или идут по абонементу." />
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {owingToday.map(c => renderOwing(c))}
-                            {owingLater.length > 0 && (
-                                <div data-owing-later style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: owingToday.length > 0 ? 8 : 0 }}>
-                                    <div>
-                                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>Долг по другим броням: не сегодня</div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                                            Эти брони уже списаны с баланса, оплатить их можно, когда клиент придёт
-                                        </div>
-                                    </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <DueSection title="Сегодня" count={owingToday.length} empty="Сегодня брать не с кого">
+                                {owingToday.map(c => renderOwing(c))}
+                            </DueSection>
+                            {(owingLater.length > 0 || otherDebtors.length > 0) && (
+                                <DueSection
+                                    title="Старые долги"
+                                    count={owingLater.length + otherDebtors.length}
+                                    note="Эти брони уже списаны с баланса, оплатить их можно, когда клиент придёт"
+                                >
                                     {owingLater.map(c => renderOwing(c, true))}
-                                </div>
+                                    {hidden.length > 0 && (
+                                        <div data-hidden-debts style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                                            Долги по броням вне списка: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}
+                                            {' '}(старые брони, отмены со штрафом, списания не за бронь), всего <span className="num">{formatGel(hiddenTotal)}</span>
+                                        </div>
+                                    )}
+                                    {otherDebtors.map(renderOther)}
+                                </DueSection>
+                            )}
+                            {forecast && forecastCount > 0 && (
+                                <DueSection
+                                    title="Скоро уйдут за лимит"
+                                    count={forecastCount}
+                                    note="Будущие брони спишутся и уведут баланс за кредитный лимит — предложите пополнить"
+                                >
+                                    {forecast.clients.map(c => {
+                                        const u = (users || []).find(x => String(x.id) === c.userId || x.email === c.email);
+                                        return (
+                                            <div key={c.userId} data-forecast-row style={{
+                                                background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
+                                                borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
+                                            }}>
+                                                <Link to={`/m/admin/users/${encodeURIComponent(c.email)}`}
+                                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 44, textDecoration: 'none', color: 'inherit' }}>
+                                                    <span style={{ minWidth: 0 }}>
+                                                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                                                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                                                            баланс {formatGel(c.balance)} · лимит {formatGel(c.creditLimit)} · ждут списания {formatGel(c.pendingTotal)} ({c.pendingCount})
+                                                        </span>
+                                                    </span>
+                                                    <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                                                        <span className="num" style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--status-pending-fg)' }}>{formatGel(c.overLimitBy)}</span>
+                                                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>за лимит</span>
+                                                    </span>
+                                                </Link>
+                                                {u && payButton(c.overLimitBy, () => setPay({ user: u, total: c.overLimitBy, today: 0 }))}
+                                            </div>
+                                        );
+                                    })}
+                                </DueSection>
                             )}
                         </div>
                     )
@@ -336,77 +431,6 @@ export function MobileAdminDashboard() {
                 )}
             </div>
 
-            {/* Долги по броням вне списка (03.10) — только если есть. */}
-            {!bookingsPending && hidden.length > 0 && (
-                <section data-hidden-debts aria-label="Долги по броням вне списка" style={{ padding: '0 16px' }}>
-                    <div style={{ background: 'var(--status-danger-bg)', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--status-danger-fg)' }}>
-                            Долги по броням вне списка: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}, <span className="num">{formatGel(hiddenTotal)}</span>
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                            Старые брони, отменённые со штрафом, списания не за бронь — на бронях в списке их не видно
-                        </div>
-                        {hidden.slice(0, 8).map(h => {
-                            const u = (users || []).find(x => String(x.id) === h.userId || x.email === h.email);
-                            return (
-                                <Link key={h.userId} to={`/m/admin/users/${encodeURIComponent(h.email || h.userId)}`}
-                                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 14, color: 'var(--color-ink)', textDecoration: 'none', minHeight: 32, alignItems: 'center' }}>
-                                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u?.name || h.email || h.userId}</span>
-                                    <span className="num" style={{ color: 'var(--status-danger-fg)', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatGel(h.amount)}</span>
-                                </Link>
-                            );
-                        })}
-                        {hidden.length > 8 && (
-                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>И ещё {hidden.length - 8} — в списке клиентов</div>
-                        )}
-                    </div>
-                </section>
-            )}
-
-            {/* Прогноз должников — одной строкой, раскрывается по тапу. */}
-            {forecast && forecast.count > 0 && (
-                <div style={{ padding: '0 16px' }}>
-                    <button
-                        type="button"
-                        onClick={() => setForecastExpanded(v => !v)}
-                        aria-expanded={forecastExpanded}
-                        style={{ ...bannerStyle, width: '100%', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}
-                    >
-                        <AlertTriangle size={18} aria-hidden="true" />
-                        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>
-                            {forecast.count} {plural(forecast.count, 'клиент уйдёт', 'клиента уйдут', 'клиентов уйдут')} за лимит
-                        </span>
-                        <ChevronRight size={18} aria-hidden="true" style={{ transform: forecastExpanded ? 'rotate(90deg)' : undefined }} />
-                    </button>
-                    {forecastExpanded && (
-                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {forecast.clients.map(c => (
-                                <Link
-                                    key={c.userId}
-                                    to={`/m/admin/users/${encodeURIComponent(c.email)}`}
-                                    style={{
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        gap: 10, background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
-                                        borderRadius: 12, padding: '10px 14px', textDecoration: 'none', color: 'inherit',
-                                    }}
-                                >
-                                    <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                                            баланс {formatGel(c.balance)} · лимит {formatGel(c.creditLimit)} · ждут списания {formatGel(c.pendingTotal)} ({c.pendingCount})
-                                        </div>
-                                    </div>
-                                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                        <div className="num" style={{ fontSize: 14, fontWeight: 600, color: 'var(--status-pending-fg)' }}>{formatGel(-c.overLimitBy)}</div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>за лимит</div>
-                                    </div>
-                                </Link>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
             {/* Разделы, которые не влезли в нижнее меню — списком, не плитками. */}
             <nav aria-label="Ещё разделы" style={{ padding: '8px 16px 0' }}>
                 <SectionTitle>Ещё</SectionTitle>
@@ -424,10 +448,12 @@ export function MobileAdminDashboard() {
                 booking={activeBooking}
                 getUserName={email => getAdminUserName(users, email)}
                 onClose={() => setActiveBooking(null)}
+                dueInfo={activeBooking ? dueMap.get(activeBooking.id) : undefined}
                 acceptPayment={b => {
                     const p = acceptPaymentFor(b, bookings, users, dueMap);
                     if (!p) return null;
                     return {
+                        total: p.total,
                         sub: p.today > 0
                             ? `Весь долг ${formatGel(p.total)}, из них за сегодня ${formatGel(p.today)}`
                             : `Весь долг ${formatGel(p.total)}`,
@@ -451,17 +477,74 @@ export function MobileAdminDashboard() {
     );
 }
 
-const bannerStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 12, minHeight: 48,
-    background: 'var(--status-pending-bg)', border: '1px solid var(--color-ink-10)', borderRadius: 14,
-    padding: '10px 14px', color: 'var(--status-pending-fg)', textDecoration: 'none',
-};
+/** Должник без брони сегодня (минус на балансе, не за завтрашние брони). */
+interface OtherDebtor {
+    user: User;
+    amount: number;
+    /** Часть долга — по броням вне списка (старые, отменённые со штрафом…). */
+    hidden: boolean;
+}
+
+/** Раздел «Должны»: заголовок с числом, пояснение, строки. */
+function DueSection({ title, count, note, empty, children }: {
+    title: string; count: number; note?: string; empty?: string; children: React.ReactNode;
+}) {
+    return (
+        <section aria-label={title} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+                    {title} · <span className="num">{count}</span>
+                </div>
+                {note && <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>{note}</div>}
+            </div>
+            {count === 0 && empty
+                ? <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>{empty}</div>
+                : children}
+        </section>
+    );
+}
+
+/** Ячейка сводки дня: нулевая — серая, ненулевая — своим тоном и ведёт на свой экран. */
+function SummaryCell({ label, value, sub, tone, onClick, to, ariaLabel }: {
+    label: string;
+    value: string | null;
+    sub: string;
+    tone: 'danger' | 'pending';
+    onClick?: () => void;
+    to?: string;
+    ariaLabel?: string;
+}) {
+    const active = value !== null;
+    const style: React.CSSProperties = {
+        display: 'flex', flexDirection: 'column', gap: 2, minHeight: 64, width: '100%',
+        padding: '10px 12px', borderRadius: 12, textAlign: 'left', fontFamily: 'inherit',
+        border: active ? 'none' : '1px solid var(--color-ink-08)',
+        background: active ? `var(--status-${tone}-bg)` : 'var(--color-card)',
+        color: active ? `var(--status-${tone}-fg)` : 'var(--color-ink-60)',
+        cursor: active ? 'pointer' : 'default', textDecoration: 'none',
+    };
+    const body = (
+        <>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+            {active && <span className="num" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>{value}</span>}
+            <span style={{ fontSize: 12 }}>{sub}</span>
+        </>
+    );
+    if (to && active) return <Link to={to} className="press" style={style} aria-label={ariaLabel}>{body}</Link>;
+    return (
+        <button type="button" className={active ? 'press' : undefined} disabled={!active} onClick={onClick} style={style} aria-label={ariaLabel}>
+            {body}
+        </button>
+    );
+}
+
 
 /** Строка дня: время · клиент · кабинет · «к оплате / ✓». Неоплаченная — рамкой danger (В2). */
 function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archivedName?: string; rebate?: number; onOpen: () => void }) {
-    const owes = row.due !== null && row.due > 0;
+    // У заявки «Ждёт подтверждения» денежной метки и красной рамки нет (решение 09.11).
+    const owes = row.due !== null && row.due > 0 && row.status !== 'pending_approval';
     const note = row.status === 'completed' ? ' · прошла'
-        : row.status === 'pending_approval' ? ' · ждёт одобрения' : '';
+        : row.status === 'pending_approval' ? ` · ${statusLabel('booking', 'pending_approval', 'staff').toLowerCase()}` : '';
     return (
         <button
             type="button"
@@ -499,7 +582,7 @@ function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archived
                     </span>
                 )}
             </span>
-            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" />
+            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={row.status} method={row.paymentMethod} />
         </button>
     );
 }

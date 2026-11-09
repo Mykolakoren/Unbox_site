@@ -66,7 +66,8 @@ export interface CrmSession {
     specialistId: string;
     date: string;
     durationMinutes: number;
-    status: 'PLANNED' | 'COMPLETED' | 'CANCELLED_CLIENT' | 'CANCELLED_THERAPIST';
+    /** NO_SHOW (09.11) — «не пришёл / поздняя отмена — оплачивается»: в долге, как COMPLETED. */
+    status: 'PLANNED' | 'COMPLETED' | 'CANCELLED_CLIENT' | 'CANCELLED_THERAPIST' | 'NO_SHOW';
     price?: number;
     currency?: string;   // Frozen at payment time; null → use client.currency
     account?: string;    // Frozen at payment time; null → use client.defaultAccount
@@ -117,9 +118,13 @@ export interface CrmSessionUpdate {
     isBooked?: boolean;
     bookingId?: string;
     notes?: string;
+    /** 09.11: при отмене заодно удалить событие из Google Календаря (в базу не пишется). */
+    removeFromCalendar?: boolean;
 }
 
 export interface CrmSettings {
+    /** 09.11: «Базовая цена сессии» из анкеты (лари) — подсказка суммы оплаты и ставка новых клиентов. */
+    defaultSessionPrice?: number;
     calendarId: string | null;
     calendarSyncEnabled: boolean;
     googleCalendarSourceOfTruth: boolean;
@@ -206,6 +211,8 @@ export interface DebtByClient {
     clientName: string;
     totalDebt: number;
     unpaidSessionsCount: number;
+    /** 09.11: из них оплачены частично («2 сессии, одна частично»). */
+    partialSessionsCount?: number;
     currency?: string;
 }
 
@@ -418,9 +425,34 @@ export const crmApi = {
         return response.data;
     },
 
-    quickPaySession: async (id: string, account?: string): Promise<{ ok: boolean; amount: number; currency: string; account?: string; added?: number; created?: boolean }> => {
-        const response = await api.post(`/crm/sessions/${id}/quick-pay`, account ? { account } : {});
-        return response.data;
+    /**
+     * amount (09.11) — «Сколько заплатили?», когда у сессии нет цены; rememberRate —
+     * заодно записать сумму ставкой клиента (если её не было). Без суммы сервер
+     * отвечает 400 code=price_required — тогда спрашиваем сумму здесь (одно окно
+     * для всех экранов) и повторяем оплату. Передумали — ошибка «Оплата не отмечена».
+     */
+    quickPaySession: async (id: string, account?: string, amount?: number, rememberRate?: boolean): Promise<{ ok: boolean; amount: number; currency: string; account?: string; added?: number; created?: boolean }> => {
+        const body: { account?: string; amount?: number; rememberRate?: boolean } = {};
+        if (account) body.account = account;
+        if (amount != null) body.amount = amount;
+        if (rememberRate) body.rememberRate = true;
+        try {
+            const response = await api.post(`/crm/sessions/${id}/quick-pay`, body);
+            return response.data;
+        } catch (e) {
+            const d = (e as { response?: { status?: number; data?: { detail?: Record<string, unknown> } } })?.response;
+            const detail = d?.data?.detail;
+            if (amount != null || d?.status !== 400 || !detail || typeof detail !== 'object' || detail.code !== 'price_required') throw e;
+            const { askPaymentAmount } = await import('../components/crm/askPaymentAmount');
+            const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+            const answer = await askPaymentAmount({
+                currency: String(detail.currency || 'GEL'),
+                defaultPrice: num(detail.defaultPrice ?? detail.default_price),
+                clientRate: num(detail.clientBasePrice ?? detail.client_base_price),
+            });
+            if (!answer) throw new Error('Оплата не отмечена — сумму не указали');
+            return crmApi.quickPaySession(id, account, answer.amount, answer.rememberRate);
+        }
     },
 
     unmarkPaidSession: async (id: string): Promise<{ ok: boolean }> => {
@@ -428,7 +460,8 @@ export const crmApi = {
         return response.data;
     },
 
-    markAllPaid: async (clientId: string): Promise<{ ok: boolean; marked: number }> => {
+    /** skippedNoPrice (09.11) — сессии без цены не отмечаются: их оплачивают по одной, указав сумму. */
+    markAllPaid: async (clientId: string): Promise<{ ok: boolean; marked: number; skippedNoPrice?: number }> => {
         const response = await api.post(`/crm/clients/${clientId}/mark-all-paid`);
         return response.data;
     },

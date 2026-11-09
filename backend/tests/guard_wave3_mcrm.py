@@ -56,8 +56,10 @@ def test_book_next_is_first_row_of_session_sheet():
     sheet = _code("SessionActionSheet.tsx")
     assert "onBookNext?: (session: CrmSession) => void" in sheet, "шторка сессии не принимает onBookNext"
     main = _between(sheet, "function Main(", "\nfunction RescheduleForm")
+    # 09.11: плитки собираются в массив tiles до return — порядок смотрим в разметке.
+    main = main[main.index("return ("):]
     i_row = main.find("Записать следующую · ${nextSessionLabel(session, client)}")
-    i_tiles = main.find("<ActionTile")
+    i_tiles = main.find("{tiles.map(")
     assert 0 <= i_row < i_tiles, "«Записать следующую · …» должна быть первой строкой шторки"
     assert "!viewingOther" in sheet, "в «просмотре как специалист» строка записи не должна показываться"
     for name in ("MobileCrmToday.tsx", "MobileCrmSessions.tsx", "MobileCrmClient.tsx"):
@@ -182,9 +184,10 @@ def test_client_card_debt_button_does_not_promise_instant_pay():
     code = _code("MobileCrmClient.tsx")
     i = code.index("onClick={() => setUnpaidOpen(true)}")
     label = code[i:code.index("</Button>", i)]
-    assert "Долг ${debtTotal} · Оплатить" in label, "кнопка долга: «Долг 280 ₾ · Оплатить»"
-    assert "Отметить оплату" not in label, \
-        "кнопка долга только открывает список — «Отметить оплату · 280 ₾» обещает мгновенную оплату"
+    # 09.11 (ревью crm-ux п. 20, дизайн п. 7): сумма долга один раз — в строке
+    # «Долг 280 ₾»; кнопка «Отметить оплату…» с многоточием = «дальше выбор», не мгновенная оплата.
+    assert "Отметить оплату…" in label, "кнопка долга: «Отметить оплату…»"
+    assert "${debtTotal}" not in label, "сумма долга на кнопке — дубль строки «Долг 280 ₾»"
 
 
 def test_screens_reload_after_sheets():
@@ -199,7 +202,8 @@ def test_screens_reload_after_sheets():
 
 def test_future_session_has_no_completed_tile():
     main = _between(_code("SessionActionSheet.tsx"), "function Main(", "\nfunction RescheduleForm")
-    assert "session.status !== 'COMPLETED' && isFuture ?" in main and 'label="Перенести"' in main, \
+    # 09.11: плитки выбираются по состоянию; у будущей запланированной — «Перенести» и «Отменить».
+    assert "else if (isFuture) tiles = [rescheduleTile, cancelTile];" in main and 'label="Перенести"' in main, \
         "G6-M4: у будущей сессии снова «Прошла»"
 
 

@@ -138,8 +138,14 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
         setMarkingAll(true);
         try {
             const result = await crmApi.markAllPaid(client.id);
-            toast.success(`Оплата отмечена: ${result.marked}`);
-            setPaidIds(prev => { const next = new Set(prev); unpaid.forEach(s => next.add(s.id)); return next; });
+            // 09.11: сессии без цены сервер «оплаченными» не ставит — их отмечают по
+            // одной, указав сумму («Сколько заплатили?»).
+            const skipped = result.skippedNoPrice ?? 0;
+            toast.success(skipped > 0
+                ? `Оплата отмечена: ${result.marked}. Без цены — ${skipped}: отметьте их по одной, указав сумму`
+                : `Оплата отмечена: ${result.marked}`, skipped > 0 ? { duration: 8000 } : undefined);
+            setPaidIds(prev => { const next = new Set(prev); unpaid.forEach(s => { if (skipped === 0 || amountOf(s, client).amount > 0 || partialPayment(s, client)) next.add(s.id); }); return next; });
+            if (skipped > 0) { onChanged?.(); return; }
             onChanged?.();
             onClose();
         } catch (e) {
@@ -210,7 +216,8 @@ export function UnpaidSessionsSheet({ open, onClose, client, sessions: sessionsP
                                     disabled={markingAll || viewingOther}
                                     onClick={() => payOne(s)}
                                 >
-                                    {partial ? `Доплатить · ${money}` : amount > 0 ? `Отметить оплату · ${money}` : 'Отметить оплату'}
+                                    {/* Цены нет — «Сколько заплатили?» спросит api (решение владельца 2, 09.11). */}
+                                    {partial ? `Доплатить · ${money}` : amount > 0 ? `Отметить оплату · ${money}` : 'Указать сумму оплаты…'}
                                 </Button>
                             </li>
                         );

@@ -32,7 +32,9 @@ def test_checklist_needs_all_ticks_and_tbilisi_day():
 
 def test_checklist_on_desktop_and_phone():
     assert "<MorningChecklistModal adminEmail={currentUser.email} />" in _src("src/pages/admin/Finance.tsx")
-    assert "<MorningChecklistModal adminEmail={currentUser.email} />" in _src("src/pages/mobile/admin/MobileAdminFinance.tsx")
+    # 09.11 (ревью admin-ux №17): на телефоне — карточка «Утро: 2 из 6» на «Сегодня», не окно поверх «Кассы».
+    assert "MorningChecklistModal" not in _src("src/pages/mobile/admin/MobileAdminFinance.tsx")
+    assert "<MorningChecklistCard adminEmail={currentUser.email} />" in _src("src/pages/mobile/admin/MobileAdminDashboard.tsx")
 
 
 def test_topup_typo_guard():

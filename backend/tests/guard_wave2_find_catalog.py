@@ -90,7 +90,10 @@ def test_find_protected_logic_untouched():
     # и acceptMergeSuggestion (is_booked); перенос — «было → станет» под тем же
     # inFlightRef (отмена снимает блок до setPendingChip).
     # 29.10 (Егор): перенос — длительность из самой брони (newDuration) — осознанная правка.
-    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "87577cabd23d97fe", \
+    # 09.11 (ревизия мобильного, владелец «делай всё»): шторка подтверждения брони под
+    # CRM-сессию с ценой, «было → станет» с именем клиента, возврат в админку после
+    # переноса — осознанная правка (проверяет regression/money-reviewer перед выкладкой).
+    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "46ec215c302ef84d", \
         "chooseWindow изменилась — оформление/перенос/привязка трогать нельзя"
 
 

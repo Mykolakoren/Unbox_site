@@ -10,6 +10,7 @@ from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
 from app.services import session_balance as sb
+from app.api.v1.crm import BILLABLE_STATUSES, profile_base_price
 
 router = APIRouter()
 
@@ -65,12 +66,12 @@ def crm_dashboard(
         )
     ).one()
 
-    # Unpaid count — only for active clients, only COMPLETED sessions
+    # Unpaid count — only for active clients, only COMPLETED/NO_SHOW sessions
     unpaid_all = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.is_paid == False,
-            TherapySession.status == "COMPLETED",
+            TherapySession.status.in_(BILLABLE_STATUSES),
         )
     ).all()
     unpaid_count = 0
@@ -212,12 +213,12 @@ def crm_dashboard(
                 "last_session_date": last_session.isoformat() if last_session else None,
             })
 
-    # Debt by client — only COMPLETED unpaid sessions (future PLANNED are not debt)
+    # Debt by client — only COMPLETED/NO_SHOW unpaid sessions (future PLANNED are not debt)
     unpaid_sessions_all = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.is_paid == False,
-            TherapySession.status == "COMPLETED",
+            TherapySession.status.in_(BILLABLE_STATUSES),
         )
     ).all()
 
@@ -233,11 +234,16 @@ def crm_dashboard(
         if client and not client.is_active:
             continue
         currency = client.currency if client else "GEL"
-        owed = sb.remaining_in(us, client, pays_by_session.get(us.id, ()), GEL_RATES, currency)
+        _pays = pays_by_session.get(us.id, ())
+        owed = sb.remaining_in(us, client, _pays, GEL_RATES, currency)
         if cid not in debt_map:
-            debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0, "currency": currency}
+            debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0,
+                             "unpaid_sessions_count": 0, "partial_sessions_count": 0, "currency": currency}
         debt_map[cid]["total_debt"] += owed
         debt_map[cid]["unpaid_sessions_count"] += 1
+        # 09.11: «2 сессии, одна частично» — внесено что-то, но не всё.
+        if _pays and sb.session_money(us, client, _pays, GEL_RATES).paid > sb.EPS and owed > sb.EPS:
+            debt_map[cid]["partial_sessions_count"] += 1
 
     debt_by_client = sorted(debt_map.values(), key=lambda x: x["total_debt"], reverse=True)
     for d in debt_by_client:
@@ -311,11 +317,15 @@ def crm_dashboard(
 
 @router.get("/settings")
 def get_crm_settings(
+    session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
     """Get specialist's CRM settings (calendar_id, etc.)."""
     crm_data = current_user.crm_data or {}
     return {
+        # 09.11: «Базовая цена сессии» из анкеты — подсказка суммы в «Сколько
+        # заплатили?» и ставка новых клиентов (решение владельца 2).
+        "default_session_price": profile_base_price(session, current_user.id),
         "calendar_id": crm_data.get("calendar_id"),
         "calendar_sync_enabled": bool(crm_data.get("calendar_id")),
         # 31.08: реальный флаг «Google Calendar — источник правды». По

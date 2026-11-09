@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { Check, ChevronDown, Hourglass, Repeat } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, Hourglass, Repeat, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { tbilisiNow } from '../../utils/dateUtils';
@@ -35,6 +35,9 @@ import { Field as FormField, Input, Select } from '../../components/ui/Field';
 import { markErrorToastShown, toastApiError } from '../../utils/errors';
 import { catalogPath } from '../../utils/catalogPath';
 import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
+import { useAdminFlow } from './adminFlow';
+import { ClientPickerSheet } from './ClientPickerSheet';
+import { TelegramConnectCard } from './TelegramConnectCard';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -97,7 +100,8 @@ export function MobileCheckout() {
     // Recurring series state — local to the checkout, not persisted in store
     // (one-shot decision). 'once' = single booking (default).
     const [recurPattern, setRecurPattern] = useState<'once' | 'weekly' | 'biweekly' | 'monthly'>('once');
-    const [recurOccurrences, setRecurOccurrences] = useState(8);
+    // 09.11 (ревью №8): по умолчанию 4 встречи (было 8 — и сумма сразу пугала).
+    const [recurOccurrences, setRecurOccurrences] = useState(4);
     // Owner+Galina 2026-05-31: дать возможность задать «продлить до даты Х»
     // вместо «N сессий». Включается чекбоксом; когда задано, occurrences
     // вычисляется автоматически по шагу паттерна.
@@ -153,6 +157,26 @@ export function MobileCheckout() {
         return u ?? currentUser;
     }, [state.bookingForUser, users, currentUser]);
     const proxyName = state.bookingForUser ? (effectiveUser?.name || state.bookingForUser) : null;
+
+    // Ревью админки №2а/№20 (09.11): в админ-брони (пришли из админки) сначала
+    // выбираем, ДЛЯ КОГО бронь, — поиском, с балансом. «Для себя» — тоже явный
+    // выбор, а не молчаливое значение по умолчанию.
+    const adminFlow = useAdminFlow(s => s.active) && isBookingAdmin(currentUser);
+    const setAdminForName = useAdminFlow(s => s.setForName);
+    const [selfChosen, setSelfChosen] = useState(false);
+    const forChosen = !!state.bookingForUser || selfChosen || !adminFlow;
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const autoOpened = useRef(false);
+    useEffect(() => {
+        if (adminFlow && !forChosen && !autoOpened.current && !confirmed) {
+            autoOpened.current = true;
+            setPickerOpen(true);
+        }
+    }, [adminFlow, forChosen, confirmed]);
+    useEffect(() => {
+        if (!adminFlow) return;
+        setAdminForName(state.bookingForUser ? proxyName : selfChosen ? (currentUser?.name ?? 'вы') : null);
+    }, [adminFlow, state.bookingForUser, proxyName, selfChosen, currentUser?.name, setAdminForName]);
 
     // Активные бонусные часы того, ЗА КОГО бронь (сервер тратит именно их).
     // Тип 'free_hour' и срок годности учитывает activeBonusHours.
@@ -388,9 +412,12 @@ export function MobileCheckout() {
 
     // «Примерка» серии на бэке (аудит 30.08): точная сумма той же математикой,
     // что и создание. Пока не пришла — кнопка показывает оценку «цена × N».
-    const [seriesQuote, setSeriesQuote] = useState<{ totalMoney: number; totalHours: number; totalBonusHours?: number; occurrences: number; subscriptionShortDates: string[] } | null>(null);
+    const [seriesQuote, setSeriesQuote] = useState<{ totalMoney: number; totalHours: number; totalBonusHours?: number; occurrences: number; subscriptionShortDates: string[]; items?: { date: string; method: string; hours: number }[] } | null>(null);
+    // Расчёт серии не пришёл (сбой) — не держим кнопку в «Считаем…» вечно.
+    const [seriesQuoteFailed, setSeriesQuoteFailed] = useState(false);
     useEffect(() => {
         setSeriesQuote(null);
+        setSeriesQuoteFailed(false);
         if (recurPattern === 'once' || !firstSlot || effectiveOccurrences < 1) return;
         let cancelled = false;
         const t = setTimeout(() => {
@@ -405,7 +432,8 @@ export function MobileCheckout() {
                 occurrences: effectiveOccurrences,
                 pattern: recurPattern,
                 targetUserId: state.bookingForUser || undefined,
-            }).then((q) => { if (!cancelled) setSeriesQuote(q); }).catch(() => {});
+            }).then((q) => { if (!cancelled) setSeriesQuote(q); })
+                .catch(() => { if (!cancelled) setSeriesQuoteFailed(true); });
         }, 350);
         return () => { cancelled = true; clearTimeout(t); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -441,6 +469,29 @@ export function MobileCheckout() {
             ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
             : formatGel(priced.total);
     const payName = payMethod === 'bonus' ? 'бонусные часы' : payMethod === 'subscription' ? 'абонемент' : 'баланс';
+    // Серия (ревью №8, 09.11): одна сумма — из расчёта сервера. Пока считает —
+    // «Считаем…» и кнопка неактивна (раньше мелькало «160 ₾» → «0 ₾»).
+    const quoteReady = !!seriesQuote && seriesQuote.occurrences === effectiveOccurrences;
+    const quoteLoading = isSeries && effectiveOccurrences > 0 && !quoteReady && !seriesQuoteFailed;
+    const seriesPayText = quoteReady && seriesQuote
+        ? [
+            (seriesQuote.totalBonusHours ?? 0) > 0 ? `${fmtHours(seriesQuote.totalBonusHours ?? 0)} бонусов` : null,
+            seriesQuote.totalHours > 0 ? `${fmtHours(seriesQuote.totalHours)} абонемента` : null,
+            seriesQuote.totalMoney > 0 || (seriesQuote.totalHours <= 0 && (seriesQuote.totalBonusHours ?? 0) <= 0)
+                ? `${formatGel(seriesQuote.totalMoney)} с баланса` : null,
+        ].filter(Boolean).join(' + ')
+        : null;
+    // Расчёт сервера может обещать часы абонемента сверх свободных или на даты
+    // после его окончания (09.11, передано на проверку денежной логики) — честно
+    // предупреждаем: при нехватке часов встреча спишется с баланса.
+    const seriesSubWarn = (() => {
+        if (!quoteReady || !seriesQuote || seriesQuote.totalHours <= 0) return null;
+        const exp = effectiveUser?.subscription?.expiryDate ? String(effectiveUser.subscription.expiryDate).slice(0, 10) : null;
+        const afterExpiry = exp ? (seriesQuote.items ?? []).filter(i => i.method === 'subscription' && i.date.slice(0, 10) > exp).length : 0;
+        const overFree = seriesQuote.totalHours - subHours.free > 0.01;
+        if (!afterExpiry && !overFree) return null;
+        return `Часов абонемента может не хватить: свободно ${fmtHours(subHours.free)}${afterExpiry ? `, а ${afterExpiry} ${ruPlural(afterExpiry, ['встреча', 'встречи', 'встреч'])} — после окончания абонемента` : ''}. Где часов не будет, встреча спишется с баланса по обычной цене за сутки до начала.`;
+    })();
     const payChoices = (['bonus', 'subscription', 'balance'] as PayMethod[])
         .filter(m => isSelectable(m, plan, isSeries)).length;
 
@@ -504,6 +555,8 @@ export function MobileCheckout() {
 
     const submit = async () => {
         if (priced.items.length === 0 || !currentUser) return;
+        // Админ-бронь (ревью админки №2а): сначала — для кого бронь.
+        if (!forChosen) { setPickerOpen(true); return; }
 
         const finalMethod = resolveFinalMethod();
 
@@ -625,6 +678,15 @@ export function MobileCheckout() {
                 total={done.total}
                 forName={doneFor}
                 summary={summaryRef.current}
+                telegramCard={doneFor ? null : (
+                    <TelegramConnectCard
+                        user={currentUser}
+                        dismissible={false}
+                        reason={done.pending
+                            ? 'Пришлём туда ответ администратора на эту бронь — иначе узнаете о нём, только открыв приложение.'
+                            : undefined}
+                    />
+                )}
                 onBookings={() => navigate(doneFor ? '/m/admin/bookings' : '/m/bookings', { replace: true })}
                 onHome={() => navigate(doneFor ? '/m/admin/dashboard' : '/m/today', { replace: true })}
             />
@@ -665,13 +727,11 @@ export function MobileCheckout() {
         ? `Бонусные часы · ${payLabel}`
         : payMethod === 'subscription'
             ? `Абонемент · ${payLabel}`
-            : isSeries && plan.subCovers
-                ? 'Сначала часы абонемента, остальное — с баланса'
-                : isSeries
-                    ? (seriesQuote && seriesQuote.occurrences === effectiveOccurrences
-                        ? `С баланса · ${formatGel(seriesQuote.totalMoney)} за серию`
-                        : `С баланса · ${payLabel} за встречу`)
-                    : `С баланса · ${payLabel}`;
+            : isSeries
+                ? (seriesPayText
+                    ? `За серию: ${seriesPayText}`
+                    : quoteLoading ? 'Считаем, чем оплатится серия…' : 'Сначала бонусы и абонемент, остальное — с баланса')
+                : `С баланса · ${payLabel}`;
     // На одобрение сервер отправляет срочные часы не-админа — одиночной брони,
     // корзины и серии (12.10, одно правило booking_policy.is_hot_start).
     const expectApproval = isHotBooking && !isBookingAdmin(currentUser);
@@ -695,27 +755,45 @@ export function MobileCheckout() {
                     </div>
                 )}
 
-                {/* Admin-proxy specialist picker — visible only to admins. */}
-                {isAdminActor && specialistChoices.length > 0 && (
+                {/* «Для кого бронь» — только админам: поиск по имени, телефону,
+                    почте, с балансом (ревью админки №2а/№20). В админ-брони —
+                    обязательный первый шаг. */}
+                {isAdminActor && (
                     <div style={pad}>
-                        <FormField
-                            label="За кого бронируете"
-                            hint={state.bookingForUser
-                                ? `Списание и абонемент — у ${effectiveUser?.name || state.bookingForUser}.`
-                                : undefined}
+                        <div style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.ink80, marginBottom: 6 }}>Для кого бронь</div>
+                        <button
+                            type="button"
+                            onClick={() => setPickerOpen(true)}
+                            className="press"
+                            style={{
+                                width: '100%', minHeight: 56, display: 'flex', alignItems: 'center', gap: 12,
+                                padding: '10px 14px', borderRadius: 12, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
+                                background: forChosen ? COLOR.card : STATUS.pending.bg,
+                                border: `1px solid ${forChosen ? COLOR.ink20 : `${STATUS.pending.fg}66`}`,
+                                color: COLOR.ink,
+                            }}
                         >
-                            <Select
-                                value={state.bookingForUser || ''}
-                                onChange={e => useBookingStore.setState({ bookingForUser: e.target.value || null })}
-                            >
-                                <option value="">За себя ({currentUser?.name || currentUser?.email})</option>
-                                {specialistChoices
-                                    .filter(u => u.email !== currentUser?.email)
-                                    .map(u => (
-                                        <option key={u.id} value={u.email}>{u.name || u.email}</option>
-                                    ))}
-                            </Select>
-                        </FormField>
+                            <UserRound size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>
+                                    {state.bookingForUser
+                                        ? proxyName
+                                        : forChosen
+                                            ? `Для себя — ${currentUser?.name || currentUser?.email}`
+                                            : 'Выберите человека'}
+                                </span>
+                                <span style={{ display: 'block', fontSize: TEXT.small, color: forChosen ? COLOR.ink60 : STATUS.pending.fg, marginTop: 2 }}>
+                                    {state.bookingForUser
+                                        ? `Баланс ${formatGel(effectiveUser?.balance ?? 0, { fraction: 0 })}${effectiveUser?.subscription ? ` · абонемент «${effectiveUser.subscription.name}»` : ''} — спишем у него`
+                                        : forChosen
+                                            ? `Ваш баланс ${formatGel(currentUser?.balance ?? 0, { fraction: 0 })}`
+                                            : 'Поиск по имени, телефону или почте'}
+                                </span>
+                            </span>
+                            <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
+                                {forChosen ? 'Изменить' : 'Выбрать'}
+                            </span>
+                        </button>
                     </div>
                 )}
 
@@ -824,10 +902,23 @@ export function MobileCheckout() {
                                 tone="ok"
                             />
                         )}
+                        {isSeries && (
+                            <div style={{ borderTop: `1px solid ${COLOR.ink10}`, paddingTop: 8 }}>
+                                {/* Длинная сумма серии («2 ч бонусов + 2 ч абонемента + 10 ₾») —
+                                    своей строкой под подписью, с переносом. */}
+                                <div style={{ fontSize: TEXT.body, fontWeight: 600 }}>
+                                    Итого за серию · {effectiveOccurrences} {ruPlural(effectiveOccurrences, ['встреча', 'встречи', 'встреч'])}
+                                </div>
+                                <div className="num" aria-live="polite" style={{ fontSize: TEXT.title, fontWeight: 600, marginTop: 2, color: quoteLoading ? COLOR.ink60 : COLOR.ink }}>
+                                    {quoteReady && seriesPayText ? seriesPayText : quoteLoading ? 'Считаем…' : `≈ ${formatGel(priced.total * effectiveOccurrences)}`}
+                                </div>
+                            </div>
+                        )}
+                        {!isSeries && (
                         <div style={{ borderTop: `1px solid ${COLOR.ink10}`, paddingTop: 8 }}>
                             <Row
                                 label="Итого"
-                                value={isSeries || payMethod === 'balance'
+                                value={payMethod === 'balance'
                                     ? formatGel(priced.total)
                                     : payMethod === 'bonus'
                                         ? (plan.bonusPartial
@@ -837,6 +928,7 @@ export function MobileCheckout() {
                                 bold
                             />
                         </div>
+                        )}
                     </div>
                 </Section>
 
@@ -1063,7 +1155,7 @@ export function MobileCheckout() {
                         {!isSeries && payMethod === 'bonus' && (
                             plan.bonusPartial
                                 ? <li>Спишется {fmtHours(plan.bonusCovered)} из бонусов, остальное — {bonusMoneyText(plan, formatGel)} с баланса{plan.bonusApprox ? ' (точная сумма — после брони)' : ''}.</li>
-                                : <li>Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}.</li>
+                                : <li>Оплатим {totalDurationHours === 1 ? 'бонусным часом' : `бонусными часами (${fmtHours(totalDurationHours)})`} — с баланса ничего не спишем.</li>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
                             честно предупреждаем про уход в долг — раньше клиент
@@ -1114,6 +1206,9 @@ export function MobileCheckout() {
                                     {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
                                     {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
                                     {'. '}Каждая бронь спишется за сутки до своего начала.
+                                    {seriesSubWarn && (seriesQuote.subscriptionShortDates?.length ?? 0) === 0 && (
+                                        <span style={{ display: 'block', color: STATUS.danger.fg }}>{seriesSubWarn}</span>
+                                    )}
                                     {(seriesQuote.subscriptionShortDates?.length ?? 0) > 0 && (
                                         <span style={{ display: 'block', color: STATUS.danger.fg }}>
                                             Абонемента хватит не на все даты ({seriesQuote.subscriptionShortDates.length} из {seriesQuote.occurrences} — мимо).
@@ -1136,6 +1231,10 @@ export function MobileCheckout() {
                             <li>До начала меньше суток — отменить бронь будет нельзя{expectApproval ? '. Если планы изменятся, напишите администратору.' : ', только «Пересдать».'}</li>
                         )}
                     </ul>
+                    {/* Ревью №11: короткие правила — одной ссылкой отсюда. */}
+                    <button type="button" onClick={() => navigate('/m/booking-rules')} style={{ ...linkBtn, margin: '4px 0 0', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <BookOpen size={16} aria-hidden="true" /> Правила отмены и переноса
+                    </button>
                 </Section>
                 )}
             </div>
@@ -1160,14 +1259,18 @@ export function MobileCheckout() {
                     block
                     size="touch"
                     // Не специалист: вместо заведомого отказа — к анкете (внутри /m).
+                    // Админ-бронь без выбранного «для кого» — submit сначала откроет выбор.
                     onClick={needsApplication ? () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) : submit}
-                    disabled={submitting || confirmed || ((overLimitBy > 0 || !!slotProblem) && !needsApplication)}
+                    disabled={submitting || confirmed || (quoteLoading && forChosen && !needsApplication)
+                        || ((overLimitBy > 0 || !!slotProblem) && !needsApplication && forChosen)}
                     loading={submitting}
                     // Длинная подпись («Отправить на одобрение · 1 ч абонемента + 5 ₾») переносится, а не режется.
                     style={{ minHeight: 52, fontSize: TEXT.body, whiteSpace: 'normal', lineHeight: 1.25, textAlign: 'center', paddingBlock: 8 }}
                 >
                     {confirmed
                         ? 'Готово'
+                        : !forChosen && !needsApplication
+                            ? 'Сначала выберите, для кого бронь'
                         : slotProblem && !needsApplication
                             ? 'Выберите другое время'
                         : overLimitBy > 0 && !needsApplication
@@ -1178,13 +1281,32 @@ export function MobileCheckout() {
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'
                                 ? (effectiveOccurrences > 0
-                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences)}`
+                                    ? (quoteLoading
+                                        ? 'Считаем…'
+                                        : `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${seriesPayText ?? `≈ ${formatGel(priced.total * effectiveOccurrences)}`}`)
                                     : 'Выберите число повторов или дату')
                                 : approvalAll
                                     ? `Отправить на одобрение · ${payLabel}`
                                     : `Забронировать · ${payLabel}`}
                 </Button>
             </div>
+
+            {isAdminActor && (
+                <ClientPickerSheet
+                    open={pickerOpen}
+                    onClose={() => setPickerOpen(false)}
+                    people={specialistChoices}
+                    self={currentUser}
+                    value={state.bookingForUser ?? (selfChosen ? '' : null)}
+                    onPick={email => {
+                        // Сбрасываем ручной выбор оплаты: у другого человека другой абонемент/бонусы.
+                        userPickedPay.current = false;
+                        if (email) { setSelfChosen(false); useBookingStore.setState({ bookingForUser: email }); }
+                        else { setSelfChosen(true); useBookingStore.setState({ bookingForUser: null }); }
+                        setPickerOpen(false);
+                    }}
+                />
+            )}
 
             {/* Время и кабинет — правка без ухода со страницы. */}
             <Sheet
@@ -1225,8 +1347,8 @@ export function MobileCheckout() {
                         </div>
                         <div>
                             <div style={fieldLabel}>Сколько</div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                {[60, 90, 120, 180].map(d => {
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                                {[60, 90, 120, 150, 180, 240].map(d => {
                                     const ok = isFree(curStartMin, d);
                                     const active = curDurMin === d;
                                     return (
@@ -1241,6 +1363,21 @@ export function MobileCheckout() {
                                         </button>
                                     );
                                 })}
+                            </div>
+                            {/* Ревью №12: «Больше…» — шаг 30 минут до 9 часов. */}
+                            <div style={{ marginTop: 8 }}>
+                                <FormField label="Больше…">
+                                    <Select
+                                        value={String(curDurMin)}
+                                        onChange={e => { const d = Number(e.target.value); if (isFree(curStartMin, d)) applyTime(curStartMin, d); else toast.error('Столько подряд не свободно — выберите меньше или другое начало'); }}
+                                    >
+                                        {Array.from({ length: 17 }, (_, i) => 60 + i * 30).map(d => (
+                                            <option key={d} value={d} disabled={!isFree(curStartMin, d)}>
+                                                {formatBookingDuration(d)}{isFree(curStartMin, d) ? '' : ' — занято'}
+                                            </option>
+                                        ))}
+                                    </Select>
+                                </FormField>
                             </div>
                         </div>
                         <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
@@ -1267,7 +1404,7 @@ export function MobileCheckout() {
                                 ? `${fmtHours(totalBonusHours)} бесплатно`
                                 : plan.bonusPartial
                                     ? `${fmtHours(plan.bonusCovered)} бесплатно + ${bonusMoneyText(plan, formatGel)} с баланса`
-                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${plan.sub.active ? ' — при абонементе только на бронь целиком' : ''}`}
+                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${plan.sub.active ? '. С абонементом бонус идёт только на бронь, которую оплатит полностью (1 ч бонуса — на бронь ровно в 1 ч)' : ''}`}
                             disabled={!plan.bonusCovers && !plan.bonusPartial}
                             active={payMethod === 'bonus'}
                             onClick={() => pickPay('bonus')}
@@ -1507,7 +1644,9 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
 
 /** Экран после брони (решение владельца): бронь на одобрении —
  *  «Ждём подтверждения администратора», обычная — «Бронь ваша». */
-function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onHome }: {
+function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onHome, telegramCard }: {
+    /** «Подключите Telegram», пока бот не подключён (ревью №9). */
+    telegramCard?: React.ReactNode;
     pending: boolean;
     /** Корзина: сколько броней из скольких ждут подтверждения (остальные уже подтверждены). */
     waiting?: number;
@@ -1554,6 +1693,7 @@ function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onH
                     </div>
                 </div>
             )}
+            {telegramCard}
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                 {forName
                     ? <Button block size="touch" onClick={onBookings}>Все брони</Button>

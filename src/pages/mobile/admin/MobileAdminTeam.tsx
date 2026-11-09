@@ -9,6 +9,7 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { DesktopLink } from './DesktopLink';
 import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { useUserStore } from '../../../store/userStore';
 
 const ROLE_LABEL: Record<string, string> = {
     founder: 'Основатель',
@@ -24,7 +25,7 @@ const ROLE_LABEL: Record<string, string> = {
  * (e.g. when someone is on leave).
  *
  * Wave 1: роль — нейтральной плашкой (раньше зелёная/синяя для красоты),
- * кнопка называет действие («Выключить» / «Включить», как у кабинетов),
+ * кнопка называет действие («Скрыть» / «Показать» — с сайта, ревью 09.11),
  * а не состояние; выключенный сотрудник помечен словом «Выключен ·».
  */
 export function MobileAdminTeam() {
@@ -33,6 +34,9 @@ export function MobileAdminTeam() {
     const [busyId, setBusyId] = useState<string | null>(null);
     const [failed, setFailed] = useState(false);
     const { confirm } = useConfirmDialog();
+    // Себе кнопку не показываем (ревью 09.11, №24). Карточка команды с аккаунтом
+    // не связана — узнаём себя по имени.
+    const myName = (useUserStore(s => s.currentUser)?.name || '').trim().toLowerCase();
 
     const load = async () => {
         setLoading(true);
@@ -61,12 +65,14 @@ export function MobileAdminTeam() {
     }, [members]);
 
     const handleToggle = async (m: TeamMember) => {
-        // Волна 4 (G9-09): выключение — с вопросом, включение — сразу.
+        // Волна 4 (G9-09): скрытие — с вопросом, показ — сразу. is_active на сервере
+        // (team.py) значит только «показывать на странице «Команда» на сайте» —
+        // доступ в админку он не трогает (ревью 09.11, №24: «Выключить» было непонятно).
         if (m.isActive) {
             const ok = await confirm({
-                title: `Выключить «${m.name}»?`,
-                body: 'Сотрудник пропадёт со страницы «Команда» на сайте. Включить обратно можно в любой момент.',
-                confirmLabel: 'Выключить',
+                title: `Скрыть «${m.name}» с сайта?`,
+                body: 'Карточка пропадёт со страницы «Команда» на сайте. Доступ в админку не меняется. Показать обратно можно в любой момент.',
+                confirmLabel: 'Скрыть с сайта',
                 cancelLabel: 'Оставить',
                 tone: 'danger',
             });
@@ -76,7 +82,7 @@ export function MobileAdminTeam() {
         try {
             await teamApi.update(m.id, { is_active: !m.isActive });
             await load();
-            toast.success(m.isActive ? `${m.name}: выключен` : `${m.name}: включён`);
+            toast.success(m.isActive ? `${m.name}: скрыт с сайта` : `${m.name}: снова на сайте`);
         } catch {
             toast.error('Не удалось обновить. Попробуйте ещё раз');
         } finally {
@@ -108,6 +114,7 @@ export function MobileAdminTeam() {
                         const roleLabel = ROLE_LABEL[m.roleType] || 'Другое';
                         // «Основатель» в плашке и «Основатель» в подписи — не повторяем.
                         const showRole = !!m.role && m.role.trim().toLowerCase() !== roleLabel.toLowerCase();
+                        const isMe = !!myName && m.name.trim().toLowerCase() === myName;
                         return (
                             <div key={m.id} style={{
                                 background: 'var(--color-card)',
@@ -152,23 +159,30 @@ export function MobileAdminTeam() {
                                         <span className="ui-badge ui-badge--muted" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {roleLabel}
                                         </span>
-                                        {(!m.isActive || showRole) && (
+                                        {showRole && (
                                             <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflowWrap: 'anywhere' }}>
-                                                {!m.isActive && 'Выключен'}{!m.isActive && showRole && ' · '}{showRole && m.role}
+                                                {m.role}
                                             </div>
                                         )}
+                                        {/* Состояние — своей строкой (ревью 09.11, №24). */}
+                                        <div style={{ fontSize: 12, marginTop: 2, color: m.isActive ? 'var(--color-ink-60)' : 'var(--status-pending-fg)', fontWeight: m.isActive ? 400 : 600 }}>
+                                            {m.isActive ? 'На сайте' : 'Скрыт с сайта'}{isMe ? ' · это вы' : ''}
+                                        </div>
                                     </div>
                                 </div>
-                                <Button
-                                    variant="secondary"
-                                    size="touch"
-                                    loading={busyId === m.id}
-                                    icon={<Power size={16} aria-hidden="true" />}
-                                    onClick={() => handleToggle(m)}
-                                    aria-label={`${m.isActive ? 'Выключить' : 'Включить'}: ${m.name}`}
-                                >
-                                    {m.isActive ? 'Выключить' : 'Включить'}
-                                </Button>
+                                {!isMe && (
+                                    <Button
+                                        variant="quiet"
+                                        size="touch"
+                                        loading={busyId === m.id}
+                                        icon={<Power size={16} aria-hidden="true" />}
+                                        onClick={() => handleToggle(m)}
+                                        aria-label={`${m.isActive ? 'Скрыть с сайта' : 'Показать на сайте'}: ${m.name}`}
+                                        style={{ flexShrink: 0 }}
+                                    >
+                                        {m.isActive ? 'Скрыть' : 'Показать'}
+                                    </Button>
+                                )}
                             </div>
                         );
                     })}

@@ -15,7 +15,9 @@ class TherapySessionBase(SQLModel):
     client_id: str = Field(index=True, foreign_key="therapist_clients.id")
     date: datetime = Field(index=True)
     duration_minutes: int = Field(default=60)
-    status: str = Field(default="PLANNED", index=True)  # PLANNED, COMPLETED, CANCELLED_CLIENT, CANCELLED_THERAPIST
+    # PLANNED, COMPLETED, CANCELLED_CLIENT, CANCELLED_THERAPIST, NO_SHOW (09.11:
+    # «не пришёл / поздняя отмена — оплачивается»: в долге, как проведённая)
+    status: str = Field(default="PLANNED", index=True)
     price: Optional[float] = None  # Override price for this session; None → use client.base_price
     currency: Optional[str] = None  # Frozen at payment time; None → use client.currency
     account: Optional[str] = None   # Frozen at payment time; None → use client.default_account
@@ -94,3 +96,6 @@ class TherapySessionUpdate(SQLModel):
     is_booked: Optional[bool] = None
     notes: Optional[str] = None
     booking_id: Optional[str] = None
+    # 09.11: при отмене — заодно убрать событие из Google Календаря специалиста
+    # (галочка «Убрать из Google Календаря»). В базу не пишется.
+    remove_from_calendar: Optional[bool] = None

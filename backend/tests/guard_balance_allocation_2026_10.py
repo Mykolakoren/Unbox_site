@@ -931,9 +931,10 @@ console.log(JSON.stringify({
     assert out["payDebt"] is None, "бронь в долг не должна называться «оплачено»"
     assert out["partial"] == "9 ₾ покрыто: скидка за неделю"
     assert out["partialNoSrc"] == "9 ₾ уже покрыто балансом"
-    assert out["labels"] == ["оплачено", "оплачено", "к оплате 11 ₾ из 20", "к оплате 20 ₾"], out["labels"]
-    assert out["kinds"] == ["paid", "paid", "owes", None], out["kinds"]
-    assert "спишется с баланса за 24 ч до начала" in out["hints"][0]
+    # 09.11 (решение владельца 1): ещё не списанная, покрытая балансом, — «с баланса» (covered).
+    assert out["labels"] == ["оплачено", "с баланса", "к оплате 11 ₾ из 20", "к оплате 20 ₾"], out["labels"]
+    assert out["kinds"] == ["covered", "paid", "owes", None], out["kinds"]
+    assert "спишется само за 24 ч до начала" in out["hints"][0]  # 09.11: подсказка «с баланса»
     assert out["hints"][1].startswith("к оплате 11 ₾ из 20 — часть уже покрыта балансом")
 
 
@@ -1133,22 +1134,26 @@ def test_screens_apply_allocation():
 
 def test_badges_new_rule_no_covered_sign():
     badge = _code("src/components/admin/DueBadge.tsx")
-    assert "спишется с баланса" not in badge and "CircleDashed" not in badge and "ui-badge--muted" not in badge, \
-        "в DueBadge снова «◌ спишется с баланса»"
-    assert "paidLabel = 'оплачено'" in badge and "к оплате" in badge and "partial &&" in badge
+    # 09.11 (решение владельца 1): у сотрудников снова «◌ с баланса» для ещё не
+    # списанной брони, покрытой балансом; «✓ оплачено» — только списанная.
+    assert "спишется с баланса" not in badge, "в DueBadge длинная подпись «спишется с баланса»"
+    assert "CircleDashed" in badge and "statusLabel('payment', 'covered', 'staff')" in badge, \
+        "в DueBadge нет «◌ с баланса» (решение 09.11)"
+    assert "paidLabel = statusLabel('payment', 'charged', 'staff')" in badge and "к оплате" in badge and "partial &&" in badge
     chess = _code("src/components/admin/AdminChessboardView.tsx")
-    assert "CircleDashed" not in chess and "COVERED_SHORT" not in chess and "'covered'" not in chess
+    # 09.11: в шахматке снова три знака, как на телефоне.
+    assert "CircleDashed" in chess and "COVERED_SHORT" not in chess and "'covered'" in chess
     assert "'списано с баланса'" not in chess, "на плитке снова «списано с баланса» вместо «оплачено»"
     legend = _read("src/components/admin/AdminChessboardView.tsx")
     legend = legend[legend.index("data-chess-legend"):legend.index("{/* ── Панель брони")]
-    assert "(!) к оплате 11 ₾ из 20" in legend and "оплачено — бронь покрыта деньгами клиента" in legend
+    assert "(!) к оплате 11 ₾ из 20" in legend and "оплачено — деньги уже списаны" in legend and "с баланса — ещё не списано" in legend
     led = _code("src/components/admin/UserBalanceLedger.tsx")
     assert "}, [userId, reloadTick, balanceKey]);" in led, "после «Принять оплату» лента и сводка над ней не перечитываются"
     assert "balance={user.balance}" in _read("src/pages/admin/UserDetails.tsx")
     assert "спишется с баланса —" not in legend
     due = _code("src/utils/dueAmounts.ts")
-    assert "export type DueMarkKind = 'owes' | 'paid';" in due
-    assert "if (info.due <= 0) return 'оплачено';" in due
+    assert "export type DueMarkKind = 'owes' | 'paid' | 'covered';" in due
+    assert "if (info.due <= 0) return info.charged === false ? 'с баланса' : 'оплачено';" in due
     st = _read("src/design/statuses.ts")
     assert "Списано с баланса" in st, "технический статус «Списано с баланса» трогать нельзя (решение 02.10)"
 

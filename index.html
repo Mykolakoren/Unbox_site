@@ -75,13 +75,13 @@
   <body>
     <!-- Волна 2 (X5-05): заглушка до загрузки приложения — вместо пустого
          белого экрана на медленной сети. React заменит её при первом рендере.
-         Цвета — токены: бумага #FAFAF7 на сайте, #F4F4F2 в приложении /m. -->
+         Цвета — токены: бумага #F4F2EC на сайте, sunken #EDEAE2 в приложении /m (палитра 09.11). -->
     <style>
       .boot { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
-              background: #FAFAF7; color: #0F0F10; font: 600 20px/1.2 'IBM Plex Sans', sans-serif; letter-spacing: -0.01em; }
-      html[data-boot="shell"] .boot { background: #F4F4F2; }
-      html[data-theme="dark"], html[data-theme="dark"] body { background: #141415; }
-      html[data-theme="dark"] .boot { background: #141415; color: #ECECE8; }
+              background: #F4F2EC; color: #0F0F10; font: 600 20px/1.2 'IBM Plex Sans', sans-serif; letter-spacing: -0.01em; }
+      html[data-boot="shell"] .boot { background: #EDEAE2; }
+      html[data-theme="dark"], html[data-theme="dark"] body { background: #161513; }
+      html[data-theme="dark"] .boot { background: #161513; color: #ECECE8; }
       html[data-theme="dark"] .boot span { background: #ECECE8; }
       .boot span { display: block; width: 48px; height: 2px; margin: 12px auto 0; background: #0F0F10; opacity: .2;
                    animation: boot-pulse 1.2s ease-in-out infinite; }

@@ -84,9 +84,14 @@ def _mobile_admin_routes(app: str) -> str:
 # Прежний отпечаток a09bd23bbb62316e.
 # 13.10: + вопрос «сумма сильно больше ожидаемой — точно?» ДО записи (topupGuard,
 # Михаил Стефанович 2020 вместо 20); поля платежа те же (проверяются ниже).
-TOPUP_SAVE_FP = "d258c18ba8e2b2ff"
+# 09.11 (ревью admin-ux №1/№4): филиал и способ больше не подставляются молча — без
+# них save не пишет; после записи — «Вернуть» 5 с (удаление операции, сервер сам
+# откатывает зачисление). Поля платежа те же (проверяются ниже). Прежний d258c18ba8e2b2ff.
+TOPUP_SAVE_FP = "f566fbe4cd88ed5c"
 PERFORM_CANCEL_FP = "c3ef680eb7ba8110"  # 24.10: только toastApiError
-END_SHIFT_SUBMIT_FP = "2f9e5a1c3a7411bb"  # 24.10: только toastApiError
+# 09.11 (решение владельца 3): у роли admin «слепое» закрытие — «ожидалось» и расхождение
+# показываются из ответа сервера ПОСЛЕ закрытия; поля отправки те же. Прежний 2f9e5a1c3a7411bb.
+END_SHIFT_SUBMIT_FP = "da6a847434cbb080"
 
 
 def test_money_fingerprints():
@@ -200,7 +205,8 @@ def test_close_shift_blind_count():
     inp = src.find("<Input")
     exp = src.find("По системе должно быть")
     assert inp != -1 and exp > inp, "ожидаемая сумма снова выше поля факта (В4)"
-    guard = src.rfind("{hasAmount && (", 0, exp)
+    # 09.11 (решение владельца 3): у роли admin — не видна и после ввода, только после закрытия.
+    guard = src.rfind("{hasAmount && !blind && (", 0, exp)
     assert guard != -1 and guard > inp, "ожидаемая сумма видна до ввода факта (В4)"
 
 

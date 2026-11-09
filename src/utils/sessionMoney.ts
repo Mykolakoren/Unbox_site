@@ -22,6 +22,25 @@ export function sessionPriceOf(s: Pick<CrmSession, 'price'>, client?: ClientMone
     return Number(s.price ?? client?.basePrice ?? 0) || 0;
 }
 
+/** Цена берётся из ставки клиента (у самой сессии цены нет) — для подсказки «по ставке клиента». */
+export function priceFromClientRate(s: Pick<CrmSession, 'price'>, client?: ClientMoney | null): boolean {
+    return s.price == null && (Number(client?.basePrice ?? 0) || 0) > 0;
+}
+
+/**
+ * Статусы сессии (09.11, решение владельца 6). «Не пришёл / поздняя отмена —
+ * оплачивается» (NO_SHOW) — в долге и в «Заработано», как проведённая (так же
+ * считает сервер: BILLABLE_STATUSES в api/v1/crm). Отменённые — не в долге.
+ */
+export const CANCELLED_SESSION_STATUSES: ReadonlySet<string> = new Set(['CANCELLED_CLIENT', 'CANCELLED_THERAPIST']);
+export const BILLABLE_SESSION_STATUSES: ReadonlySet<string> = new Set(['COMPLETED', 'NO_SHOW']);
+export function isCancelledStatus(status: string | null | undefined): boolean {
+    return !!status && CANCELLED_SESSION_STATUSES.has(status);
+}
+export function isBillableStatus(status: string | null | undefined): boolean {
+    return !!status && BILLABLE_SESSION_STATUSES.has(status);
+}
+
 /** Валюта сессии: замороженная на сессии, иначе валюта клиента. */
 export function sessionCurrencyOf(s: Pick<CrmSession, 'currency'>, client?: ClientMoney | null): string {
     return (s.currency || client?.currency || 'GEL').toUpperCase();

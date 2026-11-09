@@ -56,6 +56,12 @@ export function NewClientSheet({
     const storeClients = useCrmStore(s => s.clients);
     const paymentAccounts = useCrmStore(s => s.paymentAccounts);
     const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
+    // 09.11 (решение владельца 2): пустая ставка = «Базовая цена сессии» из анкеты
+    // (её подставит сервер) — показываем её подсказкой, чтобы не вписывать 0.
+    const defaultPrice = useCrmStore(s => s.crmSettings?.defaultSessionPrice ?? 0);
+    const hasSettings = useCrmStore(s => !!s.crmSettings);
+    const fetchCrmSettings = useCrmStore(s => s.fetchCrmSettings);
+    useEffect(() => { if (open && !hasSettings) fetchCrmSettings(); }, [open, hasSettings, fetchCrmSettings]);
     const [loaded, setLoaded] = useState<CrmClient[] | null>(null);
 
     const [name, setName] = useState('');
@@ -209,8 +215,20 @@ export function NewClientSheet({
                     </div>
                 </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 12 }}>
-                    <Field label="Ставка за сессию" error={errors.price}>
-                        <Input kind="money" value={basePrice} onChange={e => setBasePrice(e.target.value)} placeholder="0" suffix={currencySymbol(currency)} />
+                    <Field
+                        label="Ставка за сессию"
+                        error={errors.price}
+                        hint={defaultPrice > 0 && currency === 'GEL' && basePrice.trim() === ''
+                            ? `Пусто — ${formatMoney(defaultPrice, { currency: 'GEL' })}, базовая цена из вашей анкеты`
+                            : undefined}
+                    >
+                        <Input
+                            kind="money"
+                            value={basePrice}
+                            onChange={e => setBasePrice(e.target.value)}
+                            placeholder={defaultPrice > 0 && currency === 'GEL' ? String(defaultPrice) : '0'}
+                            suffix={currencySymbol(currency)}
+                        />
                     </Field>
                     <Field label="Валюта">
                         <Select value={currency} onChange={e => setCurrency(e.target.value)}>

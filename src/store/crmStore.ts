@@ -16,7 +16,7 @@ import type {
     CrmSession, CrmSessionCreate, CrmSessionUpdate,
     CrmPayment, CrmPaymentCreate,
     CrmNote, CrmNoteCreate,
-    CrmDashboard, CrmSpecialist,
+    CrmDashboard, CrmSpecialist, CrmSettings,
 } from '../api/crm';
 
 export interface PaymentAccount {
@@ -54,7 +54,12 @@ interface CrmStore {
     createSession: (data: CrmSessionCreate) => Promise<CrmSession>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>;
+    /** amount (09.11) — сумма оплаты, когда у сессии нет цены («Сколько заплатили?»). */
+    quickPaySession: (id: string, account?: string, amount?: number, rememberRate?: boolean) => Promise<{ amount: number; currency: string; added?: number; created?: boolean }>;
+
+    // Settings (09.11): подключён ли календарь, «Базовая цена сессии» из анкеты
+    crmSettings: CrmSettings | null;
+    fetchCrmSettings: () => Promise<CrmSettings | null>;
 
     // Payments
     fetchPayments: (params?: { clientId?: string; dateFrom?: string; dateTo?: string }) => Promise<void>;
@@ -86,6 +91,18 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     ],
     loading: false,
     error: null,
+    crmSettings: null,
+
+    fetchCrmSettings: async () => {
+        try {
+            const s = await crmApi.getSettings();
+            set({ crmSettings: s });
+            return s;
+        } catch {
+            // Не знаем — экраны ведут себя как раньше (кнопка синка видна).
+            return null;
+        }
+    },
 
     // ── Admin specialist view ─────────────────────────────────────────────────
     viewAsSpecialistId: null,
@@ -228,12 +245,12 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
         }
     },
 
-    quickPaySession: async (id, account?) => {
+    quickPaySession: async (id, account?, amount?, rememberRate?) => {
         const existing = _quickPayInFlight.get(id);
         if (existing) return existing;
         const p = (async () => {
             try {
-                const result = await crmApi.quickPaySession(id, account);
+                const result = await crmApi.quickPaySession(id, account, amount, rememberRate);
                 set((s) => ({
                     sessions: s.sessions.map((sess) =>
                         sess.id === id ? paidLocally(sess) : sess
@@ -241,7 +258,8 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
                 }));
                 return { amount: result.amount, currency: result.currency, added: result.added, created: result.created };
             } catch (error) {
-                toast.error('Не удалось отметить оплату');
+                // 09.11: причину с сервера показываем («У сессии не указана цена…»).
+                toastApiError(error, 'Не удалось отметить оплату');
                 throw error;
             } finally {
                 _quickPayInFlight.delete(id);
