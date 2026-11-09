@@ -42,11 +42,12 @@ def test_sync_uses_flag():
     assert '"is_invite": is_foreign_invite(ev, calendar_id),' in svc
     s = _read("backend/app/api/v1/crm/sync.py")
     create = s[s.index("# Group unmatched events by clean name"):s.index("# Create clients for each unique name")]
-    assert 'if ev.get("is_invite"):' in create, "приглашение снова создаёт карточку"
-    assert 'if norm in new_clients_map and not ev.get("is_invite"):' in s
+    # 09.11: к приглашениям добавились события на весь день — условие расширено.
+    assert 'if ev.get("is_invite") or ev.get("is_all_day"):' in create, "приглашение снова создаёт карточку"
+    assert 'if norm in new_clients_map and not ev.get("is_invite") and not ev.get("is_all_day"):' in s
     backfill = s[s.index("# ── Backfill alias codes into Google Calendar summaries"):]
     assert 'if entry.get("is_invite"):' in backfill, "синк снова переименовывает чужие приглашения"
-    assert '"looks_non_client": _looks_non_client(clean) or bool(ev.get("is_invite")),' in s, "предпросмотр"
+    assert '"looks_non_client": _looks_non_client(clean) or bool(ev.get("is_invite")) or bool(ev.get("is_all_day")),' in s, "предпросмотр"
     fe = _read("src/pages/crm/CrmSessions.tsx")
     assert "(приглашение от другого человека, пропустим)" in fe
 

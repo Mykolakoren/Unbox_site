@@ -423,6 +423,11 @@ def _looks_non_client(summary: str) -> bool:
     words = re.findall(r"[a-zа-яёіїєґ]+", low)
     if any(w in _NON_CLIENT_WORDS for w in words):
         return True
+    # 09.11: заголовок с глагола-инфинитива — это задача, а не человек:
+    # «Проверить счётчики…», «Заложить в бюджет…», «Записаться к…».
+    # Не короче 5 букв: «Мать и дочь Ивановы» — клиенты, а не задача.
+    if words and len(words[0]) >= 5 and re.search(r"(ть|ться|тись)$", words[0]):
+        return True
     return any(w.startswith(st) for w in words for st in _NON_CLIENT_STEMS)
 
 
@@ -571,7 +576,8 @@ def sync_from_calendar(
         name_events: dict = {}
         for ev in result["unmatched"]:
             # 08.10: приглашение от другого человека карточкой не становится.
-            if ev.get("is_invite"):
+            # 09.11: событие на весь день — тоже (это напоминание, не встреча).
+            if ev.get("is_invite") or ev.get("is_all_day"):
                 continue
             clean = _clean_client_name(ev["summary"])
             if not clean or len(clean) < 2:
@@ -622,7 +628,7 @@ def sync_from_calendar(
         for ev in result["unmatched"]:
             clean = _clean_client_name(ev["summary"])
             norm = _normalize_name(clean) if clean else ""
-            if norm in new_clients_map and not ev.get("is_invite"):
+            if norm in new_clients_map and not ev.get("is_invite") and not ev.get("is_all_day"):
                 ev["client_id"] = new_clients_map[norm]
                 result["matched"].append(ev)
             else:
@@ -663,7 +669,7 @@ def sync_from_calendar(
             unique_names[norm] = {
                 "name": clean,
                 # Приглашение от другого человека — тоже пропускаем (08.10).
-                "looks_non_client": _looks_non_client(clean) or bool(ev.get("is_invite")),
+                "looks_non_client": _looks_non_client(clean) or bool(ev.get("is_invite")) or bool(ev.get("is_all_day")),
                 "is_invite": bool(ev.get("is_invite")),
                 "ignored": norm in ignored,
             }

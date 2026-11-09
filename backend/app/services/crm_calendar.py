@@ -98,6 +98,16 @@ def _parse_event_dt(event_dt: dict) -> Optional[datetime]:
     return None
 
 
+def is_all_day_event(ev: dict) -> bool:
+    """Событие «на весь день» (в Google — start.date без времени).
+
+    09.11 (Николай): напоминание «Проверить счётчики на Сулаберидзе» на весь
+    день синк завёл клиентом и сессией длиной сутки. Встреча с клиентом всегда
+    имеет время начала — событие на весь день сессией не бывает."""
+    start = ev.get("start") or {}
+    return "dateTime" not in start and "date" in start
+
+
 def _extract_alias_code(summary: str) -> Optional[str]:
     """Extract 4-digit alias code from event summary (e.g. 'Name #1234' → '1234')."""
     match = re.search(r"#(\d{4})", summary or "")
@@ -219,8 +229,8 @@ def find_matching_event(
     want_name = _norm_client_name(client_name)
     exact, near, near_gap = None, None, None
     for ev in events:
-        if ev.get("status") == "cancelled":
-            continue
+        if ev.get("status") == "cancelled" or is_all_day_event(ev):
+            continue  # 09.11: событие на весь день — не встреча, к нему не привязываем
         summary = ev.get("summary") or ""
         ev_alias = _extract_alias_code(summary)
         same_client = (
@@ -545,14 +555,18 @@ def sync_from_calendar(
 
         matched_client = None          # the resolved TherapistClient, or None
         ambiguous_candidates: list = []  # when name maps to 2+ clients
+        # 09.11: событие на весь день — не встреча. Оставляем его в unmatched
+        # (чтобы оно считалось «живым» и ничего не отменялось), но ни с кем
+        # не сопоставляем и карточку из него не создаём.
+        all_day = is_all_day_event(ev)
 
         # 1) Alias code match — highest confidence, never ambiguous.
         alias = _extract_alias_code(summary)
-        if alias and alias in alias_map:
+        if alias and alias in alias_map and not all_day:
             matched_client = alias_map[alias]
 
         # 2) Fallback: strict name match (full name only, no partial fuzzy).
-        if not matched_client:
+        if not matched_client and not all_day:
             clean_name = " ".join(re.sub(r"#\d{4}", "", summary).strip().lower().split())
 
             # 2a. Exact full-name hit.
@@ -602,6 +616,7 @@ def sync_from_calendar(
             "suggested_summary": None,
             "is_recurring": bool(ev.get("recurringEventId")),
             "is_invite": is_foreign_invite(ev, calendar_id),
+            "is_all_day": all_day,
         }
 
         if matched_client:
@@ -692,6 +707,8 @@ def sync_client_history(
 
         if not matched:
             continue
+        if is_all_day_event(ev):
+            continue  # 09.11: событие на весь день — не сессия
 
         start_dt = _parse_event_dt(ev.get("start", {}))
         if not start_dt:
