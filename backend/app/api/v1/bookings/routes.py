@@ -3213,6 +3213,32 @@ class RecurringBookingRequest(PydanticBaseModel):
     crm_client_id: Optional[str] = None
 
 
+
+def _series_quote_pool_left(session: Session, owner: User) -> tuple[float, float]:
+    """Свободные часы абонемента для примерки серии: остаток пула минус часы,
+    уже обещанные будущим броням, которые ещё не списаны (pending — крон T-24ч
+    спишет их раньше новой серии). (основной пул, доп. пул)."""
+    sub = owner.subscription
+    if not sub:
+        return 0.0, 0.0
+    main_left = subscription_pool.get_float(sub, "remaining_hours")
+    extra_left = subscription_pool.extra_remaining(sub)
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    q = select(Booking).where(
+        Booking.payment_method == "subscription",
+        Booking.payment_status == "pending",
+        Booking.status.in_(["confirmed", "pending_approval"]),
+        Booking.date >= today,
+    )
+    q = q.where((Booking.user_uuid == owner.id) | (Booking.user_id == owner.email))
+    for b in session.exec(q).all():
+        hrs = float(b.hours_deducted or 0) or float(b.duration or 0) / 60.0
+        x = min(subscription_pool.booking_extra(b), hrs)
+        main_left -= max(0.0, hrs - x)
+        extra_left -= x
+    return max(0.0, main_left), max(0.0, extra_left)
+
+
 @router.post("/recurring/quote")
 def quote_recurring_booking(
     *,
@@ -3275,6 +3301,12 @@ def quote_recurring_booking(
     )
     with (_pool_swapped(session, booking_owner, _pause_trial[0]) if _pause_trial
           else contextlib.nullcontext()):
+        # 09.11 (ревизия): часы абонемента «тратим» локально по датам, как бонус, и
+        # срок сверяем с датой КАЖДОЙ встречи — раньше примерка брала живой остаток
+        # на каждую дату («8 ч с абонемента» при 2 свободных) и срок на сегодня.
+        # Встречи, на которые часов не хватит или абонемент уже кончится, считаем
+        # деньгами и отдаём в subscription_short_dates — так их и спишет крон T-24ч.
+        _sub_main_left, _sub_extra_left = _series_quote_pool_left(session, booking_owner)
         for d in dates:
             try:
                 h, m = map(int, data.start_time.split(":"))
@@ -3304,6 +3336,26 @@ def quote_recurring_booking(
                 # деньгами (так поведёт себя клиент, переключив способ оплаты).
                 warnings.append(d.strftime("%Y-%m-%d"))
                 occ_method = "balance"
+            elif occ_method == "subscription":
+                _need = float(quote.hours_deducted or 0)
+                _x = min(float(quote.extra_hours_deducted or 0), _sub_extra_left)
+                _m = max(0.0, _need - _x)
+                _sub = booking_owner.subscription
+                _expired = subscription_pool.is_expired(_sub, start_dt - timedelta(hours=4))
+                if _expired or _m > _sub_main_left + 0.01:
+                    warnings.append(d.strftime("%Y-%m-%d"))
+                    occ_method = "balance"
+                    quote = pricing_service.calculate_price(
+                        user=booking_owner,
+                        resource_id=data.resource_id,
+                        start_time=start_dt,
+                        duration_minutes=data.duration,
+                        format_type=data.format,
+                        subscription_hours_cover=False,
+                    )
+                else:
+                    _sub_main_left = max(0.0, _sub_main_left - _m)
+                    _sub_extra_left = max(0.0, _sub_extra_left - _x)
             if occ_method == "subscription":
                 # Часы — с абонемента; final_price у SUBSCRIPTION-котировки — это
                 # ДЕНЬГИ пиковой надбавки (может быть 0), их тоже показываем.
