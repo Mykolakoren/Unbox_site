@@ -9,6 +9,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { PublicHeader } from '../components/public/PublicHeader';
 import { MobilePageHeader } from '../components/ui/PageHeader';
 import { useUserStore } from '../store/userStore';
+import { COLOR, RADIUS, SHAPE, TEXT } from '../design/tokens';
 import { formatDayMonth } from '../utils/format';
 import type { Subscription } from '../store/types';
 
@@ -246,6 +247,24 @@ const ghsubMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, lett
 const ghsubHairline = `1px solid ${GH.ink10}`;
 const sectionTitle: React.CSSProperties = { ...ghsubMono, fontWeight: 500, color: GH.label, margin: '0 0 16px' };
 
+/* 09.11 фаза 3 — «мобильная кожа» в /m: те же блоки в языке приложения —
+ * подписи Sans-капсом (.ui-overline) вместо моно в разрядку, карточки
+ * card + рамка ink-10 + радиус 16, без 2 px чёрных рамок и подчёркиваний.
+ * Компьютерная версия не меняется. */
+const M_TITLE: React.CSSProperties = { margin: '0 4px 8px' };
+const M_GROUP: React.CSSProperties = {
+    gap: 1, background: COLOR.ink10, border: `1px solid ${COLOR.ink10}`,
+    borderRadius: RADIUS.sheet, overflow: 'hidden',
+};
+const M_BOX: React.CSSProperties = {
+    border: `1px solid ${COLOR.ink10}`, background: COLOR.card, borderRadius: RADIUS.sheet, padding: '14px 16px',
+};
+function SectionTitle({ m, id, children }: { m: boolean; id: string; children: React.ReactNode }) {
+    return m
+        ? <h2 id={id} className="ui-overline" style={M_TITLE}>{children}</h2>
+        : <h2 id={id} style={sectionTitle}>{children}</h2>;
+}
+
 function GridHouseSubscriptions() {
     const inShell = useInMobileShell();
     const toCatalog = useCatalogPath();
@@ -276,14 +295,14 @@ function GridHouseSubscriptions() {
 
                 {/* Абонементы */}
                 <section aria-labelledby="subs-plans" style={{ marginBottom: 48 }}>
-                    <h2 id="subs-plans" style={sectionTitle}>Абонементы</h2>
+                    <SectionTitle m={inShell} id="subs-plans">Абонементы</SectionTitle>
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: wide ? 'repeat(auto-fit, minmax(210px, 1fr))' : 'minmax(0, 1fr)',
                         gap: 12,
                     }}>
                         {PLANS.map(plan => (
-                            <PlanCard key={plan.id} plan={plan} wide={wide} current={currentSub} />
+                            <PlanCard key={plan.id} plan={plan} wide={wide} current={currentSub} m={inShell} />
                         ))}
                     </div>
                     <p style={{ fontSize: 14, color: GH.ink60, margin: '12px 0 0', lineHeight: 1.5, maxWidth: 760 }}>
@@ -295,15 +314,16 @@ function GridHouseSubscriptions() {
 
                 {/* Стандартные цены — одной таблицей без обрывков линий */}
                 <section aria-labelledby="subs-std" style={{ marginBottom: 48 }}>
-                    <h2 id="subs-std" style={sectionTitle}>Без абонемента</h2>
+                    <SectionTitle m={inShell} id="subs-std">Без абонемента</SectionTitle>
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: wide ? 'repeat(3, minmax(0, 1fr))' : 'minmax(0, 1fr)',
                         gap: 1, background: GH.ink10, border: ghsubHairline,
+                        ...(inShell ? M_GROUP : null),
                     }}>
                         {STANDARD_PRICES.map(p => (
                             <div key={p.label} style={{
-                                background: GH.paper,
+                                background: inShell ? COLOR.card : GH.paper,
                                 padding: wide ? '20px 16px' : '12px 16px',
                                 display: wide ? 'block' : 'flex',
                                 alignItems: 'baseline', justifyContent: 'space-between', gap: 12,
@@ -325,19 +345,20 @@ function GridHouseSubscriptions() {
                 </section>
 
                 {/* Цена часа — наглядно */}
-                <EffectivePriceChart />
+                <EffectivePriceChart m={inShell} />
 
                 {/* Скидки и бонусы — только то, что правда работает (владелец, 30.09) */}
                 <section aria-labelledby="subs-disc" style={{ marginBottom: 48 }}>
-                    <h2 id="subs-disc" style={sectionTitle}>Скидки и бонусы</h2>
+                    <SectionTitle m={inShell} id="subs-disc">Скидки и бонусы</SectionTitle>
 
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: wide ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
                         gap: 1, background: GH.ink10, border: ghsubHairline, marginBottom: 16,
+                        ...(inShell ? M_GROUP : null),
                     }}>
                         {/* Duration — one continuous booking in ONE cabin */}
-                        <div style={{ padding: 20, background: GH.paper }}>
+                        <div style={{ padding: inShell ? 16 : 20, background: inShell ? COLOR.card : GH.paper }}>
                             <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>Скидка за длительность</div>
                             <div style={{ fontSize: 14, color: GH.ink60, marginBottom: 12 }}>
                                 Непрерывная бронь в <strong style={{ color: GH.ink, fontWeight: 600 }}>одном кабинете</strong> — чем длиннее, тем дешевле час:
@@ -365,7 +386,7 @@ function GridHouseSubscriptions() {
                             (Bonus type='free_hour', auth.py), а не 20 ₾ на счёт —
                             на денежный баланс он не попадает. Срок — 15 дней
                             (WELCOME_BONUS_EXPIRY_DAYS). */}
-                        <div style={{ padding: 20, background: GH.paper }}>
+                        <div style={{ padding: inShell ? 16 : 20, background: inShell ? COLOR.card : GH.paper }}>
                             <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>Приветственный бонус</div>
                             <div style={{ fontSize: 14, color: GH.ink60, marginBottom: 12, lineHeight: 1.55 }}>
                                 При регистрации мы дарим <strong style={{ color: GH.ink, fontWeight: 600 }}>1 бесплатный час</strong> аренды.
@@ -391,8 +412,8 @@ function GridHouseSubscriptions() {
                     </div>
 
                     {/* Priority of charges */}
-                    <div style={{ border: ghsubHairline, padding: '14px 16px' }}>
-                        <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ПРИОРИТЕТ СКИДОК</div>
+                    <div style={inShell ? M_BOX : { border: ghsubHairline, padding: '14px 16px' }}>
+                        <div className={inShell ? 'ui-overline' : undefined} style={inShell ? { marginBottom: 8 } : { ...ghsubMono, color: GH.label, marginBottom: 8 }}>{inShell ? 'Приоритет скидок' : 'ПРИОРИТЕТ СКИДОК'}</div>
                         <p style={{ fontSize: 14, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
                             Скидки не суммируются — применяется одна, самая выгодная для вас:
                             {' '}<strong style={{ fontWeight: 600 }}>абонемент</strong> → <strong style={{ fontWeight: 600 }}>персональная</strong> → <strong style={{ fontWeight: 600 }}>за длительность</strong>.
@@ -402,8 +423,8 @@ function GridHouseSubscriptions() {
                     </div>
 
                     {/* Hot booking — approval, not a discount */}
-                    <div style={{ border: ghsubHairline, padding: '14px 16px', marginTop: 12 }}>
-                        <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ГОРЯЧАЯ БРОНЬ</div>
+                    <div style={inShell ? { ...M_BOX, marginTop: 12 } : { border: ghsubHairline, padding: '14px 16px', marginTop: 12 }}>
+                        <div className={inShell ? 'ui-overline' : undefined} style={inShell ? { marginBottom: 8 } : { ...ghsubMono, color: GH.label, marginBottom: 8 }}>{inShell ? 'Горячая бронь' : 'ГОРЯЧАЯ БРОНЬ'}</div>
                         <p style={{ fontSize: 14, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
                             Бронь менее чем за 12 часов до начала (или менее чем за 24 часа на субботу и воскресенье), а также бронь, сделанная после 21:00 на утро следующего дня (до 12:00), подтверждает администратор. После одобрения — обычная цена, без скидки и без надбавки.
                         </p>
@@ -412,11 +433,12 @@ function GridHouseSubscriptions() {
 
                 {/* Conditions */}
                 <section aria-labelledby="subs-cond" style={{ marginBottom: 40 }}>
-                    <h2 id="subs-cond" style={sectionTitle}>Условия абонементов</h2>
+                    <SectionTitle m={inShell} id="subs-cond">Условия абонементов</SectionTitle>
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: wide ? 'repeat(3, minmax(0, 1fr))' : 'minmax(0, 1fr)',
                         gap: 1, background: GH.ink10, border: ghsubHairline,
+                        ...(inShell ? M_GROUP : null),
                     }}>
                         {CONDITIONS.map(c => (
                             <div key={c.title} style={{ padding: 20, background: GH.paper }}>
@@ -447,7 +469,7 @@ function GridHouseSubscriptions() {
                         to={toCatalog('/booking-rules')}
                         style={{ fontSize: 14, color: GH.ink, minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: wide ? 'center' : 'flex-start' }}
                     >
-                        <span style={{ borderBottom: `1px solid ${GH.ink20}` }}>Правила бронирования</span>&nbsp;→
+                        <span style={inShell ? { color: COLOR.accentInk, fontWeight: 600 } : { borderBottom: `1px solid ${GH.ink20}` }}>Правила бронирования</span>&nbsp;→
                     </Link>
                 </div>
 
@@ -469,20 +491,41 @@ function isCurrentPlan(plan: { id: string; name: string }, sub: Subscription | n
     return sub.planId === plan.id || sub.name === plan.name;
 }
 
-function PlanCard({ plan, wide, current }: { plan: (typeof PLANS)[number]; wide: boolean; current?: Subscription | null }) {
+function PlanCard({ plan, wide, current, m = false }: { plan: (typeof PLANS)[number]; wide: boolean; current?: Subscription | null; m?: boolean }) {
     const mine = isCurrentPlan(plan, current);
+    const tagStyle: React.CSSProperties = m
+        ? { fontSize: TEXT.caption, color: COLOR.ink80, padding: '4px 8px', background: COLOR.sunken, borderRadius: RADIUS.control }
+        : tag;
     const hasList = plan.features.length > 0 || plan.bonuses.length > 0;
     return (
         <article
             aria-labelledby={`plan-${plan.id}`}
-            style={{
+            style={m ? {
+                // 09.11 фаза 3: «Популярный» — бирюзовая рамка 1.5 px, не чёрная 2 px.
+                border: plan.popular ? `1px solid ${COLOR.accent}` : `1px solid ${COLOR.ink10}`,
+                boxShadow: plan.popular ? `inset 0 0 0 0.5px ${COLOR.accent}` : undefined,
+                background: COLOR.card,
+                borderRadius: RADIUS.sheet,
+                padding: 16,
+                display: 'flex', flexDirection: 'column',
+            } : {
                 border: plan.popular ? `2px solid ${GH.ink}` : ghsubHairline,
                 background: GH.paper,
                 padding: wide ? 20 : 16,
                 display: 'flex', flexDirection: 'column',
             }}
         >
-            {mine ? (
+            {m ? (
+                (mine || plan.badge) && (
+                    <span style={{ display: 'flex', marginBottom: 8 }}>
+                        <span className={`ui-badge ui-badge--${mine ? 'ok' : 'muted'}`}>
+                            {mine
+                                ? `Ваш тариф${current?.expiryDate ? ` · до ${formatDayMonth(current.expiryDate)}` : ''}`
+                                : plan.badge}
+                        </span>
+                    </span>
+                )
+            ) : mine ? (
                 <span style={{ ...ghsubMono, color: GH.label, marginBottom: 6 }}>
                     Ваш тариф{current?.expiryDate ? ` · до ${formatDayMonth(current.expiryDate)}` : ''}
                 </span>
@@ -504,11 +547,11 @@ function PlanCard({ plan, wide, current }: { plan: (typeof PLANS)[number]; wide:
             </div>
 
             <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                <span style={tag}>
+                <span style={tagStyle}>
                     {plan.hours} ч{plan.bonusHours > 0 ? ` + ${plan.bonusHours} ч бонус` : ''}
                 </span>
-                {plan.capsuleHours > 0 && <span style={tag}>+ {plan.capsuleHours} ч в капсуле</span>}
-                {plan.extraNote && <span style={tag}>{plan.extraNote}</span>}
+                {plan.capsuleHours > 0 && <span style={tagStyle}>+ {plan.capsuleHours} ч в капсуле</span>}
+                {plan.extraNote && <span style={tagStyle}>{plan.extraNote}</span>}
             </div>
 
             {hasList && (
@@ -599,37 +642,39 @@ const GROUP_SCALE = [
     ...scaleRow('GROUP_MASTER', true),
 ];
 
-function EffectivePriceChart() {
+function EffectivePriceChart({ m = false }: { m?: boolean }) {
     return (
         <section aria-labelledby="subs-chart" style={{ marginBottom: 48 }}>
-            <h2 id="subs-chart" style={sectionTitle}>Сколько стоит час</h2>
+            <SectionTitle m={m} id="subs-chart">Сколько стоит час</SectionTitle>
             <p style={{ fontSize: 14, color: GH.ink60, margin: '0 0 20px', maxWidth: 560, lineHeight: 1.5 }}>
                 Полная полоса — обычная ставка. Чем короче полоса, тем дешевле вам обходится час.
             </p>
-            <PriceScale title="Индивидуальный кабинет" baseRate={20} rows={INDIVIDUAL_SCALE} />
+            <PriceScale title="Индивидуальный кабинет" baseRate={20} rows={INDIVIDUAL_SCALE} m={m} />
             <div style={{ height: 24 }} />
-            <PriceScale title="Групповой формат" baseRate={35} rows={GROUP_SCALE} />
+            <PriceScale title="Групповой формат" baseRate={35} rows={GROUP_SCALE} m={m} />
         </section>
     );
 }
 
-function PriceScale({ title, baseRate, rows }: {
+function PriceScale({ title, baseRate, rows, m = false }: {
     title: string;
     baseRate: number;
     rows: Array<{ name: string; perHour: number; subtitle: string; accent: boolean }>;
+    m?: boolean;
 }) {
     return (
         <div>
             <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap',
-                marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${GH.ink}`,
+                marginBottom: 8, paddingBottom: 6, borderBottom: m ? 'none' : `1px solid ${GH.ink}`,
+                padding: m ? '0 4px' : undefined,
             }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{title}</h3>
                 <div style={{ fontSize: 14, color: GH.ink60 }}>
                     обычно <span className="num">{formatGel(baseRate)}/ч</span>
                 </div>
             </div>
-            <div style={{ border: ghsubHairline }}>
+            <div style={m ? { border: `1px solid ${COLOR.ink10}`, background: COLOR.card, borderRadius: RADIUS.sheet, overflow: 'hidden' } : { border: ghsubHairline }}>
                 {rows.map((r, i) => {
                     const fillPct = Math.min(100, (r.perHour / baseRate) * 100);
                     return (
@@ -649,12 +694,13 @@ function PriceScale({ title, baseRate, rows }: {
                             </div>
                             <div
                                 aria-hidden="true"
-                                style={{ position: 'relative', height: 8, background: GH.ink10, marginTop: 8 }}
+                                style={{ position: 'relative', height: 8, background: m ? COLOR.sunken : GH.ink10, marginTop: 8, borderRadius: m ? SHAPE.pill : 0, overflow: 'hidden' }}
                             >
                                 <div style={{
                                     position: 'absolute', left: 0, top: 0, bottom: 0,
                                     width: `${fillPct}%`,
-                                    background: r.accent ? GH.accent : (fillPct >= 100 ? GH.ink30 : GH.ink),
+                                    // 09.11 фаза 3: в /m полосы не чёрные (в тёмной теме — белые пятна).
+                                    background: r.accent ? GH.accent : (fillPct >= 100 ? GH.ink30 : (m ? COLOR.ink40 : GH.ink)),
                                 }} />
                             </div>
                         </div>

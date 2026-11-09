@@ -30,8 +30,10 @@ interface Props {
     title: string;
     /** Вторая строка — что с этим сделать. */
     hint?: string;
-    /** Главное действие. Не добавляйте, если делать нечего. */
-    action?: { label: string; onClick: () => void };
+    /** Действие. Не добавляйте, если делать нечего. variant (09.11 фаза 3):
+     *  primary — по умолчанию; secondary — если главная кнопка экрана уже есть
+     *  в шапке («+ Сессия», «+ Клиент»): одна главная на экран. */
+    action?: { label: string; onClick: () => void; variant?: 'primary' | 'secondary' | 'quiet' };
     /** Второе, тихое действие. */
     secondaryAction?: { label: string; onClick: () => void };
     /** Небольшой значок Lucide (24–32 px) — для пустого блока внутри экрана. */
@@ -57,7 +59,7 @@ export function EmptyState({ title, hint, action, secondaryAction, icon, illustr
             {(action || secondaryAction) && (
                 <div className="ui-empty__actions">
                     {action && (
-                        <Button variant="primary" className="ui-empty__action" onClick={action.onClick}>
+                        <Button variant={action.variant ?? 'primary'} className="ui-empty__action" onClick={action.onClick}>
                             {action.label}
                         </Button>
                     )}

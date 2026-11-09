@@ -1,5 +1,6 @@
 import React from 'react';
-import { GH, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_MONO, GH_SANS } from '../hooks/useDesignFlag';
+import { useInMobileShell } from '../utils/catalogPath';
 
 /**
  * StructuredText — единый рендер «простого текста с разметкой» для анкет
@@ -89,6 +90,9 @@ function renderBody(body: string): React.ReactNode {
 }
 
 export function StructuredText({ text }: { text: string }) {
+    // 09.11 фаза 3 (общие файлы): внутри /m подзаголовок «ОБО МНЕ» — Sans 12/600 капсом
+    // (как подписи разделов /m), а не Mono в разрядку. На компьютере — прежний Grid House.
+    const skin = useInMobileShell();
     if (!text) return null;
 
     // Без секций — один блок (обратная совместимость с legacy-био).
@@ -115,7 +119,7 @@ export function StructuredText({ text }: { text: string }) {
                 return (
                     <div key={idx}>
                         <div style={{
-                            fontFamily: GH_MONO, fontSize: 12,
+                            fontFamily: skin ? GH_SANS : GH_MONO, fontSize: 12, fontWeight: skin ? 600 : undefined,
                             letterSpacing: '0.06em', textTransform: 'uppercase',
                             color: GH.ink60, marginBottom: 6,
                         }}>

@@ -14,7 +14,6 @@ import { applyAllocation, indexAllocation, ledgerRowLine, allocationHeadline } f
 import { useClientAllocation } from '../../../hooks/useBalanceAllocation';
 import { batumiDayKey, bookingDayKey, futureChargedDue } from '../../../utils/adminToday';
 import { cashBranchOfLastBooking } from '../../../utils/cashBranch';
-import { statusLabel } from '../../../design/statuses';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { humanizeMoneyText } from './branchLabel';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -30,6 +29,10 @@ import { TopupSheet } from './TopupSheet';
 import { userCanAccessFinance } from '../../../utils/permissions';
 import { extraPoolLabel } from '../../../utils/subscriptionHours';
 import { DesktopLink } from './DesktopLink';
+import { SummaryCard } from '../../../components/ui/SummaryCard';
+import { Money } from '../../../components/ui/Money';
+import { ListGroup, ListRow, ListIcon } from '../../../components/ui/ListRow';
+import { AdminBookingRow } from './AdminBookingRow';
 
 /**
  * Карточка клиента на телефоне — /m/admin/users/:email (волна 4, пакет A).
@@ -115,8 +118,9 @@ export function MobileAdminUserCard() {
 
     if (!user) {
         return (
-            <div style={{ padding: '0 16px 24px' }}>
+            <div style={{ paddingBottom: 24 }}>
                 <MobilePageHeader title="Клиент" fallbackTo="/m/admin/users" />
+                <div style={{ padding: '16px 16px 0' }}>
                 {!usersTried ? (
                     <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         <span className="sr-only">Загружаем клиента…</span>
@@ -130,6 +134,7 @@ export function MobileAdminUserCard() {
                         action={{ label: "К списку клиентов", onClick: () => navigate("/m/admin/users") }}
                     />
                 )}
+                </div>
             </div>
         );
     }
@@ -143,11 +148,13 @@ export function MobileAdminUserCard() {
     const sub = user.subscription;
 
     return (
-        <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+            {/* 09.11 фаза 3: шапка во всю ширину (липкая строка), содержимое — с полями 16. */}
             <MobilePageHeader title={user.name || user.email} fallbackTo="/m/admin/users" />
+        <div style={{ padding: '16px 16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* Контакты — одним рядом, телефон звонит. */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: -8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {tel && (
                     <a href={tel} className="ui-btn ui-btn--secondary ui-btn--touch" aria-label={`Позвонить: ${user.phone}`}>
                         <Phone size={16} aria-hidden="true" /> <span className="num">{user.phone}</span>
@@ -165,47 +172,42 @@ export function MobileAdminUserCard() {
                 )}
             </div>
 
-            {/* Баланс — первым и крупно (G9-04). Минус — красным, словом «долг». */}
-            <section
-                aria-label="Баланс"
-                style={{
-                    background: debt > 0 ? 'var(--status-danger-bg)' : 'var(--color-sunken)',
-                    borderRadius: 16, padding: 16,
-                    display: 'flex', flexDirection: 'column', gap: 8,
-                }}
-            >
-                <div style={{ fontSize: 14, fontWeight: 600, color: debt > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink-60)' }}>
-                    {debt > 0 ? 'Долг клиента' : 'Баланс'}
-                </div>
-                <div className="num" style={{
-                    fontSize: 40, fontWeight: 600, lineHeight: 1.1,
-                    color: debt > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
-                }}>
-                    {formatGel(balance)}
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
-                    Кредитный лимит: <span className="num">{limit !== null ? formatGel(limit) : 'не задан'}</span>
-                    {overLimit && (
-                        <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>
-                            {' '}· сверх лимита на <span className="num">{formatGel(debt - (limit ?? 0))}</span>
-                        </span>
-                    )}
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
-                    {sub
-                        ? <>Абонемент «{sub.name}»: осталось <span className="num">{sub.remainingHours}</span> из <span className="num">{sub.totalHours}</span> ч
-                            {extraPoolLabel(sub) ? <> · {extraPoolLabel(sub)!.toLowerCase()}</> : null}
-                            {sub.expiryDate && !sub.flexible ? <> до {formatDayMonth(sub.expiryDate)}</> : null}
-                            {sub.isFrozen ? ' · заморожен' : ''}</>
-                        : 'Абонемента нет'}
-                </div>
+            {/* Баланс — первым и крупно (G9-04). Минус — красным, словом «долг».
+                09.11 фаза 3: общая SummaryCard, сумма — Money tone="balance"; числа во
+                фразах — ровными цифрами шрифта фразы (num-inline), не моноширинным. */}
+            <section aria-label="Баланс">
+                <SummaryCard
+                    size="lg"
+                    label={debt > 0 ? 'Долг клиента' : 'Баланс'}
+                    value={<Money value={balance} tone="balance" />}
+                    caption={
+                        <>
+                            <span style={{ display: 'block' }}>
+                                Кредитный лимит: {limit !== null ? <Money value={limit} inline /> : 'не задан'}
+                                {overLimit && (
+                                    <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>
+                                        {' '}· сверх лимита на <Money value={debt - (limit ?? 0)} inline />
+                                    </span>
+                                )}
+                            </span>
+                            <span className="num-inline" style={{ display: 'block', marginTop: 4 }}>
+                                {sub
+                                    ? <>Абонемент «{sub.name}»: осталось {sub.remainingHours} из {sub.totalHours} ч
+                                        {extraPoolLabel(sub) ? <> · {extraPoolLabel(sub)!.toLowerCase()}</> : null}
+                                        {sub.expiryDate && !sub.flexible ? <> до {formatDayMonth(sub.expiryDate)}</> : null}
+                                        {sub.isFrozen ? ' · заморожен' : ''}</>
+                                    : 'Абонемента нет'}
+                            </span>
+                        </>
+                    }
+                />
             </section>
 
             {/* Долг и «Принять оплату · весь долг» — сразу под балансом (ревью 09.11, №7). */}
             {canCash && payTotal > 0 && (
                 <div data-card-debt style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ fontSize: 14, color: 'var(--status-danger-fg)', fontWeight: 600 }}>
-                        К оплате сейчас <span className="num">{formatGel(payTotal)}</span>
+                        К оплате сейчас <Money value={payTotal} inline />
                         {payTotal < debt && <span style={{ fontWeight: 400, color: 'var(--color-ink-60)' }}> · остальное — за будущие брони, их возьмут в свой день</span>}
                     </div>
                     <Button icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
@@ -217,7 +219,8 @@ export function MobileAdminUserCard() {
             {/* Главные действия. */}
             <div style={{ display: 'grid', gridTemplateColumns: canCash ? '1fr 1fr' : '1fr', gap: 8 }}>
                 {canCash && (
-                    <Button icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
+                    // Одна бирюзовая кнопка на экран: есть долг — главная «Принять оплату» выше.
+                    <Button variant={payTotal > 0 ? 'secondary' : 'primary'} icon={<Wallet size={16} aria-hidden="true" />} onClick={() => setTopupOpen(true)}>
                         Пополнить
                     </Button>
                 )}
@@ -247,32 +250,28 @@ export function MobileAdminUserCard() {
                 ) : upcoming.length === 0 ? (
                     <EmptyState compact title="Будущих броней нет" />
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {/* 09.11 фаза 3: та же строка брони, что на «Сегодня» и в «Бронях». */}
+                        <ListGroup aria-label="Ближайшие брони">
                         {upcoming.slice(0, 5).map(b => {
                             const info = dueMap.get(b.id);
+                            const owes = !!info && info.due > 0 && b.status !== 'pending_approval';
                             return (
-                                <button
+                                <AdminBookingRow
                                     key={b.id}
-                                    type="button"
                                     onClick={() => setActiveBooking(b)}
-                                    className="press"
                                     aria-label={`Бронь ${formatDateLabel(b.date as any)}, ${b.startTime} — перенести, отменить, принять оплату`}
-                                    style={{ ...rowStyle, width: '100%', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--color-ink)' }}
-                                >
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 14, fontWeight: 600 }}>
-                                            {formatDateLabel(b.date as any, { capitalize: true })}, <span className="num">{b.startTime}</span>
-                                        </div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                            {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
-                                            {b.status === 'pending_approval' ? ` · ${statusLabel('booking', 'pending_approval', 'staff').toLowerCase()}` : ''}
-                                        </div>
-                                    </div>
-                                    <DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={b.status} method={b.paymentMethod as string | undefined} />
-                                    <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
-                                </button>
+                                    start={b.startTime}
+                                    name={formatDateLabel(b.date as any, { capitalize: true })}
+                                    subtitle={RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
+                                    // Слово — statusLabel('booking', 'pending_approval', 'staff') внутри строки.
+                                    status={b.status === 'pending_approval' ? b.status : null}
+                                    owes={owes}
+                                    badge={<DueBadge due={info?.due} paid={!!info} charged={info?.charged} price={info?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={b.status} method={b.paymentMethod as string | undefined} />}
+                                />
                             );
                         })}
+                        </ListGroup>
                         {upcoming.length > 5 && (
                             <Link
                                 to={`/m/admin/bookings?q=${encodeURIComponent(user.email)}&past=0`}
@@ -295,7 +294,7 @@ export function MobileAdminUserCard() {
 
             {/* Опасное и редкое — на компьютере (сброс пароля, склейка, архив, лимит). */}
             <section aria-label="Удобнее на компьютере" style={{
-                background: 'var(--color-sunken)', borderRadius: 12, padding: 12,
+                background: 'var(--color-sunken)', borderRadius: 16, padding: 16,
                 fontSize: 14, color: 'var(--color-ink-80)', lineHeight: 1.5,
             }}>
                 <div style={{ fontWeight: 600, color: 'var(--color-ink)' }}>Удобнее на компьютере</div>
@@ -328,14 +327,10 @@ export function MobileAdminUserCard() {
                 />
             )}
         </div>
+        </div>
     );
 }
 
-const rowStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 10,
-    background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
-    borderRadius: 12, padding: '10px 12px', minHeight: 52,
-};
 
 /** Свёрнутая секция: заголовок-кнопка 44 px, содержимое монтируется при открытии. */
 function Collapsible({ title, badge, defaultOpen = false, children }: {
@@ -392,46 +387,35 @@ function LedgerList({ userId, balance }: { userId: string; balance: number }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
             {headline && (
-                <div data-alloc-headline style={{ fontSize: 13, color: 'var(--color-ink-80)', lineHeight: 1.45, paddingBottom: 8, borderBottom: '1px solid var(--color-ink-08)' }}>
+                <div data-alloc-headline style={{ fontSize: 14, color: 'var(--color-ink-80)', lineHeight: 1.45, paddingBottom: 8, borderBottom: '1px solid var(--color-ink-08)' }}>
                     {headline}
                 </div>
             )}
+            {/* 09.11 фаза 3: строки ленты — ListRow; сумма — Money tone="flow": приход
+                зелёный, расход чернилами (не красным — красный только у долга), 0 — серый. */}
+            <ListGroup bare aria-label="Движения баланса">
             {data.entries.slice(0, 30).map(e => {
                 const when = e.date ? parseUTC(e.date) : null;
                 const allocLine = ledgerRowLine(allocRows.get(e.id));
                 return (
-                    <div key={e.id} style={{
-                        display: 'flex', gap: 10, alignItems: 'flex-start',
-                        padding: '8px 0', borderBottom: '1px solid var(--color-ink-08)',
-                    }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 500 }}>
-                                {REASON_LABELS[e.reason] || 'Прочее движение'}
-                            </div>
-                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                {when ? `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}` : '—'}
-                                {e.description ? ` · ${humanizeMoneyText(e.description)}` : ''}
-                            </div>
-                            {allocLine && (
-                                <div data-alloc-line style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, lineHeight: 1.4 }}>
-                                    {allocLine}
-                                </div>
-                            )}
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                            <div className="num" style={{
-                                fontSize: 14, fontWeight: 600,
-                                color: e.delta < 0 ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)',
-                            }}>
-                                {formatGel(e.delta, { sign: true })}
-                            </div>
-                            <div className="num" style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                итог {formatGel(e.balanceAfter)}
-                            </div>
-                        </div>
-                    </div>
+                    <ListRow
+                        key={e.id}
+                        title={<span style={{ fontWeight: 500 }}>{REASON_LABELS[e.reason] || 'Прочее движение'}</span>}
+                        subtitle={<>
+                            {when ? `${formatDayMonth(when, { timeZone: BATUMI_TZ })}, ${formatTime(when, { timeZone: BATUMI_TZ })}` : '—'}
+                            {e.description ? ` · ${humanizeMoneyText(e.description)}` : ''}
+                        </>}
+                        meta={allocLine ? (
+                            <span data-alloc-line style={{ fontSize: 14, color: 'var(--color-ink-60)', lineHeight: 1.4 }}>
+                                {allocLine}
+                            </span>
+                        ) : undefined}
+                        trail={<Money value={e.delta} tone="flow" />}
+                        trailSub={<>итог <Money value={e.balanceAfter} inline /></>}
+                    />
                 );
             })}
+            </ListGroup>
             {(data.entries.length > 30 || data.truncated) && (
                 <div style={{ fontSize: 12, color: 'var(--color-ink-60)', paddingTop: 8 }}>
                     Показаны последние 30 движений — вся лента в полной карточке.
@@ -468,21 +452,18 @@ function BonusList({ userId }: { userId: string }) {
     if (!items) return <SkeletonList count={2} label="Загружаем бонусы" cardHeight={48} />;
     if (items.length === 0) return <EmptyState compact title="Бонусов нет" />;
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <ListGroup aria-label="Бонусы">
             {items.slice(0, 10).map(b => (
-                <div key={b.id} style={rowStyle}>
-                    <Plus size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {b.description || 'Бонус'} · <span className="num">{b.quantity}</span> ч
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                            {BONUS_STATUS[b.status] || b.status}
-                            {b.expiresAt && (b.status === 'active' || b.status === 'approved') ? ` · до ${formatDayMonth(b.expiresAt)}` : ''}
-                        </div>
-                    </div>
-                </div>
+                <ListRow
+                    key={b.id}
+                    lead={<ListIcon><Plus size={18} /></ListIcon>}
+                    title={<>{b.description || 'Бонус'} · <span className="num-inline">{b.quantity}</span> ч</>}
+                    subtitle={<>
+                        {BONUS_STATUS[b.status] || b.status}
+                        {b.expiresAt && (b.status === 'active' || b.status === 'approved') ? ` · до ${formatDayMonth(b.expiresAt)}` : ''}
+                    </>}
+                />
             ))}
-        </div>
+        </ListGroup>
     );
 }

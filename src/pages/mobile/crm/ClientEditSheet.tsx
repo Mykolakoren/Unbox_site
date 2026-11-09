@@ -86,14 +86,13 @@ export function ClientEditSheet({ open, client, onClose, onSaved }: {
             open={open}
             onClose={onClose}
             title="Изменить клиента"
+            // 09.11 фаза 3 (дизайн-ревью п. 19): подвал шторки — одна главная кнопка;
+            // закрыть без сохранения — крестиком сверху (третий способ «Не сохранять» убран).
             footer={
-                <>
-                    <Button block loading={saving} disabled={!form.name.trim() || priceBad} onClick={save}>Сохранить</Button>
-                    <Button block variant="secondary" onClick={onClose}>Не сохранять</Button>
-                </>
+                <Button block loading={saving} disabled={!form.name.trim() || priceBad} onClick={save}>Сохранить</Button>
             }
         >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <Field label="Имя" required>
                     <Input kind="name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
                 </Field>
@@ -126,7 +125,7 @@ export function ClientEditSheet({ open, client, onClose, onSaved }: {
                     <Input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} />
                 </Field>
                 {moneyChanged && (
-                    <div role="radiogroup" aria-labelledby="m-apply-price-title" style={{ padding: 12, background: STATUS.pending.bg, borderRadius: 10 }}>
+                    <div role="radiogroup" aria-labelledby="m-apply-price-title" style={{ padding: 12, background: STATUS.pending.bg, borderRadius: 8 }}>
                         <div id="m-apply-price-title" style={{ fontSize: 14, fontWeight: 600, color: STATUS.pending.fg, marginBottom: 2 }}>
                             Новая ставка — к каким сессиям?
                         </div>

@@ -10,6 +10,7 @@ import { DesktopLink } from './DesktopLink';
 import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { useUserStore } from '../../../store/userStore';
+import { ListGroup, ListRow, ListAvatar } from '../../../components/ui/ListRow';
 
 const ROLE_LABEL: Record<string, string> = {
     founder: 'Основатель',
@@ -90,16 +91,17 @@ export function MobileAdminTeam() {
         }
     };
 
+    // 09.11 фаза 3: шапка во всю ширину, число — в подзаголовке (без повторной
+    // подписи «КОМАНДА · 4»); строки — ListRow, действие — тихая кнопка sm.
+    const visible = members.filter(m => m.isActive).length;
     return (
-        <div style={{ padding: '0 16px 90px' }}>
-            <MobilePageHeader title="Команда" fallbackTo="/m/admin/dashboard" />
-            <div style={{
-                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-                textTransform: 'uppercase', color: 'var(--color-ink-60)',
-                marginBottom: 10,
-            }}>
-                Команда · {members.length}
-            </div>
+        <div style={{ paddingBottom: 90 }}>
+            <MobilePageHeader
+                title="Команда"
+                subtitle={loading ? undefined : `${members.length} ${plural(members.length, 'сотрудник', 'сотрудника', 'сотрудников')} · на сайте ${visible}`}
+                fallbackTo="/m/admin/dashboard"
+            />
+            <div style={{ padding: '16px 16px 0' }}>
 
             {failed && !loading && (
                 <ErrorBar message="Не удалось загрузить команду" onRetry={load} className="mb-3" />
@@ -109,92 +111,49 @@ export function MobileAdminTeam() {
             ) : failed ? null : sorted.length === 0 ? (
                 <EmptyState compact title="В команде пока никого" hint="Добавить сотрудника можно на компьютере." />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <ListGroup aria-label="Команда">
                     {sorted.map(m => {
                         const roleLabel = ROLE_LABEL[m.roleType] || 'Другое';
-                        // «Основатель» в плашке и «Основатель» в подписи — не повторяем.
+                        // «Основатель» в роли и «Основатель» в подписи — не повторяем.
                         const showRole = !!m.role && m.role.trim().toLowerCase() !== roleLabel.toLowerCase();
                         const isMe = !!myName && m.name.trim().toLowerCase() === myName;
                         return (
-                            <div key={m.id} style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 12,
-                                padding: '8px 8px 8px 12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                            }}>
-                                {m.photoUrl ? (
-                                    <img
-                                        src={m.photoUrl}
-                                        alt={m.name}
-                                        style={{
-                                            width: 40, height: 40,
-                                            borderRadius: 10,
-                                            objectFit: 'cover',
-                                            flexShrink: 0,
-                                        }}
-                                    />
-                                ) : (
-                                    <div style={{
-                                        width: 40, height: 40, borderRadius: 10,
-                                        background: 'var(--color-ink-05)',
-                                        color: 'var(--color-ink-60)',
-                                        display: 'grid', placeItems: 'center',
-                                        fontSize: 13, fontWeight: 600,
-                                        flexShrink: 0,
-                                    }}>
-                                        {m.name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}
-                                    </div>
-                                )}
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {m.name}
-                                    </div>
-                                    {/* Роль — плашкой во всю ширину (с обрезкой), подпись «кем
-                                        работает» — строкой ниже с переносом. Раньше обе стояли в
-                                        одну строку, и «Старший администратор» уходил под кнопку. */}
-                                    <div style={{ marginTop: 2, minWidth: 0 }}>
-                                        <span className="ui-badge ui-badge--muted" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {roleLabel}
-                                        </span>
-                                        {showRole && (
-                                            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflowWrap: 'anywhere' }}>
-                                                {m.role}
-                                            </div>
-                                        )}
-                                        {/* Состояние — своей строкой (ревью 09.11, №24). */}
-                                        <div style={{ fontSize: 12, marginTop: 2, color: m.isActive ? 'var(--color-ink-60)' : 'var(--status-pending-fg)', fontWeight: m.isActive ? 400 : 600 }}>
-                                            {m.isActive ? 'На сайте' : 'Скрыт с сайта'}{isMe ? ' · это вы' : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                                {!isMe && (
+                            <ListRow
+                                key={m.id}
+                                lead={<ListAvatar name={m.name} src={m.photoUrl} />}
+                                title={m.name}
+                                // Роль — текстом 14 ink-60 с переносом (раньше серая плашка
+                                // резала «Старший администр…»).
+                                subtitle={<>
+                                    {roleLabel}{showRole ? ` · ${m.role}` : ''}{isMe ? ' · это вы' : ''}
+                                </>}
+                                // Состояние: скрытый — бледнее и с плашкой (ревью 09.11, №24).
+                                meta={m.isActive ? undefined : <span className="ui-badge ui-badge--muted">скрыт с сайта</span>}
+                                dimmed={!m.isActive}
+                                action={!isMe && (
                                     <Button
                                         variant="quiet"
-                                        size="touch"
+                                        size="sm"
                                         loading={busyId === m.id}
                                         icon={<Power size={16} aria-hidden="true" />}
                                         onClick={() => handleToggle(m)}
                                         aria-label={`${m.isActive ? 'Скрыть с сайта' : 'Показать на сайте'}: ${m.name}`}
-                                        style={{ flexShrink: 0 }}
                                     >
                                         {m.isActive ? 'Скрыть' : 'Показать'}
                                     </Button>
                                 )}
-                            </div>
+                            />
                         );
                     })}
-                </div>
+                </ListGroup>
             )}
 
             <div style={{
                 marginTop: 16,
                 padding: 12,
                 background: 'var(--color-sunken)',
-                borderRadius: 10,
-                fontSize: 12,
+                borderRadius: 16,
+                fontSize: 14,
                 color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
@@ -208,6 +167,15 @@ export function MobileAdminTeam() {
                     <DesktopLink href="/admin/team">Открыть полную версию →</DesktopLink>
                 </span>
             </div>
+            </div>
         </div>
     );
+}
+
+/** 1 сотрудник, 2 сотрудника, 5 сотрудников. */
+function plural(n: number, one: string, few: string, many: string): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
 }

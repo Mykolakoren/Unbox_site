@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Wallet } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { usersApi, type MyBalanceLedgerEntry } from '../../api/users';
 import { REASON_LABELS } from '../../utils/ledgerReasons';
 import { BATUMI_TZ } from '../../utils/dateUtils';
-import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
+import { COLOR, TEXT } from '../../design/tokens';
 import { formatDayMonth, formatDayMonthShort, formatGel, formatTime } from '../../utils/format';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
+import { Money } from '../../components/ui/Money';
+import { SummaryCard } from '../../components/ui/SummaryCard';
+import { ListGroup, ListRow } from '../../components/ui/ListRow';
 import { Sheet } from '../../components/ui/Sheet';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LoadErrorCard, SkeletonRows } from './LoadStates';
@@ -86,71 +88,51 @@ export function MobileBalance() {
         <div style={{ paddingBottom: 24 }}>
             <MobilePageHeader title="Баланс" fallbackTo="/m/me" />
             <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <section aria-label="Баланс сейчас" style={{
-                    background: COLOR.sunken, borderRadius: RADIUS.sheet, padding: '16px 18px',
-                    display: 'flex', flexDirection: 'column', gap: 10,
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <Wallet size={24} aria-hidden="true" />
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
-                                {debt ? 'Долг' : 'На балансе'}
-                            </div>
-                            <div className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, color: debt ? STATUS.danger.fg : COLOR.ink }}>
-                                {formatGel(balance)}
-                            </div>
-                        </div>
+                {/* 09.11 фаза 3: итог — общий SummaryCard (как абонемент и бонусы);
+                    цвет суммы — только tone="balance" (минус = долг, красный). */}
+                <SummaryCard
+                    size="lg"
+                    label={debt ? 'Долг' : 'На балансе'}
+                    value={<Money value={balance} tone="balance" />}
+                    caption={creditLimit > 0
+                        ? `Можно уйти в минус до ${formatGel(creditLimit, { fraction: 0 })} — потом пополнить.`
+                        : undefined}
+                >
+                    <div style={{ marginTop: 12 }}>
+                        <Button block size="touch" onClick={() => setTopUpOpen(true)}>Как пополнить</Button>
                     </div>
-                    {creditLimit > 0 && (
-                        <div style={{ fontSize: TEXT.small, color: COLOR.ink80 }}>
-                            Можно уйти в минус до {formatGel(creditLimit, { fraction: 0 })} — потом пополнить.
-                        </div>
-                    )}
-                    <Button block size="touch" onClick={() => setTopUpOpen(true)}>Как пополнить</Button>
-                </section>
+                </SummaryCard>
 
                 <section aria-label="История">
-                    <h2 style={{ fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60, margin: '0 0 8px' }}>
-                        История
-                    </h2>
                     {failed ? (
                         <LoadErrorCard title="Не удалось загрузить историю" text="Деньги никуда не делись — просто сейчас не загрузилось." onRetry={load} />
                     ) : entries == null ? (
                         <SkeletonRows height={64} />
                     ) : entries.length === 0 ? (
-                        <EmptyState compact title="Операций пока нет" hint="Здесь появятся пополнения, списания за брони и возвраты." />
+                        <EmptyState compact illustration="cup" title="Операций пока нет" hint="Здесь появятся пополнения, списания за брони и возвраты." />
                     ) : (
-                        <div style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet, overflow: 'hidden' }}>
-                            {entries.map((e, i) => {
+                        <ListGroup title="История">
+                            {entries.map(e => {
                                 const when = parseUtc(e.date);
                                 const { title, sub } = whatHappened(e);
-                                const plus = e.delta > 0;
                                 return (
-                                    <div key={e.id} style={{
-                                        display: 'flex', gap: 12, alignItems: 'flex-start',
-                                        padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${COLOR.ink10}`,
-                                    }}>
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.ink }}>{title}</div>
-                                            {sub && <div style={{ fontSize: TEXT.small, color: COLOR.ink80, marginTop: 2 }}>{sub}</div>}
+                                    <ListRow
+                                        key={e.id}
+                                        title={<span style={{ fontSize: TEXT.small }}>{title}</span>}
+                                        subtitle={<>
+                                            {sub && <span style={{ display: 'block', color: COLOR.ink80 }}>{sub}</span>}
                                             {when && (
-                                                <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
+                                                <span style={{ display: 'block', fontSize: TEXT.caption }}>
                                                     {formatDayMonth(when, { timeZone: BATUMI_TZ, withYear: 'auto' })}, {formatTime(when, { timeZone: BATUMI_TZ })}
-                                                </div>
+                                                </span>
                                             )}
-                                        </div>
-                                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                            <div className="num" style={{ fontSize: TEXT.body, fontWeight: 600, color: plus ? STATUS.ok.fg : COLOR.ink }}>
-                                                {formatGel(e.delta, { sign: true })}
-                                            </div>
-                                            <div className="num" style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
-                                                остаток {formatGel(e.balanceAfter)}
-                                            </div>
-                                        </div>
-                                    </div>
+                                        </>}
+                                        trail={<Money value={e.delta} tone="flow" />}
+                                        trailSub={<span className="num">остаток {formatGel(e.balanceAfter)}</span>}
+                                    />
                                 );
                             })}
-                        </div>
+                        </ListGroup>
                     )}
                     {truncated && (
                         <p style={{ margin: '8px 4px 0', fontSize: TEXT.small, color: COLOR.ink60 }}>

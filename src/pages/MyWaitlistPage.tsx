@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { getMyBookingsPath } from '../utils/userPaths';
-import { Bell, Clock, Trash2, CheckCircle2, X, Calendar as CalendarIcon } from 'lucide-react';
+import { Bell, BellOff, Clock, CheckCircle2, X, Calendar as CalendarIcon } from 'lucide-react';
 import { parseISO } from 'date-fns';
 import { waitlistApi } from '../api/waitlist';
 import { RESOURCES, LOCATIONS } from '../utils/data';
 import type { WaitlistEntry } from '../store/types';
-import { COLOR, RADIUS, STATUS, TEXT } from '../design/tokens';
+import { COLOR, RADIUS, SHAPE, STATUS, TEXT } from '../design/tokens';
 import { formatDateLabel, formatTimeRange } from '../utils/format';
 import { toastApiError } from '../utils/errors';
 import { useInMobileShell } from '../utils/catalogPath';
@@ -124,7 +124,16 @@ export function MyWaitlistPage() {
 
     return (
         <div style={{ color: COLOR.ink, paddingBottom: 80 }}>
-            {inShell && <MobilePageHeader title="Слежу за слотами" fallbackTo="/m/me" />}
+            {/* 09.11 фаза 3: в /m счётчики — тихой подписью в шапке, а не «технической» строкой. */}
+            {inShell && (
+                <MobilePageHeader
+                    title="Слежу за слотами"
+                    fallbackTo="/m/me"
+                    subtitle={!loading && !loadError && entries.length > 0
+                        ? [`ждём ${stats.active}`, `освободилось ${stats.fulfilled}`, stats.cancelled > 0 ? `отменено ${stats.cancelled}` : null].filter(Boolean).join(' · ')
+                        : undefined}
+                />
+            )}
             <div style={{ padding: inShell ? '8px 16px 0' : '24px 16px 0' }}>
                 {!inShell && (
                     <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: '0 0 4px' }}>
@@ -136,7 +145,7 @@ export function MyWaitlistPage() {
                 </p>
 
                 {/* Счётчики — только после ответа сервера, не «0 активных» во время загрузки. */}
-                {!loading && !loadError && entries.length > 0 && (
+                {!inShell && !loading && !loadError && entries.length > 0 && (
                     <div style={{ display: 'flex', gap: 12, marginBottom: 16, fontSize: TEXT.small, color: COLOR.ink60 }}>
                         <span>Ждём: <span className="num">{stats.active}</span></span>
                         <span>Освободилось: <span className="num">{stats.fulfilled}</span></span>
@@ -150,7 +159,7 @@ export function MyWaitlistPage() {
                     <ErrorBar message="Не удалось загрузить подписки" onRetry={load} />
                 ) : entries.length === 0 ? (
                     <EmptyState
-                        icon={<Bell size={28} />}
+                        {...(inShell ? { illustration: 'door' as const } : { icon: <Bell size={28} /> })}
                         title="Вы пока ни за чем не следите"
                         hint={inShell
                             ? 'Если нужное время занято, в «Свободно» нажмите «Сообщить, когда освободится».'
@@ -219,10 +228,12 @@ function EntryCard({ entry, inShell, onRemove }: {
             padding: 16,
         }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                {/* 09.11 фаза 3: статус уже сказан биркой — значок нейтральный (sunken, ink-60),
+                    янтарь только в бирке. */}
                 <div aria-hidden="true" style={{
-                    width: 40, height: 40, borderRadius: 999, flexShrink: 0,
+                    width: 40, height: 40, borderRadius: SHAPE.pill, flexShrink: 0,
                     display: 'grid', placeItems: 'center',
-                    background: meta.bg, color: meta.fg,
+                    background: COLOR.sunken, color: COLOR.ink60,
                 }}>
                     <Icon size={20} />
                 </div>
@@ -260,7 +271,7 @@ function EntryCard({ entry, inShell, onRemove }: {
                             background: 'transparent', border: 'none', cursor: 'pointer', color: COLOR.ink60,
                         }}
                     >
-                        <Trash2 size={18} aria-hidden="true" />
+                        <BellOff size={18} aria-hidden="true" />
                     </button>
                 )}
             </div>

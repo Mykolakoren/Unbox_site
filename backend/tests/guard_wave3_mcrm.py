@@ -57,10 +57,15 @@ def test_book_next_is_first_row_of_session_sheet():
     assert "onBookNext?: (session: CrmSession) => void" in sheet, "шторка сессии не принимает onBookNext"
     main = _between(sheet, "function Main(", "\nfunction RescheduleForm")
     # 09.11: плитки собираются в массив tiles до return — порядок смотрим в разметке.
-    main = main[main.index("return ("):]
-    i_row = main.find("Записать следующую · ${nextSessionLabel(session, client)}")
-    i_tiles = main.find("{tiles.map(")
-    assert 0 <= i_row < i_tiles, "«Записать следующую · …» должна быть первой строкой шторки"
+    # 09.11 фаза 3 (дизайн-ревью CRM п. 8): «Следующая» — плитка в первом ряду шторки
+    # (подпись — дата следующей, для диктора — «Записать следующую · …»); ряд плиток —
+    # первое, что в шторке, до группы строк.
+    assert "ariaLabel={`Записать следующую · ${nextSessionLabel(session, client)}`}" in main, \
+        "нет плитки «Записать следующую»"
+    ret = main[main.index("return ("):]
+    i_tiles = ret.find("{tiles.map(")
+    i_rows = ret.find("<ListGroup bare")
+    assert 0 <= i_tiles < i_rows, "«Записать следующую · …» должна быть первой строкой шторки"
     assert "!viewingOther" in sheet, "в «просмотре как специалист» строка записи не должна показываться"
     for name in ("MobileCrmToday.tsx", "MobileCrmSessions.tsx", "MobileCrmClient.tsx"):
         code = _code(name)
@@ -95,7 +100,10 @@ def test_quick_pay_one_tap_with_undo():
     sheet = _code("SessionActionSheet.tsx")
     assert "crmApi.unmarkPaidSession(session.id)" in sheet, "шторка снимает оплату иначе — сверить с «Вернуть»"
     today = _code("MobileCrmToday.tsx")
-    assert "quickPay.pay(s)" in today and "`Оплата · ${formatMoney(" in today, "на «Сегодня» нет «Оплата · 140 ₾»"
+    # 09.11 фаза 3 (дизайн-ревью п. 4): кнопка в строке — тихая «✓ 140 ₾» (secondary sm),
+    # полный текст «Отметить оплату: Имя, 140 ₾» — для диктора.
+    assert "quickPay.pay(s)" in today and "aria-label={`Отметить оплату: ${nameOf(s)}, ${formatMoney(" in today, \
+        "на «Сегодня» нет «Оплата · 140 ₾»"
     assert "loading={busy}" in today, "кнопка оплаты не блокируется на время запроса"
 
 
@@ -111,7 +119,8 @@ def test_no_payment_via_update_session():
 def test_today_three_shelves():
     today = _code("MobileCrmToday.tsx")
     # 10.10: «+ Сессия» передаёт открытый день — bookNext.open(…, dateStr).
-    for text in (">Дальше<", ">Закрыть день<", ">Без следующей встречи<", "bookNext.open(",
+    # 09.11 фаза 3: «Закрыть день» и «Без следующей встречи» — подписи ListGroup (title="…").
+    for text in (">Дальше<", 'title="Закрыть день"', 'title="Без следующей встречи"', "bookNext.open(",
                  "formatStartsIn(", "nextSessionLabel(last, client)"):
         assert text in today, f"«Сегодня» V2: нет {text}"
     assert "display: 'none'" not in today, "вернулся мёртвый скрытый span"
@@ -120,10 +129,11 @@ def test_today_three_shelves():
 
 def test_finance_kassa_wording():
     fin = _code("MobileCrmFinance.tsx")
-    assert 'label="Касса · с долгами"' in fin, "В1: деньги за месяц — «Касса · с долгами»"
+    # 09.11 фаза 3: итоги месяца — SummaryCard, «Касса · с долгами» — ячейка stats.
+    assert "label: 'Касса · с долгами'" in fin, "В1: деньги за месяц — «Касса · с долгами»"
     assert "Доход за месяц" not in fin and "Средний чек" not in fin and "avgCheck" not in fin
     assert fin.find(">Месяц<") < fin.find(">Долги сейчас<"), "«Долги сейчас» — отдельный раздел после месяца"
-    assert "totalActiveDebt" in _between(fin, ">Долги сейчас<", "function TotalCell"), \
+    assert "totalActiveDebt" in _between(fin, ">Долги сейчас<", "function pluralizeSessions"), \
         "общий долг снова стоит под выбором месяца"
 
 
@@ -132,7 +142,8 @@ def test_tabs_and_switcher():
     tabs = re.findall(r'<TabLink to="([^"]+)"', layout)
     assert tabs == ["/m/crm/today", "/m/crm/clients", "/m/crm/sessions", "/m/crm/finance", "/m/crm/notes"], \
         f"вкладки В4: Сегодня · Клиенты · Сессии · Финансы · Заметки, а не {tabs}"
-    sw = _between(layout, "function SectionSwitcher", "const switcherItem")
+    # 09.11 фаза 3 (общие файлы): строки переключателя — общий ListRow, своего switcherItem больше нет.
+    sw = _between(layout, "function SectionSwitcher", "function TabLink")
     for to in ("'/m'", "'/m/crm/profile'", "'/m/crm/schedule'"):
         assert to in sw, f"в «Psy-CRM ▾» нет {to}"
     assert "...(isAdmin ? [{ to: '/m/admin'" in sw, "«Админка» должна показываться только по роли"
@@ -147,7 +158,8 @@ def test_new_client_opens_card():
     created = _between(code, "onCreated={(c) => {", "}}")
     assert "load()" in created and "navigate(`/m/crm/clients/${c.id}`)" in created, \
         "после создания клиента список не перечитан или не открыта карточка"
-    assert "action={viewingOther ? undefined : { label: 'Добавить клиента'" in code, "в пустом списке нет «+ Клиент»"
+    # 09.11 фаза 3 (общие файлы): «+ Клиент» уже в шапке — у пустого списка кнопка secondary.
+    assert "action={viewingOther ? undefined : { label: 'Добавить клиента', variant: 'secondary'" in code, "в пустом списке нет «+ Клиент»"
 
 
 def test_client_card_next_debt_note():
@@ -175,9 +187,12 @@ def test_contact_links_from_shared_util():
         assert "https://t.me/" not in code and "`tel:" not in code, \
             f"{name}: ссылка t.me / tel: снова собирается без проверки ника и номера"
     card = _code("MobileCrmClient.tsx")
-    assert "href={tgHref}" in card and "href={telHref}" in card
+    # 09.11 фаза 3: кнопки связи в карточке — списком contactLinks (href: telHref / tgHref).
+    assert "href: tgHref" in card and "href: telHref" in card and "href={l.href}" in card
     lst = _code("MobileCrmClients.tsx")
-    assert "href={telegramHref(c.telegram)!}" in lst and "href={phoneHref(c.phone)!}" in lst
+    # 09.11 фаза 3 (дизайн-ревью п. 12): в строке одна кнопка связи (Telegram или звонок).
+    assert "const tg = telegramHref(c.telegram);" in lst and "const tel = phoneHref(c.phone);" in lst
+    assert "href={tg}" in lst and "href={tel}" in lst
 
 
 def test_client_card_debt_button_does_not_promise_instant_pay():
@@ -203,7 +218,8 @@ def test_screens_reload_after_sheets():
 def test_future_session_has_no_completed_tile():
     main = _between(_code("SessionActionSheet.tsx"), "function Main(", "\nfunction RescheduleForm")
     # 09.11: плитки выбираются по состоянию; у будущей запланированной — «Перенести» и «Отменить».
-    assert "else if (isFuture) tiles = [rescheduleTile, cancelTile];" in main and 'label="Перенести"' in main, \
+    # 09.11 фаза 3: «Отменить» ушла из плиток вниз шторки (canCancel) — у будущей плитка «Перенести».
+    assert "else if (isFuture) tiles = [rescheduleTile];" in main and 'label="Перенести"' in main, \
         "G6-M4: у будущей сессии снова «Прошла»"
 
 

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell } from 'lucide-react';
+import { Bell, CalendarDays, Gift, Ticket, type LucideIcon } from 'lucide-react';
 import { notificationIcon } from '../../utils/notificationIcon';
 import { notificationsApi, type AppNotification } from '../../api/notifications';
-import { COLOR, STATUS } from '../../design/tokens';
+import { COLOR, SHAPE, TEXT } from '../../design/tokens';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
+import { Counter } from '../../components/ui/Counter';
 import { formatDayMonth, formatTime } from '../../utils/format';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
@@ -112,26 +114,9 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
                 }}
             >
                 <Bell size={20} />
-                {unread > 0 && (
-                    <span style={{
-                        position: 'absolute',
-                        top: 4,
-                        right: 4,
-                        background: STATUS.danger.fg,
-                        color: COLOR.onInk,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        borderRadius: 999,
-                        minWidth: 16,
-                        height: 16,
-                        padding: '0 4px',
-                        display: 'grid',
-                        placeItems: 'center',
-                        lineHeight: 1,
-                    }}>
-                        {unread > 99 ? '99+' : unread}
-                    </span>
-                )}
+                {/* 09.11 фаза 3: тот же общий Counter, что во вкладках админки; тон новостей —
+                    бирюза, не красный «долг/опасно». Без обводки: колокольчик стоит и на панели, и на бумаге. */}
+                <Counter value={unread} tone="accent" style={{ position: 'absolute', top: 2, right: 2, boxShadow: 'none' }} />
             </button>
 
             <Sheet
@@ -149,44 +134,56 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
                 ) : loadFailed && items.length === 0 ? (
                     <ErrorBar message="Не удалось загрузить уведомления" onRetry={() => { void loadItems(); }} retrying={loading} />
                 ) : items.length === 0 ? (
-                    <EmptyState compact title="Уведомлений пока нет" />
+                    <EmptyState compact illustration="cup" title="Уведомлений пока нет" hint="Здесь появятся подтверждения броней, напоминания и подарки." />
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {items.map(n => (
-                            <button
-                                key={n.id}
-                                onClick={() => handleTap(n)}
-                                style={{
-                                    width: '100%',
-                                    background: n.isRead ? COLOR.card : STATUS.pending.bg,
-                                    border: `1px solid ${COLOR.ink08}`,
-                                    borderRadius: 12,
-                                    padding: '12px 14px',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: 4,
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    textAlign: 'left',
-                                    color: COLOR.ink,
-                                }}
-                            >
-                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                    {/* Сервер присылает имя значка («CheckCircle») — рисуем значок, не текст. */}
-                                    {(() => { const Icon = notificationIcon(n.icon); return <Icon size={16} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} />; })()}
-                                    <span>{n.title}</span>
-                                </div>
-                                <div style={{ fontSize: 12, color: COLOR.ink80, lineHeight: 1.35 }}>
-                                    {n.description}
-                                </div>
-                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
-                                    {formatDayMonth(n.createdAt)}, {formatTime(n.createdAt)}
-                                </div>
-                            </button>
-                        ))}
-                    </div>
+                    // 09.11 фаза 3: без янтарной заливки (янтарь = «ждём/внимание», а тут
+                    // просто новости). Непрочитанное — бирюзовая точка и заголовок 600,
+                    // прочитанное — заголовок 500 ink-80. Строки — общий ListGroup bare.
+                    <ListGroup bare aria-label="Уведомления">
+                        {items.map(n => {
+                            const Icon = pickIcon(n);
+                            return (
+                                <ListRow
+                                    key={n.id}
+                                    onClick={() => handleTap(n)}
+                                    chevron={!!n.link}
+                                    lead={<ListIcon><Icon size={20} /></ListIcon>}
+                                    title={
+                                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                            {!n.isRead && (
+                                                <span
+                                                    aria-hidden="true"
+                                                    style={{ flex: 'none', width: 8, height: 8, borderRadius: SHAPE.pill, background: COLOR.accent, transform: 'translateY(-1px)' }}
+                                                />
+                                            )}
+                                            <span style={n.isRead ? { fontWeight: 500, color: COLOR.ink80 } : undefined}>
+                                                {n.title}
+                                                {!n.isRead && <span className="sr-only"> (новое)</span>}
+                                            </span>
+                                        </span>
+                                    }
+                                    subtitle={<>
+                                        {n.description && <span style={{ display: 'block', color: COLOR.ink80 }}>{n.description}</span>}
+                                        <span className="num-inline">{formatDayMonth(n.createdAt)}, {formatTime(n.createdAt)}</span>
+                                    </>}
+                                />
+                            );
+                        })}
+                    </ListGroup>
                 )}
             </Sheet>
         </>
     );
+}
+
+/** Значок по типу: сервер часто шлёт общий «Bell» — тогда подарок/абонемент
+ *  узнаём по типу уведомления (только вид, 09.11 фаза 3). */
+function pickIcon(n: AppNotification): LucideIcon {
+    const Icon = notificationIcon(n.icon);
+    if (Icon !== Bell) return Icon;
+    const t = `${n.type || ''}`.toLowerCase();
+    if (t.includes('bonus') || t.includes('gift') || t.includes('welcome') || t === 'free_hour' || t === 'weekly_rebate') return Gift;
+    if (t.startsWith('subscription')) return Ticket;
+    if (t === 'slot_freed' || t.startsWith('booking') || t.startsWith('hot_booking')) return CalendarDays;
+    return Bell;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BellRing, CalendarDays, Check, Info, Link as LinkIcon, Loader2, MessageCircle, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
+import { BellRing, CalendarDays, Info, Link as LinkIcon, Loader2, MessageCircle, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -15,12 +15,15 @@ import type { BookingHistoryItem } from '../../store/types';
 import { backdateHours, canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
-import { COLOR, STATUS, Z } from '../../design/tokens';
+import { COLOR, RADIUS, STATUS, TEXT, Z } from '../../design/tokens';
 import { formatDayMonth, formatDayMonthShort, formatGel, formatRelativeDay, formatWeekdayShort } from '../../utils/format';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
+import { Chip } from '../../components/ui/Chip';
+import { ChoiceCard, ChoiceGroup } from '../../components/ui/ChoiceCard';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { Field, Select } from '../../components/ui/Field';
 import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeModal';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
@@ -522,6 +525,8 @@ export function MobileFind() {
                 : ALL_SPACES.filter(x => spaces.has(x)).map(x => SPACE_WORD[x]).join(', '),
     ].join(' · ');
     const title = linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно';
+    // 09.11 фаза 3: строки времени с >4 кабинетами свёрнуты в «ещё N» — какие раскрыли.
+    const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
     useDocumentTitle(title);
 
     // crm-ux №9 (09.11): под сессию CRM — сначала короткое подтверждение с ценой
@@ -784,26 +789,21 @@ export function MobileFind() {
     return (
         <>
             <div style={{
-                paddingTop: 16,
                 paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
                 display: 'flex', flexDirection: 'column', gap: 16,
             }}>
-                <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                            {title}
-                        </h1>
-                        {(linkSessionMeta || rescheduleId) && (
-                            <p style={{ fontSize: 14, color: COLOR.ink60, margin: '4px 0 0' }}>
-                                {linkSessionMeta
-                                    ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
-                                    : 'Выберите новое время — старый слот освободится.'}
-                            </p>
-                        )}
-                    </div>
-                    {/* Календарь — экран внутри приложения: без значка внешней
-                        ссылки и без липкой кнопки, перекрывавшей первый результат. */}
-                    {!linkSessionMeta && !rescheduleId && (
+                {/* 09.11 фаза 3: общая крупная шапка. Календарь — экран внутри
+                    приложения: без значка внешней ссылки и без липкой кнопки,
+                    перекрывавшей первый результат. */}
+                <MobilePageHeader
+                    variant="large"
+                    title={title}
+                    subtitle={(linkSessionMeta || rescheduleId)
+                        ? (linkSessionMeta
+                            ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
+                            : 'Выберите новое время — старый слот освободится.')
+                        : undefined}
+                    action={!linkSessionMeta && !rescheduleId ? (
                         <Button
                             variant="secondary"
                             size="touch"
@@ -812,8 +812,8 @@ export function MobileFind() {
                         >
                             Календарь
                         </Button>
-                    )}
-                </div>
+                    ) : undefined}
+                />
 
                 {/* Ещё не специалист — наверху объясняем, почему оформить бронь
                     пока нельзя, и даём дорогу к анкете (до выбора времени). */}
@@ -839,10 +839,10 @@ export function MobileFind() {
                             background: STATUS.pending.bg,
                             border: `1px solid ${STATUS.pending.fg}33`,
                             color: STATUS.pending.fg,
-                            borderRadius: 12,
+                            borderRadius: RADIUS.control,
                             padding: '10px 12px',
-                            fontSize: 12,
-                            lineHeight: 1.4,
+                            fontSize: TEXT.small,
+                            lineHeight: 1.45,
                         }}>
                             <strong>Админ-бронь{forName ? ` для: ${forName}` : ''}.</strong>{' '}
                             {forName
@@ -859,14 +859,14 @@ export function MobileFind() {
                             background: STATUS.pending.bg,
                             border: `1px solid ${STATUS.pending.fg}33`,
                             color: STATUS.pending.fg,
-                            borderRadius: 12,
+                            borderRadius: RADIUS.control,
                             padding: '10px 12px',
                             display: 'flex',
                             alignItems: 'center',
                             gap: 10,
                         }}>
                             <Move size={18} />
-                            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>
+                            <div style={{ flex: 1, fontSize: TEXT.small, lineHeight: 1.4 }}>
                                 <b>Переносим{rescheduleOwnerName ? ` бронь: ${rescheduleOwnerName}` : ''}:</b>{' '}
                                 {rescheduleBooking.date && formatDayMonth(rescheduleBooking.date)}
                                 {' '}в {rescheduleBooking.startTime}
@@ -892,14 +892,14 @@ export function MobileFind() {
                             background: STATUS.info.bg,
                             border: `1px solid ${STATUS.info.fg}33`,
                             color: STATUS.info.fg,
-                            borderRadius: 12,
+                            borderRadius: RADIUS.control,
                             padding: '10px 12px',
                             display: 'flex',
                             alignItems: 'center',
                             gap: 10,
                         }}>
                             <LinkIcon size={18} />
-                            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>
+                            <div style={{ flex: 1, fontSize: TEXT.small, lineHeight: 1.4 }}>
                                 <b>Привязываем кабинет к сессии:</b>{' '}
                                 {linkSessionMeta.date ? formatDayMonth(linkSessionMeta.date) : ''} в {linkSessionMeta.time} · {linkSessionMeta.duration} мин
                             </div>
@@ -928,9 +928,9 @@ export function MobileFind() {
                             minHeight: 48,
                             display: 'flex', alignItems: 'center', gap: 10,
                             padding: '8px 12px',
-                            background: COLOR.sunken,
-                            border: 'none',
-                            borderRadius: 12,
+                            background: COLOR.card,
+                            border: `1px solid ${COLOR.ink10}`,
+                            borderRadius: RADIUS.control,
                             color: COLOR.ink,
                             fontFamily: 'inherit',
                             textAlign: 'left',
@@ -938,10 +938,10 @@ export function MobileFind() {
                         }}
                     >
                         <SlidersHorizontal size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: 1.35 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.small, fontWeight: 500, lineHeight: 1.35 }}>
                             {summary}
                         </span>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
+                        <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
                             Изменить
                         </span>
                     </button>
@@ -961,7 +961,7 @@ export function MobileFind() {
                             style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44,
                                 background: 'none', border: 'none', padding: 0, marginTop: 4,
-                                color: COLOR.accentInk, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
+                                color: COLOR.accentInk, fontFamily: 'inherit', fontSize: TEXT.small, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                             }}
                         >
                             <BellRing size={16} aria-hidden="true" /> Нет нужного времени? Сообщить, когда освободится
@@ -990,7 +990,7 @@ export function MobileFind() {
                     {chipsBusy && (
                         <div role="status" style={{
                             display: 'flex', alignItems: 'center', gap: 6,
-                            fontSize: 13, color: COLOR.ink60, marginBottom: 8,
+                            fontSize: TEXT.small, color: COLOR.ink60, marginBottom: 8,
                         }}>
                             <Loader2 size={14} className="animate-spin" />
                             {linking ? 'Создаём бронь и привязываем…' : 'Переносим…'}
@@ -1014,7 +1014,7 @@ export function MobileFind() {
                             <div role="note" style={{
                                 display: 'flex', gap: 8, alignItems: 'flex-start',
                                 background: STATUS.info.bg, color: STATUS.info.fg,
-                                borderRadius: 12, padding: '10px 12px', marginBottom: 8, fontSize: 13, lineHeight: 1.45,
+                                borderRadius: RADIUS.control, padding: '10px 12px', marginBottom: 8, fontSize: TEXT.small, lineHeight: 1.45,
                             }}>
                                 <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
                                 <span>
@@ -1027,13 +1027,21 @@ export function MobileFind() {
                                 </span>
                             </div>
                         )}
-                        {occupancyReady && slots.map(s => (
+                        {/* 09.11 фаза 3: «стена» стала тише — плитки одной ширины
+                            (сетка), без рамки, на sunken; под ценой — центр, если
+                            ищем в обоих; больше 4 кабинетов в строке — «ещё N». */}
+                        {occupancyReady && slots.map(s => {
+                            const expanded = expandedRows.has(s.startMin);
+                            const hidden = s.freeResIds.length > SLOT_ROW_LIMIT && !expanded
+                                ? s.freeResIds.length - (SLOT_ROW_LIMIT - 1)
+                                : 0;
+                            const shown = hidden > 0 ? s.freeResIds.slice(0, SLOT_ROW_LIMIT - 1) : s.freeResIds;
+                            return (
                             <div
                                 key={s.startMin}
                                 style={{
                                     // Волна 2 (G4-05): строка «время слева — кабинеты справа»
-                                    // с тонкой линией вместо карточки на каждое время —
-                                    // список заметно короче, глазу есть за что зацепиться.
+                                    // с тонкой линией вместо карточки на каждое время.
                                     display: 'grid',
                                     gridTemplateColumns: '52px minmax(0, 1fr)',
                                     gap: 8,
@@ -1042,14 +1050,17 @@ export function MobileFind() {
                                     borderTop: `1px solid ${COLOR.ink08}`,
                                 }}
                             >
-                                <div className="num" style={{ fontSize: 16, fontWeight: 600, color: COLOR.ink, lineHeight: '44px' }}>
+                                <div className="num" style={{ fontSize: TEXT.body, fontWeight: 600, color: COLOR.ink, lineHeight: '48px' }}>
                                     {minsToHm(s.startMin)}
                                 </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                    {s.freeResIds.map(rid => {
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 6 }}>
+                                    {shown.map(rid => {
                                         const r = RESOURCES.find(x => x.id === rid);
                                         const isReRent = s.reRentResIds.includes(rid);
                                         const isPending = pendingChip === `${s.startMin}|${rid}`;
+                                        // 09.11 (ревью №5): цена этого окна с пиком, у залов — «от … · группа …».
+                                        const label = chipPrice(s.startMin, rid);
+                                        const center = locs.size > 1 ? centerShort(r?.locationId) : '';
                                         return (
                                             <button
                                                 key={rid}
@@ -1059,57 +1070,72 @@ export function MobileFind() {
                                                 className="press"
                                                 title={isReRent ? 'Слот на пересдаче — кто-то освободил, можно забрать' : undefined}
                                                 style={{
-                                                    // Пересдача — янтарная обводка вместо
-                                                    // чёрной заливки: визуально «особый»
-                                                    // слот, отличается от обычных свободных.
-                                                    // Волна 2: контурные чипы вместо
-                                                    // сплошной стены чёрных таблеток.
-                                                    background: isReRent ? STATUS.pending.bg : COLOR.card,
+                                                    // Пересдача — янтарная подложка: «особый» слот.
+                                                    background: isReRent ? STATUS.pending.bg : COLOR.sunken,
                                                     color: isReRent ? STATUS.pending.fg : COLOR.ink,
-                                                    border: isReRent ? `1px solid ${STATUS.pending.fg}4D` : `1px solid ${COLOR.ink20}`,
-                                                    borderRadius: 8,
+                                                    border: 'none',
+                                                    borderRadius: RADIUS.control,
                                                     // Главный тап брони — цель 44 px (было 32).
-                                                    minHeight: 44,
-                                                    padding: '4px 12px',
-                                                    fontSize: 14,
+                                                    minHeight: 48,
+                                                    minWidth: 0,
+                                                    padding: '6px 10px',
+                                                    fontSize: TEXT.small,
                                                     fontWeight: 600,
                                                     cursor: chipsBusy ? 'default' : 'pointer',
                                                     fontFamily: 'inherit',
-                                                    display: 'inline-flex',
+                                                    display: 'flex',
                                                     alignItems: 'center',
                                                     gap: 6,
+                                                    textAlign: 'left',
                                                     // Пока идёт запрос — все чипы
                                                     // неактивны, нажатый остаётся ярким.
                                                     opacity: chipsBusy && !isPending ? 0.5 : 1,
                                                     pointerEvents: chipsBusy ? 'none' : undefined,
                                                 }}
                                             >
-                                                {isReRent && <Repeat size={14} aria-hidden="true" />}
-                                                {/* Волна 2: название и ставка в две строки —
-                                                    чип вдвое уже, в строку помещаются два. */}
-                                                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2, textAlign: 'left' }}>
-                                                    <span>{r?.name ?? rid}</span>
+                                                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.25 }}>
+                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                        {isReRent && <Repeat size={12} aria-hidden="true" />}
+                                                        {r?.name ?? rid}
+                                                    </span>
                                                     {/* Ставка прямо на чипе: цена не должна
                                                         появляться впервые только на оформлении. */}
-                                                    {(() => {
-                                                        // 09.11 (ревью №5): цена этого окна с пиком, у залов — «от … · группа …».
-                                                        const label = chipPrice(s.startMin, rid);
-                                                        return label ? (
-                                                            <span className="num" style={{ fontSize: 12, fontWeight: 500 }}>{label}</span>
-                                                        ) : null;
-                                                    })()}
+                                                    {(label || center || isReRent) && (
+                                                        <span className="num" style={{ fontSize: TEXT.caption, fontWeight: 500, color: isReRent ? STATUS.pending.fg : COLOR.ink60 }}>
+                                                            {[label, center, isReRent ? 'пересдача' : ''].filter(Boolean).join(' · ')}
+                                                        </span>
+                                                    )}
                                                 </span>
-                                                {isPending
-                                                    ? <Loader2 size={11} className="animate-spin" />
-                                                    : isReRent
-                                                        ? <span style={{ fontSize: 12, fontWeight: 600 }}>пересдача</span>
-                                                        : null}
+                                                {isPending && <Loader2 size={11} className="animate-spin" />}
                                             </button>
                                         );
                                     })}
+                                    {hidden > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setExpandedRows(prev => new Set(prev).add(s.startMin))}
+                                            disabled={chipsBusy}
+                                            aria-label={`Показать ещё ${hidden} на ${minsToHm(s.startMin)}`}
+                                            style={{
+                                                background: 'transparent',
+                                                border: `1px dashed ${COLOR.ink20}`,
+                                                borderRadius: RADIUS.control,
+                                                minHeight: 48,
+                                                padding: '6px 10px',
+                                                fontFamily: 'inherit',
+                                                fontSize: TEXT.small,
+                                                fontWeight: 600,
+                                                color: COLOR.accentInk,
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            ещё {hidden}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                     {occupancyReady && slots.length === 0 && (locs.size === 0 || spaces.size === 0) && (
                         <EmptyState
@@ -1147,15 +1173,15 @@ export function MobileFind() {
                             <div id="m-find-waitlist" style={{
                                 marginTop: 16,
                                 border: `1px solid ${COLOR.ink10}`,
-                                borderRadius: 16,
+                                borderRadius: RADIUS.sheet,
                                 padding: 16,
                                 background: COLOR.card,
                             }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: TEXT.body, fontWeight: 600 }}>
                                     <BellRing size={18} aria-hidden="true" />
                                     Сообщить, когда освободится
                                 </div>
-                                <p style={{ fontSize: 14, color: COLOR.ink60, margin: '4px 0 12px' }}>
+                                <p style={{ fontSize: TEXT.small, color: COLOR.ink60, margin: '4px 0 12px' }}>
                                     Выберите время и кабинет — пришлём сообщение, как только в этом центре освободится место.
                                 </p>
                                 {wlStart != null && (
@@ -1238,21 +1264,15 @@ export function MobileFind() {
                                     const d = addDays(new Date(), -k);
                                     const active = daysBack === k;
                                     return (
-                                        <button
+                                        <Chip
                                             key={`past-${k}`}
-                                            aria-pressed={active}
+                                            selected={active}
                                             onClick={() => { const x = new Date(d); x.setHours(0, 0, 0, 0); setCustomDate(x); setDayOffset(-1); }}
-                                            style={{
-                                                background: active ? COLOR.ink : COLOR.sunken,
-                                                color: active ? COLOR.onInk : COLOR.ink,
-                                                border: 'none', borderRadius: 12, padding: '10px 12px',
-                                                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-                                                minHeight: 44,
-                                            }}
+                                            style={dayChip}
                                         >
-                                            <div style={{ fontSize: 13, fontWeight: 600 }}>{k === 1 ? 'Вчера' : 'Задним числом'}</div>
-                                            <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60 }}>{formatDayMonth(d)}</div>
-                                        </button>
+                                            <span style={{ fontWeight: 600 }}>{k === 1 ? 'Вчера' : 'Задним числом'}</span>
+                                            <span style={dayChipSub}>{formatDayMonth(d)}</span>
+                                        </Chip>
                                     );
                                 })}
                             </div>
@@ -1265,24 +1285,15 @@ export function MobileFind() {
                                 const bot = formatDayMonth(d);
                                 const active = dayOffset === off;
                                 return (
-                                    <button
+                                    <Chip
                                         key={off}
-                                        aria-pressed={active}
+                                        selected={active}
                                         onClick={() => setDayOffset(off)}
-                                        style={{
-                                            background: active ? COLOR.ink : COLOR.sunken,
-                                            color: active ? COLOR.onInk : COLOR.ink,
-                                            border: 'none',
-                                            borderRadius: 14,
-                                            padding: '14px 16px',
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            textAlign: 'left',
-                                        }}
+                                        style={{ ...dayChip, width: '100%', padding: '10px 16px' }}
                                     >
-                                        <div style={{ fontSize: 16, fontWeight: 600 }}>{top}</div>
-                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{bot}</div>
-                                    </button>
+                                        <span style={{ fontSize: TEXT.body, fontWeight: 600 }}>{top}</span>
+                                        <span style={dayChipSub}>{bot}</span>
+                                    </Chip>
                                 );
                             })}
                         </div>
@@ -1294,26 +1305,15 @@ export function MobileFind() {
                                 const dayLabel = formatDayMonthShort(d);
                                 const active = dayOffset === off;
                                 return (
-                                    <button
+                                    <Chip
                                         key={off}
-                                        aria-pressed={active}
+                                        selected={active}
                                         onClick={() => { setDayOffset(off); setCustomDate(null); }}
-                                        style={{
-                                            background: active ? COLOR.ink : COLOR.sunken,
-                                            color: active ? COLOR.onInk : COLOR.ink,
-                                            border: 'none',
-                                            borderRadius: 12,
-                                            padding: '10px 12px',
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            textAlign: 'center',
-                                            flex: '0 0 auto',
-                                            minWidth: 64,
-                                        }}
+                                        style={{ ...dayChip, alignItems: 'center', flex: '0 0 auto', minWidth: 64 }}
                                     >
-                                        <div style={{ fontSize: 12, fontWeight: 600 }}>{wd}</div>
-                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{dayLabel}</div>
-                                    </button>
+                                        <span style={{ fontWeight: 600 }}>{wd}</span>
+                                        <span style={dayChipSub}>{dayLabel}</span>
+                                    </Chip>
                                 );
                             })}
                             {/* Native date input — covers any future date past the
@@ -1322,26 +1322,32 @@ export function MobileFind() {
                                 popping the OS date picker on tap. */}
                             <label
                                 style={{
-                                    background: dayOffset === -1 ? COLOR.ink : COLOR.sunken,
-                                    color: dayOffset === -1 ? COLOR.onInk : COLOR.ink,
-                                    borderRadius: 12,
-                                    padding: '10px 12px',
+                                    // Тот же язык «выбрано», что у Chip (label с полем даты
+                                    // внутри не может быть кнопкой Chip).
+                                    ...dayChip,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    background: dayOffset === -1 ? COLOR.accentSoft : COLOR.card,
+                                    color: dayOffset === -1 ? COLOR.accentInk : COLOR.ink,
+                                    border: `1px solid ${dayOffset === -1 ? COLOR.accent : COLOR.ink20}`,
+                                    boxShadow: dayOffset === -1 ? `inset 0 0 0 0.5px ${COLOR.accent}` : undefined,
+                                    borderRadius: RADIUS.control,
                                     cursor: 'pointer',
                                     fontFamily: 'inherit',
-                                    textAlign: 'center',
+                                    fontSize: TEXT.small,
                                     flex: '0 0 auto',
                                     minWidth: 88,
                                     position: 'relative',
                                 }}
                             >
-                                <div style={{ fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                     <CalendarDays size={14} aria-hidden="true" /> Другой
-                                </div>
-                                <div style={{ fontSize: 12, color: dayOffset === -1 ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>
+                                </span>
+                                <span style={dayChipSub}>
                                     {dayOffset === -1 && customDate
                                         ? formatDayMonthShort(customDate)
                                         : 'день'}
-                                </div>
+                                </span>
                                 <input
                                     type="date"
                                     min={fmtDate(new Date(), 'yyyy-MM-dd')}
@@ -1374,7 +1380,7 @@ export function MobileFind() {
                         // Перенос двигает бронь целиком — выбор длительности не
                         // предлагаем (путал: Егор 28.10).
                         <FieldGroup label="Сколько">
-                            <div style={{ fontSize: 15, color: COLOR.ink, padding: '10px 0' }}>
+                            <div style={{ fontSize: TEXT.body, color: COLOR.ink, padding: '10px 0' }}>
                                 {formatBookingDuration(duration)} — как в брони
                             </div>
                         </FieldGroup>
@@ -1384,47 +1390,28 @@ export function MobileFind() {
                             {DURATIONS.map(d => {
                                 const active = duration === d;
                                 return (
-                                    <button
+                                    <Chip
                                         key={d}
-                                        aria-pressed={active}
+                                        selected={active}
                                         onClick={() => setDuration(d)}
-                                        style={{
-                                            background: active ? COLOR.ink : COLOR.sunken,
-                                            color: active ? COLOR.onInk : COLOR.ink,
-                                            border: 'none',
-                                            borderRadius: 12,
-                                            minHeight: 44,
-                                            padding: '0 16px',
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            flex: '0 0 auto',
-                                        }}
+                                        style={{ flex: '0 0 auto', padding: '0 16px' }}
                                     >
-                                        <span style={{ fontWeight: 600, fontSize: 14 }}>
-                                            {formatBookingDuration(d)}
-                                        </span>
-                                    </button>
+                                        {formatBookingDuration(d)}
+                                    </Chip>
                                 );
                             })}
                             {(() => {
                                 const custom = !DURATIONS.includes(duration);
                                 const active = custom || moreDurOpen;
                                 return (
-                                    <button
-                                        aria-pressed={active}
+                                    <Chip
+                                        selected={active}
                                         aria-expanded={moreDurOpen}
                                         onClick={() => setMoreDurOpen(o => !o)}
-                                        style={{
-                                            background: active ? COLOR.ink : COLOR.sunken,
-                                            color: active ? COLOR.onInk : COLOR.ink,
-                                            border: 'none', borderRadius: 12, minHeight: 44, padding: '0 16px',
-                                            cursor: 'pointer', fontFamily: 'inherit', flex: '0 0 auto',
-                                        }}
+                                        style={{ flex: '0 0 auto', padding: '0 16px' }}
                                     >
-                                        <span style={{ fontWeight: 600, fontSize: 14 }}>
-                                            {custom ? formatBookingDuration(duration) : 'Больше…'}
-                                        </span>
-                                    </button>
+                                        {custom ? formatBookingDuration(duration) : 'Больше…'}
+                                    </Chip>
                                 );
                             })()}
                         </ChipsRow>
@@ -1444,41 +1431,47 @@ export function MobileFind() {
 
                     {/* Where — multi-select */}
                     <FieldGroup label="Где">
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <ChoiceGroup label="Где" columns={2}>
                             {LOCATIONS.filter(l => l.id === 'unbox_one' || l.id === 'unbox_uni').map(l => (
-                                <CheckCard
+                                <ChoiceCard
                                     key={l.id}
-                                    checked={locs.has(l.id)}
+                                    selected={locs.has(l.id)}
                                     onClick={() => toggleLoc(l.id)}
                                     title={l.name}
-                                    sub={l.address}
+                                    description={l.address}
+                                    style={{ alignItems: 'flex-start' }}
                                 />
                             ))}
-                        </div>
+                        </ChoiceGroup>
                     </FieldGroup>
 
                     {/* Space type — multi-select */}
                     <FieldGroup label="Тип помещения">
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                            <CheckCard
-                                checked={spaces.has('individual')}
+                        {/* 09.11 фаза 3: три плитки одной ширины в шторке (третья вылезала
+                            за поле на 360 px), «Большой зал» → «Зал» (переносился). */}
+                        <ChoiceGroup label="Тип помещения" columns={3}>
+                            <ChoiceCard
+                                layout="tile"
+                                selected={spaces.has('individual')}
                                 onClick={() => toggleSpace('individual')}
                                 title="Кабинет"
-                                sub="до 4 чел."
+                                description="до 4 чел."
                             />
-                            <CheckCard
-                                checked={spaces.has('group')}
+                            <ChoiceCard
+                                layout="tile"
+                                selected={spaces.has('group')}
                                 onClick={() => toggleSpace('group')}
-                                title="Большой зал"
-                                sub={GROUP_HALLS_SUB}
+                                title="Зал"
+                                description={GROUP_HALLS_SUB}
                             />
-                            <CheckCard
-                                checked={spaces.has('capsule')}
+                            <ChoiceCard
+                                layout="tile"
+                                selected={spaces.has('capsule')}
                                 onClick={() => toggleSpace('capsule')}
                                 title="Капсула"
-                                sub="1 чел."
+                                description="1 чел."
                             />
-                        </div>
+                        </ChoiceGroup>
                     </FieldGroup>
 
                 </div>
@@ -1502,7 +1495,7 @@ export function MobileFind() {
                 ) : undefined}
             >
                 {linkSummary && (
-                    <dl style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
+                    <dl style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 10, fontSize: TEXT.small }}>
                         {([
                             ['Кабинет', linkSummary.room],
                             ['Когда', linkSummary.time],
@@ -1515,7 +1508,7 @@ export function MobileFind() {
                             </div>
                         ))}
                         {linkSummary.hot && (
-                            <div style={{ background: STATUS.pending.bg, color: STATUS.pending.fg, borderRadius: 12, padding: '10px 12px', lineHeight: 1.45 }}>
+                            <div style={{ background: STATUS.pending.bg, color: STATUS.pending.fg, borderRadius: RADIUS.control, padding: '10px 12px', lineHeight: 1.45 }}>
                                 Срочная бронь (меньше 12 часов до начала, в выходные — 24, или вечером на утро) — уйдёт администратору на подтверждение. Время за вами держится, пока он решает.
                             </div>
                         )}
@@ -1553,7 +1546,7 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
 function SectionTitle({ children, live }: { children: React.ReactNode; live?: boolean }) {
     return (
         <div aria-live={live ? 'polite' : undefined} style={{
-            fontSize: 12,
+            fontSize: TEXT.caption,
             fontWeight: 600,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',
@@ -1564,8 +1557,9 @@ function SectionTitle({ children, live }: { children: React.ReactNode; live?: bo
 }
 
 function ChipsRow({ children }: { children: React.ReactNode }) {
+    // 09.11 фаза 3: общий ряд-лента с затуханием справа — видно, что листается.
     return (
-        <div style={{
+        <div className="ui-chip-row ui-chip-row--scroll" style={{
             display: 'flex',
             gap: 8,
             overflowX: 'auto',
@@ -1580,56 +1574,25 @@ function ChipsRow({ children }: { children: React.ReactNode }) {
     );
 }
 
-/** Multi-select card with a checkbox in the corner. */
-function CheckCard({ checked, onClick, title, sub }: {
-    checked: boolean;
-    onClick: () => void;
-    title: string;
-    sub?: string;
-}) {
-    return (
-        <button
-            onClick={onClick}
-            aria-pressed={checked}
-            style={{
-                background: COLOR.card,
-                color: COLOR.ink,
-                border: `1px solid ${checked ? COLOR.ink : COLOR.ink10}`,
-                borderRadius: 12,
-                padding: '12px 12px 12px 14px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                gap: 8,
-            }}
-        >
-            <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>
-                    {title}
-                </div>
-                {sub && (
-                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2, lineHeight: 1.3 }}>
-                        {sub}
-                    </div>
-                )}
-            </div>
-            <div style={{
-                width: 20, height: 20,
-                borderRadius: 6,
-                border: `1.5px solid ${checked ? COLOR.ink : COLOR.ink20}`,
-                background: checked ? COLOR.ink : 'transparent',
-                display: 'grid', placeItems: 'center',
-                color: COLOR.onInk,
-                flexShrink: 0,
-                marginTop: 1,
-            }}>
-                {checked && <Check size={14} />}
-            </div>
-        </button>
-    );
+/** Двухстрочный чип дня («Пн / 16 нояб.») на общем Chip. */
+const dayChip: React.CSSProperties = {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 2,
+    padding: '6px 12px',
+    lineHeight: 1.25,
+};
+const dayChipSub: React.CSSProperties = { fontSize: TEXT.caption, fontWeight: 500, color: COLOR.ink60 };
+
+/** Больше кабинетов в строке времени — сворачиваем в «ещё N». */
+const SLOT_ROW_LIMIT = 4;
+
+/** Короткое имя центра под ценой плитки: «One» / «Uni». */
+function centerShort(locationId?: string): string {
+    if (!locationId) return '';
+    const name = LOCATIONS.find(l => l.id === locationId)?.name ?? '';
+    return name.replace(/^Unbox\s*/i, '');
 }
 
 /** Крестик в плашке режима — цель касания 44×44. */

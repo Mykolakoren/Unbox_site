@@ -39,6 +39,10 @@ export const COLOR = {
     accentInk: '#2F5F5E',   // мелкий текст акцентом
     accentSoft: '#E7ECEA',  // подложка выбранного
     onAccent: '#FDFDFB',
+    // Заливка главной кнопки (09.11 фаза 3): в светлой = accent, в тёмной темнее.
+    accentFill: '#476D6B',
+    accentFillHover: '#3B5B59',
+    onAccentFill: '#FDFDFB',
     // Легаси-серый старых экранов (text-unbox-grey). Был #9299A3 — 2.75:1.
     unboxGrey: '#636A74',
 } as const;
@@ -180,6 +184,9 @@ if (IS_DARK) {
         accentInk: '#8FC2BE',
         accentSoft: '#24302F',
         onAccent: '#0F1413',
+        accentFill: '#3E6F6A',
+        accentFillHover: '#477A75',
+        onAccentFill: '#F2F5F4',
         unboxGrey: '#A3A9B2',
     });
     Object.assign(STATUS, {

@@ -4,7 +4,8 @@ import { useBookingStore } from '../store/bookingStore';
 import { MapPin } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { PRICING_CONFIG } from '../utils/pricingConfig';
-import { COLOR } from '../design/tokens';
+import { COLOR, RADIUS, TEXT } from '../design/tokens';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
 import { formatGel } from '../utils/format';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -191,7 +192,8 @@ function GridHouseLocationDetails({
 
             <div style={{ maxWidth: 1200, margin: '0 auto', padding: narrow ? '16px 16px 48px' : '32px clamp(16px, 4vw, 24px) 80px' }}>
                 {/* Заголовок центра. В /m название уже в шапке — здесь адрес и факты. */}
-                <div style={{ paddingBottom: narrow ? 16 : 24, borderBottom: `${narrow ? 1 : 2}px solid ${GH.ink}`, marginBottom: narrow ? 16 : 32 }}>
+                {/* 09.11 фаза 3: в /m — без чёрной черты под заголовком. */}
+                <div style={{ paddingBottom: narrow ? 16 : 24, borderBottom: inShell ? 'none' : `${narrow ? 1 : 2}px solid ${GH.ink}`, marginBottom: narrow ? 16 : 32 }}>
                     {!inShell && (
                         <>
                             <div style={{ ...ghldMono, color: GH.ink60, marginBottom: 8 }}>Центр</div>
@@ -207,7 +209,7 @@ function GridHouseLocationDetails({
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: GH.ink60, fontSize: 14, minHeight: 44, textDecoration: 'none' }}
                     >
                         <MapPin size={14} aria-hidden="true" style={{ color: GH.accent }} />
-                        <span style={{ borderBottom: ghldHairline }}>{location.address}</span>
+                        <span style={inShell ? { color: COLOR.accentInk, fontWeight: 600 } : { borderBottom: ghldHairline }}>{location.address}</span>
                     </a>
                     {narrow && locationResources.length > 0 && (
                         <div style={{ fontSize: 14, color: GH.ink60 }}>
@@ -241,7 +243,7 @@ function GridHouseLocationDetails({
                 {/* Фото */}
                 {allPhotos.length > 0 && (narrow ? (
                     <div style={{ marginBottom: 24 }}>
-                        <PhotoStrip photos={allPhotos} onOpen={setGalleryIndex} altFor={altFor} />
+                        <PhotoStrip photos={allPhotos} onOpen={setGalleryIndex} altFor={altFor} radius={inShell ? RADIUS.sheet : 0} />
                     </div>
                 ) : (
                     <div style={{ display: 'flex', gap: 4, marginBottom: 32 }}>
@@ -280,8 +282,49 @@ function GridHouseLocationDetails({
                     </div>
                 ))}
 
-                {/* Кабинеты — сразу после фото: за этим и пришли */}
-                {locationResources.length > 0 && (
+                {/* Кабинеты — сразу после фото: за этим и пришли.
+                    09.11 фаза 3: в /m — общий список строк (превью 64×64 радиус 8,
+                    название без подчёркивания, «Забронировать» — тихой кнопкой в строке). */}
+                {inShell && locationResources.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                        <ListGroup title="Кабинеты и пространства">
+                            {locationResources.map(resource => (
+                                <ListRow
+                                    key={resource.id}
+                                    to={toCatalog(`/cabinet/${resource.id}`)}
+                                    lead={
+                                        <span style={{ width: 64, height: 64, borderRadius: RADIUS.control, overflow: 'hidden', background: COLOR.sunken, display: 'block', flexShrink: 0 }}>
+                                            {resource.photos?.[0] && (
+                                                <img src={photoVariant(resource.photos[0], 'sm')} alt="" loading="lazy" decoding="async"
+                                                     style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                            )}
+                                        </span>
+                                    }
+                                    title={resource.name}
+                                    subtitle={<>
+                                        {resource.type === 'capsule' ? 'Капсула' : 'Кабинет'} · до {resource.capacity} чел.
+                                        {resource.area ? ` · ${resource.area} м²` : ''}
+                                        <span style={{ display: 'block' }}>
+                                            {[
+                                                resource.formats?.includes('individual') !== false ? `${formatGel(resource.hourlyRate)}/ч` : null,
+                                                resource.formats?.includes('group') ? `группа ${formatGel(deriveRate(resource, 'group'))}/ч` : null,
+                                                resource.formats?.includes('intervision') ? `интервизия ${formatGel(deriveRate(resource, 'intervision'))}/ч` : null,
+                                            ].filter(Boolean).map((t, k) => (
+                                                <span key={k} className="num" style={{ whiteSpace: 'nowrap' }}>{k > 0 ? ' · ' : ''}{t}</span>
+                                            ))}
+                                        </span>
+                                    </>}
+                                    action={
+                                        <Button variant="secondary" size="sm" onClick={() => handleBookResource(resource.id)} aria-label={`Забронировать: ${resource.name}`}>
+                                            Бронь
+                                        </Button>
+                                    }
+                                />
+                            ))}
+                        </ListGroup>
+                    </div>
+                )}
+                {!inShell && locationResources.length > 0 && (
                     <section style={{ marginBottom: 40 }} aria-labelledby="loc-rooms">
                         <h2 id="loc-rooms" style={{ ...ghldMono, fontWeight: 500, color: GH.ink60, margin: '0 0 12px' }}>Кабинеты и пространства</h2>
                         <div style={{ border: ghldHairline }}>
@@ -363,7 +406,7 @@ function GridHouseLocationDetails({
 
                 {location.description && (
                     <div style={{ marginBottom: 32 }}>
-                        <h2 style={{ ...ghldMono, fontWeight: 500, color: GH.ink60, margin: '0 0 12px' }}>О центре</h2>
+                        <h2 className={inShell ? 'ui-overline' : undefined} style={inShell ? { margin: '0 4px 8px' } : { ...ghldMono, fontWeight: 500, color: GH.ink60, margin: '0 0 12px' }}>О центре</h2>
                         <p style={{ fontSize: 16, color: GH.ink80, lineHeight: 1.6, maxWidth: 700, margin: 0 }}>
                             {location.description}
                         </p>
@@ -372,10 +415,12 @@ function GridHouseLocationDetails({
 
                 {location.features && location.features.length > 0 && (
                     <div style={{ marginBottom: 32 }}>
-                        <h2 style={{ ...ghldMono, fontWeight: 500, color: GH.ink60, margin: '0 0 12px' }}>Удобства</h2>
+                        <h2 className={inShell ? 'ui-overline' : undefined} style={inShell ? { margin: '0 4px 8px' } : { ...ghldMono, fontWeight: 500, color: GH.ink60, margin: '0 0 12px' }}>Удобства</h2>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             {location.features.map((feat: string, i: number) => (
-                                <span key={i} style={{ fontSize: 14, color: GH.ink80, padding: '6px 12px', border: ghldHairline }}>
+                                <span key={i} style={inShell
+                                    ? { fontSize: TEXT.small, color: COLOR.ink80, padding: '6px 12px', background: COLOR.sunken, borderRadius: RADIUS.control }
+                                    : { fontSize: 14, color: GH.ink80, padding: '6px 12px', border: ghldHairline }}>
                                     {feat}
                                 </span>
                             ))}

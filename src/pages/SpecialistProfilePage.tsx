@@ -17,7 +17,9 @@ import { Button } from '../components/ui/Button';
 import { Skeleton, SkeletonText } from '../components/ui/Skeleton';
 import { useCatalogPath, useInMobileShell } from '../utils/catalogPath';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { Z } from '../design/tokens';
+import { COLOR, RADIUS, SHAPE, TEXT, TYPE, Z } from '../design/tokens';
+import { MobilePageHeader } from '../components/ui/PageHeader';
+import { ListGroup, ListRow } from '../components/ui/ListRow';
 
 /** Нормализует контакт (@handle или ссылка) в {href, label} для профиля. */
 function normalizeContact(
@@ -148,11 +150,12 @@ export function SpecialistProfilePage() {
         return (
             <div style={pageStyle}>
                 <PublicHeader />
+                {inShell && <MobilePageHeader title="Специалист" fallbackTo="/m/specialists" />}
                 <div role="status" aria-busy="true" style={{ maxWidth: 1280, margin: '0 auto', padding: pagePad }}>
                     <span className="sr-only">Загружаем профиль…</span>
                     <div style={{ padding: '16px 0 32px' }}><Skeleton height={16} width={160} /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 4fr) minmax(0, 8fr)', gap: isNarrow ? 24 : 56 }}>
-                        <Skeleton height={isNarrow ? 240 : 480} radius={0} />
+                        <Skeleton height={isNarrow ? 240 : 480} radius={inShell ? RADIUS.sheet : 0} />
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                             <Skeleton height={56} width="70%" />
                             <Skeleton height={20} width="50%" />
@@ -168,6 +171,7 @@ export function SpecialistProfilePage() {
         return (
             <div style={pageStyle}>
                 <PublicHeader />
+                {inShell && <MobilePageHeader title="Специалист" fallbackTo="/m/specialists" />}
                 <div style={{ maxWidth: 640, margin: '0 auto', padding: isNarrow ? '48px 16px' : '96px 32px' }}>
                     <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
                         Специалист не найден
@@ -413,6 +417,140 @@ export function SpecialistProfilePage() {
             </div>
         </section>
     );
+
+    // 09.11 фаза 3 — «мобильная кожа» внутри /m: та же страница, но в языке
+    // приложения (шапка со «←», радиусы 8/16, обычные подписи вместо моно-капса,
+    // без чёрных рамок и подчёркиваний). Компьютерная версия ниже не меняется.
+    if (inShell) {
+        const initials = `${specialist.firstName?.[0] ?? ''}${specialist.lastName?.[0] ?? ''}`.toUpperCase();
+        const sp = specialist as Specialist & { instagram?: string; telegram?: string; website?: string };
+        const links = [
+            { c: normalizeContact(sp.instagram, 'instagram'), icon: <Instagram size={16} aria-hidden="true" /> },
+            { c: normalizeContact(sp.telegram, 'telegram'), icon: <Send size={16} aria-hidden="true" /> },
+            { c: normalizeContact(sp.website, 'website'), icon: <Globe size={16} aria-hidden="true" /> },
+        ].filter(x => x.c);
+        const whereValue = selectedCenters.length > 0 ? (
+            selectedCenters.map((loc, i) => (
+                <span key={loc.id}>
+                    <Link to={toCatalog(`/location/${loc.id}`)} style={{ color: COLOR.accentInk, textDecoration: 'none', fontWeight: 600 }}>
+                        {loc.label}
+                    </Link>
+                    {i < selectedCenters.length - 1 ? ', ' : ''}
+                </span>
+            ))
+        ) : hasAnyOffline ? 'Батуми' : hasOnline ? 'Онлайн' : '—';
+        return (
+            <div style={{ paddingBottom: 120 }}>
+                <MobilePageHeader title="Специалист" fallbackTo="/m/specialists" />
+                <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column', gap: 24 }}>
+                    <header style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {specialist.photoUrl ? (
+                            <img
+                                src={specialist.photoUrl}
+                                alt={fullName}
+                                style={{
+                                    width: '100%', maxHeight: 320, aspectRatio: '4 / 5', objectFit: 'cover',
+                                    borderRadius: RADIUS.sheet, display: 'block', background: COLOR.sunken,
+                                }}
+                            />
+                        ) : null}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            {!specialist.photoUrl && (
+                                <span aria-hidden="true" style={{
+                                    flex: 'none', width: 96, height: 96, borderRadius: SHAPE.pill,
+                                    background: COLOR.accentSoft, color: COLOR.accentInk,
+                                    display: 'grid', placeItems: 'center',
+                                    fontSize: TEXT.heading, fontWeight: 600,
+                                }}>{initials}</span>
+                            )}
+                            <div style={{ minWidth: 0 }}>
+                                <h1 style={{ ...TYPE.screenTitle, margin: 0, color: COLOR.ink, overflowWrap: 'anywhere' }}>{fullName}</h1>
+                                {specialist.tagline && (
+                                    <p style={{ margin: '4px 0 0', fontSize: TEXT.body, lineHeight: 1.45, color: COLOR.ink80 }}>{specialist.tagline}</p>
+                                )}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                            {(specialist.badges || []).map(code => {
+                                const b = getBadge(code);
+                                if (!b) return null;
+                                // Бирка — статусные токены вместо «мятного» Tailwind.
+                                return (
+                                    <span key={code} className={`ui-badge ui-badge--${code === 'in_training' ? 'pending' : 'ok'}`}>
+                                        {b.label}
+                                    </span>
+                                );
+                            })}
+                            <span className="ui-badge ui-badge--muted">
+                                <Check size={14} aria-hidden="true" /> Проверен Unbox
+                            </span>
+                        </div>
+                        <p className="num" style={{ margin: 0, fontSize: TEXT.body, fontWeight: 600, color: COLOR.ink }}>
+                            {[price !== null && formatGel(price), `${duration} мин`, formatLabel].filter(Boolean).join(' · ')}
+                        </p>
+                        {links.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {links.map(({ c, icon }) => (
+                                    <a key={c!.href} href={c!.href} target="_blank" rel="noreferrer"
+                                       className="ui-btn ui-btn--secondary ui-btn--sm" style={{ textDecoration: 'none' }}>
+                                        {icon}{c!.label}
+                                    </a>
+                                ))}
+                            </div>
+                        )}
+                    </header>
+
+                    <ListGroup title="Приём">
+                        <ListRow title={formatLabel || '—'} subtitle="Формат" />
+                        <ListRow title={whereValue} subtitle="Где" />
+                        <ListRow title={`${duration} минут`} subtitle="Длительность" />
+                    </ListGroup>
+
+                    {practice.length > 0 && (
+                        <ListGroup title="Практика" aside={ruCountWord(practice.length, ['направление', 'направления', 'направлений'])}>
+                            {practice.map(spec => (
+                                <ListRow key={spec} title={<span style={{ fontWeight: 500 }}>{spec}</span>} />
+                            ))}
+                        </ListGroup>
+                    )}
+
+                    <section>
+                        <h2 className="ui-overline" style={{ margin: '0 4px 8px' }}>О себе</h2>
+                        <div style={{ fontSize: TEXT.body, lineHeight: 1.6, color: COLOR.ink }}>
+                            {specialist.bio
+                                ? <StructuredText text={specialist.bio} />
+                                : 'Специалист пока не добавил описание о себе.'}
+                        </div>
+                    </section>
+
+                    <div id="specialist-slots" style={{ scrollMarginTop: 16 }}>
+                        <SpecialistBookingChessboardGrid
+                            specialistId={specialist.id}
+                            specialistName={fullName}
+                            formats={specialist.formats}
+                            basePriceGel={specialist.basePriceGel}
+                        />
+                    </div>
+                </div>
+
+                {!slotsInView && (
+                    <div style={{
+                        position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+                        width: '100%', maxWidth: 480,
+                        bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+                        padding: '8px 16px',
+                        background: COLOR.paper,
+                        borderTop: `1px solid ${COLOR.ink10}`,
+                        zIndex: Z.sticky,
+                    }}>
+                        <Button variant="primary" size="touch" block onClick={scrollToSlots}>
+                            Записаться{price !== null ? ` · ${formatGel(price)}` : ''}
+                        </Button>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div style={pageStyle}>

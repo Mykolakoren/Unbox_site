@@ -434,7 +434,7 @@ const smallStyle: CSSProperties = {
 function Panel({ inShell, children, tone }: { inShell: boolean; children: ReactNode; tone?: 'danger' }) {
     return (
         <section style={{
-            border: `1px solid ${tone === 'danger' ? `${STATUS.danger.fg}40` : COLOR.ink20}`,
+            border: `1px solid ${tone === 'danger' ? `${STATUS.danger.fg}40` : inShell ? COLOR.ink10 : COLOR.ink20}`,
             background: tone === 'danger' ? STATUS.danger.bg : COLOR.card,
             borderRadius: inShell ? RADIUS.sheet : RADIUS.grid,
             padding: SPACE[4],
@@ -497,7 +497,9 @@ function StepMarker({ state, n }: { state: StepState; n: number }) {
         return <span aria-hidden="true" style={{ ...base, background: STATUS.danger.bg, color: STATUS.danger.fg }}><X size={16} strokeWidth={2.5} /></span>;
     }
     if (state === 'active') {
-        return <span aria-hidden="true" style={{ ...base, background: COLOR.ink, color: COLOR.onInk }}>{n}</span>;
+        // 09.11 фаза 3: текущий шаг — бирюзой («сейчас»), не чёрным кружком
+        // (в тёмной теме он становился белым пятном).
+        return <span aria-hidden="true" style={{ ...base, background: COLOR.accent, color: COLOR.onAccent }}>{n}</span>;
     }
     return <span aria-hidden="true" style={{ ...base, border: `1px solid ${COLOR.ink20}`, color: COLOR.ink60 }}>{n}</span>;
 }

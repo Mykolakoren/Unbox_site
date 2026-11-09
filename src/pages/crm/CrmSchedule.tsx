@@ -14,6 +14,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Button } from '../../components/ui/Button';
 import { apiErrorMessage } from '../../utils/errors';
+import { MobileCrmSchedule } from '../mobile/crm/MobileCrmSchedule';
 
 const DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const LOCATION_OPTIONS = [
@@ -21,13 +22,13 @@ const LOCATION_OPTIONS = [
     ...LOCATIONS.filter(l => l.id !== 'neo_school').map(l => ({ value: l.id, label: l.name, icon: MapPin })),
 ];
 
-interface DayRange {
+export interface DayRange {
     start_time: string;
     end_time: string;
     location_id: string; // "__online__" or location id
 }
 
-interface DaySchedule {
+export interface DaySchedule {
     enabled: boolean;
     /** Multiple time windows per day. Backend already supports any number
      *  of weekly ScheduleSlot rows for the same day_of_week, so e.g.
@@ -39,7 +40,7 @@ const DEFAULT_RANGE = (): DayRange => ({ start_time: '10:00', end_time: '18:00',
 
 // Date-specific override: either mark the day off (is_available=false)
 // or override the weekly schedule for that date (custom hours/location).
-interface OverrideEntry {
+export interface OverrideEntry {
     specific_date: string; // "YYYY-MM-DD"
     is_available: boolean;
     start_time: string;
@@ -280,10 +281,13 @@ export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
 
     if (!currentUser) return null;
 
-    // ─── Grid House variant (behind feature flag) ────────────────────────
+    // 09.11 фаза 3 (дизайн-ревью CRM п. 2): в мобильном CRM (/m/crm/schedule) —
+    // свой вид из общих деталей приложения (MobileCrmSchedule). Данные, загрузка
+    // и сохранение — те же, отсюда; компьютерный вид ниже не меняется.
+    const View = compact ? MobileCrmSchedule : GridHouseCrmSchedule;
     return (
 
-            <GridHouseCrmSchedule
+            <View
                 loading={loading}
                 specialistId={specialistId}
                 lookup={lookup}
@@ -343,7 +347,7 @@ const GH_MONO_LABEL: React.CSSProperties = {
 };
 const GH_DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 
-interface GridHouseCrmScheduleProps {
+export interface GridHouseCrmScheduleProps {
     loading: boolean;
     specialistId: string | null;
     lookup: 'pending' | 'found' | 'missing' | 'error';

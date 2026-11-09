@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, Share, X, ArrowDown } from 'lucide-react';
-import { COLOR, themed } from '../../design/tokens';
+import { COLOR, RADIUS, SHAPE, TEXT } from '../../design/tokens';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 
@@ -96,10 +96,13 @@ export function InstallBanner() {
                 tabIndex={hint ? 0 : undefined}
                 onKeyDown={hint ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHelpOpen(true); } } : undefined}
                 style={{
+                    // 09.11 фаза 3: светлая карточка с бирюзовым значком — не вторая
+                    // тёмная плита над «ближайшей встречей».
                     margin: '12px 16px 0',
-                    background: COLOR.panel,
-                    color: COLOR.onPanel,
-                    borderRadius: 14,
+                    background: COLOR.card,
+                    color: COLOR.ink,
+                    border: `1px solid ${COLOR.ink10}`,
+                    borderRadius: RADIUS.sheet,
                     padding: '14px 16px',
                     display: 'flex',
                     alignItems: 'center',
@@ -108,40 +111,31 @@ export function InstallBanner() {
                 }}
             >
                 <div style={{
-                    width: 38, height: 38,
-                    borderRadius: 10,
-                    background: `${COLOR.onPanel}1F`,
+                    width: 40, height: 40,
+                    borderRadius: RADIUS.control,
+                    background: COLOR.accentSoft,
+                    color: COLOR.accentInk,
                     display: 'grid', placeItems: 'center',
                     flexShrink: 0,
                 }}>
                     {hint ? <Share size={18} /> : <Download size={18} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>
+                    <div style={{ fontSize: TEXT.small, fontWeight: 600, lineHeight: 1.3 }}>
                         Добавьте на главный экран
                     </div>
-                    <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2, lineHeight: 1.3 }}>
+                    <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2, lineHeight: 1.35 }}>
                         {subText}
                     </div>
                 </div>
                 {showInstallButton && (
-                    <button
+                    <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={(e) => { e.stopPropagation(); install(); }}
-                        style={{
-                            background: themed(COLOR.card, COLOR.onPanel),
-                            color: COLOR.panel,
-                            border: 'none',
-                            borderRadius: 10,
-                            minHeight: 44,
-                            padding: '0 14px',
-                            fontSize: 13,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                        }}
                     >
                         Установить
-                    </button>
+                    </Button>
                 )}
                 <button
                     onClick={(e) => { e.stopPropagation(); dismiss(); }}
@@ -150,7 +144,7 @@ export function InstallBanner() {
                         background: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
-                        color: `${COLOR.onPanel}B3`,
+                        color: COLOR.ink60,
                         // Цель касания 44×44; отрицательный отступ — плашка не растёт.
                         width: 44, height: 44,
                         margin: '-10px -10px -10px 0',
@@ -195,7 +189,7 @@ function InstallHelpSheet({ open, hint, onClose }: { open: boolean; hint: 'ios' 
                             n={1}
                             title="Найдите кнопку «Поделиться» внизу Safari"
                             body={
-                                <span>Это квадратик со стрелкой вверх (<Share size={14} aria-hidden="true" style={{ verticalAlign: '-2px' }} />) в нижней панели браузера.</span>
+                                <span>Это квадратик со стрелкой вверх (<Share size={14} aria-hidden="true" style={{ display: 'inline-block', verticalAlign: '-2px' }} />) в нижней панели браузера.</span>
                             }
                         />
                         <Step
@@ -238,27 +232,27 @@ function Step({ n, title, body }: { n: number; title: string; body: React.ReactN
     return (
         <div style={{
             background: COLOR.sunken,
-            borderRadius: 12,
-            padding: '12px 14px',
+            borderRadius: RADIUS.control,
+            padding: '12px 16px',
             display: 'flex',
             gap: 12,
         }}>
             <div style={{
                 flexShrink: 0,
                 width: 28, height: 28,
-                borderRadius: 999,
-                background: COLOR.panel,
-                color: COLOR.onPanel,
+                borderRadius: SHAPE.pill,
+                background: COLOR.accentSoft,
+                color: COLOR.accentInk,
                 display: 'grid', placeItems: 'center',
-                fontSize: 14, fontWeight: 600,
+                fontSize: TEXT.small, fontWeight: 600,
             }}>
                 {n}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>
+                <div style={{ fontSize: TEXT.small, fontWeight: 600, lineHeight: 1.3 }}>
                     {title}
                 </div>
-                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 4, lineHeight: 1.45 }}>
+                <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4, lineHeight: 1.45 }}>
                     {body}
                 </div>
             </div>
@@ -280,7 +274,7 @@ function ArrowHint({ label }: { label: string }) {
             padding: '8px 0',
             color: COLOR.ink,
         }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.ink60, textAlign: 'center' }}>
+            <div style={{ fontSize: TEXT.caption, fontWeight: 600, color: COLOR.ink60, textAlign: 'center' }}>
                 {label}
             </div>
             <ArrowDown size={28} strokeWidth={2.4} aria-hidden="true" />

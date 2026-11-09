@@ -22,6 +22,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import { ListGroup, ListRow, ListIcon } from '../../../components/ui/ListRow';
 import { formatDateLabel, formatDayMonth, formatGel } from '../../../utils/format';
 
 type Tab = 'cabinets' | 'maintenance' | 'waitlist';
@@ -61,8 +62,10 @@ export function MobileAdminCabinets() {
     const setTab = (t: Tab) => setParams(t === 'cabinets' ? {} : { tab: t }, { replace: true });
 
     return (
-        <div style={{ padding: '0 16px 90px' }}>
+        // 09.11 фаза 3: шапка во всю ширину, содержимое с полями 16; списки — ListRow.
+        <div style={{ paddingBottom: 90 }}>
             <MobilePageHeader title="Кабинеты" fallbackTo="/m/admin/dashboard" />
+            <div style={{ padding: '16px 16px 0' }}>
             <Segmented<Tab>
                 aria-label="Раздел"
                 className="mb-4"
@@ -78,6 +81,7 @@ export function MobileAdminCabinets() {
             {tab === 'cabinets' && <CabinetsTab />}
             {tab === 'maintenance' && <MaintenanceTab />}
             {tab === 'waitlist' && <WaitlistTab />}
+            </div>
         </div>
     );
 }
@@ -178,42 +182,24 @@ function CabinetsTab() {
     return (
         <div>
             {/* Locations strip — on/off toggle per location, cascades to its
-                cabinets when turning off. */}
-            <div style={{
-                marginBottom: 14,
-                paddingBottom: 12,
-                borderBottom: '1px solid var(--color-ink-08)',
-            }}>
-                <SectionLabel>Локации</SectionLabel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {liveLocations.map(loc => {
-                        const isActive = loc.isActive !== false;
-                        const childActive = resources.filter(r => r.locationId === loc.id && r.isActive !== false).length;
-                        const childTotal = resources.filter(r => r.locationId === loc.id).length;
-                        return (
-                            <div key={loc.id} style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 10,
-                                padding: '8px 8px 8px 12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                            }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-                                        {loc.name}
-                                        {!isActive && (
-                                            <span className="ui-badge ui-badge--muted" style={{ marginLeft: 6 }}>Скрыта</span>
-                                        )}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                        Активных кабинетов: {childActive} из {childTotal}
-                                    </div>
-                                </div>
+                cabinets when turning off. 09.11 фаза 3: строки ListRow, действие —
+                тихая кнопка sm (раньше 44-px «Выключить» в рамке занимала полстроки). */}
+            <ListGroup title="Локации" className="mb-6">
+                {liveLocations.map(loc => {
+                    const isActive = loc.isActive !== false;
+                    const childActive = resources.filter(r => r.locationId === loc.id && r.isActive !== false).length;
+                    const childTotal = resources.filter(r => r.locationId === loc.id).length;
+                    return (
+                        <ListRow
+                            key={loc.id}
+                            title={loc.name}
+                            subtitle={<span className="num-inline">Активных кабинетов: <span style={{ whiteSpace: 'nowrap' }}>{childActive} из {childTotal}</span></span>}
+                            meta={!isActive ? <span className="ui-badge ui-badge--muted">скрыта</span> : undefined}
+                            dimmed={!isActive}
+                            action={
                                 <Button
-                                    variant="secondary"
-                                    size="touch"
+                                    variant="quiet"
+                                    size="sm"
                                     loading={updating === loc.id}
                                     icon={<Power size={16} aria-hidden="true" />}
                                     onClick={() => handleToggleLocation(loc as any)}
@@ -221,13 +207,13 @@ function CabinetsTab() {
                                 >
                                     {isActive ? 'Выключить' : 'Включить'}
                                 </Button>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
+                            }
+                        />
+                    );
+                })}
+            </ListGroup>
 
-            <div role="group" aria-label="Локация" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
+            <div role="group" aria-label="Локация" className="ui-chip-row ui-chip-row--scroll" style={{ marginBottom: 12, paddingBottom: 4 }}>
                 <Chip selected={filterLoc === 'all'} onClick={() => setFilterLoc('all')} style={{ flexShrink: 0 }}>Все</Chip>
                 {liveLocations.map(l => (
                     <Chip key={l.id} selected={filterLoc === l.id} onClick={() => setFilterLoc(l.id)} style={{ flexShrink: 0 }}>{l.name}</Chip>
@@ -239,51 +225,38 @@ function CabinetsTab() {
             ) : filtered.length === 0 ? (
                 <EmptyState compact title="Нет кабинетов" hint="Выберите другую локацию или добавьте кабинет на компьютере." />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <ListGroup aria-label="Кабинеты">
                     {filtered.map(r => {
                         const isActive = r.isActive !== false;
                         return (
-                            <div key={r.id} style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 12,
-                                padding: '8px 8px 8px 12px',
-                                display: 'flex',
-                                gap: 10,
-                                alignItems: 'center',
-                            }}>
-                                <div style={{
-                                    width: 36, height: 36, borderRadius: 9,
-                                    background: 'var(--color-sunken)',
-                                    color: isActive ? 'var(--color-ink)' : 'var(--color-ink-60)',
-                                    display: 'grid', placeItems: 'center', flexShrink: 0,
-                                }}>
-                                    <MapPin size={16} aria-hidden="true" />
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {r.name}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                        {!isActive && 'Выключен · '}
-                                        {LOCATIONS.find(l => l.id === r.locationId)?.name || r.locationId} · {formatGel(r.hourlyRate)}/ч
-                                        {r.capacity ? ` · до ${r.capacity}` : ''}
-                                    </div>
-                                </div>
-                                <Button
-                                    variant="secondary"
-                                    size="touch"
-                                    loading={updating === r.id}
-                                    icon={<Power size={16} aria-hidden="true" />}
-                                    onClick={() => toggleActive(r)}
-                                    aria-label={`${isActive ? 'Выключить' : 'Включить'} ${r.name}`}
-                                >
-                                    {isActive ? 'Выключить' : 'Включить'}
-                                </Button>
-                            </div>
+                            <ListRow
+                                key={r.id}
+                                lead={<ListIcon><MapPin size={18} /></ListIcon>}
+                                title={r.name}
+                                subtitle={<span className="num-inline">
+                                    {LOCATIONS.find(l => l.id === r.locationId)?.name || r.locationId}
+                                    {' · '}<span style={{ whiteSpace: 'nowrap' }}>{formatGel(r.hourlyRate)}/ч</span>
+                                    {r.capacity ? <>{' · '}<span style={{ whiteSpace: 'nowrap' }}>до {r.capacity}</span></> : null}
+                                </span>}
+                                // Выключенный — бледнее и с плашкой, а не только серым словом в подписи.
+                                meta={!isActive ? <span className="ui-badge ui-badge--muted">выключен</span> : undefined}
+                                dimmed={!isActive}
+                                action={
+                                    <Button
+                                        variant="quiet"
+                                        size="sm"
+                                        loading={updating === r.id}
+                                        icon={<Power size={16} aria-hidden="true" />}
+                                        onClick={() => toggleActive(r)}
+                                        aria-label={`${isActive ? 'Выключить' : 'Включить'} ${r.name}`}
+                                    >
+                                        {isActive ? 'Выключить' : 'Включить'}
+                                    </Button>
+                                }
+                            />
                         );
                     })}
-                </div>
+                </ListGroup>
             )}
         </div>
     );
@@ -382,44 +355,23 @@ function MaintenanceTab() {
             ) : failed ? null : blocks.length === 0 ? (
                 <EmptyState compact title="Закрытых кабинетов нет" hint="Уборку или ремонт можно отметить кнопкой выше." />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
                     {Object.keys(groups).sort().map(date => (
-                        <div key={date}>
-                            <SectionLabel>{formatDateLabel(date, { capitalize: true })}</SectionLabel>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                {groups[date].map(b => {
-                                    const res = RESOURCES.find(r => r.id === b.resourceId);
-                                    const n = b.recurringGroupId ? seriesSize.get(b.recurringGroupId) || 0 : 0;
-                                    return (
-                                        <div key={b.id} style={{
-                                            background: 'var(--color-card)',
-                                            border: '1px solid var(--color-ink-08)',
-                                            borderRadius: 10,
-                                            padding: '4px 4px 4px 12px',
-                                            display: 'flex',
-                                            gap: 10,
-                                            alignItems: 'center',
-                                        }}>
-                                            <div style={{
-                                                width: 32, height: 32, borderRadius: 8,
-                                                background: 'var(--color-sunken)', color: 'var(--color-ink-80)',
-                                                display: 'grid', placeItems: 'center', flexShrink: 0,
-                                            }}>
-                                                <Wrench size={14} aria-hidden="true" />
-                                            </div>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                    {res?.name || b.resourceId} · {b.startTime}–{addMinTime(b.startTime, b.duration)}
-                                                </div>
-                                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                                    {b.reason || 'Без описания'}
-                                                    {n > 1 && ` · серия из ${n}`}
-                                                </div>
-                                            </div>
+                        <ListGroup key={date} title={formatDateLabel(date, { capitalize: true })}>
+                            {groups[date].map(b => {
+                                const res = RESOURCES.find(r => r.id === b.resourceId);
+                                const n = b.recurringGroupId ? seriesSize.get(b.recurringGroupId) || 0 : 0;
+                                return (
+                                    <ListRow
+                                        key={b.id}
+                                        lead={<ListIcon><Wrench size={18} /></ListIcon>}
+                                        title={<>{res?.name || b.resourceId} · <span className="num-inline" style={{ whiteSpace: 'nowrap' }}>{b.startTime}–{addMinTime(b.startTime, b.duration)}</span></>}
+                                        subtitle={<>{b.reason || 'Без описания'}{n > 1 && ` · серия из ${n}`}</>}
+                                        action={<>
                                             {n > 1 && b.recurringGroupId && (
                                                 <Button
                                                     variant="quiet"
-                                                    size="touch"
+                                                    size="sm"
                                                     onClick={() => handleDeleteGroup(b.recurringGroupId!, n)}
                                                 >
                                                     Снять серию
@@ -432,11 +384,11 @@ function MaintenanceTab() {
                                             >
                                                 <Trash2 size={16} aria-hidden="true" />
                                             </button>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                                        </>}
+                                    />
+                                );
+                            })}
+                        </ListGroup>
                     ))}
                 </div>
             )}
@@ -609,72 +561,54 @@ function WaitlistTab() {
             ) : failed ? null : entries.length === 0 ? (
                 <EmptyState compact title="Лист ожидания пуст" hint="Здесь появятся клиенты, которые ждут освободившийся слот." />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <ListGroup aria-label="Лист ожидания">
                     {entries.map(e => {
                         const res = RESOURCES.find(r => r.id === (e as any).resourceId);
                         const dateStr = String((e as any).date || '').slice(0, 10);
                         return (
-                            <div key={e.id} style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 10,
-                                padding: '4px 4px 4px 12px',
-                                display: 'flex', gap: 6, alignItems: 'center',
-                            }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {userName((e as any).userId)}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
-                                        {res?.name || (e as any).resourceId}
-                                        {' · '}
-                                        {dateStr ? formatDayMonth(dateStr) : 'дата не указана'}
-                                        {' · '}
-                                        {(e as any).startTime}–{(e as any).endTime}
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            const r = await waitlistApi.notifyEntry(e.id);
-                                            toast.success(`Уведомление отправлено${r.notified ? ` (${r.notified})` : ''}`);
-                                        } catch (err) {
-                                            toastApiError(err, 'Не удалось отправить уведомление');
-                                        }
-                                    }}
-                                    style={iconBtn('var(--color-ink)')}
-                                    aria-label="Уведомить клиента"
-                                >
-                                    <Bell size={16} aria-hidden="true" />
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(e.id)}
-                                    style={iconBtn('var(--status-danger-fg)')}
-                                    aria-label="Убрать из листа ожидания"
-                                >
-                                    <Trash2 size={16} aria-hidden="true" />
-                                </button>
-                            </div>
+                            <ListRow
+                                key={e.id}
+                                title={userName((e as any).userId)}
+                                subtitle={<span className="num-inline">
+                                    {res?.name || (e as any).resourceId}
+                                    {' · '}
+                                    {dateStr ? formatDayMonth(dateStr) : 'дата не указана'}
+                                    {' · '}
+                                    {(e as any).startTime}–{(e as any).endTime}
+                                </span>}
+                                action={<>
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                const r = await waitlistApi.notifyEntry(e.id);
+                                                toast.success(`Уведомление отправлено${r.notified ? ` (${r.notified})` : ''}`);
+                                            } catch (err) {
+                                                toastApiError(err, 'Не удалось отправить уведомление');
+                                            }
+                                        }}
+                                        style={iconBtn('var(--color-ink-60)')}
+                                        aria-label="Уведомить клиента"
+                                    >
+                                        <Bell size={16} aria-hidden="true" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(e.id)}
+                                        style={iconBtn('var(--status-danger-fg)')}
+                                        aria-label="Убрать из листа ожидания"
+                                    >
+                                        <Trash2 size={16} aria-hidden="true" />
+                                    </button>
+                                </>}
+                            />
                         );
                     })}
-                </div>
+                </ListGroup>
             )}
         </div>
     );
 }
 
 // ── Shared bits ──────────────────────────────────────────────────────────
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{
-            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-            textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8,
-        }}>
-            {children}
-        </div>
-    );
-}
 
 /** Кнопка-иконка 44×44 (зона нажатия), значок 16. */
 function iconBtn(color: string): React.CSSProperties {

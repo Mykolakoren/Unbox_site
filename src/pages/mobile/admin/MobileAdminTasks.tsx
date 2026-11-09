@@ -15,6 +15,7 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { COLOR, STATUS, Z } from '../../../design/tokens';
 import { formatDateLabel, formatDayMonth, formatTime } from '../../../utils/format';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
 
 type FilterTab = 'mine' | 'team' | 'overdue' | 'all';
 type StatusFilter = 'open' | 'all' | 'done';
@@ -211,21 +212,27 @@ export function MobileAdminTasks() {
         : tab === 'overdue' ? undefined
         : 'Создайте задачу кнопкой «Новая задача».';
 
+    const teamOpenCount = byStatus.filter(t => !!t.assigneeId).length;
     return (
         <>
-            <div style={{ paddingTop: 12, paddingBottom: 'calc(96px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
-                    <div>
-                        <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                            Задачи
-                        </h1>
-                        <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                            На вас: {myCount} {overdueCount > 0 && (
-                                <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>· просрочено: {overdueCount}</span>
-                            )}
-                        </p>
-                    </div>
-                </div>
+            <div style={{ paddingTop: 8, paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* 09.11 фаза 3: общая крупная шапка; «Новая задача» — главная кнопка
+                    в шапке (раньше бирюзовая полоса во всю ширину висела над меню). */}
+                <MobilePageHeader
+                    variant="large"
+                    className="pb-1"
+                    title="Задачи"
+                    subtitle={<span className="num-inline">
+                        На вас: {myCount} {overdueCount > 0 && (
+                            <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>· просрочено: {overdueCount}</span>
+                        )}
+                    </span>}
+                    action={
+                        <Button icon={<Plus size={18} aria-hidden="true" />} onClick={() => setCreating(true)}>
+                            Задача
+                        </Button>
+                    }
+                />
 
                 {/* Search */}
                 <div style={{ padding: '0 16px' }}>
@@ -233,7 +240,7 @@ export function MobileAdminTasks() {
                         display: 'flex',
                         alignItems: 'center',
                         background: 'var(--color-sunken)',
-                        borderRadius: 12,
+                        borderRadius: 8,
                         padding: '0 12px',
                         minHeight: 44,
                         gap: 8,
@@ -260,7 +267,7 @@ export function MobileAdminTasks() {
 
                 {/* Scope chips */}
                 <div style={{ padding: '0 16px' }}>
-                    <div role="group" aria-label="Чьи задачи" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+                    <div role="group" aria-label="Чьи задачи" className="ui-chip-row ui-chip-row--scroll" style={{ paddingBottom: 4 }}>
                         {([
                             ['mine', 'Мои', byStatus.filter(t => t.assigneeId === currentUser?.id).length],
                             ['team', 'Команда', byStatus.filter(t => !!t.assigneeId).length],
@@ -311,7 +318,17 @@ export function MobileAdminTasks() {
 
                 {!loading && !failed && filtered.length === 0 && (
                     <div style={{ padding: '0 16px' }}>
-                        <EmptyState compact title={emptyTitle} hint={emptyHint} />
+                        {/* 09.11 фаза 3 (№25): пустой экран — со спокойной картинкой и вторым
+                            действием «Показать задачи команды», если у команды они есть. */}
+                        <EmptyState
+                            illustration={query ? undefined : 'plant'}
+                            compact={!!query}
+                            title={emptyTitle}
+                            hint={emptyHint}
+                            secondaryAction={!query && tab === 'mine' && teamOpenCount > 0
+                                ? { label: `Показать задачи команды · ${teamOpenCount}`, onClick: () => setTab('team') }
+                                : undefined}
+                        />
                     </div>
                 )}
 
@@ -353,29 +370,6 @@ export function MobileAdminTasks() {
                         </SwipeRow>
                     ))}
                 </div>
-            </div>
-
-            {/* Sticky create button */}
-            <div style={{
-                position: 'fixed',
-                bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: '100%',
-                maxWidth: 480,
-                padding: '8px 16px',
-                background: 'linear-gradient(to bottom, transparent 0%, var(--color-card) 30%)',
-                zIndex: Z.sticky,
-                pointerEvents: 'none',
-            }}>
-                <Button
-                    block
-                    icon={<Plus size={16} aria-hidden="true" />}
-                    onClick={() => setCreating(true)}
-                    style={{ pointerEvents: 'auto' }}
-                >
-                    Новая задача
-                </Button>
             </div>
 
             {openTask && (
@@ -422,25 +416,29 @@ function TaskRow({ task: t, assigneeName, onTap, onAdvanceStatus }: {
             onClick={onTap}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } }}
             style={{
+                // 09.11 фаза 3: просрочка — красной полосой слева (как долг в бронях),
+                // а не красной рамкой вокруг всей карточки.
+                position: 'relative',
                 background: 'var(--color-card)',
-                border: `1px solid ${overdue ? 'var(--status-danger-fg)' : 'var(--color-ink-08)'}`,
-                borderRadius: 12,
-                padding: '12px 14px',
+                border: '1px solid var(--color-ink-10)',
+                borderRadius: 16,
+                padding: overdue ? '12px 16px 12px 20px' : '12px 16px',
                 opacity: t.status === 'DONE' ? 0.7 : 1,
                 cursor: 'pointer',
             }}
             role="button"
             tabIndex={0}
         >
+            {overdue && <span className="ui-row__stripe ui-row__stripe--danger" aria-hidden="true" />}
             {/* Title row */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{
-                    fontSize: 14, fontWeight: 600, lineHeight: 1.3, flex: 1,
+                    fontSize: 16, fontWeight: 600, lineHeight: 1.35, flex: 1,
                     textDecoration: t.status === 'DONE' ? 'line-through' : 'none',
                 }}>
                     {t.priority === 'HIGH' && (
                         <span style={{ color: 'var(--status-danger-fg)', marginRight: 6, whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 }}>
-                            <AlertTriangle size={14} aria-hidden="true" style={{ marginRight: 2, verticalAlign: '-2px' }} />срочно
+                            <AlertTriangle size={14} aria-hidden="true" style={{ display: 'inline-block', marginRight: 2, verticalAlign: '-2px' }} />срочно
                         </span>
                     )}
                     {t.title}
@@ -462,7 +460,7 @@ function TaskRow({ task: t, assigneeName, onTap, onAdvanceStatus }: {
                 </button>
             </div>
             {/* Meta row */}
-            <div style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--color-ink-60)', marginTop: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, fontSize: 14, color: 'var(--color-ink-60)', marginTop: 8, flexWrap: 'wrap' }}>
                 {assigneeName && (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <UserIcon size={12} aria-hidden="true" /> {assigneeName}
@@ -489,7 +487,7 @@ function TaskRow({ task: t, assigneeName, onTap, onAdvanceStatus }: {
                     <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 4,
                         background: 'var(--color-sunken)', color: 'var(--color-ink-80)',
-                        fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                        fontWeight: 600, padding: '2px 6px', borderRadius: 8,
                     }}>
                         <Repeat size={12} aria-hidden="true" /> {recurrenceLabel(recurrence)}
                     </span>
@@ -983,15 +981,16 @@ const fieldLabel: React.CSSProperties = {
 function statusPill(s: string): React.CSSProperties {
     const map: Record<string, { bg: string; fg: string }> = {
         TODO: { bg: 'var(--status-muted-bg)', fg: 'var(--status-muted-fg)' },
-        IN_PROGRESS: { bg: 'var(--status-pending-bg)', fg: 'var(--status-pending-fg)' },
+        // «В работе» — info (идёт), а не янтарь: янтарь в системе значит «ждём» (09.11 фаза 3).
+        IN_PROGRESS: { bg: 'var(--status-info-bg)', fg: 'var(--status-info-fg)' },
         DONE: { bg: 'var(--status-ok-bg)', fg: 'var(--status-ok-fg)' },
     };
     const c = map[s] || map.TODO;
     return {
         background: c.bg,
         color: c.fg,
-        borderRadius: 999,
-        padding: '4px 10px',
+        borderRadius: 8,
+        padding: '4px 8px',
         fontSize: 12,
         fontWeight: 600,
         whiteSpace: 'nowrap',

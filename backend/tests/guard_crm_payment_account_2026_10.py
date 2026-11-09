@@ -349,7 +349,10 @@ def test_front_pencil_in_last_payments_desktop_and_mobile():
     mob = _code(MOBILE_CLIENT)
     assert "onEditPayment={viewingOther ? undefined : setEditingPayment}" in mob, "в мобильной ленте нет правки оплаты"
     row = mob[mob.index("if (item.kind === 'payment')"):mob.index("return <NoteRow")]
-    assert "Изменить оплату" in row and "<Pencil" in row, "в мобильной ленте у платежа нет карандаша"
+    # 09.11 фаза 3 (дизайн-ревью CRM п. 21): строка платежа — общий ListRow, правка — тапом по
+    # всей строке (то же окно PaymentEditSheet), отдельный карандаш не нужен.
+    assert "Изменить оплату" in row and "onClick={onEditPayment ? () => onEditPayment(p) : undefined}" in row, \
+        "в мобильной ленте платёж не открывает правку"
 
 
 def test_front_mobile_price_step_hides_account_when_payment_exists():

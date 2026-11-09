@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-    ChevronRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus, Contact, KeyRound, Wallet,
+    Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus, Contact, KeyRound, Wallet,
 } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
 import { useBookingStore } from '../../../store/bookingStore';
@@ -20,6 +20,10 @@ import { TopupSheet } from './TopupSheet';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import { Button } from '../../../components/ui/Button';
 import { Segmented } from '../../../components/ui/Chip';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { ListGroup, ListRow, ListIcon } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { AdminBookingRow } from './AdminBookingRow';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
@@ -184,13 +188,16 @@ export function MobileAdminDashboard() {
 
     /** «Принять оплату · N ₾» — одна кнопка на всех строках «Должны». */
     const payButton = (amount: number, onClick: () => void) => canCash ? (
+        // 09.11 фаза 3: «вторая» кнопка (рамка), не бирюзовая заливка — бирюза одна
+        // на экран («+ Бронь»), а N мятных полос подряд кричали громче долгов.
         <Button
+            variant="secondary"
             block
             icon={<Wallet size={16} aria-hidden="true" />}
             disabled={!(amount > 0)}
             onClick={onClick}
         >
-            Принять оплату · {formatGel(amount)}
+            Принять оплату · <Money value={amount} inline />
         </Button>
     ) : null;
 
@@ -198,10 +205,8 @@ export function MobileAdminDashboard() {
     const renderOwing = (c: TodayClient, later = false) => {
         const rebate = rebateFor(rebates, c.userId, c.rows[0]?.userId);
         return (
-        <div key={c.userId} style={{
-            background: 'var(--color-card)', border: `1px solid ${later ? 'var(--color-ink-10)' : 'var(--status-danger-fg)'}`,
-            borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
+        <div key={c.userId} style={debtorCard(!later)}>
+            {!later && <span className="ui-row__stripe ui-row__stripe--danger" aria-hidden="true" />}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <Link
                     to={`/m/admin/users/${encodeURIComponent(c.rows[0]?.userId || c.userId)}`}
@@ -209,21 +214,19 @@ export function MobileAdminDashboard() {
                 >
                     {c.client}
                 </Link>
-                <span className="num" style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-danger-fg)' }}>
-                    {formatGel(c.total)}
-                </span>
+                <Money value={c.total} tone="debt" className="text-body font-semibold" />
             </div>
-            <div style={{ fontSize: 14, color: 'var(--color-ink-80)' }}>
-                За сегодня <span className="num">{formatGel(c.today)}</span>
-                {' · '}весь долг <span className="num">{formatGel(c.total)}</span>
-                {c.creditLimit !== null && <> · лимит <span className="num">{formatGel(c.creditLimit)}</span></>}
+            <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
+                За сегодня <Money value={c.today} inline />
+                {' · '}весь долг <Money value={c.total} inline />
+                {c.creditLimit !== null && <> · лимит <Money value={c.creditLimit} inline /></>}
                 {c.overLimit && <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}> · сверх лимита</span>}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+            <div className="num-inline" style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
                 {c.rows.map(r => `${r.time} ${r.cabinet}`).join(' · ')}
             </div>
             {rebate > 0 && (
-                <div data-weekly-rebate-note style={{ fontSize: 12, color: 'var(--status-ok-fg)' }}>{weeklyRebateNote(rebate)}</div>
+                <div data-weekly-rebate-note style={{ fontSize: 14, color: 'var(--status-ok-fg)' }}>{weeklyRebateNote(rebate)}</div>
             )}
             {payButton(c.total, () => openPayFor(c))}
         </div>
@@ -232,52 +235,43 @@ export function MobileAdminDashboard() {
 
     /** Должник без сегодняшней брони — строка ≥ 44 px с «Принять оплату · весь долг». */
     const renderOther = (d: OtherDebtor) => (
-        <div key={String(d.user.id || d.user.email)} data-other-debtor style={{
-            background: 'var(--color-card)', border: '1px solid var(--color-ink-10)', borderRadius: 12,
-            padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
+        <div key={String(d.user.id || d.user.email)} data-other-debtor style={debtorCard(false)}>
             <Link to={`/m/admin/users/${encodeURIComponent(d.user.email || String(d.user.id))}`}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, color: 'var(--color-ink)', textDecoration: 'none' }}>
                 <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.user.name || d.user.email}</span>
-                    {d.hidden && <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>долг по броням вне списка</span>}
+                    <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflowWrap: 'anywhere' }}>{d.user.name || d.user.email}</span>
+                    {d.hidden && <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>долг по броням вне списка</span>}
                 </span>
-                <span className="num" style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-danger-fg)', whiteSpace: 'nowrap' }}>{formatGel(d.amount)}</span>
+                <Money value={d.amount} tone="debt" className="text-body font-semibold" />
             </Link>
             {payButton(d.amount, () => setPay({ user: d.user, total: d.amount, today: 0 }))}
         </div>
     );
 
     return (
-        <div style={{ paddingTop: 16, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ paddingTop: 8, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* «+ Бронь» — в шапке, а не плавающей кнопкой: плавающий «+» лежал
-                поверх строк ленты и закрывал отметку «к оплате / ✓» справа. */}
-            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                    <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                        Сегодня
-                    </h1>
-                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {formatDateLabel(new Date(), { capitalize: true })}
-                    </p>
-                </div>
-                {/* Бронь от своего имени: сбрасываем «бронь за клиента». */}
-                <Link
-                    to="/m/find?admin=1"
-                    aria-label="Новая бронь"
-                    onClick={() => setBookingForUser(null)}
-                    className="press"
-                    style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-                        minHeight: 44, padding: '0 16px', borderRadius: 22,
-                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
-                        fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                    }}
-                >
-                    <Plus size={18} strokeWidth={2.4} aria-hidden="true" />
-                    Бронь
-                </Link>
-            </div>
+                поверх строк ленты и закрывал отметку «к оплате / ✓» справа.
+                09.11 фаза 3: общая крупная шапка, главная кнопка — бирюзовая
+                (Button primary), без чёрной «пилюли». */}
+            <MobilePageHeader
+                variant="large"
+                className="pb-0"
+                title="Сегодня"
+                subtitle={formatDateLabel(new Date(), { capitalize: true })}
+                action={
+                    /* Бронь от своего имени: сбрасываем «бронь за клиента». */
+                    <Link
+                        to="/m/find?admin=1"
+                        aria-label="Новая бронь"
+                        onClick={() => setBookingForUser(null)}
+                        className="ui-btn ui-btn--primary"
+                    >
+                        <Plus size={18} aria-hidden="true" />
+                        Бронь
+                    </Link>
+                }
+            />
 
             {approvalsFailed && (
                 <div style={{ padding: '0 16px' }}>
@@ -294,7 +288,7 @@ export function MobileAdminDashboard() {
                     <SkeletonList count={1} label="Считаем, кто должен" cardHeight={72} />
                 ) : (
                     <div data-today-summary role="group" aria-label="Сводка дня" style={{
-                        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6,
+                        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
                     }}>
                         <SummaryCell
                             label="Взять сегодня"
@@ -372,9 +366,9 @@ export function MobileAdminDashboard() {
                                 >
                                     {owingLater.map(c => renderOwing(c, true))}
                                     {hidden.length > 0 && (
-                                        <div data-hidden-debts style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                                        <div data-hidden-debts style={{ fontSize: 14, color: 'var(--color-ink-60)', lineHeight: 1.45 }}>
                                             Долги по броням вне списка: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}
-                                            {' '}(старые брони, отмены со штрафом, списания не за бронь), всего <span className="num">{formatGel(hiddenTotal)}</span>
+                                            {' '}(старые брони, отмены со штрафом, списания не за бронь), всего <Money value={hiddenTotal} inline />
                                         </div>
                                     )}
                                     {otherDebtors.map(renderOther)}
@@ -389,20 +383,18 @@ export function MobileAdminDashboard() {
                                     {forecast.clients.map(c => {
                                         const u = (users || []).find(x => String(x.id) === c.userId || x.email === c.email);
                                         return (
-                                            <div key={c.userId} data-forecast-row style={{
-                                                background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
-                                                borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
-                                            }}>
+                                            <div key={c.userId} data-forecast-row style={debtorCard(false)}>
                                                 <Link to={`/m/admin/users/${encodeURIComponent(c.email)}`}
                                                     style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 44, textDecoration: 'none', color: 'inherit' }}>
                                                     <span style={{ minWidth: 0 }}>
-                                                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                                                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                                                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflowWrap: 'anywhere' }}>{c.name}</span>
+                                                        <span className="num-inline" style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2 }}>
                                                             баланс {formatGel(c.balance)} · лимит {formatGel(c.creditLimit)} · ждут списания {formatGel(c.pendingTotal)} ({c.pendingCount})
                                                         </span>
                                                     </span>
                                                     <span style={{ textAlign: 'right', flexShrink: 0 }}>
-                                                        <span className="num" style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--status-pending-fg)' }}>{formatGel(c.overLimitBy)}</span>
+                                                        {/* Ещё не долг, а прогноз: чернилами, не красным и не янтарём (09.11 фаза 3). */}
+                                                        <Money value={c.overLimitBy} className="block text-small font-semibold" />
                                                         <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>за лимит</span>
                                                     </span>
                                                 </Link>
@@ -422,10 +414,11 @@ export function MobileAdminDashboard() {
                         }
                         // Метка недельной скидки — один раз на клиента, у первой брони.
                         const rebateRow = rebateRowsOnce(rows, rebates);
+                        // 09.11 фаза 3: строки в одной группе (как в CRM), а не стопка карточек.
                         return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <ListGroup aria-label={seg === 'tomorrow' ? 'Брони завтра' : 'Брони сегодня'}>
                                 {rows.map(r => <DayRow key={r.bookingId} row={r} archivedName={archived.get(r.userId)?.name} rebate={rebateRow.get(r.bookingId)} onOpen={() => openRow(r)} />)}
-                            </div>
+                            </ListGroup>
                         );
                     })()
                 )}
@@ -433,15 +426,14 @@ export function MobileAdminDashboard() {
 
             {/* Разделы, которые не влезли в нижнее меню — списком, не плитками. */}
             <nav aria-label="Ещё разделы" style={{ padding: '8px 16px 0' }}>
-                <SectionTitle>Ещё</SectionTitle>
-                <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--color-ink-08)' }}>
+                <ListGroup title="Ещё">
                     <QuickLink to="/m/admin/crm" icon={Contact} label="CRM клиентов" hint="Спящие клиенты, воронка" />
                     <QuickLink to="/m/admin/cabinets" icon={DoorOpen} label="Кабинеты" hint="Включить, закрыть, лист ожидания" />
                     <QuickLink to="/m/admin/specialists" icon={ShieldCheck} label="Специалисты" hint="Анкеты на проверке" />
                     <QuickLink to="/m/admin/team" icon={UsersIcon} label="Команда" />
                     <QuickLink to="/m/admin/kb" icon={BookOpen} label="База знаний" />
                     {isOwnerish && <QuickLink to="/m/admin/access-rights" icon={KeyRound} label="Права доступа" />}
-                </div>
+                </ListGroup>
             </nav>
 
             <AdminBookingSheets
@@ -491,11 +483,13 @@ function DueSection({ title, count, note, empty, children }: {
 }) {
     return (
         <section aria-label={title} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-                    {title} · <span className="num">{count}</span>
+            {/* 09.11 фаза 3: подпись раздела — как у ListGroup (12/600 капсом), число справа. */}
+            <div style={{ padding: '0 4px' }}>
+                <div className="ui-list-group__head" style={{ margin: 0, padding: 0 }}>
+                    <h2 className="ui-list-group__title">{title}</h2>
+                    <span className="ui-list-group__aside num">{count}</span>
                 </div>
-                {note && <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>{note}</div>}
+                {note && <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2, lineHeight: 1.45 }}>{note}</div>}
             </div>
             {count === 0 && empty
                 ? <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>{empty}</div>
@@ -517,9 +511,10 @@ function SummaryCell({ label, value, sub, tone, onClick, to, ariaLabel }: {
     const active = value !== null;
     const style: React.CSSProperties = {
         display: 'flex', flexDirection: 'column', gap: 2, minHeight: 64, width: '100%',
-        padding: '10px 12px', borderRadius: 12, textAlign: 'left', fontFamily: 'inherit',
-        border: active ? 'none' : '1px solid var(--color-ink-08)',
-        background: active ? `var(--status-${tone}-bg)` : 'var(--color-card)',
+        padding: '8px 12px', borderRadius: 8, textAlign: 'left', fontFamily: 'inherit',
+        // 09.11 фаза 3: нулевая ячейка — тихая серая (как ячейки SummaryCard), ненулевая — своим тоном.
+        border: 'none',
+        background: active ? `var(--status-${tone}-bg)` : 'var(--color-sunken)',
         color: active ? `var(--status-${tone}-fg)` : 'var(--color-ink-60)',
         cursor: active ? 'pointer' : 'default', textDecoration: 'none',
     };
@@ -527,7 +522,7 @@ function SummaryCell({ label, value, sub, tone, onClick, to, ariaLabel }: {
         <>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
             {active && <span className="num" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>{value}</span>}
-            <span style={{ fontSize: 12 }}>{sub}</span>
+            <span className="num-inline" style={{ fontSize: 12 }}>{sub}</span>
         </>
     );
     if (to && active) return <Link to={to} className="press" style={style} aria-label={ariaLabel}>{body}</Link>;
@@ -539,80 +534,51 @@ function SummaryCell({ label, value, sub, tone, onClick, to, ariaLabel }: {
 }
 
 
-/** Строка дня: время · клиент · кабинет · «к оплате / ✓». Неоплаченная — рамкой danger (В2). */
+/** Строка дня: время · клиент · кабинет · «к оплате / ✓». Неоплаченная — полосой danger (В2).
+ *  09.11 фаза 3: общая строка брони AdminBookingRow (ListRow + ListTime). */
 function DayRow({ row, archivedName, rebate, onOpen }: { row: TodayRow; archivedName?: string; rebate?: number; onOpen: () => void }) {
-    // У заявки «Ждёт подтверждения» денежной метки и красной рамки нет (решение 09.11).
+    // У заявки «Ждёт подтверждения» денежной метки и красной полосы нет (решение 09.11).
     const owes = row.due !== null && row.due > 0 && row.status !== 'pending_approval';
-    const note = row.status === 'completed' ? ' · прошла'
-        : row.status === 'pending_approval' ? ` · ${statusLabel('booking', 'pending_approval', 'staff').toLowerCase()}` : '';
+    // Слово статуса — из statuses.ts (AdminBookingRow); «прошла» — тише, в подписи.
+    const note = row.status === 'completed' ? ' · прошла' : '';
     return (
-        <button
-            type="button"
+        <AdminBookingRow
+            start={row.time}
+            end={row.endTime}
+            name={archivedName || row.client}
+            archived={!!archivedName}
+            subtitle={<><span style={{ whiteSpace: 'nowrap' }}>{row.cabinet}</span>{note}</>}
+            status={row.status === 'pending_approval' ? row.status : null}
+            dimmed={row.status === 'completed' && !owes}
+            owes={owes}
+            note={!!rebate && rebate > 0 ? (
+                <span data-weekly-rebate-note style={{ fontSize: 12, color: 'var(--status-ok-fg)', lineHeight: 1.35 }}>
+                    {weeklyRebateNote(rebate)}
+                </span>
+            ) : undefined}
+            badge={<DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={row.status} method={row.paymentMethod} />}
             onClick={onOpen}
-            className="press"
-            style={{
-                background: 'var(--color-card)',
-                border: `1px solid ${owes ? 'var(--status-danger-fg)' : 'var(--color-ink-08)'}`,
-                borderLeftWidth: owes ? 4 : 1,
-                borderRadius: 12,
-                padding: '8px 10px 8px 12px',
-                minHeight: 56,
-                display: 'flex', gap: 10, alignItems: 'center',
-                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%',
-                color: 'var(--color-ink)',
-            }}
-        >
-            <span className="num" style={{ fontSize: 14, fontWeight: 600, minWidth: 48, lineHeight: 1.25 }}>
-                {row.time}
-                <span style={{ display: 'block', fontSize: 12, fontWeight: 400, color: 'var(--color-ink-60)' }}>{row.endTime}</span>
-            </span>
-            <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {archivedName || row.client}
-                    </span>
-                    {archivedName && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>архив</span>}
-                </span>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {row.cabinet}{note}
-                </span>
-                {!!rebate && rebate > 0 && (
-                    <span data-weekly-rebate-note style={{ display: 'block', fontSize: 12, color: 'var(--status-ok-fg)', whiteSpace: 'normal', lineHeight: 1.35 }}>
-                        {weeklyRebateNote(rebate)}
-                    </span>
-                )}
-            </span>
-            <DueBadge due={row.due} paid={row.paid} charged={row.charged} uncharged={row.uncharged} price={row.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={row.status} method={row.paymentMethod} />
-        </button>
+        />
     );
 }
 
 function QuickLink({ to, icon: Icon, label, hint }: { to: string; icon: React.ElementType; label: string; hint?: string }) {
     return (
-        <Link
+        <ListRow
             to={to}
-            style={{
-                display: 'flex', alignItems: 'center', gap: 12, minHeight: 52,
-                padding: '6px 0', borderBottom: '1px solid var(--color-ink-08)',
-                color: 'var(--color-ink)', textDecoration: 'none',
-            }}
-        >
-            <Icon size={20} style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} aria-hidden="true" />
-            <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 16, fontWeight: 500 }}>{label}</span>
-                {hint && <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)' }}>{hint}</span>}
-            </span>
-            <ChevronRight size={18} aria-hidden="true" style={{ color: 'var(--color-ink-60)' }} />
-        </Link>
+            lead={<ListIcon><Icon size={20} /></ListIcon>}
+            title={<span style={{ fontWeight: 500 }}>{label}</span>}
+            subtitle={hint}
+        />
     );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{
-            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-            textTransform: 'uppercase', color: 'var(--color-ink-60)',
-            marginBottom: 8,
-        }}>{children}</div>
-    );
+/** Карточка должника (09.11 фаза 3): радиус 16, тонкая рамка; «за сегодня» — красной полосой слева, а не красной рамкой. */
+function debtorCard(stripe: boolean): React.CSSProperties {
+    return {
+        position: 'relative',
+        background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
+        borderRadius: 16, padding: stripe ? '12px 16px 12px 20px' : '12px 16px',
+        display: 'flex', flexDirection: 'column', gap: 8,
+    };
 }

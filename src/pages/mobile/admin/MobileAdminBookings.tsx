@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Sparkles, Plus, SlidersHorizontal, X } from 'lucide-react';
+import { Search, Plus, SlidersHorizontal, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { useUserStore } from '../../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
@@ -12,7 +12,6 @@ import { DueBadge } from '../../../components/admin/DueBadge';
 import { useBookingStore } from '../../../store/bookingStore';
 import { formatGel } from '../../../utils/format';
 import { statusLabel } from '../../../design/statuses';
-import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { COLOR } from '../../../design/tokens';
@@ -22,6 +21,12 @@ import { Sheet } from '../../../components/ui/Sheet';
 import { Button } from '../../../components/ui/Button';
 import { Segmented } from '../../../components/ui/Chip';
 import { matchesPerson } from './searchMatch';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { ListGroup } from '../../../components/ui/ListRow';
+import { AdminBookingRow } from './AdminBookingRow';
+
+/** «Unbox Uni» → «Uni»: в строке брони филиал коротко (на 360 px подпись не разваливается). */
+const shortBranch = (name: string) => name.replace(/^Unbox\s+/i, '');
 
 /** 1 прошедшая, 2 прошедшие, 5 прошедших. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -168,52 +173,42 @@ export function MobileAdminBookings() {
 
     return (
         // Нижний отступ — под нижнее меню, чтобы последняя бронь не уходила под него.
-        <div style={{ paddingTop: 12, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ paddingTop: 8, paddingBottom: 96, display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* «+ Бронь» — в шапке, как на «Сегодня», а не плавающей кнопкой:
                 при прокрутке плавающий «+» ложился на отметку «к оплате / ✓»
-                справа в строке. Кнопка тёмная и с подписью — быстрый «+»
-                (просьба владельца, июнь) остаётся на виду. */}
-            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: 'var(--color-ink)' }}>
-                        Все брони
-                    </h1>
-                    {/* P0-fix: было #666 на #fff = 3.4:1 (FAIL). Теперь ink-60
-                        через rgba — реальный контраст 5.4:1 (AA pass). */}
-                    <p style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {clientMode
-                            ? `Брони клиента с сегодняшнего дня · ${dayBookings.length}`
-                            : <>
-                                {formatDateLabel(targetDate, { capitalize: true })}
-                                {' · '}
-                                {showPast
-                                    ? `всего ${counts.active + counts.past}`
-                                    : `активных ${counts.active}${counts.past > 0
-                                        ? ` (${counts.past} ${plural(counts.past, 'прошедшая скрыта', 'прошедшие скрыты', 'прошедших скрыто')})`
-                                        : ''}`}
-                            </>}
-                    </p>
-                </div>
-                {/* 2026-06-06 owner: «+ Новая бронь» для админа. Ведёт на /m/find —
-                    общий flow поиска слота; MobileCheckout сам включает выбор
-                    «За кого бронируешь?» (isAdminActor). Бронь от своего имени:
-                    сбрасываем «бронь за клиента». */}
-                <Link
-                    to="/m/find?admin=1"
-                    aria-label="Новая бронь"
-                    onClick={() => setBookingForUser(null)}
-                    className="press"
-                    style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-                        minHeight: 44, padding: '0 16px', borderRadius: 22,
-                        background: 'var(--color-ink)', color: 'var(--color-on-ink)',
-                        fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                    }}
-                >
-                    <Plus size={18} strokeWidth={2.4} aria-hidden="true" />
-                    Бронь
-                </Link>
-            </div>
+                справа в строке. 09.11 фаза 3: общая крупная шапка, кнопка —
+                бирюзовая главная (Button primary), без чёрной «пилюли». */}
+            <MobilePageHeader
+                variant="large"
+                className="pb-0"
+                title="Все брони"
+                subtitle={clientMode
+                    ? `Брони клиента с сегодняшнего дня · ${dayBookings.length}`
+                    : <>
+                        {formatDateLabel(targetDate, { capitalize: true })}
+                        {' · '}
+                        {showPast
+                            ? `всего ${counts.active + counts.past}`
+                            : `активных ${counts.active}${counts.past > 0
+                                ? ` (${counts.past} ${plural(counts.past, 'прошедшая скрыта', 'прошедшие скрыты', 'прошедших скрыто')})`
+                                : ''}`}
+                    </>}
+                action={
+                    /* 2026-06-06 owner: «+ Новая бронь» для админа. Ведёт на /m/find —
+                       общий flow поиска слота; MobileCheckout сам включает выбор
+                       «За кого бронируешь?» (isAdminActor). Бронь от своего имени:
+                       сбрасываем «бронь за клиента». */
+                    <Link
+                        to="/m/find?admin=1"
+                        aria-label="Новая бронь"
+                        onClick={() => setBookingForUser(null)}
+                        className="ui-btn ui-btn--primary"
+                    >
+                        <Plus size={18} aria-hidden="true" />
+                        Бронь
+                    </Link>
+                }
+            />
 
             {/* Ревью 09.11 (№16): фильтры — одной строкой «Сегодня · Все филиалы ▾»
                 (шторка по нажатию), поиск остаётся. Раньше «Когда» и «Что» занимали
@@ -232,7 +227,7 @@ export function MobileAdminBookings() {
                             className="press"
                             style={{
                                 flex: 1, minWidth: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 8,
-                                padding: '0 12px', borderRadius: 12, border: '1px solid var(--color-ink-10)',
+                                padding: '0 12px', borderRadius: 8, border: '1px solid var(--color-ink-10)',
                                 background: 'var(--color-card)', color: 'var(--color-ink)', fontFamily: 'inherit',
                                 fontSize: 14, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                             }}
@@ -247,7 +242,7 @@ export function MobileAdminBookings() {
                 </div>
                 <div style={{
                     display: 'flex', alignItems: 'center',
-                    background: 'var(--color-sunken)', borderRadius: 12,
+                    background: 'var(--color-sunken)', borderRadius: 8,
                     padding: '10px 12px', gap: 8, minHeight: 44,
                 }}>
                     <Search size={16} color={COLOR.ink60} aria-hidden="true" />
@@ -267,8 +262,11 @@ export function MobileAdminBookings() {
 
             {/* Booking list */}
             {/* Wave 1: без «лесенки» появления — список перерисовывается при
-                каждой смене дня, волна в 1,2 с мешала (правило 10). */}
-            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                каждой смене дня, волна в 1,2 с мешала (правило 10).
+                09.11 фаза 3: одна группа строк AdminBookingRow (как «Сегодня» и
+                карточка клиента): имя переносится, а не режется до «Ната…»,
+                справа ОДНА плашка, статус «Ждёт подтверждения» — словом в подписи. */}
+            <div style={{ padding: '0 16px' }}>
                 {dayBookings.length === 0 && (
                     <EmptyState
                         compact
@@ -276,6 +274,8 @@ export function MobileAdminBookings() {
                         hint={clientMode ? 'Снимите «Все брони клиента», чтобы искать по дням.' : 'Выберите другой день в фильтре выше.'}
                     />
                 )}
+                {dayBookings.length > 0 && (
+                <ListGroup aria-label="Брони">
                 {dayBookings.map(b => {
                     const r = RESOURCES.find(x => x.id === b.resourceId);
                     const l = LOCATIONS.find(x => x.id === r?.locationId);
@@ -291,77 +291,41 @@ export function MobileAdminBookings() {
                     const due = dueMap.get(b.id);
                     const owes = !!due && due.due > 0 && b.status !== 'pending_approval';
                     return (
-                        <button
+                        <AdminBookingRow
                             key={b.id}
                             onClick={() => setSheet(b)}
                             aria-label={`${b.startTime}, ${userName}${isArchived ? ' (архив)' : ''}, ${isBlocker ? 'блок' : statusLabel('booking', b.status, 'staff')}`}
-                            className="press"
-                            style={{
-                                background: isBlocker ? 'var(--color-sunken)' : 'var(--color-card)',
-                                border: `1px solid ${isBlocker ? 'var(--color-ink-04)' : 'var(--color-ink-08)'}`,
-                                borderRadius: 12, padding: '12px 14px',
-                                display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10,
-                                alignItems: 'center', cursor: 'pointer', fontFamily: 'inherit',
-                                textAlign: 'left', color: 'var(--color-ink)',
-                                minHeight: 56,
-                                // Неоплаченная прошедшая не притушивается — её надо заметить (В2).
-                                opacity: isBlocker ? 0.78 : isPast && !owes ? 0.65 : 1,
-                                ...(owes ? { borderColor: 'var(--status-danger-fg)', borderLeftWidth: 4 } : null),
-                            }}
-                        >
-                            <div style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--color-ink)' }}>
-                                {b.startTime}
-                            </div>
-                            <div style={{ minWidth: 0 }}>
-                                <div style={{
-                                    fontSize: 14, fontWeight: 600,
-                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                    color: 'var(--color-ink)',
-                                    display: 'flex', alignItems: 'center', gap: 5,
-                                }}>
-                                    {isBlocker && (
-                                        <Sparkles
-                                            size={13}
-                                            style={{ color: 'var(--color-ink-60)', flexShrink: 0 }}
-                                            aria-hidden="true"
-                                        />
-                                    )}
-                                    <span style={{
-                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                        // Системные брони (УБОРКА…) — обычный регистр,
-                                        // чтобы CAPS не кричал в общем списке.
-                                        textTransform: isBlocker ? 'capitalize' : 'none',
-                                    }}>{isBlocker ? userName.toLowerCase() : userName}</span>
-                                    {isArchived && <span className="ui-badge ui-badge--muted" style={{ flexShrink: 0 }}>архив</span>}
-                                </div>
-                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                                    {clientMode ? `${formatDayMonth(bookingDayKey(b))} · ` : ''}
-                                    {r?.name || b.resourceId} · {l?.name || ''} · {formatDuration(b.duration ?? 60)}
-                                </div>
-                                {/* Статус — второй строкой под именем, чтобы имя не резалось (№16). */}
-                                {!isBlocker && b.status !== 'confirmed' && (
-                                    <div style={{ marginTop: 4 }}>
-                                        <StatusBadge kind="booking" status={b.status} audience="staff" />
-                                    </div>
-                                )}
-                            </div>
-                            {isBlocker
-                                ? <span style={{
-                                    background: 'var(--color-ink-08)',
-                                    color: 'var(--color-ink-60)',
-                                    fontSize: 12, fontWeight: 600,
-                                    padding: '4px 9px', borderRadius: 999,
-                                    whiteSpace: 'nowrap',
-                                }}>Блок</span>
+                            start={b.startTime}
+                            end={endTimeOf(b.startTime, b.duration ?? 60)}
+                            // Системные брони (УБОРКА…) — обычный регистр, чтобы CAPS не кричал.
+                            name={isBlocker ? userName.toLowerCase() : userName}
+                            blocker={isBlocker}
+                            archived={isArchived}
+                            subtitle={<>
+                                {clientMode ? `${formatDayMonth(bookingDayKey(b))} · ` : ''}
+                                {/* Куски подписи не рвутся посередине («2 / ч»): перенос — только между ними. */}
+                                {[r?.name || b.resourceId, l ? shortBranch(l.name) : '', formatDuration(b.duration ?? 60)].filter(Boolean).map((part, i) => (
+                                    <span key={i} style={{ whiteSpace: 'nowrap' }}>{i > 0 ? ' · ' : ''}{part}</span>
+                                ))}
+                            </>}
+                            // Статус — словом в подписи под именем, чтобы имя не резалось (№16).
+                            status={b.status}
+                            // Неоплаченная прошедшая не притушивается — её надо заметить (В2).
+                            dimmed={isPast && !owes}
+                            owes={owes}
+                            badge={isBlocker
+                                ? <span className="ui-badge ui-badge--muted">Блок</span>
                                 : (
-                                    // G9-14: «Подтверждена» на каждой строке — шум; бейдж
-                                    // статуса только у нестандартных, плюс «к оплате / ✓» (В2).
+                                    // G9-14: «Подтверждена» на каждой строке — шум; справа
+                                    // одна метка «к оплате / ✓» (В2), статус — в подписи.
                                     <DueBadge due={due?.due} paid={!!due} charged={due?.charged} price={due?.price} className="whitespace-normal h-auto py-1 max-w-[124px] text-right" status={b.status} method={b.paymentMethod as string | undefined} />
                                 )
                             }
-                        </button>
+                        />
                     );
                 })}
+                </ListGroup>
+                )}
             </div>
 
             <Sheet
@@ -393,7 +357,7 @@ export function MobileAdminBookings() {
                                 width: '100%', marginTop: 8,
                                 background: 'var(--color-card)',
                                 border: '1px solid var(--color-ink-08)',
-                                borderRadius: 10,
+                                borderRadius: 8,
                                 padding: '0 12px',
                                 fontSize: 16,
                                 fontFamily: 'inherit',
@@ -414,7 +378,7 @@ export function MobileAdminBookings() {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 10,
                             padding: '10px 12px',
-                            background: 'var(--color-ink-04)', borderRadius: 10,
+                            background: 'var(--color-ink-04)', borderRadius: 8,
                             cursor: 'pointer', fontSize: 14, fontWeight: 600,
                             color: 'var(--color-ink)',
                             minHeight: 44,
@@ -496,4 +460,13 @@ function dayChipLabel(key: string, todayKey: string): string {
     if (off === 1) return 'Завтра';
     if (off === -1) return 'Вчера';
     return formatDayMonth(key);
+}
+
+/** Конец брони «HH:MM» по началу и длительности (только подпись в строке). */
+function endTimeOf(start: string | null | undefined, minutes: number): string | undefined {
+    const m = /^(\d{1,2}):(\d{2})/.exec(start || '');
+    if (!m) return undefined;
+    const total = Number(m[1]) * 60 + Number(m[2]) + minutes;
+    const h = Math.floor(total / 60) % 24;
+    return `${String(h).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { COLOR } from '../../design/tokens';
+import { COLOR, RADIUS, TEXT } from '../../design/tokens';
 
 /**
  * Swipe-left action wrapper.
@@ -19,10 +19,20 @@ export function SwipeRow({
     primary,
     secondary,
     disabled,
+    as: Tag = 'div',
+    className,
+    flat = false,
 }: {
     children: React.ReactNode;
-    primary: { label: string; color: string; onAction: () => void };
-    secondary?: { label: string; color: string; onAction: () => void };
+    /** 09.11 фаза 3: 'li' — строка внутри ListGroup (ul.ui-list). */
+    as?: 'div' | 'li';
+    className?: string;
+    /** Строка внутри общей группы: без своего скругления и без своей
+     *  заливки в покое (заливка нужна только пока строка сдвинута). */
+    flat?: boolean;
+    /** fg — цвет текста кнопки (по умолчанию onInk). */
+    primary: { label: string; color: string; fg?: string; onAction: () => void };
+    secondary?: { label: string; color: string; fg?: string; onAction: () => void };
     disabled?: boolean;
 }) {
     const ref = useRef<HTMLDivElement>(null);
@@ -105,7 +115,11 @@ export function SwipeRow({
     }, [dx]);
 
     return (
-        <div ref={ref} style={{ position: 'relative', overflow: 'hidden', borderRadius: 14, touchAction: 'pan-y' }}>
+        <Tag
+            ref={ref as React.Ref<never>}
+            className={className}
+            style={{ position: 'relative', overflow: 'hidden', borderRadius: flat ? 0 : RADIUS.sheet, touchAction: 'pan-y' }}
+        >
             {/* Action layer (revealed by swipe). Пока ряд закрыт, кнопки
                 спрятаны и от диктора, и от Tab — доступный путь к тем же
                 действиям идёт через шторку брони. */}
@@ -122,10 +136,10 @@ export function SwipeRow({
                         onClick={() => { setDx(0); secondary.onAction(); }}
                         style={{
                             background: secondary.color,
-                            color: COLOR.onInk,
+                            color: secondary.fg ?? COLOR.onInk,
                             border: 'none',
                             padding: '0 18px',
-                            fontSize: 13,
+                            fontSize: TEXT.small,
                             fontWeight: 600,
                             cursor: 'pointer',
                             fontFamily: 'inherit',
@@ -141,10 +155,10 @@ export function SwipeRow({
                     onClick={() => { setDx(0); primary.onAction(); }}
                     style={{
                         background: primary.color,
-                        color: COLOR.onInk,
+                        color: primary.fg ?? COLOR.onInk,
                         border: 'none',
                         padding: '0 22px',
-                        fontSize: 13,
+                        fontSize: TEXT.small,
                         fontWeight: 600,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
@@ -161,12 +175,13 @@ export function SwipeRow({
                 style={{
                     transform: `translateX(${dx}px)`,
                     transition: startX.current === null ? 'transform 0.18s ease' : 'none',
-                    background: COLOR.card,
+                    background: flat && dx === 0 && !committing ? 'transparent' : COLOR.card,
+                    ...(flat ? { flex: 1, minWidth: 0, display: 'flex' } : null),
                     opacity: committing ? 0.5 : 1,
                 }}
             >
                 {children}
             </div>
-        </div>
+        </Tag>
     );
 }

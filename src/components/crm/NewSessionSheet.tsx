@@ -344,15 +344,11 @@ export function NewSessionSheet({
             title="Новая сессия"
             description={client ? client.name : undefined}
             width={480}
+            // 09.11 фаза 3 (общие файлы): в подвале одна главная кнопка; закрыть — крестиком шторки.
             footer={(
-                <>
-                    <Button block loading={saving} disabled={!canSubmit} onClick={() => submit()}>
-                        {submitLabel}
-                    </Button>
-                    <Button block variant="secondary" disabled={saving} onClick={onClose}>
-                        Не записывать
-                    </Button>
-                </>
+                <Button block loading={saving} disabled={!canSubmit} onClick={() => submit()}>
+                    {submitLabel}
+                </Button>
             )}
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

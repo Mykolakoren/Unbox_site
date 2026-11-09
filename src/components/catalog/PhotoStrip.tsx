@@ -10,13 +10,15 @@ import { photoVariant } from '../../utils/cabinetPhotos';
  * В углу счётчик «3 / 12». Тап по кадру открывает PhotoLightbox (onOpen).
  * Грузим md-копии (800 px WebP) и только видимые — loading="lazy".
  */
-export function PhotoStrip({ photos, onOpen, altFor, aspect = '4 / 3', inset = 16 }: {
+export function PhotoStrip({ photos, onOpen, altFor, aspect = '4 / 3', inset = 16, radius = 0 }: {
     photos: string[];
     onOpen: (index: number) => void;
     altFor: (index: number) => string;
     aspect?: string;
     /** Боковое поле страницы: лента начинается от края текста, но прокручивается до края экрана. */
     inset?: number;
+    /** 09.11 фаза 3: скругление кадра (в /m — 16, на сайте — 0, как было). */
+    radius?: number;
 }) {
     const ref = useRef<HTMLDivElement>(null);
     const [current, setCurrent] = useState(0);
@@ -63,6 +65,8 @@ export function PhotoStrip({ photos, onOpen, altFor, aspect = '4 / 3', inset = 1
                             background: COLOR.sunken,
                             cursor: 'zoom-in',
                             display: 'block',
+                            borderRadius: radius,
+                            overflow: radius ? 'hidden' : undefined,
                         }}
                     >
                         <img

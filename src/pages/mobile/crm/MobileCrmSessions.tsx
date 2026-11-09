@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, CheckCircle2, XCircle, Clock, X, Plus, AlertCircle } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { crmApi, type CrmSession } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -9,15 +9,19 @@ import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
-import { getStatusDef, statusLabel } from '../../../design/statuses';
-import { COLOR } from '../../../design/tokens';
-import { formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
+import { statusLabel } from '../../../design/statuses';
+import { formatDateLabel, formatMoney, formatTime } from '../../../utils/format';
+import { ListGroup, ListRow, ListTime } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { CrmSearch } from './CrmSearch';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
-import { aliasLabel, normalizeClientQuery, useBookNext } from './crmFlows';
+import { normalizeClientQuery, useBookNext } from './crmFlows';
 import { Button } from '../../../components/ui/Button';
 import {
-    isBillableStatus, isCancelledStatus, partialPayment, priceFromClientRate, sessionCurrencyOf, sessionDebt, sessionPriceOf,
+    isBillableStatus, isCancelledStatus, partialPayment, sessionCurrencyOf, sessionDebt, sessionPriceOf,
 } from '../../../utils/sessionMoney';
 
 type Window = '7d' | '30d' | 'past7d' | 'past30d' | 'all';
@@ -34,14 +38,6 @@ const WINDOW_LABEL: Record<Window, string> = {
 
 type StatusFilter = 'all' | 'planned' | 'completed' | 'unpaid' | 'cancelled';
 
-/** Цвет плашки-значка — по тону статуса из общего словаря (statuses.ts). */
-const TONE_BG: Record<string, { bg: string; fg: string }> = {
-    ok: { bg: 'var(--status-ok-bg)', fg: 'var(--status-ok-fg)' },
-    pending: { bg: 'var(--status-pending-bg)', fg: 'var(--status-pending-fg)' },
-    danger: { bg: 'var(--status-danger-bg)', fg: 'var(--status-danger-fg)' },
-    info: { bg: 'var(--status-info-bg)', fg: 'var(--status-info-fg)' },
-    muted: { bg: 'var(--status-muted-bg)', fg: 'var(--status-muted-fg)' },
-};
 
 /**
  * Mobile CRM — Sessions list across all clients, filterable by period
@@ -152,167 +148,125 @@ export function MobileCrmSessions() {
 
     const initialLoading = loading && sessions.length === 0 && !failed;
 
+    // 09.11 фаза 3 (дизайн-ревью п. 3, 11): строки — общий ListRow, сгруппированы по дням
+    // («Сегодня», «Завтра», «Пн, 16 ноября»), как брони клиента в /m/bookings.
+    const groups = useMemo(() => {
+        const out: { day: string; items: CrmSession[] }[] = [];
+        for (const s of filtered) {
+            const day = utcNaiveToTbilisi(s.date)?.date ?? '';
+            const last = out[out.length - 1];
+            if (last && last.day === day) last.items.push(s);
+            else out.push({ day, items: [s] });
+        }
+        return out;
+    }, [filtered]);
+    const todayYmd = tbilisiToday();
+    const dayTitle = (ymd: string) => ymd === todayYmd ? 'Сегодня'
+        : ymd === addDaysYmd(todayYmd, 1) ? 'Завтра'
+        : ymd === addDaysYmd(todayYmd, -1) ? 'Вчера'
+        : formatDateLabel(ymd, { capitalize: true, withYear: 'auto' });
+
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 2px 12px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1 }}>
-                    Все сессии
-                </h1>
-                {!viewingOther && (
-                    <Button size="touch" icon={<Plus size={16} aria-hidden="true" />} onClick={() => bookNext.open()}>
+        <div style={{ paddingBottom: 90 }}>
+            <MobilePageHeader
+                variant="large"
+                title="Сессии"
+                subtitle={q.trim() && !initialLoading ? `Найдено: ${filtered.length}` : undefined}
+                action={!viewingOther ? (
+                    <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => bookNext.open()}>
                         Сессия
                     </Button>
-                )}
-            </div>
+                ) : undefined}
+            />
 
-            {/* Period chips */}
-            <div role="group" aria-label="Период" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 8, paddingBottom: 4 }}>
-                {(['7d', '30d', 'past7d', 'past30d', 'all'] as Window[]).map(p => (
-                    <Chip key={p} selected={period === p} onClick={() => setPeriod(p)} style={{ flexShrink: 0 }}>
-                        {WINDOW_LABEL[p]}
-                    </Chip>
-                ))}
-            </div>
-
-            {/* Status filter */}
-            <div role="group" aria-label="Статус" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 4 }}>
-                {([
-                    { id: 'all', label: 'Все' },
-                    { id: 'planned', label: 'Запланированные' },
-                    { id: 'completed', label: 'Состоялись' },
-                    { id: 'unpaid', label: 'Не оплачены' },
-                    { id: 'cancelled', label: 'Отменённые' },
-                ] as { id: StatusFilter; label: string }[]).map(f => (
-                    <Chip key={f.id} selected={statusFilter === f.id} onClick={() => setStatusFilter(f.id)} style={{ flexShrink: 0 }}>
-                        {f.label}
-                    </Chip>
-                ))}
-            </div>
-
-            {/* Search */}
-            <div style={{ position: 'relative', marginBottom: 12 }}>
-                <Search size={16} color={COLOR.ink60} aria-hidden="true" style={{ position: 'absolute', left: 12, top: 14 }} />
-                <input
-                    type="text"
-                    aria-label="Поиск: имя, код или телефон клиента"
-                    placeholder="Имя, код, телефон"
-                    value={q}
-                    onChange={e => setQ(e.target.value)}
-                    style={{
-                        width: '100%',
-                        minHeight: 44,
-                        padding: '10px 44px 10px 36px',
-                        border: '1px solid var(--color-ink-20)',
-                        borderRadius: 8,
-                        fontSize: 16,
-                        background: 'var(--color-card)',
-                        color: 'var(--color-ink)',
-                        outline: 'none',
-                    }}
-                />
-                {q && (
-                    <button
-                        onClick={() => setQ('')}
-                        aria-label="Очистить поиск"
-                        style={{
-                            position: 'absolute', right: 0, top: 0, width: 44, height: 44,
-                            display: 'grid', placeItems: 'center',
-                            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-ink-60)',
-                        }}
-                    >
-                        <X size={16} aria-hidden="true" />
-                    </button>
-                )}
-            </div>
-
-            <div style={{
-                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-                textTransform: 'uppercase', color: 'var(--color-ink-60)',
-                marginBottom: 8,
-            }}>
-                Сессий: {initialLoading ? '—' : filtered.length}
-            </div>
-
-            {failed && !loading && (
-                <ErrorBar message="Не удалось загрузить сессии" onRetry={() => reload()} className="mb-3" />
-            )}
-
-            {initialLoading ? (
-                <SkeletonList count={5} label="Загружаем сессии" cardHeight={56} />
-            ) : failed && sessions.length === 0 ? null : filtered.length === 0 ? (
-                <EmptyState compact title="В этом фильтре сессий нет" hint="Выберите другой период или статус." />
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: loading ? 0.6 : 1 }}>
-                    {filtered.map(s => {
-                        const client = clients.find(c => c.id === s.clientId);
-                        const dt = parseUTC(s.date);
-                        const isCancelled = isCancelledStatus(s.status);
-                        const isCompleted = s.status === 'COMPLETED';
-                        const tone = TONE_BG[getStatusDef('session', s.status).tone];
-                        const cur = sessionCurrencyOf(s, client);
-                        // Ревью п. 1, 8: одна цена (своя или ставка клиента) и частичная оплата.
-                        const price = sessionPriceOf(s, client);
-                        const partial = partialPayment(s, client);
-                        const owes = !s.isPaid && (isBillableStatus(s.status)
-                            || (s.status === 'PLANNED' && dt.getTime() <= Date.now()))
-                            && sessionDebt(s, client).amount > 0;
-                        return (
-                            <button
-                                key={s.id}
-                                onClick={() => setActiveSheet(s)}
-                                className="press"
-                                style={{
-                                    background: 'var(--color-card)',
-                                    border: '1px solid var(--color-ink-08)',
-                                    borderRadius: 10,
-                                    padding: '10px 12px',
-                                    minHeight: 56,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 10,
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    textAlign: 'left',
-                                    width: '100%',
-                                    opacity: isCancelled ? 0.7 : 1,
-                                }}
-                            >
-                                <div style={{
-                                    width: 32, height: 32, borderRadius: 8,
-                                    background: tone.bg,
-                                    color: tone.fg,
-                                    display: 'grid', placeItems: 'center',
-                                    flexShrink: 0,
-                                }}>
-                                    {isCancelled ? <XCircle size={16} aria-hidden="true" />
-                                        : s.status === 'NO_SHOW' ? <AlertCircle size={16} aria-hidden="true" />
-                                        : isCompleted ? <CheckCircle2 size={16} aria-hidden="true" />
-                                        : <Clock size={16} aria-hidden="true" />}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{
-                                        fontWeight: 600, fontSize: 14, color: 'var(--color-ink)',
-                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                    }}>
-                                        {client?.aliasCode ? `${aliasLabel(client.aliasCode)} · ` : ''}{client?.name || 'Клиент'}
-                                        {owes && (
-                                            <span style={{ color: partial ? 'var(--status-pending-fg)' : 'var(--status-danger-fg)', fontWeight: 600, marginLeft: 4 }}>
-                                                · {partial ? statusLabel('payment', 'partial') : statusLabel('payment', 'unpaid')}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                        {formatDayMonth(dt, { timeZone: BATUMI_TZ })}, {formatTime(dt, { timeZone: BATUMI_TZ })}
-                                        {' · '}{statusLabel('session', s.status)}
-                                        {price > 0 ? ` · ${formatMoney(price, { currency: cur })}${priceFromClientRate(s, client) ? ' (ставка)' : ''}` : ''}
-                                        {partial ? ` · оплачено ${formatMoney(partial.paid, { currency: cur })}, долг ${formatMoney(partial.remaining, { currency: cur })}` : ''}
-                                    </div>
-                                </div>
-                            </button>
-                        );
-                    })}
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Фильтры — ряд, который листается вбок (затухание справа подсказывает, что есть ещё). */}
+                <div role="group" aria-label="Период" className="ui-chip-row ui-chip-row--scroll">
+                    {(['7d', '30d', 'past7d', 'past30d', 'all'] as Window[]).map(p => (
+                        <Chip key={p} selected={period === p} onClick={() => setPeriod(p)} style={{ flexShrink: 0 }}>
+                            {WINDOW_LABEL[p]}
+                        </Chip>
+                    ))}
                 </div>
-            )}
+                <div role="group" aria-label="Статус" className="ui-chip-row ui-chip-row--scroll">
+                    {([
+                        { id: 'all', label: 'Все' },
+                        { id: 'planned', label: 'Запланированные' },
+                        { id: 'completed', label: 'Состоялись' },
+                        { id: 'unpaid', label: 'Не оплачены' },
+                        { id: 'cancelled', label: 'Отменённые' },
+                    ] as { id: StatusFilter; label: string }[]).map(f => (
+                        <Chip key={f.id} selected={statusFilter === f.id} onClick={() => setStatusFilter(f.id)} style={{ flexShrink: 0 }}>
+                            {f.label}
+                        </Chip>
+                    ))}
+                </div>
+                <CrmSearch
+                    value={q}
+                    onChange={setQ}
+                    label="Поиск: имя, код или телефон клиента"
+                    placeholder="Имя, код, телефон"
+                />
+            </div>
+
+            <div style={{ padding: '24px 16px 0' }}>
+                {failed && !loading && (
+                    <ErrorBar message="Не удалось загрузить сессии" onRetry={() => reload()} className="mb-3" />
+                )}
+
+                {initialLoading ? (
+                    <SkeletonList count={5} label="Загружаем сессии" cardHeight={56} />
+                ) : failed && sessions.length === 0 ? null : filtered.length === 0 ? (
+                    <EmptyState compact title="В этом фильтре сессий нет" hint="Выберите другой период или статус." />
+                ) : (
+                    <div style={{ opacity: loading ? 0.6 : 1 }}>
+                        {groups.map(g => (
+                            <ListGroup key={g.day} title={dayTitle(g.day)} aside={`${g.items.length}`}>
+                                {g.items.map(s => {
+                                    const client = clients.find(c => c.id === s.clientId);
+                                    const dt = parseUTC(s.date);
+                                    const end = new Date(dt.getTime() + (s.durationMinutes || 60) * 60000);
+                                    const isCancelled = isCancelledStatus(s.status);
+                                    const isFuture = dt.getTime() > Date.now();
+                                    const cur = sessionCurrencyOf(s, client);
+                                    // Ревью п. 1, 8: одна цена (своя или ставка клиента) и частичная оплата.
+                                    const price = sessionPriceOf(s, client);
+                                    const partial = partialPayment(s, client);
+                                    const owes = !s.isPaid && (isBillableStatus(s.status)
+                                        || (s.status === 'PLANNED' && dt.getTime() <= Date.now()))
+                                        && sessionDebt(s, client).amount > 0;
+                                    // «Запланирована» — обычное состояние, её не пишем; пишем только особое.
+                                    const statusWord = s.status === 'PLANNED' ? '' : statusLabel('session', s.status);
+                                    const sub = [
+                                        statusWord,
+                                        partial ? `оплачено ${formatMoney(partial.paid, { currency: cur })} из ${formatMoney(partial.price, { currency: cur })}` : '',
+                                    ].filter(Boolean).join(' · ');
+                                    return (
+                                        <ListRow
+                                            key={s.id}
+                                            dimmed={isCancelled}
+                                            lead={<ListTime start={formatTime(dt, { timeZone: BATUMI_TZ })} end={formatTime(end, { timeZone: BATUMI_TZ })} />}
+                                            title={client?.name || 'Клиент'}
+                                            subtitle={sub || undefined}
+                                            onClick={() => setActiveSheet(s)}
+                                            trail={owes ? (
+                                                <Money value={partial ? partial.remaining : sessionDebt(s, client).amount} currency={cur} tone="debt" />
+                                            ) : price > 0 && !isCancelled ? (
+                                                <span style={isFuture ? { color: 'var(--color-ink-60)', fontWeight: 500 } : undefined}>
+                                                    <Money value={price} currency={cur} />
+                                                </span>
+                                            ) : undefined}
+                                            meta={owes ? (
+                                                <StatusBadge kind="payment" status={partial ? 'partial' : 'unpaid'} variant="dot" />
+                                            ) : undefined}
+                                        />
+                                    );
+                                })}
+                            </ListGroup>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {activeSheet && (
                 <SessionActionSheet

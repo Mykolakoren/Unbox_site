@@ -9,7 +9,8 @@ import { LOCATIONS, RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { getFavoriteCabinet } from './favoriteCabinet';
 import type { BookingHistoryItem } from '../../store/types';
-import { COLOR } from '../../design/tokens';
+import { COLOR, RADIUS, TEXT } from '../../design/tokens';
+import { Chip } from '../../components/ui/Chip';
 import { formatDateLabel, formatDayMonth } from '../../utils/format';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { tbilisiNow } from '../../utils/dateUtils';
@@ -142,7 +143,7 @@ export function MobileCalendar() {
                     <div role="group" aria-label="Вид календаря" style={{
                         display: 'flex',
                         background: COLOR.sunken,
-                        borderRadius: 10,
+                        borderRadius: RADIUS.control,
                         padding: 2,
                     }}>
                         <button
@@ -181,7 +182,7 @@ export function MobileCalendar() {
                     <div style={{
                         flex: 1,
                         textAlign: 'center',
-                        fontSize: 14,
+                        fontSize: TEXT.body,
                         fontWeight: 600,
                     }}>
                         {dayLabel(targetDate, dayOffset)}
@@ -198,46 +199,40 @@ export function MobileCalendar() {
                 {mode === 'room' ? (
                     <>
                         {/* Cabinet chips — horizontal scroll */}
-                        <div style={{
-                            display: 'flex',
+                        {/* 09.11 фаза 3: выбранный кабинет — общий Chip (accent-soft + рамка),
+                            не чёрная заливка; ряд листается с затуханием справа. */}
+                        <div className="ui-chip-row ui-chip-row--scroll" role="group" aria-label="Кабинет" style={{
                             gap: 6,
-                            overflowX: 'auto',
                             padding: '0 16px 4px',
-                            scrollbarWidth: 'none',
                         }}>
                             {visibleCabinets.map(r => {
                                 const active = r.id === activeResId;
                                 const loc = LOCATIONS.find(l => l.id === r.locationId);
                                 return (
-                                    <button
+                                    <Chip
                                         key={r.id}
-                                        aria-pressed={active}
+                                        selected={active}
                                         onClick={() => setActiveResId(r.id)}
                                         style={{
-                                            background: active ? COLOR.ink : COLOR.sunken,
-                                            color: active ? COLOR.onInk : COLOR.ink,
-                                            border: 'none',
-                                            borderRadius: 10,
+                                            flexDirection: 'column',
+                                            alignItems: 'flex-start',
+                                            gap: 1,
                                             padding: '6px 12px',
-                                            minHeight: 44,
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
                                             flex: '0 0 auto',
-                                            textAlign: 'left',
                                         }}
                                     >
-                                        <div style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</div>
-                                        <div style={{ fontSize: 12, marginTop: 1 }}>
+                                        <span style={{ fontWeight: 600 }}>{r.name}</span>
+                                        <span style={{ fontSize: TEXT.caption, fontWeight: 500, color: COLOR.ink60 }}>
                                             {loc?.name?.replace('Unbox ', '')}
-                                        </div>
-                                    </button>
+                                        </span>
+                                    </Chip>
                                 );
                             })}
                         </div>
 
                         {/* Vertical timeline */}
                         <div style={{ padding: '0 16px' }}>
-                            <p style={{ fontSize: 14, color: COLOR.ink60, margin: '0 0 8px' }}>
+                            <p style={{ fontSize: TEXT.small, color: COLOR.ink60, margin: '0 0 8px' }}>
                                 Нажмите на свободный час: верх — начало в :00, низ — в :30. Прошедшее время закрыто.
                             </p>
                             <Timeline
@@ -255,7 +250,7 @@ export function MobileCalendar() {
                     /* Schedule (all rooms, chronological) */
                     <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {dayBookings.length === 0 ? (
-                            <EmptyState compact title="В этот день ничего не забронировано" />
+                            <EmptyState compact illustration="plant" title="В этот день ничего не забронировано" />
                         ) : dayBookings.map(({ b, startMin, endMin }) => {
                             const own = isOwnBooking(b);
                             const r = RESOURCES.find(x => x.id === b.resourceId);
@@ -274,7 +269,7 @@ export function MobileCalendar() {
                                         border: own
                                             ? `1px solid ${COLOR.accent}`
                                             : `1px solid ${COLOR.ink05}`,
-                                        borderRadius: 12,
+                                        borderRadius: RADIUS.control,
                                         padding: '10px 12px',
                                         textAlign: 'left',
                                         fontFamily: 'inherit',
@@ -284,19 +279,20 @@ export function MobileCalendar() {
                                         gap: 12,
                                     }}
                                 >
-                                    <div style={{
-                                        fontSize: 14,
+                                    <div className="num" style={{
+                                        fontSize: TEXT.small,
                                         fontWeight: 600,
                                         minWidth: 88,
+                                        whiteSpace: 'nowrap',
                                     }}>
                                         {minToHHMM(startMin)}–{minToHHMM(endMin)}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 600 }}>
+                                        <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>
                                             {r?.name ?? b.resourceId}
                                         </div>
                                         {/* Без прозрачности: ink-60 × 0.6 уходило ниже читаемого. */}
-                                        <div style={{ fontSize: 12, marginTop: 1 }}>
+                                        <div style={{ fontSize: TEXT.caption, marginTop: 1 }}>
                                             {own ? 'Ваша бронь' : 'Занято'}
                                         </div>
                                     </div>
@@ -336,7 +332,7 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
             height: totalHeight,
             background: COLOR.card,
             border: `1px solid ${COLOR.ink08}`,
-            borderRadius: 14,
+            borderRadius: RADIUS.sheet,
             overflow: 'hidden',
         }}>
             {/* Hour rows — clickable for quick-book */}
@@ -349,9 +345,11 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
                 const slotFree = (from: number) => !bookings.some(x => x.startMin < from + 60 && x.endMin > from);
                 // «+ Свободно» — в верхней половине, если весь час свободен;
                 // «+ с :30» — в нижней, если с :30 свободен час, а с :00 — нет.
+                // 09.11 фаза 3: вместо десяти одинаковых «+ Свободно» — еле заметный
+                // «+» справа (подсказка «нажмите на свободный час» — одна, сверху).
                 const label = past || startMin + 60 > DAY_END * 60 ? null
-                    : hourStart ? (slotFree(startMin) ? '+ Свободно' : null)
-                        : (slotFree(startMin) && (startMin - 30 <= freeFromMin || !slotFree(startMin - 30)) ? `+ с ${Math.floor(startMin / 60)}:30` : null);
+                    : hourStart ? (slotFree(startMin) ? '+' : null)
+                        : (slotFree(startMin) && (startMin - 30 <= freeFromMin || !slotFree(startMin - 30)) ? `+ :30` : null);
                 const hh = `${Math.floor(startMin / 60)}:${hourStart ? '00' : '30'}`;
                 return (
                     <button
@@ -371,14 +369,15 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
                             alignItems: 'center',
                             cursor: past ? 'default' : 'pointer',
                             fontFamily: 'inherit',
-                            padding: `0 12px 0 ${TIME_RAIL_PX + 8}px`,
-                            textAlign: 'left',
+                            padding: `0 16px 0 ${TIME_RAIL_PX + 8}px`,
+                            justifyContent: 'flex-end',
+                            textAlign: 'right',
                             color: COLOR.ink60,
-                            fontSize: 12,
+                            fontSize: TEXT.small,
                         }}
                         aria-label={past ? `${hh} — время прошло` : `Забронировать с ${hh}`}
                     >
-                        {label && <span aria-hidden="true">{label}</span>}
+                        {label && <span aria-hidden="true" className="num" style={{ fontWeight: 500 }}>{label}</span>}
                     </button>
                 );
             })}
@@ -399,11 +398,12 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
                 return (
                     <div
                         key={`lbl-${hour}`}
+                        className="num"
                         style={{
                             position: 'absolute',
                             top: i * HOUR_PX + 4,
                             left: 8,
-                            fontSize: 12,
+                            fontSize: TEXT.caption,
                             fontWeight: 600,
                             color: COLOR.ink60,
                             pointerEvents: 'none',
@@ -453,10 +453,10 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
                             overflow: 'hidden',
                         }}
                     >
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>
+                        <div className="num" style={{ fontSize: TEXT.caption, fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {minToHHMM(startMin)}–{minToHHMM(endMin)}
                         </div>
-                        <div style={{ fontSize: 12 }}>
+                        <div style={{ fontSize: TEXT.caption }}>
                             {own ? 'Ваша бронь' : 'Занято'}
                         </div>
                     </button>
@@ -466,10 +466,11 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }:
     );
 }
 
+// 09.11 фаза 3: стрелки дня — тихие иконки (были серые квадраты тяжелее заголовка).
 const navBtn: React.CSSProperties = {
-    background: COLOR.sunken,
+    background: 'transparent',
     border: 'none',
-    borderRadius: 10,
+    borderRadius: RADIUS.control,
     width: 44, height: 44,
     display: 'grid', placeItems: 'center',
     cursor: 'pointer',
@@ -480,7 +481,7 @@ const modeBtn = (active: boolean): React.CSSProperties => ({
     background: active ? COLOR.card : 'transparent',
     color: active ? COLOR.ink : COLOR.ink60,
     border: 'none',
-    borderRadius: 8,
+    borderRadius: RADIUS.control,
     width: 44, height: 44,
     display: 'grid', placeItems: 'center',
     cursor: 'pointer',

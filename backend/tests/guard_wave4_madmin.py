@@ -141,7 +141,7 @@ def test_access_rights_wrapped():
     assert "<AdminAccessRights />" not in routes, "десктопные права доступа без обёртки с полями"
     assert "MobileAdminAccessRights" in routes
     wrap = _m("MobileAdminAccessRights.tsx")
-    assert "padding: '0 16px" in wrap and "MobilePageHeader" in wrap
+    assert "padding: '0 16px" in wrap and "MobilePageHeader" in wrap  # 09.11 фаза 3: свои строки, поля 16 — те же
 
 
 # ─────────────────────────────────────────────────────────────────────────

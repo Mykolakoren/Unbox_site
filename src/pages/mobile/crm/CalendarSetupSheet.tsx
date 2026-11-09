@@ -160,8 +160,8 @@ const text: React.CSSProperties = { fontSize: 14, lineHeight: 1.45, color: 'var(
 
 const codeBox: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-    marginTop: 8, padding: '8px 10px', borderRadius: 10,
+    marginTop: 8, padding: '8px 12px', borderRadius: 8,
     background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)', color: 'var(--color-ink)',
 };
 
-const note: React.CSSProperties = { borderRadius: 10, padding: '10px 12px', fontSize: 14, lineHeight: 1.4 };
+const note: React.CSSProperties = { borderRadius: 8, padding: '10px 12px', fontSize: 14, lineHeight: 1.4 };

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Send, X } from 'lucide-react';
 import type { User } from '../../store/types';
-import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
+import { COLOR, RADIUS, TEXT } from '../../design/tokens';
+import { Button } from '../../components/ui/Button';
 
 const DISMISS_KEY = 'unbox.m.tgCardDismissedAt';
 const DISMISS_DAYS = 7;
@@ -36,28 +37,28 @@ export function TelegramConnectCard({ user, reason, dismissible = true }: {
     const [hidden, setHidden] = useState(() => dismissible && dismissedRecently());
     if (!user || isTelegramLinked(user) || hidden) return null;
     return (
+        // 09.11 фаза 3: спокойная карточка с бирюзовым значком вместо голубой
+        // «статусной» плашки (синий в палитре — только «запланировано»).
         <div role="note" style={{
-            background: STATUS.info.bg, color: STATUS.info.fg,
-            borderRadius: RADIUS.sheet, padding: '12px 14px',
-            display: 'flex', gap: 10, alignItems: 'flex-start', textAlign: 'left', width: '100%',
+            background: COLOR.card, color: COLOR.ink,
+            border: `1px solid ${COLOR.ink10}`,
+            borderRadius: RADIUS.sheet, padding: '12px 16px',
+            display: 'flex', gap: 12, alignItems: 'flex-start', textAlign: 'left', width: '100%',
         }}>
-            <Send size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+            <Send size={20} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: COLOR.accentInk }} />
             <div style={{ flex: 1, minWidth: 0, fontSize: TEXT.small, lineHeight: 1.45 }}>
-                <div style={{ fontWeight: 600 }}>Подключите Telegram</div>
-                <div style={{ color: COLOR.ink80 }}>
+                <div style={{ fontWeight: 600, fontSize: TEXT.body }}>Подключите Telegram</div>
+                <div style={{ color: COLOR.ink60, marginTop: 2 }}>
                     {reason ?? 'Чтобы не пропустить подтверждение брони, напоминания и сообщение, если вашу пересдачу заберут.'}
                 </div>
-                <button
-                    type="button"
+                <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => navigate('/m/profile')}
-                    style={{
-                        marginTop: 6, minHeight: 44, padding: 0, background: 'none', border: 'none',
-                        color: STATUS.info.fg, fontWeight: 600, fontSize: TEXT.small, fontFamily: 'inherit',
-                        textDecoration: 'underline', cursor: 'pointer',
-                    }}
+                    style={{ marginTop: 8 }}
                 >
                     Подключить за минуту
-                </button>
+                </Button>
             </div>
             {dismissible && (
                 <button
@@ -67,7 +68,7 @@ export function TelegramConnectCard({ user, reason, dismissible = true }: {
                         try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* не страшно */ }
                         setHidden(true);
                     }}
-                    style={{ width: 44, height: 44, margin: '-10px -10px 0 0', background: 'none', border: 'none', color: STATUS.info.fg, cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
+                    style={{ width: 44, height: 44, margin: '-10px -10px 0 0', background: 'none', border: 'none', color: COLOR.ink60, cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
                 >
                     <X size={16} aria-hidden="true" />
                 </button>

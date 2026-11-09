@@ -188,7 +188,7 @@ export function MobileCloseShiftSheet({ branch, systemBalance, blind: blindProp 
                                 padding: '12px',
                                 minHeight: 44,
                                 background: isOn ? 'var(--status-ok-bg)' : 'var(--color-sunken)',
-                                borderRadius: 10, cursor: 'pointer',
+                                borderRadius: 8, cursor: 'pointer',
                             }}
                         >
                             <input
@@ -221,7 +221,7 @@ export function MobileCloseShiftSheet({ branch, systemBalance, blind: blindProp 
 
             {/* Cash count */}
             <div style={{
-                background: 'var(--color-sunken)', borderRadius: 12, padding: '14px 16px',
+                background: 'var(--color-sunken)', borderRadius: 16, padding: '16px',
                 display: 'flex', flexDirection: 'column', gap: 12,
             }}>
                 {/* В4 (владелец 01.10): слепой пересчёт. Сначала админ вводит,

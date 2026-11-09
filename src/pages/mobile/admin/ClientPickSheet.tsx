@@ -37,7 +37,7 @@ export function ClientPickSheet({ onClose, onPick }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{
                     display: 'flex', alignItems: 'center', background: 'var(--color-sunken)',
-                    borderRadius: 12, padding: '0 12px', minHeight: 44, gap: 8,
+                    borderRadius: 8, padding: '0 12px', minHeight: 44, gap: 8,
                 }}>
                     <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
@@ -62,7 +62,7 @@ export function ClientPickSheet({ onClose, onPick }: {
                             className="press"
                             style={{
                                 display: 'flex', alignItems: 'center', gap: 10, minHeight: 52, padding: '8px 12px',
-                                borderRadius: 12, border: '1px solid var(--color-ink-08)', background: 'var(--color-card)',
+                                borderRadius: 8, border: '1px solid var(--color-ink-08)', background: 'var(--color-card)',
                                 fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer', color: 'var(--color-ink)',
                             }}
                         >

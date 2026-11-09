@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { BookOpen, Check, ChevronDown, Hourglass, Repeat, UserRound } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, Hourglass, Repeat, UserRound, Wallet } from 'lucide-react';
+import { ChoiceCard } from '../../components/ui/ChoiceCard';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { tbilisiNow } from '../../utils/dateUtils';
@@ -767,7 +768,7 @@ export function MobileCheckout() {
                             className="press"
                             style={{
                                 width: '100%', minHeight: 56, display: 'flex', alignItems: 'center', gap: 12,
-                                padding: '10px 14px', borderRadius: 12, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
+                                padding: '10px 14px', borderRadius: RADIUS.control, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
                                 background: forChosen ? COLOR.card : STATUS.pending.bg,
                                 border: `1px solid ${forChosen ? COLOR.ink20 : `${STATUS.pending.fg}66`}`,
                                 color: COLOR.ink,
@@ -808,9 +809,14 @@ export function MobileCheckout() {
                                     {' '}· {formatBookingDuration(Math.round(totalDurationHours * 60))}
                                 </span>
                             </div>
-                            <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
-                                {resource?.name}{location ? ` · ${location.name}, ${location.address}` : ''}
+                            {/* 09.11 фаза 3: кабинет · центр и адрес — отдельными строками
+                                (адрес рвался посередине: «Тбел / Абусеридзе, 38»). */}
+                            <div style={{ fontSize: TEXT.small, color: COLOR.ink80 }}>
+                                {resource?.name}{location ? ` · ${location.name}` : ''}
                             </div>
+                            {location?.address && (
+                                <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>{location.address}</div>
+                            )}
                         </div>
                         <button
                             type="button"
@@ -932,43 +938,38 @@ export function MobileCheckout() {
                     </div>
                 </Section>
 
-                {/* Чем платите — одна строка; три способа — в шторке. */}
-                {!needsApplication && (
-                    <div style={pad} id="m-checkout-pay">
-                        <button
-                            type="button"
-                            onClick={() => setPayOpen(true)}
-                            className="press"
-                            style={{
-                                width: '100%', minHeight: 60,
-                                background: COLOR.accentSoft, color: COLOR.ink,
-                                border: 'none', borderRadius: 12,
-                                padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                                fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
-                            }}
-                        >
-                            <span style={{ flex: 1, minWidth: 0 }}>
-                                <span style={{ display: 'block', fontSize: TEXT.caption, color: COLOR.ink60 }}>Чем платите</span>
-                                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>{payTitle}</span>
-                            </span>
-                            <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk }}>
-                                {payChoices > 1 ? 'Изменить' : 'Подробнее'}
-                            </span>
-                        </button>
-                        {pauseNote && (
-                            <div role="status" style={{ marginTop: 6, fontSize: TEXT.small, lineHeight: 1.45, color: STATUS.info.fg }}>
-                                {pauseNote}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Допуслуги и повтор — свёрнутыми строками (нужны редко). */}
-                <div style={pad}>
+                {/* 09.11 фаза 3: «Чем платите» — строкой той же карточки, что «Допуслуги»
+                    и «Повторять» (была единственная бирюзовая подложка целого блока).
+                    Три способа — в шторке. Допуслуги и повтор — свёрнутыми строками. */}
+                <div style={pad} id="m-checkout-pay">
                     <div style={{ ...card, overflow: 'hidden' }}>
+                        {!needsApplication && (
+                            <button
+                                type="button"
+                                onClick={() => setPayOpen(true)}
+                                className="press"
+                                style={{
+                                    width: '100%', minHeight: 56,
+                                    background: 'transparent', color: COLOR.ink,
+                                    border: 'none',
+                                    padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                                    fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
+                                }}
+                            >
+                                <Wallet size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                                <span style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ display: 'block', fontSize: TEXT.small, fontWeight: 600 }}>Чем платите</span>
+                                    <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink80 }}>{payTitle}</span>
+                                </span>
+                                <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
+                                    {payChoices > 1 ? 'Изменить' : 'Подробнее'}
+                                </span>
+                            </button>
+                        )}
                         {availableExtras.length > 0 && (
                             <>
                                 <FoldRow
+                                    divider={!needsApplication}
                                     label="Допуслуги"
                                     value={state.extras.length === 0 ? 'Нет · Добавить' : extrasSummary}
                                     open={extrasOpen}
@@ -979,34 +980,13 @@ export function MobileCheckout() {
                                         {availableExtras.map(e => {
                                             const active = state.extras.includes(e.id);
                                             return (
-                                                <button
+                                                <ChoiceCard
                                                     key={e.id}
-                                                    role="checkbox"
-                                                    aria-checked={active}
+                                                    selected={active}
                                                     onClick={() => state.toggleExtra(e.id)}
-                                                    style={{
-                                                        minHeight: 48,
-                                                        background: active ? COLOR.accentSoft : COLOR.card,
-                                                        border: `1px solid ${active ? COLOR.accent : COLOR.ink10}`,
-                                                        borderRadius: RADIUS.control,
-                                                        padding: '8px 12px',
-                                                        display: 'flex', alignItems: 'center', gap: 12,
-                                                        cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: COLOR.ink,
-                                                    }}
-                                                >
-                                                    <span aria-hidden="true" style={{
-                                                        width: 22, height: 22, borderRadius: 6, flexShrink: 0,
-                                                        background: active ? COLOR.accent : 'transparent',
-                                                        border: `1.5px solid ${active ? COLOR.accent : COLOR.ink40}`,
-                                                        display: 'grid', placeItems: 'center', color: COLOR.onAccent,
-                                                    }}>
-                                                        {active && <Check size={14} />}
-                                                    </span>
-                                                    <span style={{ flex: 1, fontSize: TEXT.small, fontWeight: 600 }}>{e.name}</span>
-                                                    <span className="num" style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
-                                                        {e.price > 0 ? `+${formatGel(e.price)}` : 'бесплатно'}
-                                                    </span>
-                                                </button>
+                                                    title={<span style={{ fontSize: TEXT.small }}>{e.name}</span>}
+                                                    trail={<span className="num">{e.price > 0 ? `+${formatGel(e.price)}` : 'бесплатно'}</span>}
+                                                />
                                             );
                                         })}
                                     </div>
@@ -1018,7 +998,7 @@ export function MobileCheckout() {
                             value={recurSummary}
                             open={recurOpen}
                             onToggle={() => setRecurOpen(o => !o)}
-                            divider={availableExtras.length > 0}
+                            divider={availableExtras.length > 0 || !needsApplication}
                         />
                         {recurOpen && (
                             <div style={{ padding: '0 16px 14px' }}>
@@ -1115,6 +1095,18 @@ export function MobileCheckout() {
                     </div>
                 </div>
 
+                {!needsApplication && (
+                    <>
+                        {pauseNote && (
+                            <div style={pad}>
+                                <div role="status" style={{ fontSize: TEXT.small, lineHeight: 1.45, color: STATUS.info.fg }}>
+                                    {pauseNote}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+
                 {/* Что произойдёт: одобрение, когда и что спишем, до какого момента
                     отмена бесплатная. Тексты списания — те же, что были под итогом. */}
                 {!needsApplication && (
@@ -1122,7 +1114,7 @@ export function MobileCheckout() {
                     <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 8, fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink }}>
                         {expectApproval ? (
                             <li>
-                                <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4, color: STATUS.pending.fg }} />
+                                <Hourglass size={14} aria-hidden="true" style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4, color: STATUS.pending.fg }} />
                                 <b>{hotInfo?.reason}</b> — {isSeries
                                     ? 'первая встреча уйдёт администратору на одобрение, остальные сразу ваши.'
                                     : approvalSome
@@ -1475,7 +1467,7 @@ export function MobileCheckout() {
                         <div style={{ fontSize: TEXT.small, color: COLOR.ink80, lineHeight: 1.5 }}>
                             Занято {seriesConflicts.length} из {effectiveOccurrences}:
                         </div>
-                        <div style={{ maxHeight: 160, overflowY: 'auto', background: COLOR.sunken, borderRadius: 12,
+                        <div style={{ maxHeight: 160, overflowY: 'auto', background: COLOR.sunken, borderRadius: RADIUS.control,
                                       padding: '10px 12px', fontSize: TEXT.small, lineHeight: 1.7 }}>
                             {seriesConflicts.map(c => (
                                 <div key={c.date}>{formatDateLabel(c.date, { capitalize: true })}</div>
@@ -1614,9 +1606,11 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
             aria-checked={on}
             style={{
                 minHeight: 60,
+                // 09.11 фаза 3: тот же язык «выбрано», что у ChoiceCard (рамка 1.5 px accent, радиус 8).
                 background: on ? COLOR.accentSoft : COLOR.card,
                 border: `1px solid ${on ? COLOR.accent : COLOR.ink10}`,
-                borderRadius: 12,
+                boxShadow: on ? `inset 0 0 0 0.5px ${COLOR.accent}` : undefined,
+                borderRadius: RADIUS.control,
                 padding: '10px 14px',
                 display: 'flex',
                 alignItems: 'center',
@@ -1635,8 +1629,8 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
                 {on && <div style={{ width: 10, height: 10, borderRadius: 999, background: COLOR.accent }} />}
             </div>
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: TEXT.small, fontWeight: 600, color: disabled ? COLOR.ink60 : COLOR.ink }}>{label}</div>
-                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
+                <div style={{ fontSize: TEXT.body, fontWeight: 600, color: disabled ? COLOR.ink60 : on ? COLOR.accentInk : COLOR.ink }}>{label}</div>
+                {sub && <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
             </div>
         </button>
     );

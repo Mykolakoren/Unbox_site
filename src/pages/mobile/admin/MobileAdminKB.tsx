@@ -35,32 +35,30 @@ export function MobileAdminKB() {
     const [expandedId, setExpandedId] = useState<SectionId | null>(null);
 
     return (
-        <div style={{ padding: '0 16px 90px' }}>
-            <MobilePageHeader title="База знаний" fallbackTo="/m/admin/dashboard" />
-            <div style={{
-                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-                textTransform: 'uppercase', color: 'var(--color-ink-60)',
-                marginBottom: 10,
-            }}>
-                База знаний · {SECTIONS.length} разделов
-            </div>
+        // 09.11 фаза 3: шапка во всю ширину, число разделов — в подзаголовке (без
+        // повторной подписи «БАЗА ЗНАНИЙ · 5»); разделы — одна группа с линиями.
+        <div style={{ paddingBottom: 90 }}>
+            <MobilePageHeader title="База знаний" subtitle={`${SECTIONS.length} разделов`} fallbackTo="/m/admin/dashboard" />
+            <div style={{ padding: '16px 16px 0' }}>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {SECTIONS.map(s => {
+            <div style={{
+                background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
+                borderRadius: 16, overflow: 'hidden',
+            }}>
+                {SECTIONS.map((s, i) => {
                     const Icon = s.icon;
                     const isOpen = expandedId === s.id;
                     return (
-                        <div key={s.id}>
+                        <div key={s.id} style={{ borderTop: i > 0 ? '1px solid var(--color-ink-10)' : 'none' }}>
                             <button
                                 onClick={() => setExpandedId(isOpen ? null : s.id)}
+                                aria-expanded={isOpen}
                                 style={{
                                     width: '100%',
-                                    background: 'var(--color-card)',
-                                    border: '1px solid var(--color-ink-08)',
-                                    borderRadius: 12,
-                                    borderBottomLeftRadius: isOpen ? 0 : 12,
-                                    borderBottomRightRadius: isOpen ? 0 : 12,
-                                    padding: '12px',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    minHeight: 56,
+                                    padding: '12px 16px',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 10,
@@ -69,22 +67,13 @@ export function MobileAdminKB() {
                                     textAlign: 'left',
                                 }}
                             >
-                                <div style={{
-                                    width: 36, height: 36, borderRadius: 9,
-                                    background: 'var(--color-sunken)',
-                                    color: 'var(--color-ink-80)',
-                                    display: 'grid', placeItems: 'center',
-                                    flexShrink: 0,
-                                }}>
-                                    <Icon size={16} aria-hidden="true" />
-                                </div>
+                                <Icon size={20} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)' }}>
+                                    <div style={{ fontWeight: 600, fontSize: 16, color: 'var(--color-ink)' }}>
                                         {s.title}
                                     </div>
                                     <div style={{
-                                        fontSize: 12, color: 'var(--color-ink-60)',
-                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                        fontSize: 14, color: 'var(--color-ink-60)',
                                         marginTop: 2,
                                     }}>
                                         {s.sub}
@@ -108,10 +97,10 @@ export function MobileAdminKB() {
 
             <div style={{
                 marginTop: 16,
-                padding: 12,
+                padding: 16,
                 background: 'var(--color-sunken)',
-                borderRadius: 10,
-                fontSize: 12,
+                borderRadius: 16,
+                fontSize: 14,
                 color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
@@ -124,6 +113,7 @@ export function MobileAdminKB() {
                     <br />
                     <DesktopLink href="/admin/knowledge-base">Открыть базу знаний →</DesktopLink>
                 </span>
+            </div>
             </div>
         </div>
     );
@@ -150,12 +140,7 @@ function SectionPreview({ section }: { section: Section }) {
 
     return (
         <div style={{
-            background: 'var(--color-card)',
-            border: '1px solid var(--color-ink-08)',
-            borderTop: 'none',
-            borderBottomLeftRadius: 12,
-            borderBottomRightRadius: 12,
-            padding: '12px 14px 14px',
+            padding: '0 16px 16px 48px',
             fontSize: 14,
             color: 'var(--color-ink-80)',
             lineHeight: 1.55,

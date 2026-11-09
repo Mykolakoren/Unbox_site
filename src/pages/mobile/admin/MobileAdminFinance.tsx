@@ -29,6 +29,10 @@ import type { User } from '../../../store/types';
 import { branchLabel, humanizeMoneyText } from './branchLabel';
 import { ClientPickSheet } from './ClientPickSheet';
 import { TopupSheet } from './TopupSheet';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { SummaryCard } from '../../../components/ui/SummaryCard';
+import { ListGroup, ListRow, ListIcon } from '../../../components/ui/ListRow';
+import { PageTabs } from '../../../components/ui/PageTabs';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
 type Branch = typeof BRANCHES[number];
@@ -37,7 +41,8 @@ type Period = 'day' | 'week' | 'month';
 type View = 'cash' | 'day' | 'rebates';
 
 const PERIOD_LABEL: Record<Period, string> = {
-    day: 'Сегодня',
+    // «День», а не «Сегодня»: рядом подпись периода «Сегодня» — слово шло дважды подряд.
+    day: 'День',
     week: 'Неделя',
     month: 'Месяц',
 };
@@ -264,15 +269,29 @@ function MobileAdminFinanceScreen() {
         });
     };
 
+    // 09.11 фаза 3 (admin-design №7, №8): «+ Операция» — главная кнопка в шапке
+    // (круглый плавающий «+» закрывал колонку сумм); «Сейчас в кассе» сразу под
+    // разделами, «Закрыть смену» — тихой кнопкой в той же карточке; период и
+    // итоги — одной карточкой. Меньше рядов переключателей до первой операции.
     return (
-        <div style={{ padding: '14px 16px 96px' }}>
-            <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 0 12px', color: 'var(--color-ink)' }}>
-                Касса
-            </h1>
+        <div style={{ paddingTop: 8, paddingBottom: 96 }}>
+            <MobilePageHeader
+                variant="large"
+                className="pb-0"
+                title="Касса"
+                action={
+                    <Button icon={<Plus size={18} aria-hidden="true" />} onClick={() => setShowAdd(true)} aria-label="Добавить операцию">
+                        Операция
+                    </Button>
+                }
+            />
+            <div style={{ padding: '16px 16px 0' }}>
 
-            {/* Раздел: операции / итоги дня / недельные скидки (решение владельца 02.10). */}
+            {/* Раздел: операции / итоги дня / недельные скидки (решение владельца 02.10).
+                Вкладки страницы — подчёркиванием, а не вторым таким же сегментом, как
+                период ниже: раздел экрана и фильтр выглядят по-разному. */}
             {canReports && (
-                <Segmented<View>
+                <PageTabs<View>
                     aria-label="Раздел кассы"
                     options={[
                         { value: 'cash', label: 'Операции' },
@@ -281,13 +300,12 @@ function MobileAdminFinanceScreen() {
                     ]}
                     value={view}
                     onChange={setView}
-                    className="mb-3"
                 />
             )}
 
             {/* Филиал — один фильтр на весь экран (недельные скидки — по всем филиалам). */}
             {view !== 'rebates' && (
-            <div role="group" aria-label="Филиал" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
+            <div role="group" aria-label="Филиал" className="ui-chip-row ui-chip-row--scroll" style={{ marginBottom: 12, paddingBottom: 4 }}>
                 {BRANCHES.map(b => (
                     <Chip
                         key={b}
@@ -309,119 +327,121 @@ function MobileAdminFinanceScreen() {
             )}
 
             {(view === 'cash' || !canReports) && (<>
-            {/* 1. Сейчас в кассе — не зависит от периода. */}
+            {/* 1. Сейчас в кассе — не зависит от периода. 4. «Закрыть смену» —
+                всегда видна (G9-10), тихой кнопкой здесь же; при «Все» — сначала филиал. */}
             <section aria-label="Сейчас в кассе" style={{ marginBottom: 16 }}>
-                <SectionTitle>Сейчас в кассе · {branch === 'all' ? 'все филиалы' : branch}</SectionTitle>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 6,
-                }}>
-                    {/* axios-интерсептор клиента конвертит snake_case → camelCase
-                        автоматически (см. api/client.ts). Поэтому реально
-                        прилетает cardTbc/cardBog, а не card_tbc/card_bog. */}
-                    {hideCash
-                        ? <HiddenCashTile />
-                        : <BalanceTile label="Наличные" value={balances.cash} />}
-                    <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
-                    <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
-                </div>
+                <SummaryCard
+                    label={`Сейчас в кассе · ${branch === 'all' ? 'все филиалы' : shortBranch(branch)}`}
+                    aside={
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<Lock size={14} aria-hidden="true" />}
+                            onClick={() => {
+                                if (branch === 'all') setPickShiftBranch(true);
+                                else setCloseShiftOpen(true);
+                            }}
+                            aria-label={branch === 'all' ? 'Закрыть смену' : `Закрыть смену · ${branch}`}
+                        >
+                            Закрыть смену
+                        </Button>
+                    }
+                >
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                        gap: 8,
+                    }}>
+                        {/* axios-интерсептор клиента конвертит snake_case → camelCase
+                            автоматически (см. api/client.ts). Поэтому реально
+                            прилетает cardTbc/cardBog, а не card_tbc/card_bog. */}
+                        {hideCash
+                            ? <HiddenCashTile />
+                            : <BalanceTile label="Наличные" value={balances.cash} />}
+                        <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
+                        <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
+                    </div>
+                </SummaryCard>
             </section>
 
-            {/* 2. Период. */}
-            <section aria-label="Итоги периода" style={{ marginBottom: 14 }}>
-                <SectionTitle>Итоги периода</SectionTitle>
+            {/* 2–3. Период и «доход / расход / разница» — одной карточкой. */}
+            <section aria-label="Итоги периода" style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <Segmented<Period>
                     aria-label="Период"
                     options={(['day', 'week', 'month'] as Period[]).map(p => ({ value: p, label: PERIOD_LABEL[p] }))}
                     value={period}
                     onChange={p => { setPeriod(p); setOffset(0); }}
                 />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '8px 0' }}>
-                    <Button
-                        variant="quiet"
-                        size="touch"
-                        icon={<ChevronLeft size={20} aria-hidden="true" />}
-                        aria-label="Предыдущий период"
-                        onClick={() => setOffset(o => o - 1)}
-                    />
-                    <div style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }} aria-live="polite">
-                        {range.label}
+                <SummaryCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '-8px -8px 0' }}>
+                        <Button
+                            variant="quiet"
+                            size="touch"
+                            icon={<ChevronLeft size={20} aria-hidden="true" />}
+                            aria-label="Предыдущий период"
+                            onClick={() => setOffset(o => o - 1)}
+                        />
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'center', fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }} aria-live="polite">
+                            {range.label}
+                            {offset !== 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setOffset(0)}
+                                    style={{
+                                        display: 'block', margin: '0 auto', background: 'none', border: 'none', padding: '2px 4px',
+                                        fontFamily: 'inherit', fontSize: 14, fontWeight: 500, color: 'var(--color-accent-ink)', cursor: 'pointer',
+                                    }}
+                                >
+                                    {period === 'day' ? 'К сегодня' : period === 'week' ? 'К этой неделе' : 'К этому месяцу'}
+                                </button>
+                            )}
+                        </div>
+                        <Button
+                            variant="quiet"
+                            size="touch"
+                            icon={<ChevronRight size={20} aria-hidden="true" />}
+                            aria-label="Следующий период"
+                            disabled={offset >= 0}
+                            onClick={() => setOffset(o => o + 1)}
+                        />
                     </div>
-                    <Button
-                        variant="quiet"
-                        size="touch"
-                        icon={<ChevronRight size={20} aria-hidden="true" />}
-                        aria-label="Следующий период"
-                        disabled={offset >= 0}
-                        onClick={() => setOffset(o => o + 1)}
-                    />
-                    {offset !== 0 && (
-                        <Button variant="secondary" size="touch" onClick={() => setOffset(0)}>
-                            {period === 'day' ? 'Сегодня' : period === 'week' ? 'Эта неделя' : 'Этот месяц'}
-                        </Button>
-                    )}
-                </div>
 
-                {/* 3. + доход / − расход / = разница. */}
-                <div style={{
-                    background: 'var(--color-sunken)',
-                    color: 'var(--color-ink)',
-                    borderRadius: 12,
-                    padding: '12px 14px',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 8,
-                }}>
-                    <TotalCell icon={<TrendingUp size={14} aria-hidden="true" />} label="+ доход" value={totals?.income} positive />
-                    <TotalCell icon={<TrendingDown size={14} aria-hidden="true" />} label="− расход" value={totals?.expense} />
-                    <TotalCell icon={<Wallet size={14} aria-hidden="true" />} label="= разница" value={totals?.net} positive={!totals || totals.net >= 0} />
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 6, lineHeight: 1.4 }}>
-                    {periodCaption}{branch === 'all' ? ', все филиалы' : `, ${branch}`}
-                    {summary && summary.adjustmentCount > 0 && (
-                        <>
-                            {' '}· корректировки (не деньги):
-                            {summary.adjustmentIncome > 0 && ` ${formatGel(summary.adjustmentIncome, { sign: true })}`}
-                            {summary.adjustmentExpense > 0 && ` ${formatGel(-summary.adjustmentExpense)}`}
-                            {' '}— в итоги не входят
-                        </>
-                    )}
-                </div>
-                {!summary && summaryFailed && listTruncated && (
-                    <div style={{ fontSize: 12, color: 'var(--status-pending-fg)', marginTop: 4, lineHeight: 1.4 }}>
-                        Итоги посчитаны по последним {TX_LIMIT} операциям — могут быть неполными.
+                    {/* + доход / − расход / = разница: знак в числе, цвет — Money tone="flow"
+                        (приход зелёный, расход чернилами, ноль серый; красный — только у долга). */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                        <TotalCell icon={<TrendingUp size={14} aria-hidden="true" />} label="Доход" value={totals?.income} />
+                        <TotalCell icon={<TrendingDown size={14} aria-hidden="true" />} label="Расход" value={totals ? -totals.expense : undefined} />
+                        <TotalCell icon={<Wallet size={14} aria-hidden="true" />} label="Разница" value={totals?.net} />
                     </div>
-                )}
+                    <div className="num-inline" style={{ fontSize: 14, color: 'var(--color-ink-60)', lineHeight: 1.45 }}>
+                        {periodCaption}{branch === 'all' ? ', все филиалы' : `, ${branch}`}
+                        {summary && summary.adjustmentCount > 0 && (
+                            <>
+                                {' '}· корректировки (не деньги):
+                                {summary.adjustmentIncome > 0 && ` ${formatGel(summary.adjustmentIncome, { sign: true })}`}
+                                {summary.adjustmentExpense > 0 && ` ${formatGel(-summary.adjustmentExpense)}`}
+                                {' '}— в итоги не входят
+                            </>
+                        )}
+                    </div>
+                    {!summary && summaryFailed && listTruncated && (
+                        <div style={{ fontSize: 14, color: 'var(--status-pending-fg)', lineHeight: 1.45 }}>
+                            Итоги посчитаны по последним {TX_LIMIT} операциям — могут быть неполными.
+                        </div>
+                    )}
+                </SummaryCard>
             </section>
 
-            {/* 4. Закрыть смену — всегда видна (G9-10). При «Все» — сначала филиал. */}
-            <Button
-                variant="secondary"
-                block
-                icon={<Lock size={16} aria-hidden="true" />}
-                onClick={() => {
-                    if (branch === 'all') setPickShiftBranch(true);
-                    else setCloseShiftOpen(true);
-                }}
-                style={{ marginBottom: 16 }}
-            >
-                {branch === 'all' ? 'Закрыть смену' : `Закрыть смену · ${branch}`}
-            </Button>
-
             {/* 5. Операции. */}
-            <SectionTitle>
-                Операции · {listTruncated ? `последние ${scopedTransactions.length}` : scopedTransactions.length}
-            </SectionTitle>
             {isLoading ? (
                 <SkeletonList count={4} label="Загружаем операции" cardHeight={56} />
             ) : scopedTransactions.length === 0 ? (
-                // Отступ снизу — под круглую «+»: она закрывала подсказку (обход 10.10).
-                <div style={{ paddingBottom: 72 }}>
-                    <EmptyState compact title="В этом периоде операций нет" hint="Новую операцию можно добавить кнопкой «+»." />
-                </div>
+                <EmptyState compact title="В этом периоде операций нет" hint="Новую операцию можно добавить кнопкой «Операция» вверху." />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <ListGroup
+                    title="Операции"
+                    aside={<span className="num">{listTruncated ? `последние ${scopedTransactions.length}` : scopedTransactions.length}</span>}
+                >
                     {scopedTransactions.slice(0, TX_LIMIT).map(t => (
                         <TransactionRow
                             key={t.id}
@@ -429,31 +449,10 @@ function MobileAdminFinanceScreen() {
                             onTap={canEditTx(t) ? () => setEditingTx(t) : () => setViewingTx(t)}
                         />
                     ))}
-                </div>
+                </ListGroup>
             )}
             </>)}
-
-            {/* FAB */}
-            <button
-                onClick={() => setShowAdd(true)}
-                style={{
-                    position: 'fixed',
-                    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-                    right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
-                    width: 56, height: 56,
-                    borderRadius: 28,
-                    background: 'var(--color-ink)',
-                    color: 'var(--color-on-ink)',
-                    border: 'none',
-                    display: 'grid', placeItems: 'center',
-                    boxShadow: 'var(--shadow-pop)',
-                    cursor: 'pointer',
-                    zIndex: 50,
-                }}
-                aria-label="Добавить операцию"
-            >
-                <Plus size={22} aria-hidden="true" />
-            </button>
+            </div>
 
             {showAdd && (
                 <AddTransactionSheet
@@ -557,37 +556,16 @@ function MobileAdminFinanceScreen() {
     );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 8 }}>
-            {children}
-        </div>
-    );
-}
-
+/** Ячейка «Сейчас в кассе» — как ячейки SummaryCard (sunken, радиус 8); минус — красным (Money tone="balance"). */
 function BalanceTile({ label, value }: { label: string; value: number | undefined | null }) {
     // Defensive: backend may return partial balance object on auth/permission
     // edge cases (e.g. role has read but a column-level filter). Coercing to
     // 0 here keeps the page rendering instead of crashing on `undefined.toFixed`.
     const n = typeof value === 'number' ? value : 0;
-    const negative = n < 0;
     return (
-        <div style={{
-            background: 'var(--color-card)',
-            border: '1px solid var(--color-ink-08)',
-            borderRadius: 12,
-            padding: '10px 10px 12px',
-        }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
-                {label}
-            </div>
-            <div style={{
-                fontSize: 18,
-                fontWeight: 600,
-                color: negative ? 'var(--status-danger-fg)' : 'var(--color-ink)',
-            }}>
-                <Money value={n} />
-            </div>
+        <div className="ui-summary__stat">
+            <span className="ui-summary__stat-label">{label}</span>
+            <span className="ui-summary__stat-value"><Money value={n} tone="balance" /></span>
         </div>
     );
 }
@@ -595,38 +573,26 @@ function BalanceTile({ label, value }: { label: string; value: number | undefine
 /** Наличные для роли admin до закрытия смены — скрыты (решение владельца 3, 09.11). */
 function HiddenCashTile() {
     return (
-        <div data-cash-hidden style={{
-            background: 'var(--color-card)',
-            border: '1px solid var(--color-ink-08)',
-            borderRadius: 12,
-            padding: '10px 10px 12px',
-        }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
-                Наличные
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--color-ink-60)', display: 'flex', gap: 4, alignItems: 'flex-start', lineHeight: 1.3 }}>
+        <div data-cash-hidden className="ui-summary__stat">
+            <span className="ui-summary__stat-label">Наличные</span>
+            <span style={{ fontSize: 12, color: 'var(--color-ink-60)', display: 'flex', gap: 4, alignItems: 'flex-start', lineHeight: 1.3 }}>
                 <EyeOff size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
                 скрыто до закрытия смены
-            </div>
+            </span>
         </div>
     );
 }
 
-function TotalCell({ icon, label, value, positive }: { icon: React.ReactNode; label: string; value: number | undefined | null; positive?: boolean }) {
+function TotalCell({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | undefined | null }) {
     // Нет числа (итоги ещё грузятся) — «…», а не ложный «0 ₾».
     const loaded = typeof value === 'number';
-    const n = loaded ? value : 0;
     return (
-        <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 3 }}>
+        <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-ink-60)', marginBottom: 2 }}>
                 {icon} {label}
             </div>
-            <div className="num" style={{
-                fontSize: 16,
-                fontWeight: 600,
-                color: positive === false ? 'var(--status-danger-fg)' : 'var(--color-ink)',
-            }}>
-                {loaded ? formatGel(n) : '…'}
+            <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {loaded ? <Money value={value} tone="flow" /> : <span className="num">…</span>}
             </div>
         </div>
     );
@@ -650,54 +616,20 @@ function TransactionRow({ tx, onTap }: {
         txClient(tx),
         tx.adminName ? `записал(а) ${tx.adminName}` : '',
     ].filter(Boolean).join(' · ');
+    // 09.11 фаза 3: строка — общий ListRow; сумма — Money tone="flow" (приход
+    // зелёный, расход чернилами — красный только у долга); значок без цветной плитки.
     return (
-        <div
+        <ListRow
             onClick={onTap}
-            role={onTap ? 'button' : undefined}
-            tabIndex={onTap ? 0 : undefined}
-            onKeyDown={onTap ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } }) : undefined}
-            className={onTap ? 'press' : undefined}
-            style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 12px',
-            background: 'var(--color-card)',
-            borderRadius: 10,
-            border: '1px solid var(--color-ink-08)',
-            cursor: onTap ? 'pointer' : 'default',
-        }}>
-            <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: isIncome ? 'var(--status-ok-bg)' : 'var(--status-danger-bg)',
-                color: isIncome ? 'var(--status-ok-fg)' : 'var(--status-danger-fg)',
-                display: 'grid', placeItems: 'center',
-                flexShrink: 0,
-            }}>
-                {isIncome ? <TrendingUp size={14} aria-hidden="true" /> : <TrendingDown size={14} aria-hidden="true" />}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {tx.categoryName || humanizeMoneyText(tx.description) || (isIncome ? 'Доход' : 'Расход')}
-                </div>
-                {who && (
-                    <div data-tx-who style={{ fontSize: 12, color: 'var(--color-ink-80)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {who}
-                    </div>
-                )}
-                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {meta}
-                </div>
-            </div>
-            <div className="num" style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: isIncome ? 'var(--status-ok-fg)' : 'var(--status-danger-fg)',
-                whiteSpace: 'nowrap',
-            }}>
-                {formatGel(isIncome ? (tx.amount ?? 0) : -(tx.amount ?? 0), { sign: true })}
-            </div>
-        </div>
+            chevron={false}
+            lead={<ListIcon>{isIncome ? <TrendingUp size={18} /> : <TrendingDown size={18} />}</ListIcon>}
+            title={<span style={{ fontWeight: 500 }}>{tx.categoryName || humanizeMoneyText(tx.description) || (isIncome ? 'Доход' : 'Расход')}</span>}
+            subtitle={<>
+                {who && <span data-tx-who style={{ display: 'block', color: 'var(--color-ink-80)' }}>{who}</span>}
+                <span className="num-inline">{meta}</span>
+            </>}
+            trail={<Money value={isIncome ? (tx.amount ?? 0) : -(tx.amount ?? 0)} tone="flow" />}
+        />
     );
 }
 /** Имя клиента операции: client_name, иначе из описания «Пополнение баланса: Имя». */
@@ -948,7 +880,7 @@ function AddTransactionSheet({
                         className="press"
                         style={{
                             display: 'flex', alignItems: 'center', gap: 10, minHeight: 52, padding: '10px 12px',
-                            borderRadius: 12, border: '1px solid var(--color-ink-10)', background: 'var(--color-sunken)',
+                            borderRadius: 8, border: '1px solid var(--color-ink-10)', background: 'var(--color-sunken)',
                             fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer', color: 'var(--color-ink)',
                         }}
                     >
@@ -970,7 +902,7 @@ function AddTransactionSheet({
                         value={amount}
                         onChange={e => setAmount(e.target.value)}
                         autoFocus
-                        placeholder="0"
+                        size="hero"
                     />
                 </Field>
 
@@ -1009,7 +941,7 @@ function AddTransactionSheet({
                 {askWhoPays && (
                     <div data-who-pays role="group" aria-label="Кто платит?" style={{
                         background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
-                        borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+                        borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
                         <div style={{ fontSize: 14, fontWeight: 600 }}>Кто платит?</div>
                         <div style={{ fontSize: 12, lineHeight: 1.4 }}>

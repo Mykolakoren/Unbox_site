@@ -359,8 +359,12 @@ function GridHouseAdminShell({
                                                     textDecoration: 'none',
                                                     fontSize: 14,
                                                     fontWeight: active ? 600 : 500,
-                                                    background: active ? GH.ink : undefined,
-                                                    color: active ? GH.paper : GH.ink,
+                                                    // 09.11 фаза 3: текущий раздел — стиль «выбрано» (accent-soft +
+                                                    // полоса accent слева), а не заливка ink: в тёмной теме та
+                                                    // превращалась в слепящую белую плиту.
+                                                    background: active ? 'var(--color-accent-soft)' : undefined,
+                                                    color: active ? 'var(--color-accent-ink)' : GH.ink,
+                                                    boxShadow: active ? 'inset 3px 0 0 var(--color-accent)' : undefined,
                                                 }}
                                             >
                                                 <Icon size={16} aria-hidden="true" />

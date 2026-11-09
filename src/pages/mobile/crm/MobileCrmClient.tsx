@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-    ArrowLeft, Phone, MessageCircle, Mail, Plus, CalendarPlus, MapPin,
-    CheckCircle2, Clock, XCircle, Wallet, FileText, ChevronRight, Pencil,
+    Phone, MessageCircle, Mail, Plus, CalendarPlus, MapPin,
+    CheckCircle2, Clock, XCircle, Wallet, FileText, Pencil, PauseCircle,
 } from 'lucide-react';
 import { crmApi, type CrmClient, type CrmSession, type CrmPayment, type CrmNote } from '../../../api/crm';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -19,12 +19,18 @@ import { Field, TextArea } from '../../../components/ui/Field';
 import { UnpaidSessionsSheet } from '../../../components/crm/UnpaidSessionsSheet';
 import { PaymentEditSheet } from '../../../components/crm/PaymentEditSheet';
 import { accountLabel } from '../../../utils/paymentAccounts';
-import { getStatusDef, statusLabel } from '../../../design/statuses';
+import { statusLabel } from '../../../design/statuses';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { toastApiError } from '../../../utils/errors';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
-import { formatDateLabel, formatDayMonth, formatMoney, formatTime, formatTimeRange } from '../../../utils/format';
+import { formatDateLabel, formatDayMonth, formatMoney, formatMonthLabel, formatTime, formatTimeRange } from '../../../utils/format';
+import clsx from 'clsx';
+import { ListGroup, ListIcon, ListRow } from '../../../components/ui/ListRow';
+import { Money, moneyToneClass } from '../../../components/ui/Money';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { SummaryCard } from '../../../components/ui/SummaryCard';
 import { SessionActionSheet } from './SessionActionSheet';
 import { ClientEditSheet } from './ClientEditSheet';
 import { undoToast } from '../../../components/ui/undoToast';
@@ -264,90 +270,76 @@ export function MobileCrmClient() {
         }
     };
 
+    const contactLinks = [
+        telHref && { href: telHref, label: 'Позвонить', icon: <Phone size={16} aria-hidden="true" />, external: false },
+        tgHref && { href: tgHref, label: 'Написать', icon: <MessageCircle size={16} aria-hidden="true" />, external: true, aria: 'Написать в Telegram' },
+        client.email && { href: `mailto:${client.email}`, label: 'Почта', icon: <Mail size={16} aria-hidden="true" />, external: false },
+    ].filter(Boolean) as { href: string; label: string; icon: React.ReactNode; external: boolean; aria?: string }[];
+    const moneyStats = balance && ((balance.totalPaid ?? 0) > 0 || (balance.prepayment ?? 0) > 0 || client.basePrice > 0)
+        ? [
+            ...(client.basePrice > 0 ? [{ label: 'Ставка', value: <Money value={client.basePrice} currency={cur} /> }] : []),
+            { label: 'Оплачено за всё время', value: <Money value={balance.totalPaid ?? 0} currency={cur} /> },
+            ...((balance.prepayment ?? 0) > 0 ? [{ label: 'Аванс', value: <Money value={balance.prepayment} currency={cur} /> }] : []),
+        ]
+        : null;
+    const hasDebt = unpaid.length > 0 && !!debtTotal;
+    const feedGroups = groupByMonth(timeline.slice(0, feedLimit));
+
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <button
-                    onClick={() => navigate('/m/crm/clients')}
-                    aria-label="К списку клиентов"
-                    style={{
-                        background: 'var(--color-sunken)',
-                        border: 'none',
-                        borderRadius: 10,
-                        width: 44, height: 44,
-                        display: 'grid', placeItems: 'center',
-                        cursor: 'pointer',
-                        color: 'var(--color-ink)',
-                        flexShrink: 0,
-                    }}
-                >
-                    <ArrowLeft size={18} aria-hidden="true" />
-                </button>
-                <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1, minWidth: 0 }}>
-                    {client.name}
-                    {client.aliasCode && (
-                        <span className="num" style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-ink-60)', marginLeft: 8 }}>
-                            {aliasLabel(client.aliasCode)}
-                        </span>
-                    )}
-                </h1>
-                {!viewingOther && (
-                    <button
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 09.11 фаза 3: общая крупная шапка: «←» к списку, имя 28, код для календаря
+                мелко под именем (.mono), карандаш справа. */}
+            <MobilePageHeader
+                variant="large"
+                back
+                onBack={() => navigate('/m/crm/clients')}
+                title={client.name}
+                subtitle={client.aliasCode ? (
+                    <>код для календаря <span className="mono">{aliasLabel(client.aliasCode)}</span></>
+                ) : undefined}
+                action={!viewingOther ? (
+                    <Button
+                        variant="secondary"
                         onClick={() => setEditOpen(true)}
                         aria-label="Изменить клиента"
-                        style={{
-                            background: 'var(--color-sunken)', border: 'none', borderRadius: 10,
-                            width: 44, height: 44, display: 'grid', placeItems: 'center',
-                            cursor: 'pointer', color: 'var(--color-ink)', flexShrink: 0,
-                        }}
-                    >
-                        <Pencil size={18} aria-hidden="true" />
-                    </button>
-                )}
-            </div>
+                        icon={<Pencil size={18} aria-hidden="true" />}
+                    />
+                ) : undefined}
+                className="crm-client-header"
+            />
+            <style>{'.crm-client-header { padding-bottom: 0; }'}</style>
 
-            {!client.isActive && (
-                <div style={{
-                    margin: '0 16px', padding: '10px 12px', borderRadius: 10,
-                    background: 'var(--color-sunken)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                }}>
-                    <span style={{ flex: 1, minWidth: 160, fontSize: 14, lineHeight: 1.4 }}>
-                        <b>На паузе.</b> Сессии, оплаты и заметки сохранены; в списке «Активные» клиента не видно.
-                    </span>
-                    {!viewingOther && (
-                        <Button variant="secondary" size="touch" loading={pausing} onClick={togglePause}>
-                            Вернуть в работу
-                        </Button>
-                    )}
+            {/* Связь — компактные кнопки по содержимому (дизайн-ревью п. 13). */}
+            {contactLinks.length > 0 && (
+                <div style={{ padding: '0 16px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {contactLinks.map(l => (
+                        <a
+                            key={l.label}
+                            href={l.href}
+                            className="ui-btn ui-btn--secondary"
+                            aria-label={l.aria}
+                            {...(l.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                        >
+                            {l.icon}
+                            {l.label}
+                        </a>
+                    ))}
                 </div>
             )}
 
-            {/* Contacts row */}
-            {(telHref || tgHref || client.email) && (
-                <div style={{ padding: '0 16px', display: 'flex', gap: 8 }}>
-                    {telHref && (
-                        <a href={telHref} style={contactBtn}>
-                            <Phone size={16} aria-hidden="true" />
-                            <span style={{ fontSize: 12 }}>Звонок</span>
-                        </a>
-                    )}
-                    {tgHref && (
-                        <a
-                            href={tgHref}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            // Нейтральная, как «Звонок» (аудит G6-18, X4-15).
-                            style={contactBtn}
-                        >
-                            <MessageCircle size={16} aria-hidden="true" />
-                            <span style={{ fontSize: 12 }}>Telegram</span>
-                        </a>
-                    )}
-                    {client.email && (
-                        <a href={`mailto:${client.email}`} style={contactBtn}>
-                            <Mail size={16} aria-hidden="true" />
-                            <span style={{ fontSize: 12 }}>Почта</span>
-                        </a>
+            {!client.isActive && (
+                <div style={{
+                    margin: '0 16px', padding: '12px 16px', borderRadius: 16,
+                    background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
+                    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                }}>
+                    <span style={{ flex: 1, minWidth: 160, fontSize: 14, lineHeight: 1.45 }}>
+                        <b>На паузе.</b> Сессии, оплаты и заметки сохранены; в списке «Активные» клиента не видно.
+                    </span>
+                    {!viewingOther && (
+                        <Button variant="secondary" size="sm" loading={pausing} onClick={togglePause}>
+                            Вернуть в работу
+                        </Button>
                     )}
                 </div>
             )}
@@ -363,7 +355,8 @@ export function MobileCrmClient() {
                 </div>
             )}
 
-            {/* Следующая встреча */}
+            {/* Следующая встреча — тот же предмет, что «Дальше» на «Сегодня», в лёгком
+                виде: карточка с рамкой; дата строкой, время одной строкой (не рвётся). */}
             <div style={{ padding: '0 16px' }}>
                 {nextSession ? (
                     <div style={nextBox}>
@@ -371,96 +364,87 @@ export function MobileCrmClient() {
                             <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-ink-60)' }}>
                                 Следующая встреча
                             </span>
-                            <span style={{ fontSize: 16, fontWeight: 600 }}>
+                            <span style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
                                 {formatDateLabel(parseUTC(nextSession.date), { ...TZ, capitalize: true, withYear: 'auto' })}
-                                {' · '}
-                                <span className="num">{formatTimeRange(
+                            </span>
+                            <span className="num" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                                {formatTimeRange(
                                     parseUTC(nextSession.date),
                                     new Date(parseUTC(nextSession.date).getTime() + (nextSession.durationMinutes || 60) * 60000),
                                     TZ,
-                                )}</span>
+                                )}
                             </span>
                             <span style={{ fontSize: 14, color: 'var(--color-ink-60)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <MapPin size={14} aria-hidden="true" />
+                                <MapPin size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
                                 {cabinetOf(nextSession) ?? 'Кабинет не забронирован'}
                             </span>
                         </button>
                         {!nextSession.isBooked && !viewingOther && (
-                            <Button
-                                variant="secondary"
-                                size="touch"
-                                onClick={() => { const p = linkCabinetPath(nextSession); if (p) navigate(p); }}
-                            >
-                                Кабинет
-                            </Button>
+                            <div>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => { const p = linkCabinetPath(nextSession); if (p) navigate(p); }}
+                                >
+                                    Забронировать кабинет
+                                </Button>
+                            </div>
                         )}
                     </div>
                 ) : (
-                    <div style={{ ...nextBox, flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                    <div style={nextBox}>
+                        <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 16, fontWeight: 600 }}>Следующей нет</div>
                             <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
                                 {lastPast ? `была ${formatDayMonth(parseUTC(lastPast.date), { ...TZ, withYear: 'auto' })}` : 'сессий ещё не было'}
                             </div>
                         </div>
                         {!viewingOther && (
-                            <Button
-                                size="touch"
-                                icon={<CalendarPlus size={16} aria-hidden="true" />}
-                                onClick={() => bookNext.open(client, lastPast)}
-                            >
-                                {`Записать · ${nextSessionLabel(lastPast, client)}`}
-                            </Button>
+                            <div>
+                                <Button
+                                    icon={<CalendarPlus size={16} aria-hidden="true" />}
+                                    onClick={() => bookNext.open(client, lastPast)}
+                                >
+                                    {`Записать · ${nextSessionLabel(lastPast, client)}`}
+                                </Button>
+                            </div>
                         )}
                     </div>
                 )}
             </div>
 
-            {/* Долг — только когда он есть (G6-02) */}
-            {unpaid.length > 0 && debtTotal && (
+            {/* Деньги клиента — одна карточка (дизайн-ревью п. 6, 7, 13): долг — danger
+                (не янтарь), сумма один раз; ставка и «оплачено всего» — ячейками. */}
+            {(hasDebt || moneyStats) && (
                 <div style={{ padding: '0 16px' }}>
-                    <div style={debtBox}>
-                        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-                            {/* Дизайн-ревью п. 7: сумма долга — один раз; цифры моноширинным только в сумме. */}
-                            <div style={{ fontSize: 16, fontWeight: 600 }}>Долг <span className="num">{debtTotal}</span></div>
-                            <div style={{ fontSize: 14 }}>
-                                {unpaid.length} {plural(unpaid.length, 'сессия', 'сессии', 'сессий')} без оплаты
-                            </div>
-                        </div>
-                        {!viewingOther && (
+                    <SummaryCard
+                        label={hasDebt ? 'Долг' : undefined}
+                        value={hasDebt ? <span className={clsx('num', 'ui-money', moneyToneClass(1, 'debt'))}>{debtTotal}</span> : undefined}
+                        caption={hasDebt ? `${unpaid.length} ${plural(unpaid.length, 'сессия', 'сессии', 'сессий')} без оплаты` : undefined}
+                        aside={hasDebt && !viewingOther ? (
                             // Кнопка только открывает список неоплаченных — оплата по строке.
-                            <Button variant="secondary" size="touch" onClick={() => setUnpaidOpen(true)}>
+                            <Button variant="secondary" size="sm" onClick={() => setUnpaidOpen(true)}>
                                 Отметить оплату…
                             </Button>
-                        )}
-                    </div>
+                        ) : undefined}
+                        stats={moneyStats ?? undefined}
+                    />
                 </div>
             )}
 
-            {/* Деньги — строкой */}
-            {balance && ((balance.totalPaid ?? 0) > 0 || (balance.prepayment ?? 0) > 0 || client.basePrice > 0) && (
-                <div style={{ padding: '0 16px', fontSize: 14, color: 'var(--color-ink-80)' }}>
-                    {[
-                        client.basePrice > 0 ? `Ставка ${formatMoney(client.basePrice, { currency: cur })}` : '',
-                        `оплачено за всё время ${formatMoney(balance.totalPaid ?? 0, { currency: cur })}`,
-                        (balance.prepayment ?? 0) > 0 ? `аванс ${formatMoney(balance.prepayment, { currency: cur })}` : '',
-                    ].filter(Boolean).join(' · ')}
-                </div>
-            )}
-
-            {/* История — сессии, оплаты, заметки одной лентой */}
+            {/* История — сессии, оплаты, заметки одной лентой, по месяцам */}
             <div style={{ padding: '0 16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '8px 0 12px', padding: '0 4px' }}>
                     <div>
-                        <SectionTitle>История</SectionTitle>
-                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>
+                        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>История</h2>
+                        <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2 }}>
                             {sessions.length} {plural(sessions.length, 'сессия', 'сессии', 'сессий')}
                             {' · '}{payments.length} {plural(payments.length, 'оплата', 'оплаты', 'оплат')}
                             {' · '}{notes.length} {plural(notes.length, 'заметка', 'заметки', 'заметок')}
                         </div>
                     </div>
                     {!viewingOther && (
-                        <Button variant="secondary" size="touch" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNoteOpen(true)}>
+                        <Button variant="secondary" size="sm" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setNoteOpen(true)}>
                             Заметка
                         </Button>
                     )}
@@ -472,17 +456,23 @@ export function MobileCrmClient() {
                         hint="Запишите первую сессию — она появится здесь."
                     />
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {timeline.slice(0, feedLimit).map(item => (
-                            <TimelineRow
-                                key={`${item.kind}-${itemId(item)}`}
-                                item={item}
-                                client={client}
-                                sessionById={sessionById}
-                                onOpenSession={setActiveSheet}
-                                onEditPayment={viewingOther ? undefined : setEditingPayment}
-                            />
-                        ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div>
+                            {feedGroups.map(g => (
+                                <ListGroup key={g.key} title={g.title}>
+                                    {g.items.map(item => (
+                                        <TimelineRow
+                                            key={`${item.kind}-${itemId(item)}`}
+                                            item={item}
+                                            client={client}
+                                            sessionById={sessionById}
+                                            onOpenSession={setActiveSheet}
+                                            onEditPayment={viewingOther ? undefined : setEditingPayment}
+                                        />
+                                    ))}
+                                </ListGroup>
+                            ))}
+                        </div>
                         {timeline.length > feedLimit && (
                             <Button variant="secondary" block onClick={() => setFeedLimit(n => n + FEED_PAGE)}>
                                 {`Показать ещё ${Math.min(FEED_PAGE, timeline.length - feedLimit)} · всего ${timeline.length}`}
@@ -492,11 +482,19 @@ export function MobileCrmClient() {
                 )}
             </div>
 
+            {/* «Поставить на паузу» — строка группы «Ещё», а не висящий жирный текст. */}
             {client.isActive && !viewingOther && (
-                <div style={{ padding: '0 16px' }}>
-                    <Button variant="quiet" size="touch" loading={pausing} onClick={togglePause}>
-                        Поставить на паузу
-                    </Button>
+                <div style={{ padding: '8px 16px 0' }}>
+                    <ListGroup title="Ещё">
+                        <ListRow
+                            lead={<ListIcon><PauseCircle size={20} /></ListIcon>}
+                            title={<span style={{ color: 'var(--color-ink-80)' }}>Поставить на паузу</span>}
+                            subtitle="Скроется из «Активных»; сессии, оплаты и заметки сохранятся"
+                            disabled={pausing}
+                            onClick={togglePause}
+                            chevron={false}
+                        />
+                    </ListGroup>
                 </div>
             )}
 
@@ -610,51 +608,17 @@ function NewNoteSheet({ open, clientId, clientName, onClose, onCreated }: {
     );
 }
 
-const contactBtn: React.CSSProperties = {
-    flex: 1,
-    background: 'var(--color-card)',
-    color: 'var(--color-ink)',
-    border: '1px solid var(--color-ink-10)',
-    borderRadius: 12,
-    padding: '10px 8px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 4,
-    fontFamily: 'inherit',
-    fontSize: 12,
-    fontWeight: 600,
-    textDecoration: 'none',
-    cursor: 'pointer',
-    minHeight: 56,
-};
-
+// Лёгкая версия «Дальше» с «Сегодня»: карточка с рамкой, без тёмной заливки.
 const nextBox: React.CSSProperties = {
-    background: 'var(--color-sunken)', borderRadius: 14, padding: '12px 12px 12px 14px',
-    display: 'flex', alignItems: 'center', gap: 10,
+    background: 'var(--color-card)', border: '1px solid var(--color-ink-10)', borderRadius: 16,
+    padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
 };
 
 const nextBoxButton: React.CSSProperties = {
-    flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left',
+    minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left',
     fontFamily: 'inherit', color: 'var(--color-ink)', cursor: 'pointer',
     display: 'flex', flexDirection: 'column', gap: 4,
 };
-
-// Долг — янтарный тон «ждём оплату» (цвет только для статуса).
-const debtBox: React.CSSProperties = {
-    background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
-    borderRadius: 14, padding: '12px 12px 12px 14px',
-    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-};
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{
-            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-            textTransform: 'uppercase', color: 'var(--color-ink-60)',
-        }}>{children}</div>
-    );
-}
 
 type TimelineItem =
     | { kind: 'session'; ts: number; session: CrmSession }
@@ -665,13 +629,28 @@ function itemId(item: TimelineItem): string {
     return item.kind === 'session' ? item.session.id : item.kind === 'payment' ? item.payment.id : item.note.id;
 }
 
-/** Строка ленты клиента. Сессия — кнопка: открывает шторку сессии. */
+/** Лента по месяцам («Ноябрь 2026») — подписи групп, как в /m/bookings по дням. */
+function groupByMonth(items: TimelineItem[]): { key: string; title: string; items: TimelineItem[] }[] {
+    const out: { key: string; title: string; items: TimelineItem[] }[] = [];
+    for (const it of items) {
+        const d = new Date(it.ts);
+        const title = formatMonthLabel(d, { ...TZ, capitalize: true });
+        const last = out[out.length - 1];
+        if (last && last.title === title) last.items.push(it);
+        else out.push({ key: `${title}-${out.length}`, title, items: [it] });
+    }
+    return out;
+}
+
+/** Строка ленты клиента (09.11 фаза 3, дизайн-ревью п. 21): общий ListRow,
+ *  слева значок без цветной плитки (часы / кошелёк / лист), справа статус
+ *  оплаты точкой или сумма. Тап по строке — шторка (сессия, правка платежа). */
 function TimelineRow({ item, client, sessionById, onOpenSession, onEditPayment }: {
     item: TimelineItem;
     client: CrmClient;
     sessionById: Map<string, CrmSession>;
     onOpenSession: (s: CrmSession) => void;
-    /** Карандаш «Изменить оплату» на платеже; нет — «просмотр как специалист». */
+    /** Правка платежа по тапу; нет — «просмотр как специалист». */
     onEditPayment?: (p: CrmPayment) => void;
 }) {
     // Счёт платежа — человеческим названием («Наличные»), а не id («cash»).
@@ -680,41 +659,24 @@ function TimelineRow({ item, client, sessionById, onOpenSession, onEditPayment }
         const s = item.session;
         const isCancelled = s.status?.startsWith('CANCELLED');
         const isPlanned = s.status === 'PLANNED';
-        const money = sessionMoneyLine(s, client, isPlanned && item.ts > Date.now());
-        // Прошла, но не отмечена — как на экране дня: янтарным, а не «Запланирована».
+        const future = isPlanned && item.ts > Date.now();
+        // Прошла, но не отмечена — «Не отмечена», а не «Запланирована».
         const isUnmarked = isPlanned && item.ts + (s.durationMinutes ?? 60) * 60000 < Date.now();
-        // Цвет — по тону статуса из общего словаря; «не отмечена» — янтарное «ждём».
-        const tone = isUnmarked ? 'pending' : getStatusDef('session', s.status).tone;
-        const color = { bg: `var(--status-${tone}-bg)`, fg: `var(--status-${tone}-fg)` };
         const Icon = isCancelled ? XCircle : isPlanned ? Clock : CheckCircle2;
+        const pay = sessionPayState(s, client, future);
         return (
-            <button
-                type="button"
+            <ListRow
+                dimmed={isCancelled}
+                lead={<ListIcon><Icon size={20} /></ListIcon>}
+                title={`Сессия · ${isUnmarked ? 'Не отмечена' : statusLabel('session', s.status)}`}
+                subtitle={<>
+                    {formatDateLabel(new Date(item.ts), TZ)}, <span className="num-inline">{formatTime(new Date(item.ts), TZ)}</span>
+                    {sessionPriceLine(s, client) ? ` · ${sessionPriceLine(s, client)}` : ''}
+                </>}
+                // Статус оплаты — третьей строкой (meta): справа длинный бейдж сжимал текст при 360 px.
+                meta={pay ? <StatusBadge kind="payment" status={pay} variant="dot" /> : undefined}
                 onClick={() => onOpenSession(s)}
-                className="press"
-                style={{
-                    ...rowBase,
-                    opacity: isCancelled ? 0.75 : 1,
-                }}
-            >
-                <div style={{
-                    width: 30, height: 30, borderRadius: 8,
-                    background: color.bg, color: color.fg,
-                    display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                    <Icon size={14} aria-hidden="true" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-                        Сессия · {isUnmarked ? 'Не отмечена' : statusLabel('session', s.status)}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                        {formatDateLabel(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
-                        {money ? ` · ${money}` : ''}
-                    </div>
-                </div>
-                <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--color-ink-60)', flexShrink: 0 }} />
-            </button>
+            />
         );
     }
     if (item.kind === 'payment') {
@@ -722,59 +684,29 @@ function TimelineRow({ item, client, sessionById, onOpenSession, onEditPayment }
         // Ревью п. 8: за какую сессию платёж («за 3 нояб.»).
         const forSession = p.sessionId ? sessionById.get(p.sessionId) : undefined;
         return (
-            <div style={{ ...rowBase, cursor: 'default' }}>
-                <div style={{
-                    width: 30, height: 30, borderRadius: 8,
-                    background: 'var(--status-ok-bg)', color: 'var(--status-ok-fg)',
-                    display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                    <Wallet size={14} aria-hidden="true" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-                        Платёж · <span className="num">{formatMoney(p.amount || 0, { currency: p.currency || 'GEL' })}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                        {formatDayMonth(new Date(item.ts), TZ)}, {formatTime(new Date(item.ts), TZ)}
-                        {forSession ? ` · за ${formatDayMonth(parseUTC(forSession.date), TZ)}` : ''}
-                        {p.account ? ` · ${accountLabel(p.account, paymentAccounts)}` : ''}
-                    </div>
-                </div>
-                {onEditPayment && (
-                    <button
-                        type="button"
-                        onClick={() => onEditPayment(p)}
-                        aria-label={`Изменить оплату ${formatMoney(p.amount || 0, { currency: p.currency || 'GEL' })}`}
-                        title="Изменить оплату"
-                        className="press"
-                        style={{
-                            width: 44, height: 44, margin: '-6px -8px -6px 0', flexShrink: 0,
-                            display: 'grid', placeItems: 'center', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'var(--color-ink-60)',
-                        }}
-                    >
-                        <Pencil size={15} aria-hidden="true" />
-                    </button>
-                )}
-            </div>
+            <ListRow
+                lead={<ListIcon><Wallet size={20} /></ListIcon>}
+                title="Платёж"
+                subtitle={<>
+                    {formatDayMonth(new Date(item.ts), TZ)}, <span className="num-inline">{formatTime(new Date(item.ts), TZ)}</span>
+                    {forSession ? ` · за ${formatDayMonth(parseUTC(forSession.date), TZ)}` : ''}
+                    {p.account ? ` · ${accountLabel(p.account, paymentAccounts)}` : ''}
+                </>}
+                trail={<Money value={p.amount || 0} currency={p.currency || 'GEL'} tone="flow" />}
+                onClick={onEditPayment ? () => onEditPayment(p) : undefined}
+                aria-label={onEditPayment ? `Изменить оплату ${formatMoney(p.amount || 0, { currency: p.currency || 'GEL' })}` : undefined}
+            />
         );
     }
     return <NoteRow note={item.note} />;
 }
 
-const rowBase: React.CSSProperties = {
-    background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
-    borderRadius: 10, padding: '8px 12px', minHeight: 52,
-    display: 'flex', alignItems: 'center', gap: 10,
-    width: '100%', textAlign: 'left', fontFamily: 'inherit', cursor: 'pointer',
-    color: 'var(--color-ink)',
-};
-
 const NOTE_PREVIEW_CHARS = 140;
 
 /** Заметка в ленте клиента. Текст — поле `content` (как во вкладке
  *  «Заметки»); раньше читалось несуществующее `text`, и плашки были пустыми.
- *  Длинная заметка обрезается, тап раскрывает её целиком. */
+ *  Длинная заметка обрезается, тап раскрывает её целиком. Отличается от
+ *  сессий только значком и цветом текста — без отдельного фона. */
 function NoteRow({ note: n }: { note: CrmNote }) {
     const [expanded, setExpanded] = useState(false);
     // Ревью п. 10: «Скрывать текст» (общая настройка, по умолчанию вкл.) —
@@ -784,94 +716,60 @@ function NoteRow({ note: n }: { note: CrmNote }) {
     const content = n.content || '';
     const isLong = content.length > NOTE_PREVIEW_CHARS;
     const masked = hidden && !revealed;
+    const when = n.createdAt ? formatDayMonth(parseUTC(n.createdAt), TZ) : '';
     if (masked) {
         return (
-            <button
-                type="button"
+            <ListRow
+                lead={<ListIcon><FileText size={20} /></ListIcon>}
+                title={`Заметка${when ? ` · ${when}` : ''}`}
+                subtitle="Текст скрыт · нажмите, чтобы показать"
                 onClick={() => setRevealed(true)}
                 aria-label="Заметка — показать текст"
-                style={noteRowStyle(true)}
-            >
-                <div style={noteIcon}><FileText size={14} aria-hidden="true" /></div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-                        Заметка{n.createdAt ? ` · ${formatDayMonth(parseUTC(n.createdAt), TZ)}` : ''}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>Текст скрыт · нажмите, чтобы показать</div>
-                </div>
-            </button>
+                chevron={false}
+            />
         );
     }
     return (
-        <button
-            type="button"
-            onClick={() => { if (isLong) setExpanded(v => !v); else if (hidden) setRevealed(false); }}
-            aria-expanded={isLong ? expanded : undefined}
-            // Заметка — нейтральная карточка: цвет только для статуса.
-            style={{
-                background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
-                borderRadius: 10, padding: '9px 12px',
-                display: 'flex', alignItems: 'flex-start', gap: 10,
-                width: '100%', textAlign: 'left', fontFamily: 'inherit',
-                cursor: isLong ? 'pointer' : 'default',
-                color: 'var(--color-ink)',
-            }}
-        >
-            <div style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: 'var(--color-card)', color: 'var(--color-ink-80)',
-                display: 'grid', placeItems: 'center', flexShrink: 0,
-            }}>
-                <FileText size={14} aria-hidden="true" />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>Заметка</div>
-                <div style={{ fontSize: 12, color: 'var(--color-ink-80)', marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <ListRow
+            lead={<ListIcon><FileText size={20} /></ListIcon>}
+            title="Заметка"
+            subtitle={<>
+                <span style={{ display: 'block', color: 'var(--color-ink-80)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {expanded || !isLong ? content : `${content.slice(0, NOTE_PREVIEW_CHARS)}…`}
-                </div>
+                </span>
                 {isLong && (
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)', marginTop: 4, textDecoration: 'underline' }}>
+                    <span style={{ display: 'block', fontWeight: 600, color: 'var(--color-accent-ink)', marginTop: 4 }}>
                         {expanded ? 'Свернуть' : 'Показать полностью'}
-                    </div>
+                    </span>
                 )}
-                {n.createdAt && (
-                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 3 }}>
-                        {formatDayMonth(parseUTC(n.createdAt), TZ)}, {formatTime(parseUTC(n.createdAt), TZ)}
-                    </div>
-                )}
-            </div>
-        </button>
+            </>}
+            trail={n.createdAt ? <span style={{ color: 'var(--color-ink-60)', fontWeight: 500 }}>{when}</span> : undefined}
+            trailSub={n.createdAt ? <span className="num">{formatTime(parseUTC(n.createdAt), TZ)}</span> : undefined}
+            onClick={isLong ? () => setExpanded(v => !v) : hidden ? () => setRevealed(false) : undefined}
+            chevron={false}
+        />
     );
 }
 
-const noteIcon: React.CSSProperties = {
-    width: 30, height: 30, borderRadius: 8,
-    background: 'var(--color-card)', color: 'var(--color-ink-80)',
-    display: 'grid', placeItems: 'center', flexShrink: 0,
-};
-
-function noteRowStyle(clickable: boolean): React.CSSProperties {
-    return {
-        background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
-        borderRadius: 10, padding: '9px 12px', minHeight: 52,
-        display: 'flex', alignItems: 'center', gap: 10,
-        width: '100%', textAlign: 'left', fontFamily: 'inherit',
-        cursor: clickable ? 'pointer' : 'default', color: 'var(--color-ink)',
-    };
-}
-
 /**
- * Деньги сессии строкой (ревью п. 1, 8): «120 ₾ · оплачено 60, долг 60».
- * Цена — своя или ставка клиента (как считает сервер); у будущей — только цена.
+ * Цена сессии строкой (ревью п. 1, 8): «120 ₾ (ставка) · оплачено 60, долг 60».
+ * Цена — своя или ставка клиента (как считает сервер). «Оплачено / не оплачено» —
+ * бейджем справа (sessionPayState).
  */
-function sessionMoneyLine(s: CrmSession, client: CrmClient, future: boolean): string {
+function sessionPriceLine(s: CrmSession, client: CrmClient): string {
     const price = sessionPriceOf(s, client);
     const currency = sessionCurrencyOf(s, client);
     const parts: string[] = [];
     if (price > 0) parts.push(`${formatMoney(price, { currency })}${priceFromClientRate(s, client) ? ' (ставка)' : ''}`);
     const partial = partialPayment(s, client);
-    if (s.isPaid) parts.push(statusLabel('payment', 'paid').toLowerCase());
-    else if (partial) parts.push(`оплачено ${formatMoney(partial.paid, { currency })}, долг ${formatMoney(partial.remaining, { currency })}`);
-    else if (!future && (isBillableStatus(s.status) || s.status === 'PLANNED') && sessionDebt(s, client).amount > 0) parts.push('не оплачено');
+    if (!s.isPaid && partial) parts.push(`оплачено ${formatMoney(partial.paid, { currency })}, долг ${formatMoney(partial.remaining, { currency })}`);
     return parts.join(' · ');
+}
+
+/** Статус оплаты сессии для бейджа: те же условия, что раньше у строки «оплачено / не оплачено». */
+function sessionPayState(s: CrmSession, client: CrmClient, future: boolean): 'paid' | 'partial' | 'unpaid' | null {
+    if (s.isPaid) return 'paid';
+    if (partialPayment(s, client)) return 'partial';
+    if (!future && (isBillableStatus(s.status) || s.status === 'PLANNED') && sessionDebt(s, client).amount > 0) return 'unpaid';
+    return null;
 }

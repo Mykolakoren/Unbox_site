@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, Clock } from 'lucide-react';
 import { GH, GH_MONO, GH_SANS } from '../hooks/useDesignFlag';
-import { COLOR, STATUS } from '../design/tokens';
+import { COLOR, RADIUS, STATUS } from '../design/tokens';
+import { Button } from './ui/Button';
 import type { SpecialistApplicationStatus } from '../hooks/useSpecialistApplication';
 import { catalogPath, useInMobileShell } from '../utils/catalogPath';
 
@@ -92,11 +93,11 @@ export function SpecialistGateCard({ variant, status }: {
             <div
                 data-testid="specialist-gate"
                 style={{
-                    background: waiting ? STATUS.pending.bg : COLOR.sunken,
+                    background: waiting ? STATUS.pending.bg : COLOR.card,
                     // Рамка «ждём» — янтарём на 35 % (0x59): цветом фона её не было видно.
                     // Серая — ink-20: ink-08 на сером фоне карточки сливалась с экраном.
-                    border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : COLOR.ink20}`,
-                    borderRadius: 16,
+                    border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : COLOR.ink10}`,
+                    borderRadius: RADIUS.sheet,
                     padding: 16,
                     display: 'flex',
                     flexDirection: 'column',
@@ -114,31 +115,16 @@ export function SpecialistGateCard({ variant, status }: {
                         </div>
                     </div>
                 </div>
-                <button
-                    type="button"
+                {/* 09.11 фаза 3 (/m): главная кнопка — общая бирюзовая Button primary,
+                    без чёрной плиты; «ждём» — тихая secondary. */}
+                <Button
+                    variant={waiting ? 'secondary' : 'primary'}
+                    block
                     onClick={onCta}
-                    className="press"
-                    style={{
-                        width: '100%',
-                        minHeight: 44,
-                        background: waiting ? COLOR.card : COLOR.ink,
-                        color: waiting ? COLOR.ink : COLOR.onInk,
-                        border: waiting ? `1px solid ${COLOR.ink}` : 'none',
-                        borderRadius: 8,
-                        padding: '13px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 16,
-                        fontWeight: 600,
-                    }}
+                    iconRight={<ArrowRight size={18} aria-hidden="true" />}
                 >
                     {copy.cta}
-                    <ArrowRight size={18} aria-hidden="true" />
-                </button>
+                </Button>
             </div>
         );
     }

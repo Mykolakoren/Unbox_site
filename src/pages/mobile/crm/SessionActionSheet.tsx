@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     Check, X, MapPin, Calendar, Trash2, RotateCcw,
-    Unlink, ChevronRight, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock, FileText, Info,
+    Unlink, AlertTriangle, ArrowLeft, CalendarPlus, CalendarClock, FileText, Info, Wallet,
 } from 'lucide-react';
 import { crmApi, type CrmSession, type CrmClient, type CrmNote, type CrmPayment } from '../../../api/crm';
 import { formatBatumi, parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
@@ -15,7 +15,7 @@ import { Sheet } from '../../../components/ui/Sheet';
 import { Button } from '../../../components/ui/Button';
 import { Field, Input, Select, TextArea } from '../../../components/ui/Field';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
-import { COLOR } from '../../../design/tokens';
+import { ListGroup, ListIcon, ListRow } from '../../../components/ui/ListRow';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 import type { BookingHistoryItem } from '../../../store/types';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/parseMoneyInput';
@@ -632,15 +632,6 @@ function Main({
             onClick={() => onPaid(!session.isPaid)}
         />
     );
-    const cancelTile = (
-        <ActionTile
-            icon={<X size={18} aria-hidden="true" />}
-            label="Отменить"
-            tone="danger-soft"
-            disabled={busy}
-            onClick={onCancel}
-        />
-    );
     const restoreTile = (
         <ActionTile
             icon={<RotateCcw size={18} aria-hidden="true" />}
@@ -658,11 +649,14 @@ function Main({
             onClick={onReschedule}
         />
     );
+    // 09.11 фаза 3 (дизайн-ревью п. 8): наверху 1–3 равные плитки главных действий,
+    // ниже одна группа строк без отдельных рамок, внизу — тихая «Отменить сессию»
+    // текстом danger (редкое и опасное действие не стоит рядом с «Перенести»).
     let tiles: ReactNode[];
     if (isCancelled) tiles = isFuture ? [rescheduleTile, restoreTile] : [restoreTile];
     else if (isNoShow) tiles = [payTile, restoreTile];
-    else if (isCompleted) tiles = [payTile, cancelTile];
-    else if (isFuture) tiles = [rescheduleTile, cancelTile];
+    else if (isCompleted) tiles = [payTile];
+    else if (isFuture) tiles = [rescheduleTile];
     else tiles = [
         <ActionTile
             key="done"
@@ -672,101 +666,121 @@ function Main({
             disabled={busy}
             onClick={() => onStatus('COMPLETED')}
         />,
-        cancelTile,
     ];
+    // Волна 3: «записать следующую» — второй тап из трёх (карточка → эта плитка →
+    // «Записать»). Тот же день недели и время через неделю (utils/crmNextSession).
+    if (onBookNext) {
+        tiles.push(
+            <ActionTile
+                key="next"
+                icon={<CalendarPlus size={18} aria-hidden="true" />}
+                label="Следующая"
+                sub={nextSessionLabel(session, client)}
+                ariaLabel={`Записать следующую · ${nextSessionLabel(session, client)}`}
+                disabled={busy}
+                onClick={onBookNext}
+            />,
+        );
+    }
+    const canCancel = !isCancelled && !isNoShow;
     const hasPayTile = tiles.includes(payTile);
     const hasRescheduleTile = tiles.includes(rescheduleTile);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {/* Волна 3: «записать следующую» — второй тап из трёх
-                (карточка → эта строка → «Записать»). Тот же день недели и
-                время через неделю (utils/crmNextSession, по Батуми). */}
-            {onBookNext && (
-                <Row
-                    icon={<CalendarPlus size={16} aria-hidden="true" />}
-                    label={`Записать следующую · ${nextSessionLabel(session, client)}`}
-                    sub="Тот же день недели и время"
-                    onClick={onBookNext}
-                />
-            )}
-            <div style={{ display: 'grid', gridTemplateColumns: tiles.length > 1 ? '1fr 1fr' : '1fr', gap: 6, paddingBottom: 8, paddingTop: onBookNext ? 6 : 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`, gap: 8 }}>
                 {tiles.map((t, i) => <div key={i} style={{ display: 'grid' }}>{t}</div>)}
             </div>
 
-            {/* Оплата строкой — у будущей и отменённой (предоплата, снять оплату).
-                У прошедшей оплата — главная плитка выше, строку не дублируем. */}
-            {!hasPayTile && (
-                <Row
-                    icon={currencyIcon}
-                    label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
-                    sub={partial
-                        ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
-                        : (priceText ?? 'цены нет — спросим сумму')}
-                    pressed={!!session.isPaid}
-                    disabled={busy}
-                    right={<CheckMark on={!!session.isPaid} />}
-                    onClick={() => onPaid(!session.isPaid)}
-                />
-            )}
             {hasPayTile && partial && (
-                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', padding: '0 2px 4px' }}>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', padding: '0 4px' }}>
                     Оплачено {formatMoney(partial.paid, { currency })} из {formatMoney(partial.price, { currency })}, долг {formatMoney(partial.remaining, { currency })}
                 </div>
             )}
             {paymentBlock}
-            <Row
-                icon={currencyIcon}
-                label="Цена"
-                sub={priceText ?? 'не указана'}
-                onClick={onPrice}
-            />
-            {/* Ревью п. 11: у будущей сессии есть плитка «Перенести» — строку не дублируем. */}
-            {!hasRescheduleTile && (
+
+            <ListGroup bare aria-label="Сессия">
+                {/* Оплата строкой — у будущей и отменённой (предоплата, снять оплату).
+                    У прошедшей оплата — главная плитка выше, строку не дублируем. */}
+                {!hasPayTile && (
+                    <Row
+                        icon={<Wallet size={20} aria-hidden="true" />}
+                        label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
+                        sub={partial
+                            ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
+                            : (priceText ?? 'цены нет — спросим сумму')}
+                        pressed={!!session.isPaid}
+                        disabled={busy}
+                        right={<CheckMark on={!!session.isPaid} />}
+                        onClick={() => onPaid(!session.isPaid)}
+                    />
+                )}
                 <Row
-                    icon={<Calendar size={16} aria-hidden="true" />}
-                    label="Перенести время"
-                    sub="Дата · время · длительность"
-                    onClick={onReschedule}
+                    icon={currencyIcon}
+                    label="Цена"
+                    sub={priceText ?? 'не указана'}
+                    onClick={onPrice}
                 />
-            )}
-            <Row
-                icon={<MapPin size={16} aria-hidden="true" />}
-                label={session.isBooked ? `Кабинет: ${cabinet ?? 'привязан'}` : 'Привязать кабинет'}
-                sub={session.isBooked ? 'Бронь активна · открепить или отменить' : 'Забронировать кабинет под эту сессию'}
-                onClick={() => {
-                    if (session.isBooked) {
-                        // Отдельный шаг с последствиями: раньше «Отменить бронь»
-                        // срабатывала с одного тапа, а «открепить» спрашивало
-                        // непонятным системным окном.
-                        onCabinet();
-                    } else {
-                        const date = formatBatumi(session.date, 'yyyy-MM-dd');
-                        const time = formatBatumi(session.date, 'HH:mm');
-                        const dur = session.durationMinutes ?? 60;
-                        navigate(`/m/find?linkSession=${session.id}&date=${date}&time=${time}&duration=${dur}`);
-                    }
-                }}
-            />
-            {/* Ревью п. 10: на главном экране шторки — только число заметок, без
-                текста (её открывают отметить оплату, пока клиент рядом). */}
-            <Row
-                icon={<FileText size={16} aria-hidden="true" />}
-                label={noteCount > 0 ? `Заметки · ${noteCount}` : 'Заметки'}
-                sub={notes === null && !legacyNote ? '…'
-                    : noteCount === 0 ? 'добавить заметку'
-                    : lastNoteAt ? `последняя · ${formatDayMonth(lastNoteAt, TZ)}` : 'открыть'}
-                onClick={onNotes}
-            />
-            {/* Ревью п. 3: «вернуть в план» — редкое действие, не на главном месте. */}
-            {isCompleted && (
+                {/* Ревью п. 11: у будущей сессии есть плитка «Перенести» — строку не дублируем. */}
+                {!hasRescheduleTile && (
+                    <Row
+                        icon={<Calendar size={20} aria-hidden="true" />}
+                        label="Перенести время"
+                        sub="Дата · время · длительность"
+                        onClick={onReschedule}
+                    />
+                )}
                 <Row
-                    icon={<span aria-hidden="true" style={{ fontWeight: 600, fontSize: 16, lineHeight: 1 }}>↶</span>}
-                    label="Вернуть в план"
-                    sub="Если сессия на самом деле ещё не прошла"
+                    icon={<MapPin size={20} aria-hidden="true" />}
+                    label={session.isBooked ? `Кабинет: ${cabinet ?? 'привязан'}` : 'Привязать кабинет'}
+                    sub={session.isBooked ? 'Бронь активна · открепить или отменить' : 'Забронировать кабинет под эту сессию'}
+                    onClick={() => {
+                        if (session.isBooked) {
+                            // Отдельный шаг с последствиями: раньше «Отменить бронь»
+                            // срабатывала с одного тапа, а «открепить» спрашивало
+                            // непонятным системным окном.
+                            onCabinet();
+                        } else {
+                            const date = formatBatumi(session.date, 'yyyy-MM-dd');
+                            const time = formatBatumi(session.date, 'HH:mm');
+                            const dur = session.durationMinutes ?? 60;
+                            navigate(`/m/find?linkSession=${session.id}&date=${date}&time=${time}&duration=${dur}`);
+                        }
+                    }}
+                />
+                {/* Ревью п. 10: на главном экране шторки — только число заметок, без
+                    текста (её открывают отметить оплату, пока клиент рядом). */}
+                <Row
+                    icon={<FileText size={20} aria-hidden="true" />}
+                    label={noteCount > 0 ? `Заметки · ${noteCount}` : 'Заметки'}
+                    sub={notes === null && !legacyNote ? '…'
+                        : noteCount === 0 ? 'добавить заметку'
+                        : lastNoteAt ? `последняя · ${formatDayMonth(lastNoteAt, TZ)}` : 'открыть'}
+                    onClick={onNotes}
+                />
+                {/* Ревью п. 3: «вернуть в план» — редкое действие, не на главном месте. */}
+                {isCompleted && (
+                    <Row
+                        icon={<RotateCcw size={20} aria-hidden="true" />}
+                        label="Вернуть в план"
+                        sub="Если сессия на самом деле ещё не прошла"
+                        disabled={busy}
+                        onClick={() => onStatus('PLANNED')}
+                    />
+                )}
+            </ListGroup>
+
+            {canCancel && (
+                <Button
+                    variant="quiet"
+                    block
                     disabled={busy}
-                    onClick={() => onStatus('PLANNED')}
-                />
+                    icon={<X size={16} aria-hidden="true" />}
+                    onClick={onCancel}
+                    style={{ color: 'var(--status-danger-fg)' }}
+                >
+                    Отменить сессию
+                </Button>
             )}
         </div>
     );
@@ -1220,7 +1234,7 @@ function CheckRow({ checked, onChange, disabled, children }: {
     return (
         <label style={{
             display: 'flex', alignItems: 'center', gap: 10, minHeight: 44, padding: '6px 12px',
-            borderRadius: 10, background: 'var(--color-sunken)', cursor: disabled ? 'default' : 'pointer',
+            borderRadius: 8, background: 'var(--color-sunken)', cursor: disabled ? 'default' : 'pointer',
             fontSize: 14, lineHeight: 1.4, color: 'var(--color-ink)',
         }}>
             <input
@@ -1263,52 +1277,31 @@ function DeleteConfirm({ session, busy, onDelete, onBack }: {
 }
 
 // ─── small building blocks ──────────────────────────────────────────────
-function Row({ icon, label, sub, right, onClick, tone, pressed, disabled }: {
+/** Строка шторки (09.11 фаза 3): общий ListRow внутри ListGroup bare — без
+ *  отдельной рамки и серой плитки под значком. */
+function Row({ icon, label, sub, right, onClick, pressed, disabled }: {
     icon: React.ReactNode;
     label: string;
     sub?: string;
     right?: React.ReactNode;
     onClick?: () => void;
-    tone?: 'danger-soft';
     /** Для переключателя (оплата): состояние для экранного диктора. */
     pressed?: boolean;
     disabled?: boolean;
 }) {
-    const fg = tone === 'danger-soft' ? 'var(--status-danger-fg)' : 'var(--color-ink)';
     return (
-        <button
+        <ListRow
+            lead={<ListIcon>{icon}</ListIcon>}
+            title={label}
+            subtitle={sub}
+            trail={right}
+            chevron={right ? false : undefined}
             onClick={onClick}
-            disabled={disabled || (!onClick && !right)}
+            disabled={disabled}
+            // 09.11 фаза 3 (общие файлы): ListRow пропускает aria-pressed — переключатель
+            // оплаты озвучивается как переключатель, а не обходным aria-label.
             aria-pressed={pressed}
-            className={onClick ? 'press' : undefined}
-            style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '12px 14px',
-                minHeight: 56,
-                background: 'var(--color-card)',
-                border: '1px solid var(--color-ink-08)',
-                borderRadius: 12,
-                cursor: onClick ? 'pointer' : 'default',
-                fontFamily: 'inherit',
-                color: fg,
-                width: '100%',
-                textAlign: 'left',
-            }}
-        >
-            <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: tone === 'danger-soft' ? 'var(--status-danger-bg)' : 'var(--color-sunken)',
-                display: 'grid', placeItems: 'center',
-                flexShrink: 0,
-            }}>{icon}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
-                {sub && <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
-            </div>
-            {right ?? (onClick && <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />)}
-        </button>
+        />
     );
 }
 
@@ -1316,7 +1309,7 @@ function Row({ icon, label, sub, right, onClick, tone, pressed, disabled }: {
 function CheckMark({ on }: { on: boolean }) {
     return (
         <span aria-hidden="true" style={{
-            width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+            width: 24, height: 24, borderRadius: 8, flexShrink: 0,
             display: 'grid', placeItems: 'center',
             background: on ? 'var(--status-ok-fg)' : 'transparent',
             border: on ? 'none' : '2px solid var(--color-ink-40)',
@@ -1327,41 +1320,48 @@ function CheckMark({ on }: { on: boolean }) {
     );
 }
 
-function ActionTile({ icon, label, sub, onClick, tone, pressed, disabled }: {
+function ActionTile({ icon, label, sub, ariaLabel, onClick, tone, pressed, disabled }: {
     icon: React.ReactNode;
     label: string;
-    /** Вторая строка (сумма, «в план»). */
+    /** Вторая строка (сумма, «в план», дата следующей). */
     sub?: string;
+    ariaLabel?: string;
     onClick: () => void;
-    tone?: 'primary' | 'danger-soft' | 'ok';
+    /** primary — главное действие шторки (бирюза, одно); ok — «Оплачено». */
+    tone?: 'primary' | 'ok';
     /** Для переключателя (оплата): состояние для экранного диктора. */
     pressed?: boolean;
     disabled?: boolean;
 }) {
-    const bg = tone === 'primary' ? 'var(--color-ink)' : tone === 'danger-soft' ? 'var(--status-danger-bg)'
+    // 09.11 фаза 3: главная плитка — бирюза (accent), как главная кнопка; не ink —
+    // в тёмной теме ink светлый, и плитка горела белым пятном.
+    const bg = tone === 'primary' ? 'var(--color-accent)'
         : tone === 'ok' ? 'var(--status-ok-bg)' : 'var(--color-sunken)';
-    const fg = tone === 'primary' ? 'var(--color-on-ink)' : tone === 'danger-soft' ? 'var(--status-danger-fg)'
+    const fg = tone === 'primary' ? 'var(--color-on-accent)'
         : tone === 'ok' ? 'var(--status-ok-fg)' : 'var(--color-ink)';
     return (
         <button
+            type="button"
             onClick={onClick}
             disabled={disabled}
             aria-pressed={pressed}
+            aria-label={ariaLabel}
             className="press"
             style={{
                 background: bg, color: fg,
-                border: 'none', borderRadius: 12,
-                padding: '12px 10px',
+                border: 'none', borderRadius: 8,
+                padding: '10px 8px',
                 minHeight: 64,
-                fontWeight: 600, fontSize: 14, fontFamily: 'inherit',
+                fontWeight: 600, fontSize: 14, fontFamily: 'inherit', lineHeight: 1.25,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+                textAlign: 'center',
                 cursor: 'pointer',
                 opacity: disabled ? 0.6 : 1,
             }}
         >
             {icon}
             <span>{label}</span>
-            {sub && <span className="num" style={{ fontSize: 12, fontWeight: 500, opacity: 0.85 }}>{sub}</span>}
+            {sub && <span className="num-inline" style={{ fontSize: 12, fontWeight: 500, opacity: 0.85 }}>{sub}</span>}
         </button>
     );
 }
@@ -1379,7 +1379,7 @@ function FormShell({ title, onBack, children }: {
             >
                 Назад
             </Button>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{title}</h3>
+            <h3 style={{ margin: 0, fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>{title}</h3>
             {children}
         </div>
     );
@@ -1391,20 +1391,20 @@ function truncate(s: string, n: number) { return s.length > n ? s.slice(0, n - 1
 const infoBox: React.CSSProperties = {
     display: 'flex', alignItems: 'flex-start', gap: 8,
     background: 'var(--status-info-bg)', color: 'var(--status-info-fg)',
-    borderRadius: 10, padding: '10px 12px', marginTop: 12,
+    borderRadius: 8, padding: '10px 12px', marginTop: 12,
     fontSize: 14, lineHeight: 1.4,
 };
 
 const warnBox: React.CSSProperties = {
     background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
-    borderRadius: 10, padding: '10px 12px', marginTop: 12,
+    borderRadius: 8, padding: '10px 12px', marginTop: 12,
     fontSize: 14, lineHeight: 1.4,
 };
 
 // Заметка — нейтральная карточка (раньше жёлтая «стикер»: цвет — только для статуса).
 const noteCard: React.CSSProperties = {
     background: 'var(--color-sunken)', border: '1px solid var(--color-ink-08)',
-    borderRadius: 12, padding: '10px 12px', marginTop: 10,
+    borderRadius: 8, padding: '10px 12px', marginTop: 10,
 };
 
 const noteText: React.CSSProperties = {

@@ -332,7 +332,10 @@ def test_minor_items():
     cal = _code("src/pages/mobile/MobileCalendar.tsx")
     assert "disabled={past}" in cal and "j * 30" in cal, "№17"
     assert "только на бронь, которую покрывает целиком" not in _code("src/pages/mobile/MobileBonuses.tsx"), "№18"
-    assert "{priceLabel(booking)}" in mb and "whiteSpace: 'nowrap' }}>\n                        {priceLabel" not in mb, "№19"
+    # 09.11 фаза 3: строка брони по образцу ListRow — сумма справа коротко
+    # (priceTrail: «Абонемент» / сумма, доплата второй строкой), а не длинным priceLabel.
+    # 09.11 фаза 3 (общие файлы): строка — ListRow, сумма в trail/trailSub.
+    assert "const price = priceTrail(booking);" in mb and "trailSub=" in mb, "№19"
     prof = _code("src/pages/mobile/MobileProfile.tsx")
     assert "Выйти из аккаунта?" in prof, "№20"
 

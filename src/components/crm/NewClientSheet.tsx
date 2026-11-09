@@ -164,15 +164,11 @@ export function NewClientSheet({
             onClose={() => { if (!saving) onClose(); }}
             title="Новый клиент"
             width={480}
+            // 09.11 фаза 3 (общие файлы): в подвале одна главная кнопка; закрыть — крестиком шторки.
             footer={(
-                <>
-                    <Button block loading={saving} disabled={!name.trim() || viewingOther} onClick={submit}>
-                        Добавить клиента
-                    </Button>
-                    <Button block variant="secondary" disabled={saving} onClick={onClose}>
-                        Не добавлять
-                    </Button>
-                </>
+                <Button block loading={saving} disabled={!name.trim() || viewingOther} onClick={submit}>
+                    Добавить клиента
+                </Button>
             )}
         >
             <form
@@ -239,6 +235,7 @@ export function NewClientSheet({
 
                 <Button
                     variant="quiet"
+                    className="ui-more-toggle"
                     aria-expanded={more}
                     iconRight={<ChevronDown size={16} aria-hidden="true" style={{ transform: more ? 'rotate(180deg)' : undefined }} />}
                     onClick={() => setMore(v => !v)}

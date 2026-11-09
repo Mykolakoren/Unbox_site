@@ -13,9 +13,10 @@ import { forceUnlockScroll } from '../useScrollLock';
 import { canUsePsyCrm } from '../crmAccess';
 import { userCanAccessFinance, userCanAccessRights } from '../../../utils/permissions';
 // Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
-import { COLOR, FONT, TEXT } from '../../../design/tokens';
+import { COLOR, FONT, TEXT, themed } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
 import { Sheet } from '../../../components/ui/Sheet';
+import { Counter } from '../../../components/ui/Counter';
 
 /**
  * Mobile admin shell — separate workspace at /m/admin.
@@ -128,7 +129,7 @@ export function MobileAdminLayout() {
 
     if (!currentUser) {
         return (
-            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
+            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.paper }}>
                 <div role="status" aria-label="Загружаем" className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
             </div>
         );
@@ -151,7 +152,9 @@ export function MobileAdminLayout() {
                 width: '100%',
                 maxWidth: 480,
                 minHeight: '100vh',
-                background: COLOR.card,
+                // 09.11 фаза 3: фон страницы — тёплая бумага (как /m и /m/crm), карточки
+                // и группы строк (card) лежат на ней; раньше всё было одного цвета card.
+                background: COLOR.paper,
                 display: 'flex',
                 flexDirection: 'column',
                 paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
@@ -161,9 +164,12 @@ export function MobileAdminLayout() {
             }}>
                 {/* Safe-area сверху: в standalone-режиме iOS шапка пряталась
                     под чёлкой (см. MobileCrmLayout, тот же фикс 31.08). */}
+                {/* 09.11 фаза 3: в тёмной теме шапка — цвет страницы с линией снизу:
+                    бирюзовая плита #22302F на тёмной бумаге висела светлой полосой. */}
                 <div style={{
-                    background: 'var(--color-panel)',
-                    color: 'var(--color-on-panel)',
+                    background: themed('var(--color-panel)', 'var(--color-paper)'),
+                    color: themed('var(--color-on-panel)', 'var(--color-ink)'),
+                    borderBottom: themed('none', `1px solid ${COLOR.ink10}`),
                     padding: 'calc(6px + env(safe-area-inset-top, 0px)) 12px 6px',
                     display: 'flex',
                     alignItems: 'center',
@@ -184,7 +190,7 @@ export function MobileAdminLayout() {
                             padding: '0 8px',
                             display: 'flex', alignItems: 'center', gap: 6,
                             cursor: 'pointer',
-                            color: 'var(--color-on-panel)',
+                            color: 'inherit',
                             fontFamily: 'inherit',
                             fontSize: 16,
                             fontWeight: 600,
@@ -193,10 +199,10 @@ export function MobileAdminLayout() {
                         Админка
                         <ChevronDown size={16} aria-hidden="true" />
                     </button>
-                    <div style={{ flex: 1, fontSize: TEXT.caption, color: 'var(--color-on-panel)', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {currentUser.name?.split(' ')[0]}
-                    </div>
-                    <NotificationsBell color={COLOR.onPanel} />
+                    {/* Имя — в шторке «Куда перейти» («Вы вошли как …»), а не мелким
+                        полупрозрачным текстом посреди шапки (admin-design №25). */}
+                    <div style={{ flex: 1 }} />
+                    <NotificationsBell color={themed(COLOR.onPanel, COLOR.ink)} />
                 </div>
 
                 <main data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>
@@ -234,6 +240,7 @@ export function MobileAdminLayout() {
                 onClose={() => setSwitcherOpen(false)}
                 canCrm={canUsePsyCrm(currentUser)}
                 canRights={userCanAccessRights(currentUser)}
+                userName={currentUser.name || currentUser.email || ''}
                 pathname={location.pathname}
                 onGo={(to) => { setSwitcherOpen(false); navigate(to); }}
             />
@@ -244,11 +251,12 @@ export function MobileAdminLayout() {
 }
 
 /** «Админка ▾»: куда перейти. Текущий раздел — с галочкой; пункты — по роли. */
-function SectionSwitcher({ open, onClose, canCrm, canRights, pathname, onGo }: {
+function SectionSwitcher({ open, onClose, canCrm, canRights, userName, pathname, onGo }: {
     open: boolean;
     onClose: () => void;
     canCrm: boolean;
     canRights: boolean;
+    userName: string;
     pathname: string;
     onGo: (to: string) => void;
 }) {
@@ -261,7 +269,7 @@ function SectionSwitcher({ open, onClose, canCrm, canRights, pathname, onGo }: {
         ...(canCrm ? [{ to: '/m/crm/today', label: 'Psy-CRM', hint: 'Ваши клиенты и сессии', current: false }] : []),
     ];
     return (
-        <Sheet open={open} onClose={onClose} title="Куда перейти">
+        <Sheet open={open} onClose={onClose} title="Куда перейти" description={userName ? `Вы вошли как ${userName}` : undefined}>
             <nav aria-label="Разделы" style={{ display: 'flex', flexDirection: 'column' }}>
                 {/* Выход в личный кабинет — первым, как раньше кнопка в шапке. */}
                 <button
@@ -329,16 +337,9 @@ function TabLink({ to, icon: Icon, label, badge = 0 }: { to: string; icon: React
         >
             <Icon size={20} strokeWidth={2} />
             <span>{label}</span>
-            {badge > 0 && (
-                <span aria-hidden="true" className="num" style={{
-                    position: 'absolute', top: 4, left: 'calc(50% + 6px)',
-                    minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-                    background: 'var(--status-pending-fg)', color: 'var(--color-on-ink)',
-                    fontSize: 12, fontWeight: 600, lineHeight: '18px', textAlign: 'center',
-                }}>
-                    {badge > 99 ? '99+' : badge}
-                </span>
-            )}
+            {/* 09.11 фаза 3: один вид счётчика во всём приложении (components/ui/Counter):
+                danger-solid + белая цифра + обводка цветом фона, не коричневое пятно. */}
+            <Counter value={badge} style={{ position: 'absolute', top: 4, left: 'calc(50% + 6px)' }} />
         </NavLink>
     );
 }

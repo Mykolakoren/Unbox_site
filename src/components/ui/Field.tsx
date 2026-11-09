@@ -95,14 +95,17 @@ function useFieldProps(id?: string, ariaDescribedBy?: string, ariaInvalid?: Inpu
     };
 }
 
-export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
     kind?: InputKind;
     /** Единица справа внутри поля: «₾», «мин», «ч». */
     suffix?: ReactNode;
+    /** hero (09.11 фаза 3) — сумма как главное поле шторки денег: высота 64,
+     *  цифры 28/600, суффикс «₾» того же кегля ink-60. */
+    size?: 'default' | 'hero';
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-    { kind = 'text', suffix, className, id, 'aria-describedby': dby, 'aria-invalid': inv, required, ...rest },
+    { kind = 'text', suffix, size = 'default', className, id, 'aria-describedby': dby, 'aria-invalid': inv, required, ...rest },
     ref,
 ) {
     const f = useFieldProps(id, dby, inv);
@@ -112,13 +115,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             {...KIND_ATTRS[kind]}
             {...f}
             required={required ?? f.required}
-            className={clsx('ui-input', suffix && 'ui-input--with-suffix', (kind === 'money' || kind === 'integer') && 'tabular-nums', className)}
+            className={clsx('ui-input', suffix && 'ui-input--with-suffix', size === 'hero' && 'ui-input--hero', (kind === 'money' || kind === 'integer') && 'tabular-nums', className)}
             {...rest}
         />
     );
     if (!suffix) return input;
     return (
-        <div className="ui-input-wrap">
+        <div className={clsx('ui-input-wrap', size === 'hero' && 'ui-input-wrap--hero')}>
             {input}
             <span className="ui-input__suffix" aria-hidden="true">{suffix}</span>
         </div>

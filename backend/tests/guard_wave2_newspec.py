@@ -107,7 +107,9 @@ def test_buttons_are_touch_size():
     assert not re.search(r"<button\b", page), "самодельная <button> вместо общего Button"
     assert "from '../components/ui/Button'" in page
     gate = _code(GATE)
-    assert gate.count("minHeight: 44") >= 2, "кнопка карточки анкеты ниже 44 px"
+    # 09.11 фаза 3: в /m кнопка карточки — общий Button (44 px через --control-h),
+    # на компьютере — своя кнопка с minHeight: 44.
+    assert gate.count("minHeight: 44") >= 1 and "<Button" in gate, "кнопка карточки анкеты ниже 44 px"
 
 
 # ─────────────────────────────────────────────────────────────────────────

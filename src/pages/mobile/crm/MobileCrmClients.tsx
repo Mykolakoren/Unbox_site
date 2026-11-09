@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Phone, Search, MessageCircle, X, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { MessageCircle, Phone, Plus } from 'lucide-react';
 import type { CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { Button } from '../../../components/ui/Button';
@@ -9,14 +9,17 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { NewClientSheet } from '../../../components/crm/NewClientSheet';
-import { COLOR } from '../../../design/tokens';
+import { ListAvatar, ListGroup, ListRow } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { CrmSearch } from './CrmSearch';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
-import { formatDayMonth, formatMoney } from '../../../utils/format';
+import { formatDayMonth } from '../../../utils/format';
 import { utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { phoneHref, telegramHref } from '../../../utils/contactLinks';
 import { useCrmCalendar, useCrmDataVersion } from './crmDataVersion';
-import { aliasLabel, normalizeClientQuery, shortDay } from './crmFlows';
+import { normalizeClientQuery, shortDay } from './crmFlows';
 import { usePullToRefresh } from '../usePullToRefresh';
 import { PullIndicator } from '../PullIndicator';
 
@@ -103,70 +106,32 @@ export function MobileCrmClients() {
             : byName);
     }, [clients, query, activeOnly, filter]);
 
+    const searching = !!query.trim();
+
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column' }}>
             <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
-            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                        Клиенты
-                    </h1>
-                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {loading && clients.length === 0 ? 'Загружаем…' : `Всего: ${clients.length} · показано: ${filtered.length}`}
-                    </p>
-                </div>
-                {!viewingOther && (
-                    <Button size="touch" icon={<Plus size={16} aria-hidden="true" />} onClick={() => setCreateOpen(true)}>
+            {/* 09.11 фаза 3: общая крупная шапка; счётчик — только при поиске («Найдено 3»). */}
+            <MobilePageHeader
+                variant="large"
+                title="Клиенты"
+                subtitle={loading && clients.length === 0 ? 'Загружаем…' : searching ? `Найдено: ${filtered.length}` : undefined}
+                action={!viewingOther ? (
+                    <Button icon={<Plus size={16} aria-hidden="true" />} onClick={() => setCreateOpen(true)}>
                         Клиент
                     </Button>
-                )}
-            </div>
+                ) : undefined}
+            />
 
-            {/* Search */}
-            <div style={{ padding: '0 16px' }}>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: 'var(--color-sunken)',
-                    borderRadius: 12,
-                    padding: '0 0 0 12px',
-                    minHeight: 44,
-                    gap: 8,
-                }}>
-                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
-                    <input
-                        value={query}
-                        onChange={e => setQuery(e.target.value)}
-                        aria-label="Поиск клиента: имя, код или телефон"
-                        placeholder="Имя, код, телефон"
-                        style={{
-                            flex: 1,
-                            background: 'transparent',
-                            border: 'none',
-                            outline: 'none',
-                            fontSize: 16,
-                            fontFamily: 'inherit',
-                            color: 'var(--color-ink)',
-                            minWidth: 0,
-                        }}
-                    />
-                    {query && (
-                        <button
-                            onClick={() => setQuery('')}
-                            aria-label="Очистить поиск"
-                            style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: 'var(--color-ink-60)', width: 44, height: 44,
-                                display: 'grid', placeItems: 'center', flexShrink: 0,
-                            }}
-                        >
-                            <X size={16} aria-hidden="true" />
-                        </button>
-                    )}
-                </div>
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <CrmSearch
+                    value={query}
+                    onChange={setQuery}
+                    label="Поиск клиента: имя, код или телефон"
+                    placeholder="Имя, код, телефон"
+                />
                 <Segmented<'active' | 'all'>
                     aria-label="Каких клиентов показать"
-                    className="mt-2"
                     options={[
                         { value: 'active', label: 'Активные' },
                         { value: 'all', label: 'Все' },
@@ -174,33 +139,30 @@ export function MobileCrmClients() {
                     value={activeOnly ? 'active' : 'all'}
                     onChange={v => setActiveOnly(v === 'active')}
                 />
-                <div role="group" aria-label="Отбор клиентов" style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                <div role="group" aria-label="Отбор клиентов" className="ui-chip-row">
                     {([
                         { id: 'all', label: 'Все' },
                         { id: 'debt', label: 'С долгом' },
                         { id: 'noNext', label: 'Без следующей' },
                     ] as { id: ClientFilter; label: string }[]).map(f => (
-                        <Chip key={f.id} selected={filter === f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)} style={{ flexShrink: 0 }}>
+                        <Chip key={f.id} selected={filter === f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
                             {f.label}
                         </Chip>
                     ))}
                 </div>
             </div>
 
+            <div style={{ padding: '24px 16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {failed && !loading && (
-                <div style={{ padding: '0 16px' }}>
-                    <ErrorBar message="Не удалось загрузить клиентов" onRetry={load} />
-                </div>
+                <ErrorBar message="Не удалось загрузить клиентов" onRetry={load} />
             )}
 
             {loading && clients.length === 0 && (
-                <div style={{ padding: '0 16px' }}>
-                    <SkeletonList count={5} label="Загружаем клиентов" cardHeight={60} />
-                </div>
+                <SkeletonList count={5} label="Загружаем клиентов" cardHeight={60} />
             )}
 
             {!loading && !failed && filtered.length === 0 && (
-                <div style={{ padding: '0 16px' }}>
+                <div>
                     {query ? (
                         <EmptyState compact title="Никого не нашлось" hint="Попробуйте другое имя, телефон или код." />
                     ) : filter !== 'all' && clients.length > 0 ? (
@@ -215,7 +177,7 @@ export function MobileCrmClients() {
                             compact
                             title="Клиентов пока нет"
                             hint="Добавьте клиента здесь. Чтобы клиенты и встречи появлялись сами из Google Календаря, подключите его."
-                            action={viewingOther ? undefined : { label: 'Добавить клиента', onClick: () => setCreateOpen(true) }}
+                            action={viewingOther ? undefined : { label: 'Добавить клиента', variant: 'secondary', onClick: () => setCreateOpen(true) }}
                             secondaryAction={!viewingOther && calendar.openSetup ? { label: 'Подключить календарь', onClick: calendar.openSetup } : undefined}
                         />
                     ) : (
@@ -223,79 +185,49 @@ export function MobileCrmClients() {
                             compact
                             title="Клиентов пока нет"
                             hint="Добавьте клиента здесь — или запишите встречу в Google Календарь, клиент появится после синхронизации (кнопка ⟳ на «Сегодня»)."
-                            action={viewingOther ? undefined : { label: 'Добавить клиента', onClick: () => setCreateOpen(true) }}
+                            action={viewingOther ? undefined : { label: 'Добавить клиента', variant: 'secondary', onClick: () => setCreateOpen(true) }}
                         />
                     )}
                 </div>
             )}
 
-            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {filtered.map(c => (
-                    <div
-                        key={c.id}
-                        style={{
-                            background: 'var(--color-card)',
-                            border: '1px solid var(--color-ink-08)',
-                            borderRadius: 12,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            paddingRight: 6,
-                        }}
-                    >
-                        <Link
-                            to={`/m/crm/clients/${c.id}`}
-                            style={{
-                                flex: 1,
-                                minWidth: 0,
-                                padding: '12px 8px 12px 14px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                color: 'var(--color-ink)',
-                                textDecoration: 'none',
-                            }}
-                        >
-                            <div style={{
-                                width: 36, height: 36,
-                                borderRadius: 999,
-                                background: 'var(--color-sunken)',
-                                display: 'grid', placeItems: 'center',
-                                fontSize: 14, fontWeight: 600,
-                                color: 'var(--color-ink-60)',
-                                flexShrink: 0,
-                            }}>
-                                {initials(c.name)}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {c.aliasCode ? `${aliasLabel(c.aliasCode)} · ${c.name}` : c.name}
-                                </div>
-                                <ClientSecondLine c={c} />
-                            </div>
-                        </Link>
-                        {phoneHref(c.phone) && (
-                            <a
-                                href={phoneHref(c.phone)!}
-                                aria-label={`Позвонить: ${c.name}`}
-                                style={iconBtn}
-                            >
-                                <Phone size={16} aria-hidden="true" />
+            {filtered.length > 0 && (
+                // Дизайн-ревью п. 3, 10, 12: одна группа строк; код клиента не в строке
+                // (он в карточке); долг — справа суммой, не режется; звонок/Telegram — в карточке.
+                <ListGroup aria-label="Клиенты">
+                    {filtered.map(c => {
+                        const debt = Number(c.unpaidSum ?? 0) || 0;
+                        // Одна кнопка связи фиксированной ширины (правый край ровный):
+                        // Telegram, если есть, иначе звонок. Обе — в карточке клиента.
+                        const tg = telegramHref(c.telegram);
+                        const tel = phoneHref(c.phone);
+                        const contact = tg ? (
+                            <a href={tg} target="_blank" rel="noopener noreferrer" aria-label={`Написать в Telegram: ${c.name}`}
+                                className="ui-btn ui-btn--quiet ui-btn--sm ui-btn--icon" style={{ color: 'var(--color-ink-60)' }}>
+                                <MessageCircle size={18} aria-hidden="true" />
                             </a>
-                        )}
-                        {telegramHref(c.telegram) && (
-                            <a
-                                href={telegramHref(c.telegram)!}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`Написать в Telegram: ${c.name}`}
-                                style={iconBtn}
-                            >
-                                <MessageCircle size={16} aria-hidden="true" />
+                        ) : tel ? (
+                            <a href={tel} aria-label={`Позвонить: ${c.name}`}
+                                className="ui-btn ui-btn--quiet ui-btn--sm ui-btn--icon" style={{ color: 'var(--color-ink-60)' }}>
+                                <Phone size={18} aria-hidden="true" />
                             </a>
-                        )}
-                    </div>
-                ))}
+                        ) : undefined;
+                        return (
+                            <ListRow
+                                key={c.id}
+                                to={`/m/crm/clients/${c.id}`}
+                                lead={<ListAvatar name={c.name || '?'} />}
+                                title={c.name}
+                                subtitle={clientSecondLine(c)}
+                                trail={debt > 0 ? <Money value={debt} currency={c.currency || 'GEL'} tone="debt" /> : undefined}
+                                trailSub={debt > 0 ? 'долг' : undefined}
+                                dimmed={!c.isActive}
+                                action={contact}
+                            />
+                        );
+                    })}
+                </ListGroup>
+            )}
             </div>
 
             <NewClientSheet
@@ -313,39 +245,11 @@ export function MobileCrmClients() {
     );
 }
 
-/** Инициалы из двух букв, как в «Финансах»: «Анна Ким» → «АК». */
-function initials(name: string | undefined): string {
-    return (name || '').split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('') || '?';
-}
-
-/** Вторая строка (G6-22): «след.: чт, 2 окт., 16:00 · долг 140 ₾».
- *  Нет следующей — «была 23 сент.»; нет истории — телефон/почта. */
-function ClientSecondLine({ c }: { c: ClientRow }) {
+/** Вторая строка (G6-22): «след. чт, 2 окт., 16:00». Нет следующей — «была 23 сент.»;
+ *  нет истории — телефон/почта. Долг — справа суммой (дизайн-ревью п. 12). */
+function clientSecondLine(c: ClientRow): string {
     const next = c.nextSessionDate ? utcNaiveToTbilisi(c.nextSessionDate) : null;
-    const debt = Number(c.unpaidSum ?? 0) || 0;
-    const parts: string[] = [];
-    if (next) parts.push(`след. ${shortDay(next.date)}, ${next.time}`);
-    else if (c.lastPastSessionDate) parts.push(`была ${formatDayMonth(parseUTC(c.lastPastSessionDate), { timeZone: BATUMI_TZ, withYear: 'auto' })}`);
-    else parts.push(c.phone || c.email || (c.tags?.length ? c.tags.slice(0, 2).join(', ') : 'сессий ещё не было'));
-    // Ревью п. 12: долг — первым, его не съедает многоточие.
-    return (
-        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {debt > 0 && (
-                <span className="num" style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>
-                    долг {formatMoney(debt, { currency: c.currency || 'GEL' })}{' · '}
-                </span>
-            )}
-            {parts.join(' · ')}
-        </div>
-    );
+    if (next) return `след. ${shortDay(next.date)}, ${next.time}`;
+    if (c.lastPastSessionDate) return `была ${formatDayMonth(parseUTC(c.lastPastSessionDate), { timeZone: BATUMI_TZ, withYear: 'auto' })}`;
+    return c.phone || c.email || (c.tags?.length ? c.tags.slice(0, 2).join(', ') : 'сессий ещё не было');
 }
-
-const iconBtn: React.CSSProperties = {
-    width: 44, height: 44,
-    borderRadius: 8,
-    background: 'var(--color-sunken)',
-    display: 'grid', placeItems: 'center',
-    color: 'var(--color-ink)',
-    flexShrink: 0,
-    textDecoration: 'none',
-};

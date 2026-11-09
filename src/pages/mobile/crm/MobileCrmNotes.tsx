@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, FileText } from 'lucide-react';
 import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
 import { crmApi, type CrmNote, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { EmptyState } from '../../../components/ui/EmptyState';
-import { Chip } from '../../../components/ui/Chip';
+import { Button } from '../../../components/ui/Button';
+import { ListGroup, ListIcon, ListRow } from '../../../components/ui/ListRow';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { CrmSearch } from './CrmSearch';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
-import { COLOR } from '../../../design/tokens';
 import { formatDayMonth, formatTime } from '../../../utils/format';
 import { useNotesHidden } from './notesPrivacy';
 
@@ -75,126 +76,82 @@ export function MobileCrmNotes() {
     }, [notes, query, clientById]);
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    Заметки
-                </h1>
-                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {loading && notes.length === 0 ? 'Загружаем…' : `Всего: ${notes.length}`}
-                </p>
-            </div>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column' }}>
+            {/* 09.11 фаза 3: общая крупная шапка; число — только при поиске. */}
+            <MobilePageHeader
+                variant="large"
+                title="Заметки"
+                subtitle={loading && notes.length === 0 ? 'Загружаем…' : query.trim() ? `Найдено: ${filtered.length}` : undefined}
+            />
 
             <div style={{ padding: '0 16px' }}>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: 'var(--color-sunken)',
-                    borderRadius: 12,
-                    padding: '0 12px',
-                    minHeight: 44,
-                    gap: 8,
-                }}>
-                    <Search size={16} color={COLOR.ink60} aria-hidden="true" />
-                    <input
-                        value={query}
-                        onChange={e => setQuery(e.target.value)}
-                        aria-label="Поиск по тексту или имени клиента"
-                        placeholder="Поиск по тексту или имени клиента"
-                        style={{
-                            flex: 1,
-                            background: 'transparent',
-                            border: 'none',
-                            outline: 'none',
-                            fontSize: 16,
-                            fontFamily: 'inherit',
-                            minWidth: 0,
-                            color: 'var(--color-ink)',
-                        }}
-                    />
+                {/* Дизайн-ревью п. 16, 23: поиск — общий вид; «Скрывать текст» — глаз 44×44
+                    в строке поиска, состояние — значком, подписью и aria-pressed. */}
+                <CrmSearch
+                    value={query}
+                    onChange={setQuery}
+                    label="Поиск по тексту или имени клиента"
+                    placeholder="Текст или имя клиента"
+                    trailing={(
+                        <Button
+                            variant="secondary"
+                            aria-pressed={hideText}
+                            aria-label={hideText ? 'Текст скрыт · показать' : 'Скрыть текст'}
+                            title={hideText ? 'Текст скрыт · показать' : 'Скрыть текст'}
+                            onClick={toggleHide}
+                            icon={hideText ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                            style={hideText ? { background: 'var(--color-accent-soft)', borderColor: 'var(--color-accent)', color: 'var(--color-accent-ink)' } : undefined}
+                        />
+                    )}
+                />
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 8, padding: '0 4px' }}>
+                    {hideText ? 'Текст заметок скрыт — видны только имя и дата' : 'Текст заметок виден'}
                 </div>
-                {/* Дизайн-ревью п. 23: подпись и значок по состоянию, aria-pressed. */}
-                <Chip
-                    selected={hideText}
-                    aria-pressed={hideText}
-                    onClick={toggleHide}
-                    icon={hideText ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-                    style={{ marginTop: 8 }}
-                >
-                    {hideText ? 'Текст скрыт · показать' : 'Скрыть текст'}
-                </Chip>
             </div>
 
+            <div style={{ padding: '24px 16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {failed && !loading && (
-                <div style={{ padding: '0 16px' }}>
-                    <ErrorBar message="Не удалось загрузить заметки" onRetry={loadNotes} />
-                </div>
+                <ErrorBar message="Не удалось загрузить заметки" onRetry={loadNotes} />
             )}
 
             {loading && notes.length === 0 && (
-                <div style={{ padding: '0 16px' }}>
-                    <SkeletonList count={4} label="Загружаем заметки" cardHeight={88} />
-                </div>
+                <SkeletonList count={4} label="Загружаем заметки" cardHeight={88} />
             )}
 
             {!loading && !failed && filtered.length === 0 && (
-                <div style={{ padding: '0 16px' }}>
-                    {query ? (
-                        <EmptyState compact title="Ничего не нашлось" hint="Попробуйте другое слово или имя." />
-                    ) : (
-                        <EmptyState compact title="Заметок пока нет" hint="Заметку можно добавить в шторке сессии или в карточке клиента («+ Заметка»)." />
-                    )}
-                </div>
+                query ? (
+                    <EmptyState compact title="Ничего не нашлось" hint="Попробуйте другое слово или имя." />
+                ) : (
+                    <EmptyState compact title="Заметок пока нет" hint="Заметку можно добавить в шторке сессии или в карточке клиента («+ Заметка»)." />
+                )
             )}
 
-            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {filtered.map(n => {
-                    const c = clientById.get(n.clientId);
-                    const created = parseUTC(n.createdAt);
-                    return (
-                        <Link
-                            key={n.id}
-                            to={c ? `/m/crm/clients/${c.id}` : '/m/crm/clients'}
-                            style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 12,
-                                padding: '12px 14px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 6,
-                                color: 'var(--color-ink)',
-                                textDecoration: 'none',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                <span style={{ fontSize: 14, fontWeight: 600 }}>
-                                    {c?.name ?? '—'}
-                                </span>
-                                <span style={{ fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap' }}>
-                                    {formatDayMonth(created, { timeZone: BATUMI_TZ })}, {formatTime(created, { timeZone: BATUMI_TZ })}
-                                </span>
-                            </div>
-                            {hideText ? (
-                                <div style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
-                                    Текст скрыт — нажмите «Текст скрыт · показать»
-                                </div>
-                            ) : (
-                                <div style={{
-                                    fontSize: 14,
-                                    color: 'var(--color-ink-80)',
-                                    lineHeight: 1.4,
-                                    overflow: 'hidden',
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: 'vertical',
-                                }}>
-                                    {n.content}
-                                </div>
-                            )}
-                        </Link>
-                    );
-                })}
+            {filtered.length > 0 && (
+                <ListGroup aria-label="Заметки">
+                    {filtered.map(n => {
+                        const c = clientById.get(n.clientId);
+                        const created = parseUTC(n.createdAt);
+                        return (
+                            <ListRow
+                                key={n.id}
+                                to={c ? `/m/crm/clients/${c.id}` : '/m/crm/clients'}
+                                lead={<ListIcon><FileText size={20} /></ListIcon>}
+                                title={c?.name ?? '—'}
+                                subtitle={hideText ? 'Текст скрыт' : (
+                                    <span style={{
+                                        color: 'var(--color-ink-80)', overflow: 'hidden',
+                                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                                    }}>
+                                        {n.content}
+                                    </span>
+                                )}
+                                trail={<span style={{ color: 'var(--color-ink-60)', fontWeight: 500 }} className="num">{formatDayMonth(created, { timeZone: BATUMI_TZ })}</span>}
+                                trailSub={<span className="num">{formatTime(created, { timeZone: BATUMI_TZ })}</span>}
+                            />
+                        );
+                    })}
+                </ListGroup>
+            )}
             </div>
         </div>
     );

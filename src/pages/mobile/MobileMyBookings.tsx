@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, Repeat } from 'lucide-react';
+import { Repeat } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
@@ -8,7 +8,7 @@ import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
 import { LoadErrorCard, SkeletonRows, StaleBar } from './LoadStates';
 import { prepareRepeat } from './repeatBooking';
-import { priceLabel } from './priceLabel';
+import { priceTrail } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { formatDateLabel as formatDateLabelRu, formatDayMonth } from '../../utils/format';
@@ -24,6 +24,8 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Segmented } from '../../components/ui/Chip';
 import { Button } from '../../components/ui/Button';
+import { ListGroup, ListRow } from '../../components/ui/ListRow';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { bookingPlace, bookingStartDate, bookingTimeRange, isLiveBooking } from './bookingView';
 import { cancelledRefund, reRentConfirmBody, reRentToast } from './refundText';
 import { hoursUntilBookingStart } from '../../utils/subscription';
@@ -152,14 +154,11 @@ export function MobileMyBookings() {
     }, [myBookings, now]);
 
     return (
-        <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
 
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: 0 }}>
-                    Мои брони
-                </h1>
-            </div>
+            {/* 09.11 фаза 3: общая крупная шапка корня раздела. */}
+            <MobilePageHeader variant="large" title="Мои брони" />
 
             <div style={{ padding: '0 16px' }}>
                 {/* Wave 1: общий Segmented (44 px, aria-pressed) вместо самодельных вкладок. */}
@@ -169,7 +168,7 @@ export function MobileMyBookings() {
                     onChange={setTab}
                     options={[
                         { value: 'upcoming', label: loaded ? `Будущие · ${upcoming.length}` : 'Будущие' },
-                        { value: 'series', label: loaded ? `Серии · ${series.length}` : 'Серии' },
+                        { value: 'series', label: loaded && series.length > 0 ? `Серии · ${series.length}` : 'Серии' },
                         { value: 'past', label: 'Прошедшие' },
                     ]}
                 />
@@ -190,16 +189,17 @@ export function MobileMyBookings() {
                     upcoming.length === 0
                         ? (
                             <EmptyState
+                                illustration="door"
                                 title="Будущих броней пока нет"
                                 hint="Выберите свободное время — займёт минуту."
                                 action={{ label: 'Найти время', onClick: () => navigate('/m/find') }}
                             />
                         )
+                        // 09.11 фаза 3: группа дня — общий ListGroup, строки — классы ListRow
+                        // (своя разметка только ради свайпа и долгого нажатия).
                         : upcomingGroups.map(group => (
-                            <section key={group.key} aria-label={group.label} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                <h2 style={groupTitle}>{group.label}</h2>
-                                <div style={listCard}>
-                                    {group.items.map(({ b, dt }, idx) => {
+                            <ListGroup key={group.key} title={group.label}>
+                                    {group.items.map(({ b, dt }) => {
                                         // Часы до начала — по времени Тбилиси, как на сервере
                                         // (_booking_hours_until_start), а не по поясу телефона.
                                         const hoursToStart = hoursUntilBookingStart(b);
@@ -211,10 +211,11 @@ export function MobileMyBookings() {
                                         // the "Re-rent" action as the primary instead.
                                         // 09.11 (владелец): «Пересдать» — ТОЛЬКО меньше суток до
                                         // начала; раньше — «Отменить» с полным возвратом.
+                                        // 09.11 фаза 3: «Пересдать» в свайпе — тёмно-бирюзовая панель, не чёрная.
                                         const primary = within24h
                                             ? {
                                                 label: 'Пересдать',
-                                                color: COLOR.ink,
+                                                color: COLOR.panel, fg: COLOR.onPanel,
                                                 onAction: () => {
                                                     // На пересдачу — только через подтверждение
                                                     // (денежное действие). Снятие — сразу.
@@ -233,26 +234,24 @@ export function MobileMyBookings() {
                                             onAction: () => open(b),
                                         };
                                         return (
-                                            <SwipeRow key={b.id} primary={primary} secondary={secondary} disabled={pendingApproval}>
+                                            <SwipeRow key={b.id} as="li" className="ui-row" flat primary={primary} secondary={secondary} disabled={pendingApproval}>
                                                 <Row
+                                                    as="div"
                                                     booking={b}
                                                     dt={dt!}
                                                     withDate={group.withDate}
-                                                    first={idx === 0}
-                                                    today={group.key === 'today'}
                                                     onTap={() => open(b)}
                                                 />
                                             </SwipeRow>
                                         );
                                     })}
-                                </div>
-                            </section>
+                            </ListGroup>
                         ))
                 )}
                 {loaded && tab === 'series' && (
                     series.length === 0
-                        ? <EmptyState title="Активных серий нет" hint="Серия — одна и та же бронь каждую неделю. Её можно создать при оформлении: «Повторять каждую неделю»." />
-                        : series.map(s => (
+                        ? <EmptyState illustration="plant" title="Активных серий нет" hint="Серия — одна и та же бронь каждую неделю. Её можно создать при оформлении: «Повторять каждую неделю»." />
+                        : <ListGroup aria-label="Серии">{series.map(s => (
                             <SeriesRow
                                 key={s.id}
                                 items={s.items}
@@ -267,28 +266,27 @@ export function MobileMyBookings() {
                                     if (nextUpcoming) open(nextUpcoming.b);
                                 }}
                             />
-                        ))
+                        ))}</ListGroup>
                 )}
                 {loaded && tab === 'past' && (
                     past.length === 0
-                        ? <EmptyState title="Прошедших броней пока нет" />
+                        ? <EmptyState illustration="cup" title="Прошедших броней пока нет" hint="Здесь появятся брони, которые уже прошли, — их можно повторить в одно касание." />
                         : (
-                            <div style={listCard}>
-                                {past.map(({ b, dt }, idx) => (
+                            <ListGroup aria-label="Прошедшие брони">
+                                {past.map(({ b, dt }) => (
                                     <Row
                                         key={b.id}
                                         booking={b}
                                         dt={dt!}
                                         dimmed
                                         withDate
-                                        first={idx === 0}
                                         onTap={() => open(b)}
                                         onRepeat={() => {
                                             if (prepareRepeat(b)) navigate('/m/checkout');
                                         }}
                                     />
                                 ))}
-                            </div>
+                            </ListGroup>
                         )
                 )}
             </div>
@@ -306,15 +304,14 @@ export function MobileMyBookings() {
     );
 }
 
-function Row({ booking, dt, dimmed, withDate, first, today, onTap, onRepeat }: {
+function Row({ booking, dt, dimmed, withDate, onTap, onRepeat, as = 'li' }: {
     booking: BookingHistoryItem;
+    /** div — внутри SwipeRow (он сам строка списка). */
+    as?: 'li' | 'div';
     dt: Date;
     dimmed?: boolean;
     /** День в строке — в группах «На этой неделе», «Позже» и в «Прошедших». */
     withDate?: boolean;
-    first?: boolean;
-    /** Сегодняшняя бронь — тонкая полоса слева. */
-    today?: boolean;
     onTap: () => void;
     onRepeat?: () => void;
 }) {
@@ -322,67 +319,44 @@ function Row({ booking, dt, dimmed, withDate, first, today, onTap, onRepeat }: {
     // Long-press → repeat (on past tab where onRepeat is set). For upcoming
     // tab onRepeat is undefined, so long-press is a no-op there.
     const longPressProps = useLongPress(() => onRepeat?.());
-    // G4-18: строка около 72 px вместо карточки на 190 — неделя видна на одном экране.
     const badges = rowBadges(booking, !!dimmed);
+    const cancelled = booking.status === 'cancelled';
+    const price = priceTrail(booking);
 
+    // 09.11 фаза 3: строка — общий ListRow: «Ср, 11 нояб. · 12:00–14:00» + сумма справа;
+    // ниже «Кабинет 5 · Unbox Uni · 2 ч». Способ оплаты коротко («Абонемент»), доплата —
+    // второй строкой справа (priceTrail). Бейджи — только исключения. Долгое нажатие
+    // (повторить) передаётся на нажимаемую часть строки; свайп — обёртка SwipeRow снаружи.
     return (
-        <div
-            className="press"
-            style={{
-                background: COLOR.card,
-                borderTop: first ? 'none' : `1px solid ${COLOR.ink10}`,
-                boxShadow: today ? `inset 3px 0 0 ${COLOR.ink}` : undefined,
-                minHeight: 72,
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                cursor: 'pointer',
-            }}
+        <ListRow
+            as={as}
+            dimmed={dimmed}
             onClick={onTap}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } }}
-            role="button"
-            tabIndex={0}
             {...(onRepeat ? longPressProps : {})}
-        >
-            {/* Прошедшие приглушаем цветом, а не прозрачностью: opacity .6
-                роняла вторичный текст ниже читаемого (3:1). */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: TEXT.body, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink }}>
-                    {withDate && <span style={{ whiteSpace: 'nowrap' }}>{formatDateLabel(dt)} · </span>}
-                    <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span>
-                </div>
-                <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
-                    {place.title} · {formatBookingDuration(booking.duration ?? 60)}
-                    {(booking as any).recurringGroupId && <> · серия</>}
-                </div>
-                {/* Ревью №19: сумма и способ оплаты — своей строкой под местом,
-                    рядом со статусом, а не справа (сдавливала название). */}
-                <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {!onRepeat && booking.status !== 'cancelled' && (
-                        <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink }}>
-                            {priceLabel(booking)}
-                        </span>
-                    )}
-                    {booking.status === 'cancelled' && (
-                        <span style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>{cancelledRefund(booking).text}</span>
-                    )}
-                    {badges}
-                </div>
-            </div>
-            {onRepeat ? (
+            title={<>
+                {withDate && <><span style={{ whiteSpace: 'nowrap' }}>{formatDateLabel(dt)} ·</span>{' '}</>}
+                <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span>
+            </>}
+            subtitle={<>
+                {place.title} · <span style={{ whiteSpace: 'nowrap' }}>{formatBookingDuration(booking.duration ?? 60)}</span>
+                {(booking as any).recurringGroupId && <> · серия</>}
+                {cancelled && <> · {cancelledRefund(booking).text}</>}
+            </>}
+            meta={badges}
+            trail={cancelled ? undefined : <span className="num">{price.main}</span>}
+            trailSub={!cancelled && price.sub ? <span className="num">{price.sub}</span> : undefined}
+            chevron={!onRepeat}
+            action={onRepeat && (
                 <Button
-                    variant="secondary"
-                    icon={<Repeat size={16} aria-hidden="true" />}
+                    variant="quiet"
+                    size="sm"
+                    icon={<Repeat size={20} aria-hidden="true" />}
                     onClick={(e) => { e.stopPropagation(); onRepeat(); }}
                     aria-label={`Повторить: ${place.title}, ${booking.startTime}`}
-                >
-                    Повторить
-                </Button>
-            ) : (
-                <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />
+                    title="Повторить"
+                />
             )}
-        </div>
+        />
     );
 }
 
@@ -397,9 +371,10 @@ function rowBadges(booking: BookingHistoryItem, past: boolean): React.ReactNode 
         out.push(<StatusBadge key="b" kind="booking" status={booking.status} />);
     }
     if (booking.isReRentListed) out.push(<StatusBadge key="r" kind="booking" status="re-rent-listed" />);
-    if (booking.status !== 'cancelled') {
-        const pay = <PaymentBadge key="p" status={booking.paymentStatus} />;
-        if (booking.paymentStatus && booking.paymentStatus !== 'pending') out.push(pay);
+    // 09.11 фаза 3: «Оплачено» у каждой строки — шум (оплачено почти всё);
+    // показываем только исключение — «без оплаты» (waived).
+    if (booking.status !== 'cancelled' && booking.paymentStatus === 'waived') {
+        out.push(<PaymentBadge key="p" status={booking.paymentStatus} />);
     }
     return out.length ? out : null;
 }
@@ -446,37 +421,12 @@ function SeriesRow({ items, onTap }: { items: BookingHistoryItem[]; onTap?: () =
     const fmt = (d: Date | null) => d ? formatDayMonth(d) : '?';
 
     return (
-        <button
+        <ListRow
             onClick={onTap}
-            className="press"
-            style={{
-                width: '100%',
-                background: COLOR.card,
-                border: `1px solid ${COLOR.ink10}`,
-                borderRadius: RADIUS.sheet,
-                padding: '12px 16px',
-                cursor: onTap ? 'pointer' : 'default',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                color: COLOR.ink,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-            }}
-        >
-            <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
-                    Серия · {sorted.length} {ruPlural(sorted.length, ['бронь', 'брони', 'броней'])}
-                </span>
-                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600, marginTop: 2 }}>
-                    {resource?.name} · <span className="num">{first?.startTime}</span>
-                </span>
-                <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2 }}>
-                    {fmt(dt0)} → {fmt(dtN)} · продлить или отменить
-                </span>
-            </span>
-            <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
-        </button>
+            title={<>{resource?.name} · <span className="num">{first?.startTime}</span></>}
+            subtitle={<>{fmt(dt0)} → {fmt(dtN)} · продлить или отменить</>}
+            trail={<span className="num">{sorted.length} {ruPlural(sorted.length, ['бронь', 'брони', 'броней'])}</span>}
+        />
     );
 }
 
@@ -485,19 +435,3 @@ function PaymentBadge({ status }: { status?: 'pending' | 'paid' | 'waived' | nul
     if (!status) return null;
     return <StatusBadge kind="payment" status={status} />;
 }
-
-const listCard: React.CSSProperties = {
-    background: COLOR.card,
-    border: `1px solid ${COLOR.ink10}`,
-    borderRadius: RADIUS.sheet,
-    overflow: 'hidden',
-};
-
-const groupTitle: React.CSSProperties = {
-    margin: '8px 0 0',
-    fontSize: TEXT.caption,
-    fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: COLOR.ink60,
-};

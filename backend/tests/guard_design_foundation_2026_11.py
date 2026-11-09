@@ -34,6 +34,20 @@ UI = ROOT / "src" / "components" / "ui"
 LEGACY_UI = {"LegacyButton.tsx"}
 
 
+def _lum(h: str) -> float:
+    h = h.lstrip("#")
+    def ch(v):
+        v = int(v, 16) / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = ch(h[0:2]), ch(h[2:4]), ch(h[4:6])
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(a: str, b: str) -> float:
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
 def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
@@ -88,6 +102,10 @@ EXPORTS = {
     "src/components/ui/EmptyIllustration.tsx": ["export function EmptyIllustration"],
     "src/components/ui/Money.tsx": ["export function Money", "export function moneyToneClass"],
     "src/components/ui/SummaryCard.tsx": ["export function SummaryCard"],
+    # 09.11 фаза 3 (общие файлы): общие Switch / Counter / PageTabs (перенесены из экранов).
+    "src/components/ui/Switch.tsx": ["export function Switch", 'role="switch"'],
+    "src/components/ui/Counter.tsx": ["export function Counter"],
+    "src/components/ui/PageTabs.tsx": ["export function PageTabs", 'role="tablist"'],
 }
 
 
@@ -101,9 +119,13 @@ def test_new_components_exist_and_export():
 
 def test_list_row_contract():
     src = _strip_comments(_read("src/components/ui/ListRow.tsx"))
-    assert "<ul className={clsx('ui-list'" in src and "<li" in src, "ListGroup/ListRow — не список ul/li"
+    # 09.11 фаза 3: строка по умолчанию li (as="div" — внутри своей обёртки), пропускает aria-*/data-*/обработчики,
+    # внешняя ссылка href — обычный <a>.
+    assert "<ul className={clsx('ui-list'" in src and "as: Root = 'li'" in src, "ListGroup/ListRow — не список ul/li"
     assert '<button type="button" className="ui-row__main"' in src, "строка с onClick — не кнопка"
     assert "<Link to={to} className=\"ui-row__main\"" in src, "строка с to — не ссылка"
+    assert "<a href={href}" in src and "'noopener noreferrer'" in src, "внешняя ссылка без rel noopener"
+    assert src.count("{...pass}") >= 4, "aria-*/data-*/обработчики не доходят до нажимаемой части строки"
     # Своё действие — вне нажимаемой области (кнопка в кнопке невалидна)
     assert re.search(r"\{main\}\s*\{action && <div className=\"ui-row__action\">", src), \
         "action должен стоять рядом с нажимаемой частью, а не внутри неё"
@@ -168,7 +190,8 @@ def test_no_black_selected_fill_in_ui():
         if re.search(r":not\([^)]*aria-pressed", sel_text) and "aria-pressed=\"true\"]" not in re.sub(r":not\([^)]*\)\)?", "", sel_text):
             continue  # :hover:not([aria-pressed="true"]) — это НЕ выбранное
         assert not re.search(r"background[^;]*var\(--color-ink\)", body), f"«выбрано» залито ink: {m.group(1).strip()}"
-        assert "accent" in body or "border-left-color" in body, f"«выбрано» не бирюзой: {m.group(1).strip()}"
+        if "background" in body:  # 09.11 фаза 3: правила без заливки (сдвиг ручки Switch) не проверяем
+            assert "accent" in body, f"«выбрано» не бирюзой: {m.group(1).strip()}"
     chip = _strip_comments(_read("src/components/ui/Chip.tsx"))
     assert "Check" not in chip, "у выбранного чипа снова галочка — чип расширяется, ряд переносится"
     choice = _strip_comments(_read("src/components/ui/ChoiceCard.tsx"))
@@ -252,7 +275,16 @@ def test_one_primary_and_row_actions():
     assert "'auto' | 'touch' | 'compact' | 'sm'" in src, "нет size=\"sm\" для действий в строке"
     assert "ОДНА на экран" in src, "в Button не записано правило «одна главная на экран»"
     css = _strip_comments(_read("src/styles/ui.css"))
-    assert "var(--color-accent)" in _css_rule(css, ".ui-btn--primary"), "главная кнопка не бирюзовая"
+    # 09.11 фаза 3: заливка — --color-accent-fill (в светлой = accent, в тёмной темнее)
+    assert "var(--color-accent-fill)" in _css_rule(css, ".ui-btn--primary"), "главная кнопка не бирюзовая"
+    idx = _read("src/index.css")
+    th, dk = _theme_block(idx), _dark_block(idx)
+    acc = re.search(r"--color-accent:\s*(#[0-9A-Fa-f]{6})", th).group(1)
+    assert re.search(rf"--color-accent-fill:\s*{acc}", th, re.I), "в светлой теме accent-fill ≠ accent"
+    for blk in (th, dk):
+        f = re.search(r"--color-accent-fill:\s*(#[0-9A-Fa-f]{6})", blk).group(1)
+        t = re.search(r"--color-on-accent-fill:\s*(#[0-9A-Fa-f]{6})", blk).group(1)
+        assert _contrast(t, f) >= 4.5, f"текст на главной кнопке {t} на {f} < 4.5:1"
     sm = re.search(r"\.ui-btn--sm\s*\{([^}]*)\}", css)
     assert sm and "--btn-h: 36px" in sm.group(1), "sm не 36 px"
     assert re.search(r"\.ui-btn--sm::after\s*\{[^}]*inset: -4px 0", css), "у sm нет запаса до 44 px для пальца"
@@ -273,6 +305,33 @@ def test_empty_state_illustration():
     assert "illustration?:" in src and "secondaryAction?:" in src
     art = _strip_comments(_read("src/components/ui/EmptyIllustration.tsx"))
     assert not re.search(r"#[0-9A-Fa-f]{3,8}\b", art), "в картинках вписаны цвета — только currentColor и токены"
+
+
+def test_phase3_shared_requests():
+    """09.11 фаза 3 (общие файлы): просьбы экранов к общим компонентам."""
+    for gone in ("src/pages/mobile/admin/heroMoney.ts", "src/pages/mobile/admin/PageTabs.tsx",
+                 "src/pages/mobile/admin/AdminCounter.tsx"):
+        assert not (ROOT / gone).exists(), f"{gone}: дубль общего компонента вернулся"
+    field = _read("src/components/ui/Field.tsx")
+    assert "size?: 'default' | 'hero'" in field and "'ui-input--hero'" in field, "у Input нет size=\"hero\""
+    idx = _read("src/index.css")
+    assert ":not(.ui-input--hero)" in idx, "правило «16 px против зума iOS» снова давит крупное поле суммы"
+    for rel in ("src/pages/mobile/admin/TopupSheet.tsx", "src/pages/mobile/admin/MobileAdminFinance.tsx"):
+        assert 'size="hero"' in _read(rel), f"{rel}: сумма не крупным полем"
+    empty = _read("src/components/ui/EmptyState.tsx")
+    assert "variant={action.variant ?? 'primary'}" in empty, "у EmptyState нет варианта кнопки"
+    css = _strip_comments(_read("src/styles/ui.css"))
+    assert re.search(r':root\[data-theme="dark"\] \.ui-m-header \{ background: var\(--color-paper\)', css), \
+        "в тёмной теме шапка /m светлее страницы"
+    assert re.search(r"@media \(max-width: 360px\) \{\s*\.ui-row__main \{ padding-left: var\(--space-3\)", css), \
+        "на 360 px поля строки снова 16"
+    assert "> .ui-list-group + .ui-list-group { margin-top: 0; }" in css, "в контейнере с gap отступ между группами двойной"
+    lay = _read("src/pages/mobile/MobileLayout.tsx")
+    assert "<span data-tour={tourId}" in lay, "тур подсвечивает всю вкладку, а не значок"
+    for rel in ("src/components/crm/NewSessionSheet.tsx", "src/components/crm/NewClientSheet.tsx"):
+        src = _read(rel)
+        assert "Не записывать" not in src and "Не добавлять" not in src, f"{rel}: в подвале снова две кнопки"
+    assert 'className="ui-more-toggle"' in _read("src/components/crm/NewClientSheet.tsx")
 
 
 def test_docs_how_to_build_a_screen():

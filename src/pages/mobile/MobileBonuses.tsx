@@ -2,29 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { Gift, Clock, Check, Info, X } from 'lucide-react';
 import { parseISO } from 'date-fns';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
-import { COLOR, STATUS } from '../../design/tokens';
+import { TEXT } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
 import { ruPlural } from '../../utils/plural';
-import { SkeletonList } from '../../components/ui/Skeleton';
+import { Skeleton, SkeletonList } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { Chip } from '../../components/ui/Chip';
+import { Segmented } from '../../components/ui/Chip';
+import { SummaryCard } from '../../components/ui/SummaryCard';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 
-type Filter = 'active' | 'used' | 'expired' | 'all';
-
-const FILTER_LABEL: Record<Filter, string> = {
-    active: 'Активные',
-    used: 'Использованные',
-    expired: 'Истёкшие',
-    all: 'Все',
-};
+// 09.11 фаза 3: три сегмента вместо четырёх чипов (переносились в две строки):
+// «Прошлые» = использованные + истёкшие, у каждой строки — бирка.
+type Filter = 'active' | 'past' | 'all';
 
 /** Пусто — своя фраза для каждого фильтра. */
 const EMPTY_TITLE: Record<Filter, string> = {
     active: 'Активных бонусов нет',
-    used: 'Использованных бонусов нет',
-    expired: 'Истёкших бонусов нет',
+    past: 'Прошлых бонусов нет',
     all: 'Бонусов пока нет',
 };
 
@@ -58,7 +54,7 @@ export function MobileBonuses() {
 
     const filtered = useMemo(() => {
         return bonuses
-            .filter(b => filter === 'all' ? true : b.status === filter)
+            .filter(b => filter === 'all' ? true : filter === 'active' ? b.status === 'active' : b.status !== 'active')
             .sort((a, b) => {
                 // Soonest-expiring first within active; newest-created first for the rest.
                 if (filter === 'active') {
@@ -73,58 +69,42 @@ export function MobileBonuses() {
     const totals = useMemo(() => {
         const active = bonuses.filter(b => b.status === 'active');
         const totalActiveHours = active.reduce((s, b) => s + (b.quantity || 0), 0);
-        return { totalActiveHours, activeCount: active.length };
+        const soon = active
+            .filter(b => b.expiresAt)
+            .sort((a, b) => parseISO(a.expiresAt!).getTime() - parseISO(b.expiresAt!).getTime())[0];
+        return { totalActiveHours, activeCount: active.length, nearest: soon?.expiresAt ? formatDayMonth(soon.expiresAt) : null };
     }, [bonuses]);
 
     return (
         <div style={{ paddingBottom: 24 }}>
             {/* X2-19: «Назад» без истории (открыли из Telegram) — в «Я», а не из приложения. */}
             <MobilePageHeader title="Бонусы" fallbackTo="/m/me" />
-            <div style={{ padding: '8px 16px 0' }}>
+            <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column' }}>
 
-            {/* Hero strip — total active hours. Wave 1: ровная поверхность
-                вместо жёлтого градиента — цвет только для статуса. */}
-            <div style={{
-                background: COLOR.sunken,
-                color: COLOR.ink,
-                borderRadius: 14,
-                padding: '16px 18px',
-                marginBottom: 14,
-                display: 'flex', alignItems: 'center', gap: 14,
-            }}>
-                <Gift size={28} />
-                <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
-                        Активных бонусов
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-                        {loading ? (
-                            <span style={{ fontSize: 14, color: COLOR.ink60 }}>Загружаем…</span>
-                        ) : loadFailed ? (
-                            <span style={{ fontSize: 14, color: COLOR.ink60 }}>—</span>
-                        ) : (
-                            <>
-                                <span className="num" style={{ fontSize: 28, fontWeight: 600 }}>
-                                    {totals.totalActiveHours}
-                                </span>
-                                <span style={{ fontSize: 13 }}>ч</span>
-                                <span style={{ fontSize: 12, color: COLOR.ink60, marginLeft: 6 }}>
-                                    · {totals.activeCount} {ruPlural(totals.activeCount, ['бонус', 'бонуса', 'бонусов'])}
-                                </span>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </div>
+            {/* 09.11 фаза 3: итог — общий SummaryCard (как абонемент): одно число,
+                «ч» на той же линии, количество бонусов — подписью. */}
+            <SummaryCard
+                label="Активных бонусов"
+                value={loading
+                    ? <Skeleton width={56} height={28} />
+                    : loadFailed ? '—' : <span className="num">{totals.totalActiveHours}</span>}
+                unit={!loading && !loadFailed ? 'ч' : undefined}
+                caption={!loading && !loadFailed
+                    ? `${totals.activeCount} ${ruPlural(totals.activeCount, ['бонус', 'бонуса', 'бонусов'])}${totals.nearest ? ` · ближайший сгорает ${totals.nearest}` : ''}`
+                    : undefined}
+            />
 
-            {/* Filter chips */}
-            {/* Wave 1: общие Chip (44 px, aria-pressed) с переносом. */}
-            <div className="ui-chip-row" role="group" aria-label="Какие бонусы показать" style={{ marginBottom: 12 }}>
-                {(['active', 'used', 'expired', 'all'] as Filter[]).map(f => (
-                    <Chip key={f} selected={filter === f} onClick={() => setFilter(f)}>
-                        {FILTER_LABEL[f]}
-                    </Chip>
-                ))}
+            <div style={{ margin: '16px 0 12px' }}>
+                <Segmented<Filter>
+                    aria-label="Какие бонусы показать"
+                    value={filter}
+                    onChange={setFilter}
+                    options={[
+                        { value: 'active', label: 'Активные' },
+                        { value: 'past', label: 'Прошлые' },
+                        { value: 'all', label: 'Все' },
+                    ]}
+                />
             </div>
 
             {loading ? (
@@ -132,97 +112,61 @@ export function MobileBonuses() {
             ) : loadFailed ? (
                 <ErrorBar message="Не удалось загрузить бонусы" onRetry={() => { void load(); }} />
             ) : filtered.length === 0 ? (
-                <EmptyState compact title={EMPTY_TITLE[filter]} />
+                <EmptyState compact illustration="cup" title={EMPTY_TITLE[filter]} />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <ListGroup aria-label="Бонусы">
                     {filtered.map(b => {
                         const status = b.status;
-                        // Цвета — только статусные токены: активен = ок,
-                        // использован = прошло, истёк = сгорел.
-                        const palette = status === 'active'
-                            ? { bg: STATUS.ok.bg, fg: STATUS.ok.fg, label: 'Активен' }
-                            : status === 'used'
-                                ? { bg: STATUS.muted.bg, fg: STATUS.muted.fg, label: 'Использован' }
-                                : { bg: STATUS.danger.bg, fg: STATUS.danger.fg, label: 'Истёк' };
                         const StatusIcon = status === 'active' ? Gift : status === 'used' ? Check : X;
                         const expiryStr = b.expiresAt ? formatDayMonth(b.expiresAt) : null;
+                        // Бирка — только там, где статус не очевиден из фильтра.
+                        const badge = status === 'active'
+                            ? (filter === 'all' ? <span className="ui-badge ui-badge--ok">Активен</span> : null)
+                            : <span className="ui-badge ui-badge--muted">{status === 'used' ? 'Использован' : 'Истёк'}</span>;
                         return (
-                            <div key={b.id} style={{
-                                background: COLOR.card,
-                                border: `1px solid ${COLOR.ink05}`,
-                                borderRadius: 11,
-                                padding: '11px 12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                            }}>
-                                <div style={{
-                                    width: 32, height: 32, borderRadius: 8,
-                                    background: palette.bg, color: palette.fg,
-                                    display: 'grid', placeItems: 'center', flexShrink: 0,
-                                }}>
-                                    <StatusIcon size={14} aria-hidden="true" />
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: COLOR.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {b.description || b.type || 'Бонус'} · {b.quantity} ч
-                                    </div>
-                                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                        <span style={{ color: palette.fg, fontWeight: 600 }}>{palette.label}</span>
-                                        <span>·</span>
-                                        <span>{formatDayMonth(b.createdAt, { withYear: 'auto' })}</span>
-                                        {expiryStr && status === 'active' && (
-                                            <>
-                                                <span>·</span>
-                                                <Clock size={12} aria-hidden="true" />
-                                                <span>до {expiryStr}</span>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
+                            <ListRow
+                                key={b.id}
+                                dimmed={status !== 'active'}
+                                lead={<ListIcon><StatusIcon size={20} /></ListIcon>}
+                                title={b.description || b.type || 'Бонус'}
+                                subtitle={<>
+                                    {formatDayMonth(b.createdAt, { withYear: 'auto' })}
+                                    {expiryStr && status === 'active' && (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+                                            · <Clock size={14} aria-hidden="true" /> до {expiryStr}
+                                        </span>
+                                    )}
+                                </>}
+                                meta={badge ?? undefined}
+                                trail={<span className="num">{b.quantity} ч</span>}
+                            />
                         );
                     })}
-                </div>
+                </ListGroup>
             )}
 
-            <div style={{
-                marginTop: 16,
-                padding: 12,
-                background: COLOR.sunken,
-                borderRadius: 10,
-                fontSize: 12,
-                color: COLOR.ink80,
-                lineHeight: 1.5,
-                display: 'flex',
-                gap: 8,
-                alignItems: 'flex-start',
-            }}>
-                <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1, color: COLOR.ink60 }} />
+            {/* 09.11 фаза 3: справка — строками 14 px без серой плашки (тексты те же;
+                пример про 2-часовую бронь — по ревью №18). */}
+            <ListGroup bare title="Как тратятся бонусы" className="m-bonus-help">
+                <ListRow
+                    lead={<ListIcon><Info size={20} /></ListIcon>}
+                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}>Бонусные часы тратятся первыми — раньше абонемента и баланса. Сначала уходят те, что раньше сгорают.</span>}
+                />
+                <ListRow
+                    lead={<ListIcon>{null}</ListIcon>}
+                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}><b>Нет абонемента?</b> Бонус идёт на любую бронь: например, 1 бонусный час на бронь в 2 часа — первый час бесплатно, второй оплачивается как обычно.</span>}
+                />
+                <ListRow
+                    lead={<ListIcon>{null}</ListIcon>}
+                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}><b>Есть абонемент?</b> Бонус уйдёт только на бронь, которую оплатит полностью: 1 бонусный час — на бронь ровно в 1 час. На бронь в 2 часа пойдут часы абонемента, а бонус останется.</span>}
+                />
                 {/* X3-02: на сервере приветственный час живёт 15 дней
-                    (auth.py WELCOME_BONUS_EXPIRY_DAYS), а тут было написано 90 —
-                    клиент откладывал час, и тот сгорал. */}
-                {/* 09.11 (ревью №18): на примере, а не «покрывает целиком». */}
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span>
-                        Бонусные часы тратятся первыми — раньше абонемента и баланса. Сначала уходят те,
-                        что раньше сгорают.
-                    </span>
-                    <span>
-                        <b>Нет абонемента?</b> Бонус идёт на любую бронь: например, 1 бонусный час на бронь
-                        в 2 часа — первый час бесплатно, второй оплачивается как обычно.
-                    </span>
-                    <span>
-                        <b>Есть абонемент?</b> Бонус уйдёт только на бронь, которую оплатит полностью:
-                        1 бонусный час — на бронь ровно в 1 час. На бронь в 2 часа пойдут часы абонемента,
-                        а бонус останется.
-                    </span>
-                    <span>
-                        Приветственный бонус — 1 бесплатный час, действует 15 дней с регистрации
-                        (точная дата «до …» — в списке выше).
-                    </span>
-                </span>
-            </div>
+                    (auth.py WELCOME_BONUS_EXPIRY_DAYS), а тут было написано 90. */}
+                <ListRow
+                    lead={<ListIcon>{null}</ListIcon>}
+                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}>Приветственный бонус — 1 бесплатный час, действует 15 дней с регистрации (точная дата «до …» — в списке выше).</span>}
+                />
+            </ListGroup>
             </div>
         </div>
     );

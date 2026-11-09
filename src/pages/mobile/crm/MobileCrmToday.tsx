@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Calendar, RefreshCw, Plus, Plane, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react';
+import { Calendar, Check, ChevronDown, RefreshCw, Plus, Plane, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { crmApi, type CrmSession, type CrmClient } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
@@ -12,6 +12,9 @@ import { useCrmCalendar, useCrmDataVersion } from './crmDataVersion';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { ListAvatar, ListGroup, ListRow, ListTime } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
@@ -282,38 +285,49 @@ export function MobileCrmToday() {
             <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
             <VacationBanner />
 
-            {/* ── Шапка ─────────────────────────────────────────────── */}
-            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.15 }}>
-                        {isToday ? 'Сегодня' : dayLabel}
-                    </h1>
-                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                        {[isToday ? dayLabel : '', countLabel].filter(Boolean).join(' · ') || ' '}
-                    </p>
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                    {!viewingOther && (
-                        <Button
-                            size="touch"
-                            icon={<Plus size={16} aria-hidden="true" />}
-                            onClick={() => bookNext.open(undefined, undefined, isToday ? undefined : dateStr)}
-                        >
-                            Сессия
-                        </Button>
-                    )}
-                    {calendar.connected !== false && (
-                        <Button
-                            variant="secondary"
-                            size="touch"
-                            disabled={syncing}
-                            onClick={handleSync}
-                            aria-label={syncing ? 'Синхронизируем с Google Календарём' : 'Синхронизировать с Google Календарём'}
-                            icon={<RefreshCw size={16} aria-hidden="true" style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />}
+            {/* ── Шапка (09.11 фаза 3): общая крупная шапка 28/14/16. Дата — один раз:
+                подзаголовок «Пн, 9 ноября · 5 сессий» сам открывает выбор другой даты
+                (раньше дата стояла ещё и на широкой кнопке «Другая дата · 9 ноября»). */}
+            <MobilePageHeader
+                variant="large"
+                title={isToday ? 'Сегодня' : dayLabel}
+                subtitle={(
+                    <label className="press" style={datePickerLabel}>
+                        <Calendar size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <span>{[isToday ? dayLabel : 'Другая дата', countLabel].filter(Boolean).join(' · ')}</span>
+                        <ChevronDown size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <input
+                            type="date"
+                            aria-label="Выбрать дату"
+                            value={dateStr}
+                            onChange={e => goTo(e.target.value)}
+                            style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%' }}
                         />
-                    )}
-                </div>
-            </div>
+                    </label>
+                )}
+                action={(
+                    <>
+                        {!viewingOther && (
+                            <Button
+                                icon={<Plus size={16} aria-hidden="true" />}
+                                onClick={() => bookNext.open(undefined, undefined, isToday ? undefined : dateStr)}
+                            >
+                                Сессия
+                            </Button>
+                        )}
+                        {calendar.connected !== false && (
+                            <Button
+                                variant="secondary"
+                                disabled={syncing}
+                                onClick={handleSync}
+                                aria-label={syncing ? 'Синхронизируем с Google Календарём' : 'Синхронизировать с Google Календарём'}
+                                icon={<RefreshCw size={16} aria-hidden="true" style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />}
+                            />
+                        )}
+                    </>
+                )}
+                className="crm-today-header"
+            />
 
             {calendar.connected === false && !viewingOther && (
                 <button
@@ -323,18 +337,19 @@ export function MobileCrmToday() {
                     data-calendar-plate
                     style={calendarPlate}
                 >
-                    <CalendarOff size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                    <CalendarOff size={20} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-ink-60)', marginTop: 2 }} />
                     <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: 'block', fontWeight: 600 }}>Календарь не подключён</span>
-                        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
+                        <span style={{ display: 'block', fontWeight: 600, fontSize: 16 }}>Календарь не подключён</span>
+                        <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)', marginTop: 2 }}>
                             Встречи из Google Календаря будут появляться здесь сами
                         </span>
+                        <span style={{ display: 'block', fontWeight: 600, color: 'var(--color-accent-ink)', marginTop: 6 }}>Как подключить</span>
                     </span>
-                    <span style={{ fontWeight: 600, textDecoration: 'underline', flexShrink: 0 }}>Как подключить</span>
                 </button>
             )}
 
-            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.crm-today-header { padding-top: 0; padding-bottom: 0; }`}</style>
 
             {/* ── Лента недели (G6-24) ──────────────────────────────── */}
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -352,6 +367,7 @@ export function MobileCrmToday() {
                     {Array.from({ length: 7 }, (_, i) => addDaysYmd(monday, i)).map(ymd => {
                         const selected = ymd === dateStr;
                         const hasDot = weekDots?.monday === monday && weekDots.days.has(ymd);
+                        const isTodayCell = ymd === todayStr;
                         return (
                             <button
                                 key={ymd}
@@ -361,19 +377,24 @@ export function MobileCrmToday() {
                                 aria-label={`${formatDateLabel(ymd, { capitalize: true })}${hasDot ? ', есть сессии' : ''}`}
                                 className="press"
                                 style={{
-                                    minHeight: 56, borderRadius: 10, border: 'none', cursor: 'pointer',
+                                    // 09.11 фаза 3: выбранный день — общий язык «выбрано»
+                                    // (accent-soft + рамка accent), а не чёрная плитка: в тёмной
+                                    // теме она была светлым пятном. Сегодня — тонкая обводка.
+                                    minHeight: 56, borderRadius: 8, border: 'none', cursor: 'pointer',
                                     fontFamily: 'inherit',
-                                    background: selected ? 'var(--color-ink)' : 'var(--color-sunken)',
-                                    color: selected ? 'var(--color-on-ink)' : 'var(--color-ink)',
+                                    background: selected ? 'var(--color-accent-soft)' : 'transparent',
+                                    color: selected ? 'var(--color-accent-ink)' : 'var(--color-ink)',
                                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                                    boxShadow: ymd === todayStr && !selected ? 'inset 0 0 0 1.5px var(--color-ink)' : undefined,
+                                    boxShadow: selected
+                                        ? 'inset 0 0 0 1.5px var(--color-accent)'
+                                        : isTodayCell ? 'inset 0 0 0 1px var(--color-ink-20)' : undefined,
                                 }}
                             >
-                                <span style={{ fontSize: 12, fontWeight: 500 }}>{formatWeekdayShort(ymd)}</span>
+                                <span style={{ fontSize: 12, fontWeight: selected ? 600 : 500, color: selected ? undefined : 'var(--color-ink-60)' }}>{formatWeekdayShort(ymd)}</span>
                                 <span className="num" style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>{Number(ymd.slice(8))}</span>
                                 <span aria-hidden="true" style={{
                                     width: 4, height: 4, borderRadius: 999,
-                                    background: hasDot ? 'currentColor' : 'transparent',
+                                    background: hasDot ? (selected ? 'var(--color-accent)' : 'var(--color-ink-60)') : 'transparent',
                                 }} />
                             </button>
                         );
@@ -389,33 +410,20 @@ export function MobileCrmToday() {
                     <ChevronRight size={18} aria-hidden="true" />
                 </button>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {!isToday && (
-                        <Button variant="secondary" size="touch" onClick={() => goTo(todayStr)} style={{ flex: 1 }}>
+                {!isToday && (
+                    <div>
+                        <Button variant="secondary" size="sm" onClick={() => goTo(todayStr)}>
                             К сегодня
                         </Button>
-                    )}
-                    <label style={pickerStyle}>
-                        <Calendar size={16} aria-hidden="true" />
-                        {/* Рядом с «К сегодня» кнопка в полширины, и дата переносилась на
-                            вторую строку; день и так в заголовке (обход 10.10). */}
-                        <span>{isToday ? `Другая дата · ${formatDayMonth(dateStr, { withYear: 'auto' })}` : 'Другая дата'}</span>
-                        <input
-                            type="date"
-                            aria-label="Выбрать дату"
-                            value={dateStr}
-                            onChange={e => goTo(e.target.value)}
-                            style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-                        />
-                    </label>
-                </div>
+                    </div>
+                )}
             </div>
 
             {/* ── Полки (свайп — соседний день) ─────────────────────── */}
             <div
                 onTouchStart={onTouchStart}
                 onTouchEnd={onTouchEnd}
-                style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 14, minHeight: 200 }}
+                style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 24, minHeight: 200 }}
             >
                 {/* Скелетон — пока день ещё не загружен. При тихом обновлении
                     того же дня полки остаются на месте. */}
@@ -436,7 +444,7 @@ export function MobileCrmToday() {
                         compact
                         title="Сессий на эту дату нет"
                         hint="Листайте дни свайпом или выберите день в ленте недели."
-                        action={viewingOther ? undefined : { label: 'Записать сессию', onClick: () => bookNext.open(undefined, undefined, isToday ? undefined : dateStr) }}
+                        action={viewingOther ? undefined : { label: 'Записать сессию', variant: 'secondary', onClick: () => bookNext.open(undefined, undefined, isToday ? undefined : dateStr) }}
                     />
                 )}
 
@@ -451,11 +459,11 @@ export function MobileCrmToday() {
                                         end: new Date(parseUTC(next.date).getTime() + (next.durationMinutes || 60) * 60000),
                                     })}
                                 </span>
-                                <span className="num" style={{ fontSize: 28, fontWeight: 600, lineHeight: 1.1 }}>{timeRange(next)}</span>
+                                <span className="num" style={{ fontSize: 28, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap' }}>{timeRange(next)}</span>
                                 <span style={{ fontSize: 16, fontWeight: 600 }}>{nameOf(next)}</span>
                                 <span style={{ fontSize: 14, opacity: 0.8 }}>
-                                    {[cabinetOf(next) ?? 'Без кабинета', priceOf(next) && formatMoney(priceOf(next)!.amount, { currency: priceOf(next)!.currency })]
-                                        .filter(Boolean).join(' · ')}
+                                    {cabinetOf(next) ?? 'Без кабинета'}
+                                    {priceOf(next) && <>{' · '}<Money value={priceOf(next)!.amount} currency={priceOf(next)!.currency} inline /></>}
                                 </span>
                             </button>
                             {!next.isBooked && !viewingOther && (
@@ -469,50 +477,55 @@ export function MobileCrmToday() {
                             )}
                         </div>
                         {later.length > 0 && (
-                            <div style={listCard}>
-                                {later.map((s, i) => (
-                                    <SessionLine
-                                        key={s.id}
-                                        first={i === 0}
-                                        time={startTime(s)}
-                                        name={nameOf(s)}
-                                        onOpen={() => openSheet(s)}
-                                        right={(() => {
-                                            const p = priceOf(s);
+                            <ListGroup aria-label="Позже сегодня">
+                                {later.map(s => {
+                                    const p = priceOf(s);
+                                    return (
+                                        <ListRow
+                                            key={s.id}
+                                            lead={<ListTime start={startTime(s)} />}
+                                            title={nameOf(s)}
+                                            subtitle={cabinetOf(s) ?? undefined}
+                                            onClick={() => openSheet(s)}
                                             // Будущая — цена нейтрально, без «ждёт оплаты» (G6-07/G6-15).
-                                            return p ? <span className="num" style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>{formatMoney(p.amount, { currency: p.currency })}</span> : null;
-                                        })()}
-                                    />
-                                ))}
-                            </div>
+                                            trail={p ? <span style={{ color: 'var(--color-ink-60)', fontWeight: 500 }}><Money value={p.amount} currency={p.currency} /></span> : undefined}
+                                        />
+                                    );
+                                })}
+                            </ListGroup>
                         )}
                     </section>
                 )}
 
-                {/* 2. Закрыть день */}
+                {/* 2. Закрыть день — оплата в строке тихой кнопкой (secondary sm):
+                    главная бирюзовая на экране одна — «+ Сессия» (09.11 фаза 3). */}
                 {dayLoaded && shelves.started.length > 0 && (
-                    <section aria-labelledby="crm-shelf-close" style={shelfStyle}>
-                        <h2 id="crm-shelf-close" style={shelfTitle}>Закрыть день</h2>
-                        <div style={listCard}>
-                            {shelves.started.map((s, i) => {
+                    <div>
+                        <ListGroup title="Закрыть день">
+                            {shelves.started.map(s => {
                                 const p = priceOf(s);
                                 const busy = quickPay.busyIds.has(s.id);
+                                const priceless = !p && !viewingOther && isBillableStatusOrPast(s)
+                                    && sessionPriceOf(s, clientById.get(s.clientId)) <= 0;
                                 return (
-                                    <SessionLine
+                                    <ListRow
                                         key={s.id}
-                                        first={i === 0}
-                                        time={startTime(s)}
-                                        name={nameOf(s)}
-                                        note={s.status === 'NO_SHOW' ? statusLabel('session', 'NO_SHOW') : undefined}
-                                        onOpen={() => openSheet(s)}
-                                        right={s.isPaid ? (
-                                            <StatusBadge kind="payment" status="paid" />
-                                        ) : !p && !viewingOther && isBillableStatusOrPast(s)
-                                            && sessionPriceOf(s, clientById.get(s.clientId)) <= 0 ? (
+                                        lead={<ListTime start={startTime(s)} />}
+                                        title={nameOf(s)}
+                                        subtitle={s.status === 'NO_SHOW'
+                                            ? <span style={{ color: 'var(--status-danger-fg)', fontWeight: 600 }}>{statusLabel('session', 'NO_SHOW')}</span>
+                                            : undefined}
+                                        onClick={() => openSheet(s)}
+                                        trail={s.isPaid ? (
+                                            <StatusBadge kind="payment" status="paid" variant="dot" />
+                                        ) : priceless || (p && !viewingOther) ? undefined : (
+                                            <StatusBadge kind="session" status={s.status} variant="dot" />
+                                        )}
+                                        action={s.isPaid ? undefined : priceless ? (
                                             // 09.11 (решение 2): цены нет — оплата через «Сколько заплатили?».
                                             <Button
                                                 variant="secondary"
-                                                size="touch"
+                                                size="sm"
                                                 onClick={() => openSheet(s, true)}
                                                 aria-label={`Отметить оплату: ${nameOf(s)} — указать сумму`}
                                             >
@@ -522,23 +535,24 @@ export function MobileCrmToday() {
                                             // В5: оплата в один тап — на счёт клиента по умолчанию,
                                             // тост на 5 с «Вернуть». Защита от двойного тапа — в useQuickPay.
                                             <Button
-                                                size="touch"
+                                                variant="secondary"
+                                                size="sm"
                                                 loading={busy}
+                                                icon={partialPayment(s, clientById.get(s.clientId)) ? undefined : <Check size={16} aria-hidden="true" />}
                                                 onClick={() => quickPay.pay(s)}
                                                 aria-label={`Отметить оплату: ${nameOf(s)}, ${formatMoney(p.amount, { currency: p.currency })}`}
                                             >
+                                                {/* Коротко «✓ 120 ₾» — имя рядом не обрезается (полный текст — в aria-label). */}
                                                 {partialPayment(s, clientById.get(s.clientId))
-                                                    ? `Доплата · ${formatMoney(p.amount, { currency: p.currency })}`
-                                                    : `Оплата · ${formatMoney(p.amount, { currency: p.currency })}`}
+                                                    ? <span>Доплата · <Money value={p.amount} currency={p.currency} inline /></span>
+                                                    : <Money value={p.amount} currency={p.currency} inline />}
                                             </Button>
-                                        ) : (
-                                            <StatusBadge kind="session" status={s.status} />
-                                        )}
+                                        ) : undefined}
                                     />
                                 );
                             })}
-                        </div>
-                    </section>
+                        </ListGroup>
+                    </div>
                 )}
 
                 {/* Аренды без сессии (4.4): кабинет снят, а встречи в CRM нет. */}
@@ -546,58 +560,64 @@ export function MobileCrmToday() {
                     const rentals = rentalsWithoutSession(bookings, myEmail, dateStr, sessions);
                     if (!rentals.length) return null;
                     return (
-                        <section aria-labelledby="crm-shelf-rentals" style={shelfStyle} data-rentals-shelf>
-                            <h2 id="crm-shelf-rentals" style={shelfTitle}>Аренда без сессии</h2>
-                            <div style={listCard}>
-                                {rentals.map((b, i) => (
-                                    <SessionLine
+                        <div data-rentals-shelf>
+                            <ListGroup title="Аренда без сессии">
+                                {rentals.map(b => (
+                                    <ListRow
                                         key={b.id}
-                                        first={i === 0}
-                                        time={b.startTime || ''}
-                                        name={RESOURCES.find(r => r.id === b.resourceId)?.name ?? 'Кабинет'}
-                                        onOpen={() => setRentalTarget(b)}
-                                        right={<Button variant="secondary" size="touch" onClick={() => setRentalTarget(b)}>Записать сессию</Button>}
+                                        lead={<ListTime start={b.startTime || ''} />}
+                                        title={RESOURCES.find(r => r.id === b.resourceId)?.name ?? 'Кабинет'}
+                                        onClick={() => setRentalTarget(b)}
+                                        action={<Button variant="secondary" size="sm" onClick={() => setRentalTarget(b)}>Записать сессию</Button>}
                                     />
                                 ))}
-                            </div>
-                        </section>
+                            </ListGroup>
+                        </div>
                     );
                 })()}
 
                 {/* 3. Без следующей встречи */}
                 {dayLoaded && shelves.noNext.length > 0 && !viewingOther && (
-                    <section aria-labelledby="crm-shelf-nonext" style={shelfStyle}>
-                        <h2 id="crm-shelf-nonext" style={shelfTitle}>Без следующей встречи</h2>
-                        {shelves.noNext.map(({ client, last }) => (
-                            <div key={client.id} style={noNextRow}>
-                                <span style={{ fontWeight: 600, flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {client.name}
-                                </span>
-                                <Button variant="secondary" size="touch" onClick={() => bookNext.open(client, last)}>
-                                    {`Записать · ${nextSessionLabel(last, client)}`}
-                                </Button>
-                            </div>
-                        ))}
-                    </section>
+                    <div>
+                        <ListGroup title="Без следующей встречи">
+                            {shelves.noNext.map(({ client, last }) => (
+                                <ListRow
+                                    key={client.id}
+                                    lead={<ListAvatar name={client.name} />}
+                                    title={client.name}
+                                    subtitle={nextSessionLabel(last, client)}
+                                    action={(
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => bookNext.open(client, last)}
+                                            aria-label={`Записать · ${nextSessionLabel(last, client)}`}
+                                        >
+                                            Записать
+                                        </Button>
+                                    )}
+                                />
+                            ))}
+                        </ListGroup>
+                    </div>
                 )}
 
                 {/* Старые отменённые (до 14.05 отмена была статусом) */}
                 {dayLoaded && shelves.cancelled.length > 0 && (
-                    <section aria-labelledby="crm-shelf-cancelled" style={shelfStyle}>
-                        <h2 id="crm-shelf-cancelled" style={shelfTitle}>Отменённые</h2>
-                        <div style={listCard}>
-                            {shelves.cancelled.map((s, i) => (
-                                <SessionLine
+                    <div>
+                        <ListGroup title="Отменённые">
+                            {shelves.cancelled.map(s => (
+                                <ListRow
                                     key={s.id}
-                                    first={i === 0}
-                                    time={startTime(s)}
-                                    name={nameOf(s)}
-                                    onOpen={() => openSheet(s)}
-                                    right={<StatusBadge kind="session" status={s.status} />}
+                                    dimmed
+                                    lead={<ListTime start={startTime(s)} />}
+                                    title={nameOf(s)}
+                                    onClick={() => openSheet(s)}
+                                    trail={<StatusBadge kind="session" status={s.status} variant="dot" />}
                                 />
                             ))}
-                        </div>
-                    </section>
+                        </ListGroup>
+                    </div>
                 )}
             </div>
 
@@ -636,30 +656,6 @@ export function MobileCrmToday() {
     );
 }
 
-/** Строка сессии на полке: время, имя (тап — шторка), действие справа. */
-function SessionLine({ time, name, note, right, onOpen, first }: {
-    time: string; name: string; right?: React.ReactNode; onOpen: () => void; first: boolean;
-    /** Пометка под именем («Неявка · оплачивается»). */
-    note?: string;
-}) {
-    return (
-        <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px 6px 0',
-            borderTop: first ? 'none' : '1px solid var(--color-ink-10)',
-        }}>
-            <button type="button" onClick={onOpen} className="press" style={lineButton}>
-                <span className="num" style={{ fontWeight: 600, flexShrink: 0 }}>{time}</span>
-                {/* Ревью п. 18: имя не обрезаем кнопкой оплаты — переносим на 2 строки. */}
-                <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                    <span style={nameClamp}>{name}</span>
-                    {note && <span style={{ fontSize: 12, color: 'var(--status-danger-fg)', fontWeight: 600 }}>{note}</span>}
-                </span>
-            </button>
-            {right && <div style={{ flexShrink: 0 }}>{right}</div>}
-        </div>
-    );
-}
-
 /** Понедельник недели, в которую попадает день (календарно, без поясов). */
 function mondayOf(ymd: string): string {
     const [y, m, d] = ymd.split('-').map(Number);
@@ -678,8 +674,9 @@ function pluralSessions(n: number): string {
 // ─── styles ──────────────────────────────────────────────────────────
 const shelfStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
 
+// Как подпись ListGroup («ЗАКРЫТЬ ДЕНЬ»): отступ 4, чтобы подписи полок стояли ровно.
 const shelfTitle: React.CSSProperties = {
-    margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+    margin: 0, padding: '0 4px', fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
     textTransform: 'uppercase', color: 'var(--color-ink-60)',
 };
 
@@ -701,22 +698,24 @@ const onInkButton: React.CSSProperties = {
     fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer',
 };
 
-const nameClamp: React.CSSProperties = {
-    fontWeight: 600, overflow: 'hidden', overflowWrap: 'anywhere',
-    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.25,
+
+/** Подзаголовок шапки — он же выбор даты (дата на экране один раз). Зона нажатия 44 px. */
+const datePickerLabel: React.CSSProperties = {
+    position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6,
+    minHeight: 44, margin: '-10px 0', cursor: 'pointer', color: 'var(--color-ink-60)',
 };
 
 const weekArrow: React.CSSProperties = {
-    width: 36, minHeight: 56, flexShrink: 0, border: 'none', borderRadius: 10, padding: 0,
+    width: 36, minHeight: 56, flexShrink: 0, border: 'none', borderRadius: 8, padding: 0,
     background: 'transparent', color: 'var(--color-ink-60)', cursor: 'pointer',
     display: 'grid', placeItems: 'center',
 };
 
 const calendarPlate: React.CSSProperties = {
-    margin: '0 16px', padding: '10px 12px', minHeight: 56, borderRadius: 12,
-    background: 'var(--color-sunken)', border: '1px solid var(--color-ink-10)',
+    margin: '0 16px', padding: '12px 16px', minHeight: 56, borderRadius: 16,
+    background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
     color: 'var(--color-ink)', fontFamily: 'inherit', fontSize: 14, textAlign: 'left',
-    display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+    display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
 };
 
 /** Прошла (или отмечена «неявка») — значит, по ней ждём оплату. */
@@ -724,29 +723,9 @@ function isBillableStatusOrPast(s: CrmSession): boolean {
     return isBillableStatus(s.status) || (s.status === 'PLANNED' && parseUTC(s.date).getTime() <= Date.now());
 }
 
-const listCard: React.CSSProperties = {
-    background: 'var(--color-card)', border: '1px solid var(--color-ink-10)',
-    borderRadius: 16, padding: '0 0 0 14px',
-};
 
-const lineButton: React.CSSProperties = {
-    flex: 1, minWidth: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 10,
-    background: 'none', border: 'none', padding: 0, textAlign: 'left',
-    color: 'var(--color-ink)', fontFamily: 'inherit', fontSize: 16, cursor: 'pointer',
-};
 
-const noNextRow: React.CSSProperties = {
-    background: 'var(--color-sunken)', borderRadius: 12, padding: '8px 8px 8px 14px',
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-};
 
-const pickerStyle: React.CSSProperties = {
-    flex: 1, position: 'relative',
-    background: 'var(--color-card)', border: '1px solid var(--color-ink-10)', borderRadius: 8,
-    padding: '0 12px', minHeight: 44,
-    fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-};
 
 /** Баннер «Вы в отпуске до …» — тап открывает анкету, где отпуск снимают. */
 function VacationBanner() {
@@ -766,7 +745,7 @@ function VacationBanner() {
                 minHeight: 44,
                 background: 'var(--status-pending-bg)',
                 border: '1px solid var(--color-ink-10)',
-                borderRadius: 10,
+                borderRadius: 16,
                 color: 'var(--status-pending-fg)',
                 fontSize: 14,
                 gap: 10,

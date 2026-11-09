@@ -17,6 +17,7 @@ import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 import { toastApiError } from '../../../utils/errors';
+import { Money } from '../../../components/ui/Money';
 import { DueBadge } from '../../../components/admin/DueBadge';
 import type { DueInfo } from '../../../utils/dueAmounts';
 import { hoursUntilStart, refundPreview } from './cancelRules';
@@ -361,7 +362,7 @@ function ActionSheet({
                         : <DueBadge due={dueInfo?.due} paid={!!dueInfo} charged={dueInfo?.charged} price={dueInfo?.price}
                             status={booking.status} method={booking.paymentMethod as string | undefined} />}
                     <span style={{ fontSize: 14, color: 'var(--color-ink-60)' }}>
-                        Цена <span className="num" style={{ fontWeight: 600, color: 'var(--color-ink)' }}>{formatGel(booking.finalPrice ?? 0)}</span>
+                        Цена <Money value={booking.finalPrice ?? 0} className="font-semibold text-ink" />
                     </span>
                 </div>
                 {discount && (
@@ -375,7 +376,10 @@ function ActionSheet({
                     </p>
                 )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* 09.11 фаза 3 (admin-design №20): действия — строками списка с линиями
+                    (значок 20, текст 16/500, подпись 14), а не одинаковыми серыми плитками;
+                    «Отменить бронь» — отдельно, красным текстом без заливки. */}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
                     {canApprove && (
                         <ActionRow
                             label="Одобрить бронь"
@@ -424,7 +428,7 @@ function ActionSheet({
                         />
                     )}
                     {reRentTooEarly && (
-                        <div style={{ fontSize: 13, color: 'var(--color-ink-60)', padding: '4px 4px 8px' }}>
+                        <div style={{ fontSize: 14, color: 'var(--color-ink-60)', padding: '4px 4px 8px' }}>
                             Больше суток до начала — пересдавать не нужно: отмените бронь, деньги вернутся полностью.
                         </div>
                     )}
@@ -446,6 +450,7 @@ function ActionSheet({
                         <ActionRow
                             label="Отменить бронь"
                             tone="danger"
+                            separated
                             icon={<X size={18} />}
                             busy={busy}
                             onClick={onCancel}
@@ -457,11 +462,8 @@ function ActionSheet({
 }
 
 function ActionRow({
-    label, sub, icon, tone, busy, onClick,
-}: { label: string; sub?: string; icon: React.ReactNode; tone?: 'ok' | 'danger'; busy?: boolean; onClick: () => void }) {
-    const bgVar = tone === 'danger' ? '--status-danger-bg'
-        : tone === 'ok' ? '--status-ok-bg'
-        : '--color-sunken';
+    label, sub, icon, tone, busy, separated, onClick,
+}: { label: string; sub?: string; icon: React.ReactNode; tone?: 'ok' | 'danger'; busy?: boolean; separated?: boolean; onClick: () => void }) {
     const fgVar = tone === 'danger' ? '--status-danger-fg'
         : tone === 'ok' ? '--status-ok-fg'
         : '--color-ink';
@@ -470,22 +472,26 @@ function ActionRow({
             onClick={onClick}
             disabled={busy}
             aria-busy={busy || undefined}
-            className="press"
             style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                background: `var(${bgVar})`,
+                display: 'flex', alignItems: 'center', gap: 12,
+                background: 'transparent',
                 color: `var(${fgVar})`,
-                border: 'none', borderRadius: 12,
-                padding: '12px 16px', fontFamily: 'inherit',
-                fontSize: 15, fontWeight: 600, cursor: busy ? 'wait' : 'pointer',
+                border: 'none',
+                borderTop: separated ? 'none' : '1px solid var(--color-ink-08)',
+                borderRadius: separated ? 8 : 0,
+                marginTop: separated ? 16 : 0,
+                padding: separated ? '12px 4px' : '10px 4px', fontFamily: 'inherit',
+                fontSize: 16, fontWeight: 500, cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.6 : 1, textAlign: 'left',
-                minHeight: 52,
+                minHeight: 52, width: '100%',
             }}
         >
-            {busy ? <Loader2 size={18} className="animate-spin-fast" style={{ flexShrink: 0 }} /> : <span style={{ flexShrink: 0 }}>{icon}</span>}
+            {busy
+                ? <Loader2 size={20} className="animate-spin-fast" style={{ flexShrink: 0 }} />
+                : <span style={{ flexShrink: 0, display: 'flex', color: tone ? undefined : 'var(--color-ink-60)' }}>{icon}</span>}
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
                 <span>{label}</span>
-                {sub && <span style={{ fontSize: 12, fontWeight: 400 }}>{sub}</span>}
+                {sub && <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--color-ink-60)' }}>{sub}</span>}
             </span>
         </button>
     );
@@ -556,7 +562,7 @@ function CancelBookingSheet({ booking, userName, busy, isOwner, onClose, onConfi
             ) : (
                 <>
                     {late && (
-                        <div data-late-cancel style={{ fontSize: 14, color: 'var(--status-pending-fg)', background: 'var(--status-pending-bg)', borderRadius: 12, padding: '8px 12px', marginBottom: 12, lineHeight: 1.4 }}>
+                        <div data-late-cancel style={{ fontSize: 14, color: 'var(--status-pending-fg)', background: 'var(--status-pending-bg)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, lineHeight: 1.4 }}>
                             {hours !== null && hours < 0 ? 'Бронь уже началась или прошла.' : 'До начала меньше 24 часов.'}
                             {' '}По правилам клиент сам уже не отменит — без возврата. Если время пересдать и его займут — клиенту 50 %.
                         </div>
@@ -575,7 +581,7 @@ function CancelBookingSheet({ booking, userName, busy, isOwner, onClose, onConfi
                                     className="press"
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 10, minHeight: 52, padding: '8px 12px',
-                                        borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                                        borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
                                         background: selected ? 'var(--color-accent-soft)' : 'var(--color-card)',
                                         border: selected ? '1px solid var(--color-accent)' : '1px solid var(--color-ink-10)',
                                         color: 'var(--color-ink)',

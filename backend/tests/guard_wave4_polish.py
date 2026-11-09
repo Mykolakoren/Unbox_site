@@ -160,8 +160,10 @@ def test_access_rights_redirects_without_role():
     mob = _code(MADMIN + "MobileAdminAccessRights.tsx")
     assert "if (!userCanAccessRights(currentUser)) return <Navigate to=\"/m/admin/dashboard\" replace />;" in mob, \
         "мобильные «Права доступа» открываются не владельцу / не старшему админу"
-    # Один H1: в мобильной шапке. Компьютерная страница — embedded, без PageHeader.
-    assert "<AdminAccessRights embedded" in mob, "внутри мобильной шапки снова второй H1"
+    # Один H1: в мобильной шапке. 09.11 фаза 3: на телефоне вместо компьютерной таблицы —
+    # свои строки ListRow (admin-design №21); окно «Что может делать» — тот же PermissionsEditor.
+    assert "<AdminAccessRights" not in mob and "<h1" not in mob, "внутри мобильной шапки снова второй H1"
+    assert "<PermissionsEditor" in mob and "<ListRow" in mob and "<table" not in mob
     assert "embedded ? (" in src and "<PageHeader title=\"Права доступа\"" in src
 
 
@@ -266,7 +268,8 @@ def test_mobile_admin_cash_gated():
 
     users = _code(MADMIN + "MobileAdminUsers.tsx")
     assert "const canCash = userCanAccessFinance(currentUser);" in users
-    assert "{canCash && <button" in users and "{canCash && topupUser && (" in users, "«＋₾» без права на кассу"
+    # 09.11 фаза 3: «＋₾» — тихая кнопка в action строки ListRow, по-прежнему только с правом на кассу.
+    assert "action={canCash ? (" in users and "{canCash && topupUser && (" in users, "«＋₾» без права на кассу"
 
     card = _code(MADMIN + "MobileAdminUserCard.tsx")
     assert "const canCash = userCanAccessFinance(currentUser);" in card
@@ -404,7 +407,9 @@ def test_archived_clients_named_not_counted():
                       (MADMIN + "MobileAdminDashboard.tsx", "todayRows({ bookings, users, dueMap, dayKey: todayKey, resources: RESOURCE_NAMES })")):
         src = _code(rel)
         assert "useArchivedClients(missingUserIds)" in src, f"{rel}: бронь архивного клиента снова началом почты"
-        assert ">архив<" in src, f"{rel}: нет пометки «архив»"
+        # 09.11 фаза 3: на телефоне пометку рисует общая строка брони AdminBookingRow.
+        assert ">архив<" in src or ("archived={!!archivedName}" in src and ">архив<" in _code(MADMIN + "AdminBookingRow.tsx")), \
+            f"{rel}: нет пометки «архив»"
         assert feed in src, f"{rel}: архивные клиенты подмешаны в деньги «Сегодня»"
         assert "byClient(rows, users" in src or "byClient(rowsToday, users" in src
     chess = _code("src/components/admin/AdminChessboardView.tsx")
@@ -423,9 +428,13 @@ def test_visual_polish_today_chess_team_users():
     assert "position: 'fixed'" not in mob, "«+» на «Сегодня» снова плавает поверх отметок оплаты"
     assert 'aria-label="Новая бронь"' in mob
     mb = _code(MADMIN + "MobileAdminBookings.tsx")
-    assert "paddingTop: 12, paddingBottom: 96" in mb, "«+» в «Бронях» закрывает последнюю строку"
+    # 09.11 фаза 3: сверху 8 — под общей крупной шапкой; снизу по-прежнему 96 под меню.
+    assert "paddingTop: 8, paddingBottom: 96" in mb, "«+» в «Бронях» закрывает последнюю строку"
     team = _code(MADMIN + "MobileAdminTeam.tsx")
-    assert "maxWidth: '100%'" in team and "overflowWrap: 'anywhere'" in team, "роль в «Команде» снова обрезается"
+    # 09.11 фаза 3: роль — подписью ListRow (переносится, overflow-wrap: anywhere в ui.css),
+    # а не плашкой с многоточием.
+    assert "<ListRow" in team and "subtitle={<>" in team and "textOverflow: 'ellipsis'" not in team, \
+        "роль в «Команде» снова обрезается"
     users = _code(ADMIN + "Users.tsx")
     assert '<PageHeader\n                title="Клиенты"' in users, "/admin/users: H1 не «Клиенты» (как в меню)"
     assert "Реестр клиентов" not in users

@@ -10,7 +10,8 @@ import { loginPathWithRedirect } from '../../utils/loginRedirect';
 // Wave 1: оболочка на общих токенах — шрифт IBM Plex (был system-ui),
 // тёплая карточка вместо #fff, меню на слое Z.nav, подписи вкладок 12 px
 // цветом ink-60 (было #999, 2.8:1), активная — бирюзой «выбрано».
-import { COLOR, FONT, TEXT, Z } from '../../design/tokens';
+import { COLOR, FONT, RADIUS, TEXT, Z } from '../../design/tokens';
+import { Skeleton, SkeletonList } from '../../components/ui/Skeleton';
 import { useTouchDensity } from '../../hooks/useTouchDensity';
 import { isAdminFlowPath, useAdminFlow } from './adminFlow';
 import { isBookingAdmin } from './crmAccess';
@@ -136,8 +137,13 @@ export function MobileLayout() {
 
     if (!currentUser) {
         return (
-            <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: COLOR.card }}>
-                <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+            // 09.11 фаза 3: вместо серо-синего спиннера Tailwind на весь экран —
+            // каркас экрана (шапка + 3 строки) на тёплой бумаге.
+            <div style={{ minHeight: '100vh', background: COLOR.paper, display: 'flex', justifyContent: 'center' }}>
+                <div style={{ width: '100%', maxWidth: 480, padding: '24px 16px', display: 'grid', gap: 16, alignContent: 'start' }}>
+                    <Skeleton width="45%" height={28} />
+                    <SkeletonList count={3} label="Загружаем" />
+                </div>
             </div>
         );
     }
@@ -172,7 +178,9 @@ export function MobileLayout() {
                     width: '100%',
                     maxWidth: 480,
                     minHeight: '100vh',
-                    background: COLOR.card,
+                    // 09.11 фаза 3: колонка — тёплая бумага, карточки (card) на ней видны
+                    // сами, без рамок. Было COLOR.card — карточки сливались с фоном.
+                    background: COLOR.paper,
                     display: 'flex',
                     flexDirection: 'column',
                     // Safe-area сверху: в standalone-режиме iOS контент
@@ -269,7 +277,7 @@ function AdminFlowStrip({ forName, onBack }: { forName: string | null; onBack: (
                 className="press"
                 style={{
                     minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '0 10px', borderRadius: 10, border: `1px solid ${COLOR.ink20}`,
+                    padding: '0 10px', borderRadius: RADIUS.control, border: `1px solid ${COLOR.ink20}`,
                     background: COLOR.card, color: COLOR.ink, fontFamily: 'inherit',
                     fontSize: TEXT.small, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
                 }}
@@ -288,7 +296,6 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
     return (
         <NavLink
             to={to}
-            data-tour={tourId}
             // X5-06: отклик на касание сразу, пока грузится экран вкладки.
             className="press"
             style={({ isActive }) => ({
@@ -306,7 +313,11 @@ function TabLink({ to, icon: Icon, label, tourId }: { to: string; icon: React.El
                 lineHeight: 1,
             })}
         >
-            <Icon size={22} strokeWidth={2} />
+            {/* 09.11 фаза 3 (общие файлы): цель подсветки тура — сам значок вкладки (кольцо
+                вокруг него), а не вся вкладка: в тёмной теме не светлый прямоугольник. */}
+            <span data-tour={tourId} style={{ display: 'grid', placeItems: 'center', width: 36, height: 28, borderRadius: RADIUS.control }}>
+                <Icon size={22} strokeWidth={2} />
+            </span>
             <span>{label}</span>
         </NavLink>
     );

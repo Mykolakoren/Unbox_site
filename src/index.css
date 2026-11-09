@@ -48,6 +48,11 @@
   --color-accent-ink:   #2F5F5E;   /* мелкий текст акцентом, 6.9:1 */
   --color-accent-soft:  #E7ECEA;   /* подложка выбранного чипа */
   --color-on-accent:    #FDFDFB;   /* текст на акценте, 5.4:1 */
+  /* Заливка главной кнопки (09.11 фаза 3). В светлой = accent; в тёмной — темнее
+   * accent, чтобы широкие кнопки не «кричали» мятным. */
+  --color-accent-fill:       #476D6B;
+  --color-accent-fill-hover: #3B5B59;
+  --color-on-accent-fill:    #FDFDFB;
 
   /* ── Легаси-бренд (старые Tailwind-экраны: text-unbox-grey и т.п.) ── */
   --color-unbox-green:  #476D6B;
@@ -240,7 +245,8 @@ body.scroll-locked [data-mobile-scroll] {
  * text-xs/text-sm — страница зумилась в поиске клиента, сумме кассы,
  * времени сессии (аудит мобильной админки и Psy-CRM, 24.09). */
 @media (max-width: 768px) {
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  /* .ui-input--hero (28 px) больше 16 — iOS не зумит, правило его не трогает */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.ui-input--hero),
   select,
   textarea {
     font-size: 16px !important;
@@ -634,6 +640,9 @@ html [data-sonner-toast] [data-button] {
   --color-accent-ink:   #8FC2BE;
   --color-accent-soft:  #24302F;
   --color-on-accent:    #0F1413;
+  --color-accent-fill:       #3E6F6A;   /* 09.11 фаза 3: спокойная бирюза для залитой кнопки, текст 5.2:1 */
+  --color-accent-fill-hover: #477A75;
+  --color-on-accent-fill:    #F2F5F4;
 
   --color-unbox-green:  #7FB3AF;
   --color-unbox-dark:   #E4E6EA;

@@ -16,6 +16,7 @@ import { canUsePsyCrm, isBookingAdmin } from '../crmAccess';
 import { COLOR, FONT, TEXT, Z } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
 import { Sheet } from '../../../components/ui/Sheet';
+import { ListGroup, ListRow } from '../../../components/ui/ListRow';
 import { Skeleton, SkeletonList } from '../../../components/ui/Skeleton';
 import { useCrmStore } from '../../../store/crmStore';
 import { CalendarSetupSheet } from './CalendarSetupSheet';
@@ -135,7 +136,8 @@ export function MobileCrmLayout() {
         return (
             <div style={{ minHeight: '100vh', background: COLOR.sunken, display: 'flex', justifyContent: 'center' }}>
                 <div style={{
-                    width: '100%', maxWidth: 480, minHeight: '100vh', background: COLOR.card,
+                    // 09.11 фаза 3: фон экрана — бумага (карточки и группы строк — card поверх неё).
+                    width: '100%', maxWidth: 480, minHeight: '100vh', background: COLOR.paper,
                     fontFamily: FONT.sans, color: COLOR.ink,
                 }}>
                     <div style={headerStyle}>
@@ -173,7 +175,8 @@ export function MobileCrmLayout() {
                 width: '100%',
                 maxWidth: 480,
                 minHeight: '100vh',
-                background: COLOR.card,
+                // 09.11 фаза 3: бумага, как в клиентском /m — группы строк (card) на ней видны.
+                background: COLOR.paper,
                 display: 'flex',
                 flexDirection: 'column',
                 paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
@@ -311,61 +314,43 @@ function SectionSwitcher({ open, onClose, isAdmin, pathname, onGo, onCalendar, c
     ];
     return (
         <Sheet open={open} onClose={onClose} title="Куда перейти">
-            <nav aria-label="Разделы" style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Выход из CRM в личный кабинет — первым, как раньше кнопка в шапке. */}
-                <button
-                    type="button"
-                    onClick={() => onGo('/m')}
-                    aria-label="Мой кабинет"
-                    className="press"
-                    style={{ ...switcherItem, minHeight: 44, minWidth: 44 }}
-                >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>Мой кабинет</span>
-                        <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>Брони кабинетов, баланс, абонемент</span>
-                    </span>
-                </button>
-                {items.map(it => (
-                    <button
-                        key={it.to}
-                        type="button"
-                        onClick={() => onGo(it.to)}
-                        aria-current={it.current ? 'page' : undefined}
-                        className="press"
-                        style={{ ...switcherItem, borderTop: `1px solid ${COLOR.ink08}` }}
-                    >
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>{it.label}</span>
-                            <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>{it.hint}</span>
-                        </span>
-                        {it.current && <Check size={18} aria-hidden="true" style={{ color: 'var(--color-accent)', flexShrink: 0 }} />}
-                    </button>
-                ))}
-                <button
-                    type="button"
-                    onClick={onCalendar}
-                    className="press"
-                    style={{ ...switcherItem, borderTop: `1px solid ${COLOR.ink08}` }}
-                >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: 'block', fontSize: 16, fontWeight: 600 }}>Календарь и счета</span>
-                        <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>
-                            {calendarConnected === false
-                                ? 'Google Календарь не подключён — подключить'
-                                : 'Google Календарь, счета для оплаты'}
-                        </span>
-                    </span>
-                </button>
+            {/* 09.11 фаза 3 (общие файлы): строки — общий ListRow (как «Я»), текущий раздел —
+                aria-current + бирюзовая галочка справа. */}
+            <nav aria-label="Разделы">
+                <ListGroup bare>
+                    {/* Выход из CRM в личный кабинет — первым, как раньше кнопка в шапке. */}
+                    <ListRow
+                        onClick={() => onGo('/m')}
+                        aria-label="Мой кабинет"
+                        title="Мой кабинет"
+                        subtitle="Брони кабинетов, баланс, абонемент"
+                        chevron={false}
+                    />
+                    {items.map(it => (
+                        <ListRow
+                            key={it.to}
+                            onClick={() => onGo(it.to)}
+                            aria-current={it.current ? 'page' : undefined}
+                            title={it.label}
+                            subtitle={it.hint}
+                            trail={it.current ? <Check size={18} aria-hidden="true" style={{ color: 'var(--color-accent)', display: 'block' }} /> : undefined}
+                            chevron={false}
+                        />
+                    ))}
+                    <ListRow
+                        onClick={onCalendar}
+                        title="Календарь и счета"
+                        subtitle={calendarConnected === false
+                            ? 'Google Календарь не подключён — подключить'
+                            : 'Google Календарь, счета для оплаты'}
+                        chevron={false}
+                    />
+                </ListGroup>
             </nav>
         </Sheet>
     );
 }
 
-const switcherItem: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 12, minHeight: 56,
-    padding: '8px 4px', background: 'none', border: 'none',
-    textAlign: 'left', fontFamily: 'inherit', color: 'var(--color-ink)', cursor: 'pointer',
-};
 
 function TabLink({ to, icon: Icon, label }: { to: string; icon: React.ElementType; label: string }) {
     return (

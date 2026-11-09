@@ -93,8 +93,10 @@ def test_bookings_new_booking_button_in_header():
     link = src[src.rfind("<Link", 0, btn):src.index("</Link>", btn)]
     assert 'to="/m/find?admin=1"' in link, "«+ Бронь» ведёт не в общий поиск слота /m/find"
     assert "onClick={() => setBookingForUser(null)}" in link, "«+ Бронь» не сбрасывает «бронь за клиента»"
-    # Заметная, как на «Сегодня»: тёмная, с подписью «Бронь», палец попадает (44 px).
-    assert "background: 'var(--color-ink)'" in link and "minHeight: 44" in link, "«+ Бронь» в шапке стала незаметной"
+    # Заметная, как на «Сегодня», с подписью «Бронь», палец попадает (44 px).
+    # 09.11 фаза 3: главная кнопка — бирюзовая Button primary (ui-btn: 44 px из
+    # --control-h), а не чёрная «пилюля» (в тёмной теме — белое пятно).
+    assert 'className="ui-btn ui-btn--primary"' in link, "«+ Бронь» в шапке стала незаметной"
     assert re.search(r"<Plus [^>]*/>\s*Бронь\s*$", link), "у кнопки нет подписи «Бронь»"
     dash = _code(MADMIN + "MobileAdminDashboard.tsx")
     assert "position: 'fixed'" not in dash, "«+» на «Сегодня» снова плавает"
@@ -103,7 +105,9 @@ def test_bookings_new_booking_button_in_header():
 def test_bookings_archived_client_named_not_email():
     src = _code(MADMIN + "MobileAdminBookings.tsx")
     assert "useArchivedClients(missingUserIds)" in src, "«Брони»: архивный клиент снова началом почты"
-    assert ">архив<" in src, "«Брони»: нет пометки «архив» у брони архивного клиента"
+    # 09.11 фаза 3: пометку рисует общая строка брони AdminBookingRow (archived=…).
+    assert "archived={isArchived}" in src and ">архив<" in _code(MADMIN + "AdminBookingRow.tsx"), \
+        "«Брони»: нет пометки «архив» у брони архивного клиента"
     assert "archivedNameOf(email) ?? getAdminUserName(users, email)" in src, "имя из архива не подставляется"
     assert "`${arch} (архив)`" in src, "шторка брони: архивный клиент без пометки"
     # В деньги архив не подмешиваем: «к оплате» — только по обычному списку.

@@ -1,9 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { Children, Fragment, useEffect, useState } from 'react';
-import {
-    ArrowUpRight, BookOpen, Briefcase, Building2, ChevronRight, ClipboardCheck, Eye, Gift, HelpCircle,
-    LogOut, MapPin, MessageCircle, Phone, ShieldCheck, Tags, Ticket, UserRound, Users, Wallet,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { BookOpen, Briefcase, Building2, ClipboardCheck, Eye, Gift, HelpCircle, LogOut, MapPin, MessageCircle, Phone, ShieldCheck, Star, Tags, Ticket, UserRound, Users, Wallet } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
@@ -12,12 +9,14 @@ import { fmtHours, subscriptionOverview } from '../../utils/paymentPriority';
 import { extraPoolLabel } from '../../utils/subscriptionHours';
 import { resetTour } from './OnboardingTour';
 import { canBookCabinets } from '../../utils/permissions';
-import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
-import { formatGel } from '../../utils/format';
+import { COLOR, SHAPE, STATUS, TEXT } from '../../design/tokens';
 import { catalogPath } from '../../utils/catalogPath';
 import { SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { Button } from '../../components/ui/Button';
-import { Select } from '../../components/ui/Field';
+import { Sheet } from '../../components/ui/Sheet';
+import { Money } from '../../components/ui/Money';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
+import { ChoiceCard, ChoiceGroup } from '../../components/ui/ChoiceCard';
 import { canUsePsyCrm } from './crmAccess';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { mapsUrl } from './bookingView';
@@ -46,6 +45,7 @@ export function MobileProfile() {
     const [bonuses, setBonuses] = useState<Bonus[] | null>(null);
     const [favCab, setFavCab] = useState<string | null>(() => getFavoriteCabinet(currentUser?.id));
     const { confirm } = useConfirmDialog();
+    const [favOpen, setFavOpen] = useState(false);
 
     useEffect(() => {
         // Только для строки «Бонусы · N ч». Сбой не мешает остальному экрану.
@@ -55,6 +55,14 @@ export function MobileProfile() {
     }, []);
 
     if (!currentUser) return null;
+
+    const favOptions = RESOURCES.filter(r => r.locationId !== 'neo_school' && r.isActive !== false);
+    const favRes = favCab ? favOptions.find(r => r.id === favCab) : null;
+    const favLabel = favRes ? favRes.name : 'Любой';
+    const pickFav = (val: string | null) => {
+        setFavCab(val);
+        setFavoriteCabinet(currentUser.id, val);
+    };
 
     const tgConnected = !!currentUser.telegramId && /^\d+$/.test(currentUser.telegramId);
     const isAdmin = currentUser.role === 'owner' || currentUser.role === 'senior_admin' || currentUser.role === 'admin' || currentUser.isAdmin;
@@ -89,13 +97,23 @@ export function MobileProfile() {
             paddingTop: 16, paddingBottom: 24,
             display: 'flex', flexDirection: 'column', gap: 24,
         }}>
-            {/* Кто я */}
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, margin: 0, lineHeight: 1.2 }}>
-                    {currentUser.name}
-                </h1>
-                <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
-                    {currentUser.email}
+            {/* Кто я — 09.11 фаза 3: круг с инициалами (экран «про меня» без лица). */}
+            <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span aria-hidden="true" style={{
+                    flex: 'none', width: 56, height: 56, borderRadius: SHAPE.pill,
+                    background: COLOR.accentSoft, color: COLOR.accentInk,
+                    display: 'grid', placeItems: 'center',
+                    fontSize: TEXT.title, fontWeight: 600,
+                }}>
+                    {initialsOf(currentUser.name || currentUser.email || '')}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                    <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, margin: 0, lineHeight: 1.2, overflowWrap: 'anywhere' }}>
+                        {currentUser.name}
+                    </h1>
+                    <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4, overflowWrap: 'anywhere' }}>
+                        {currentUser.email}
+                    </div>
                 </div>
             </div>
 
@@ -103,7 +121,7 @@ export function MobileProfile() {
                 <MenuRow
                     icon={<Wallet size={18} />}
                     label="Баланс"
-                    value={<span className="num" style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink, fontWeight: 600 }}>{formatGel(balance, { fraction: 0 })}</span>}
+                    value={<Money value={balance} tone="balance" fraction={0} />}
                     sub={debt > 0 ? 'Долг · история · Как пополнить баланс' : 'История · Как пополнить баланс'}
                     onClick={() => navigate('/m/balance')}
                 />
@@ -146,36 +164,16 @@ export function MobileProfile() {
                     sub={`Имя, телефон · Telegram ${tgConnected ? 'подключён' : 'не подключён'}`}
                     onClick={() => navigate('/m/profile')}
                 />
-                {/* Любимый кабинет — первым при поиске свободного времени. */}
-                <div style={{ padding: '12px 16px' }}>
-                    <label htmlFor="m-fav-cab" style={{ display: 'block', fontSize: TEXT.small, fontWeight: 600, marginBottom: 8 }}>
-                        Любимый кабинет
-                    </label>
-                    <Select
-                        id="m-fav-cab"
-                        value={favCab ?? ''}
-                        onChange={e => {
-                            const val = e.target.value || null;
-                            setFavCab(val);
-                            setFavoriteCabinet(currentUser.id, val);
-                        }}
-                    >
-                        <option value="">Любой</option>
-                        {RESOURCES
-                            .filter(r => r.locationId !== 'neo_school' && r.isActive !== false)
-                            .map(r => {
-                                const loc = LOCATIONS.find(l => l.id === r.locationId);
-                                return (
-                                    <option key={r.id} value={r.id}>
-                                        {r.name}{loc ? ` · ${loc.name}` : ''}
-                                    </option>
-                                );
-                            })}
-                    </Select>
-                    <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 6 }}>
-                        Покажем его первым при поиске свободного времени.
-                    </div>
-                </div>
+                {/* Любимый кабинет — первым при поиске свободного времени.
+                    09.11 фаза 3: строка списка «Любимый кабинет · Любой ›», выбор — в шторке
+                    (выпадающий список ломал колонку и в тёмной теме терял стрелку). */}
+                <MenuRow
+                    icon={<Star size={18} />}
+                    label="Любимый кабинет"
+                    sub="Покажем его первым при поиске свободного времени"
+                    value={favLabel}
+                    onClick={() => setFavOpen(true)}
+                />
                 <MenuRow
                     icon={<HelpCircle size={18} />}
                     label="Показать обзор заново"
@@ -245,6 +243,30 @@ export function MobileProfile() {
                 />
             </Group>
 
+            <Sheet
+                open={favOpen}
+                onClose={() => setFavOpen(false)}
+                title="Любимый кабинет"
+                description="Покажем его первым при поиске свободного времени."
+                footer={<Button block onClick={() => setFavOpen(false)}>Готово</Button>}
+            >
+                <ChoiceGroup label="Любимый кабинет">
+                    <ChoiceCard selected={!favCab} onClick={() => pickFav(null)} title="Любой" />
+                    {favOptions.map(r => {
+                        const loc = LOCATIONS.find(l => l.id === r.locationId);
+                        return (
+                            <ChoiceCard
+                                key={r.id}
+                                selected={favCab === r.id}
+                                onClick={() => pickFav(r.id)}
+                                title={r.name}
+                                description={loc?.name}
+                            />
+                        );
+                    })}
+                </ChoiceGroup>
+            </Sheet>
+
             {/* Logout */}
             <div style={{ padding: '0 16px' }}>
                 <Button
@@ -262,62 +284,16 @@ export function MobileProfile() {
     );
 }
 
+/** 09.11 фаза 3: разделы «Я» — общий ListGroup (одна карточка, линии между строками). */
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
     return (
-        <section style={{ padding: '0 16px' }}>
-            <h2 style={{
-                fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
-                textTransform: 'uppercase', color: COLOR.ink60,
-                margin: '0 0 8px',
-            }}>{title}</h2>
-            <div style={{
-                background: COLOR.card,
-                border: `1px solid ${COLOR.ink10}`,
-                borderRadius: RADIUS.sheet,
-                overflow: 'hidden',
-            }}>
-                {/* Тонкая линия между строками (не над первой). */}
-                {Children.toArray(children).filter(Boolean).map((child, i) => (
-                    <Fragment key={i}>
-                        {i > 0 && <div aria-hidden="true" style={{ height: 1, background: COLOR.ink10, marginLeft: 52 }} />}
-                        {child}
-                    </Fragment>
-                ))}
-            </div>
-        </section>
+        <div style={{ padding: '0 16px' }}>
+            <ListGroup title={title}>{children}</ListGroup>
+        </div>
     );
 }
 
-const rowStyle: React.CSSProperties = {
-    width: '100%',
-    minHeight: 56,
-    background: 'transparent',
-    border: 'none',
-    padding: '10px 16px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    color: COLOR.ink,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    textAlign: 'left',
-    textDecoration: 'none',
-};
-
-function RowBody({ icon, label, sub, value }: { icon: React.ReactNode; label: string; sub?: string; value?: React.ReactNode }) {
-    return (
-        <>
-            <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', width: 24, flexShrink: 0, color: COLOR.ink80 }}>{icon}</span>
-            <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>{label}</span>
-                {sub && <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60, marginTop: 1 }}>{sub}</span>}
-            </span>
-            {value !== undefined && <span style={{ fontSize: TEXT.small, color: COLOR.ink80, flexShrink: 0 }}>{value}</span>}
-        </>
-    );
-}
-
-/** Строка меню «Я» — переход внутри приложения. */
+/** Строка меню «Я» — переход внутри приложения (общий ListRow). Значение справа 14/600. */
 function MenuRow({ icon, label, sub, value, onClick }: {
     icon: React.ReactNode;
     label: string;
@@ -326,14 +302,17 @@ function MenuRow({ icon, label, sub, value, onClick }: {
     onClick: () => void;
 }) {
     return (
-        <button type="button" onClick={onClick} className="press" style={rowStyle}>
-            <RowBody icon={icon} label={label} sub={sub} value={value} />
-            <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />
-        </button>
+        <ListRow
+            onClick={onClick}
+            lead={<ListIcon>{icon}</ListIcon>}
+            title={label}
+            subtitle={sub}
+            trail={value}
+        />
     );
 }
 
-/** Строка меню — внешняя ссылка (карта, Telegram, звонок). */
+/** Строка меню — внешняя ссылка (карта, Telegram, звонок): те же классы строки. */
 function MenuLink({ href, icon, label, sub, internal }: {
     href: string;
     icon: React.ReactNode;
@@ -343,14 +322,16 @@ function MenuLink({ href, icon, label, sub, internal }: {
     internal?: boolean;
 }) {
     return (
-        <a
+        <ListRow
             href={href}
-            {...(internal ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
-            className="press"
-            style={rowStyle}
-        >
-            <RowBody icon={icon} label={label} sub={sub} />
-            {!internal && <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />}
-        </a>
+            target={internal ? undefined : '_blank'}
+            lead={<ListIcon>{icon}</ListIcon>}
+            title={label}
+            subtitle={sub}
+        />
     );
+}
+
+function initialsOf(name: string): string {
+    return name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
 }

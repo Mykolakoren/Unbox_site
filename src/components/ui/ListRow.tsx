@@ -1,6 +1,6 @@
-import type { MouseEvent, ReactNode } from 'react';
+import type { HTMLAttributes, MouseEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { ArrowUpRight, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 
 /**
@@ -76,7 +76,13 @@ export function ListGroup({
     );
 }
 
-export interface ListRowProps {
+/** Всё, что можно передать на нажимаемую часть строки: aria-* (aria-pressed,
+ *  aria-current, aria-expanded…), data-*, обработчики (onContextMenu,
+ *  onPointerDown, onTouchStart — свайп и долгое нажатие), id, title-подсказка. */
+type RowPassThrough = Omit<HTMLAttributes<HTMLElement>, 'title' | 'className' | 'children' | 'onClick' | 'style'>
+    & { [key: `data-${string}`]: string | number | boolean | undefined };
+
+export interface ListRowProps extends RowPassThrough {
     /** Слева: <ListTime/>, <ListIcon/>, <ListAvatar/> или своё. */
     lead?: ReactNode;
     title: ReactNode;
@@ -90,27 +96,36 @@ export interface ListRowProps {
     trailSub?: ReactNode;
     /** Своё действие справа (Button size="sm" secondary/quiet, переключатель). */
     action?: ReactNode;
-    onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
-    /** Ссылка вместо onClick (react-router). */
+    onClick?: (e: MouseEvent<HTMLElement>) => void;
+    /** Ссылка внутри приложения (react-router). */
     to?: string;
-    /** Стрелка «›». По умолчанию — есть, если строка нажимается и action нет. */
+    /** Внешняя ссылка: tel:, mailto:, https://… (обычный <a>). */
+    href?: string;
+    /** Для href: '_blank' — новая вкладка (rel по умолчанию noopener noreferrer). */
+    target?: string;
+    rel?: string;
+    /** Стрелка справа. По умолчанию — есть, если строка нажимается и action нет;
+     *  у внешней ссылки (https, target=_blank) — «↗» вместо «›». */
     chevron?: boolean;
     disabled?: boolean;
-    /** Прошедшее/неактивное: название ink-60 (не прозрачность — текст не бледнеет ниже 4.5:1). */
+    /** Прошедшее/неактивное: название и сумма ink-60 (не прозрачность — текст не бледнеет ниже 4.5:1). */
     dimmed?: boolean;
     /** Полоса слева: danger — «к оплате», pending — «ждёт». Только вместе со словом! */
     tone?: 'danger' | 'pending';
     /** Слово к полосе для диктора, если в строке его нет («к оплате»). */
     toneLabel?: string;
-    'aria-label'?: string;
+    /** li — строка внутри ListGroup (по умолчанию); div — внутри своей обёртки
+     *  (например SwipeRow as="li", который сам стоит в списке). */
+    as?: 'li' | 'div';
     className?: string;
 }
 
 export function ListRow({
-    lead, title, subtitle, meta, trail, trailSub, action, onClick, to, chevron,
-    disabled = false, dimmed = false, tone, toneLabel, className, ...aria
+    lead, title, subtitle, meta, trail, trailSub, action, onClick, to, href, target, rel, chevron,
+    disabled = false, dimmed = false, tone, toneLabel, as: Root = 'li', className, ...pass
 }: ListRowProps) {
-    const interactive = !!(onClick || to) && !disabled;
+    const interactive = !!(onClick || to || href) && !disabled;
+    const external = !!href && (target === '_blank' || /^https?:/i.test(href));
     const showChevron = chevron ?? (interactive && !action);
 
     const content = (
@@ -128,25 +143,32 @@ export function ListRow({
                     {trailSub && <span className="ui-row__trail-sub">{trailSub}</span>}
                 </span>
             )}
-            {showChevron && <ChevronRight size={18} className="ui-row__chevron" aria-hidden="true" />}
+            {showChevron && (external
+                ? <ArrowUpRight size={18} className="ui-row__chevron" aria-hidden="true" />
+                : <ChevronRight size={18} className="ui-row__chevron" aria-hidden="true" />)}
         </>
     );
 
     let main: ReactNode;
-    if (to && !disabled) {
-        main = <Link to={to} className="ui-row__main" aria-label={aria['aria-label']}>{content}</Link>;
-    } else if (onClick || (to && disabled)) {
+    if (href && !disabled) {
         main = (
-            <button type="button" className="ui-row__main" onClick={onClick} disabled={disabled} aria-label={aria['aria-label']}>
+            <a href={href} target={target} rel={rel ?? (target === '_blank' ? 'noopener noreferrer' : undefined)}
+               className="ui-row__main" onClick={onClick} {...pass}>{content}</a>
+        );
+    } else if (to && !disabled) {
+        main = <Link to={to} className="ui-row__main" onClick={onClick} {...pass}>{content}</Link>;
+    } else if (onClick || ((to || href) && disabled)) {
+        main = (
+            <button type="button" className="ui-row__main" onClick={onClick} disabled={disabled} {...pass}>
                 {content}
             </button>
         );
     } else {
-        main = <div className="ui-row__main">{content}</div>;
+        main = <div className="ui-row__main" {...pass}>{content}</div>;
     }
 
     return (
-        <li
+        <Root
             className={clsx(
                 'ui-row',
                 action && 'ui-row--with-action',
@@ -158,7 +180,7 @@ export function ListRow({
             {tone && <span className={clsx('ui-row__stripe', `ui-row__stripe--${tone}`)} aria-hidden="true" />}
             {main}
             {action && <div className="ui-row__action">{action}</div>}
-        </li>
+        </Root>
     );
 }
 

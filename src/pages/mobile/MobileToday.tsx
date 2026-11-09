@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, ArrowUpRight, Briefcase, Check, CheckSquare, ChevronDown, ChevronRight, Gift, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Briefcase, Check, CheckSquare, ChevronDown, Gift, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
@@ -8,7 +8,7 @@ import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
 import { LoadErrorCard, SkeletonRows, StaleBar } from './LoadStates';
 import { prepareRepeat } from './repeatBooking';
-import { priceLabel } from './priceLabel';
+import { priceTrail } from './priceLabel';
 import { NotificationsBell } from './NotificationsBell';
 import { adminTasksApi, type AdminTask } from '../../api/adminTasks';
 import { bonusesApi } from '../../api/bonuses';
@@ -24,6 +24,8 @@ import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatSt
 import { fmtHours } from '../../utils/paymentPriority';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Button } from '../../components/ui/Button';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { TelegramConnectCard, isTelegramLinked } from './TelegramConnectCard';
 import { canUsePsyCrm } from './crmAccess';
@@ -285,24 +287,18 @@ export function MobileToday() {
     return (
         <>
             <div style={{
-                paddingTop: 16,
                 paddingBottom: 24,
                 display: 'flex', flexDirection: 'column', gap: 20,
             }}>
                 <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
 
-                {/* Шапка: «Сегодня» и дата, справа колокольчик. */}
-                <div style={{ ...sectionPad, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: 0 }}>
-                            Сегодня
-                        </h1>
-                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
-                            {formatDateLabel(now, { capitalize: true })}
-                        </div>
-                    </div>
-                    <NotificationsBell />
-                </div>
+                {/* Шапка: «Сегодня» и дата, справа колокольчик (09.11 фаза 3 — общая крупная шапка). */}
+                <MobilePageHeader
+                    variant="large"
+                    title="Сегодня"
+                    subtitle={formatDateLabel(now, { capitalize: true })}
+                    action={<NotificationsBell />}
+                />
 
                 {/* Ещё не специалист — сначала анкета (или её статус). */}
                 {!canBook && (
@@ -329,6 +325,7 @@ export function MobileToday() {
                     ) : (
                         <EmptyState
                             compact
+                            illustration="chair"
                             title="Пока ничего не забронировано"
                             hint={welcome
                                 ? `У вас ${fmtHours(welcome.hours)} бесплатно${welcome.until ? ` — до ${formatDayMonth(welcome.until)}` : ''}. Хороший повод для первой брони.`
@@ -349,17 +346,18 @@ export function MobileToday() {
                 {/* «Дальше» — три следующие брони строками. */}
                 {!loading && !failed && nextRows.length > 0 && (
                     <div style={sectionPad}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <SectionTitle>Дальше</SectionTitle>
-                            <button type="button" onClick={() => navigate('/m/bookings')} style={linkBtn}>
-                                Все брони
-                            </button>
-                        </div>
-                        <div style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet, overflow: 'hidden' }}>
-                            {nextRows.map(({ b, dt }, i) => (
-                                <NextRow key={b.id} booking={b} dt={dt!} first={i === 0} onOpen={() => setOpenBooking(b)} />
+                        <ListGroup
+                            title={<>Дальше</>}
+                            aside={
+                                <button type="button" onClick={() => navigate('/m/bookings')} style={linkBtn}>
+                                    Все брони
+                                </button>
+                            }
+                        >
+                            {nextRows.map(({ b, dt }) => (
+                                <NextRow key={b.id} booking={b} dt={dt!} onOpen={() => setOpenBooking(b)} />
                             ))}
-                        </div>
+                        </ListGroup>
                     </div>
                 )}
 
@@ -371,8 +369,8 @@ export function MobileToday() {
                         <div role="status" style={{
                             background: creditWarn.tone === 'urgent' ? STATUS.danger.bg : STATUS.pending.bg,
                             color: creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg,
-                            borderRadius: 12,
-                            padding: '12px 14px',
+                            borderRadius: RADIUS.sheet,
+                            padding: '12px 16px',
                             display: 'flex',
                             gap: 10,
                             alignItems: 'flex-start',
@@ -398,65 +396,44 @@ export function MobileToday() {
                     booked the next occurrence, surface a 1-tap shortcut. */}
                 {canBook && regularSlot && (
                     <div style={sectionPad}>
-                        <button
-                            onClick={() => repeatBooking(regularSlot.booking)}
-                            className="press"
-                            style={quietCard}
-                        >
-                            <Repeat size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: TEXT.small, fontWeight: 600, lineHeight: 1.3 }}>
+                        <ListGroup aria-label="Постоянный слот">
+                            <ListRow
+                                onClick={() => repeatBooking(regularSlot.booking)}
+                                lead={<ListIcon><Repeat size={20} /></ListIcon>}
+                                title={<>
                                     Ваш постоянный слот: {(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId}
                                     {' · '}
                                     <span className="num">{regularSlot.booking.startTime}</span>
-                                </div>
-                                <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
-                                    Забронировать на {formatDateLabel(regularSlot.nextDate)} · {regularSlot.count}× за 2 мес.
-                                </div>
-                            </div>
-                            <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
-                        </button>
+                                </>}
+                                subtitle={`Забронировать на ${formatDateLabel(regularSlot.nextDate)} · ${regularSlot.count}× за 2 мес.`}
+                            />
+                        </ListGroup>
                     </div>
                 )}
 
                 {/* Повторить из последних — свёрнуто. */}
                 {canBook && lastFive.length > 0 && (
                     <div style={sectionPad}>
-                        <div style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet, overflow: 'hidden' }}>
-                            <button
+                        <ListGroup aria-label="Повторить из последних">
+                            <ListRow
                                 onClick={() => setRepeatOpen(o => !o)}
-                                aria-expanded={repeatOpen}
-                                style={{
-                                    width: '100%',
-                                    background: 'transparent',
-                                    border: 'none',
-                                    minHeight: 48,
-                                    padding: '0 16px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    fontSize: TEXT.small,
-                                    fontWeight: 600,
-                                    color: COLOR.ink,
-                                }}
-                            >
-                                Повторить из последних
-                                <ChevronDown
-                                    size={16}
-                                    aria-hidden="true"
-                                    color={COLOR.ink60}
-                                    style={{
-                                        transition: 'transform 0.15s',
-                                        transform: repeatOpen ? 'rotate(180deg)' : 'none',
-                                    }}
-                                />
-                            </button>
+                                lead={<ListIcon><Repeat size={20} /></ListIcon>}
+                                title="Повторить из последних"
+                                chevron={false}
+                                trail={
+                                    <ChevronDown
+                                        size={18}
+                                        aria-hidden="true"
+                                        color={COLOR.ink60}
+                                        style={{ transition: 'transform 0.15s', transform: repeatOpen ? 'rotate(180deg)' : 'none' }}
+                                    />
+                                }
+                                aria-label={repeatOpen ? 'Свернуть: повторить из последних' : 'Показать: повторить из последних'}
+                            />
                             {repeatOpen && lastFive.map(({ b, dt }) => (
                                 <RepeatRow key={b.id} booking={b} dt={dt} onPick={() => repeatBooking(b)} />
                             ))}
-                        </div>
+                        </ListGroup>
                     </div>
                 )}
 
@@ -479,119 +456,73 @@ export function MobileToday() {
                                 </button>
                             )}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <ListGroup aria-label="Задачи на днях">
                             {myTasks.slice(0, 3).map(t => {
-                                const overdue = t.deadline && new Date(t.deadline).getTime() < Date.now();
+                                const overdue = !!t.deadline && new Date(t.deadline).getTime() < Date.now();
                                 return (
-                                    <div key={t.id} style={{
-                                        background: COLOR.card,
-                                        border: `1px solid ${overdue ? `${STATUS.danger.fg}4D` : COLOR.ink08}`,
-                                        borderRadius: 10,
-                                        padding: '6px 10px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 8,
-                                        minHeight: 36,
-                                    }}>
-                                        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <div style={{
-                                                fontSize: TEXT.small,
-                                                fontWeight: 600,
-                                                lineHeight: 1.25,
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                whiteSpace: 'nowrap',
-                                                flex: 1,
-                                                minWidth: 0,
-                                            }}>
-                                                {t.priority === 'HIGH' && (
-                                                    <AlertTriangle size={12} aria-label="Важно" style={{ color: STATUS.danger.fg, verticalAlign: '-1px', marginRight: 4 }} />
-                                                )}
-                                                {t.title}
-                                            </div>
-                                            {t.deadline && (
-                                                <span style={{
-                                                    fontSize: TEXT.caption,
-                                                    color: overdue ? STATUS.danger.fg : COLOR.ink60,
-                                                    fontWeight: overdue ? 600 : 500,
-                                                    flexShrink: 0,
-                                                }}>
-                                                    {overdue
-                                                        ? 'просрочена'
-                                                        : formatDayMonth(t.deadline)}
-                                                </span>
+                                    <ListRow
+                                        key={t.id}
+                                        tone={overdue ? 'danger' : undefined}
+                                        title={<>
+                                            {t.priority === 'HIGH' && (
+                                                <AlertTriangle size={14} aria-label="Важно" style={{ display: 'inline-block', color: STATUS.danger.fg, verticalAlign: '-2px', marginRight: 4 }} />
                                             )}
-                                        </div>
-                                        {/* Кнопка 44×44 (цель касания), видимый квадрат — 24. */}
-                                        <button
-                                            onClick={() => completeTask(t.id)}
-                                            style={{
-                                                background: 'transparent',
-                                                border: 'none',
-                                                width: 44,
-                                                height: 44,
-                                                margin: '-10px -10px -10px 0',
-                                                padding: 0,
-                                                cursor: 'pointer',
-                                                flexShrink: 0,
-                                                display: 'grid',
-                                                placeItems: 'center',
-                                            }}
-                                            aria-label="Пометить выполненной"
-                                        >
-                                            <span style={{
-                                                background: COLOR.ink,
-                                                color: COLOR.onInk,
-                                                borderRadius: 6,
-                                                width: 24,
-                                                height: 24,
-                                                display: 'grid',
-                                                placeItems: 'center',
-                                            }}>
-                                                <Check size={14} strokeWidth={2.5} aria-hidden="true" />
-                                            </span>
-                                        </button>
-                                    </div>
+                                            {t.title}
+                                        </>}
+                                        subtitle={t.deadline
+                                            ? (overdue
+                                                ? <span style={{ color: STATUS.danger.fg, fontWeight: 600 }}>просрочена</span>
+                                                : `до ${formatDayMonth(t.deadline)}`)
+                                            : undefined}
+                                        action={
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                icon={<Check size={18} strokeWidth={2.5} aria-hidden="true" />}
+                                                onClick={() => completeTask(t.id)}
+                                                aria-label="Пометить выполненной"
+                                            />
+                                        }
+                                    />
                                 );
                             })}
-                            {myTasks.length > 3 && isAdmin && (
-                                <button type="button" onClick={() => navigate('/m/admin/tasks')} style={{ ...linkBtn, alignSelf: 'center' }}>
+                        </ListGroup>
+                        {myTasks.length > 3 && isAdmin && (
+                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                                <button type="button" onClick={() => navigate('/m/admin/tasks')} style={{ ...linkBtn, margin: 0 }}>
                                     Ещё {myTasks.length - 3}
                                 </button>
-                            )}
-                        </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* Рабочие места — тихие кнопки внизу, не над встречей. */}
-                {(showCrm || isAdmin) && (
-                    <div style={{ ...sectionPad, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {/* Рабочие места и связь с администратором — одна тихая группа строк
+                    внизу (09.11 фаза 3: было — кнопка «CRM» в рамке и отдельная карточка). */}
+                <div style={sectionPad}>
+                    <ListGroup aria-label="Ещё">
                         {showCrm && (
-                            <Button variant="secondary" icon={<Briefcase size={16} aria-hidden="true" />} onClick={() => navigate('/m/crm')}>
-                                CRM
-                            </Button>
+                            <ListRow
+                                onClick={() => navigate('/m/crm')}
+                                lead={<ListIcon><Briefcase size={20} /></ListIcon>}
+                                title="Psy-CRM"
+                                subtitle="Клиенты, сессии, заметки"
+                            />
                         )}
                         {isAdmin && (
-                            <Button variant="secondary" icon={<ShieldCheck size={16} aria-hidden="true" />} onClick={() => navigate('/m/admin')}>
-                                Админка
-                            </Button>
+                            <ListRow
+                                onClick={() => navigate('/m/admin')}
+                                lead={<ListIcon><ShieldCheck size={20} /></ListIcon>}
+                                title="Админка"
+                            />
                         )}
-                    </div>
-                )}
-
-                {/* Связь с администратором — тихая строка. */}
-                <div style={sectionPad}>
-                    <a
-                        href="https://t.me/UnboxCenter"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="press"
-                        style={{ ...quietCard, textDecoration: 'none' }}
-                    >
-                        <MessageCircle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                        <span style={{ flex: 1, fontSize: TEXT.small, fontWeight: 600 }}>Написать администратору</span>
-                        <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
-                    </a>
+                        <ListRow
+                            href="https://t.me/UnboxCenter"
+                            target="_blank"
+                            lead={<ListIcon><MessageCircle size={20} /></ListIcon>}
+                            title="Написать администратору"
+                        />
+                    </ListGroup>
                 </div>
             </div>
 
@@ -692,38 +623,26 @@ function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryIt
     );
 }
 
-/** Строка «Дальше»: «Завтра · 09:00–10:00», ниже кабинет · центр, справа статус или сумма. */
-function NextRow({ booking, dt, first, onOpen }: { booking: BookingHistoryItem; dt: Date; first: boolean; onOpen: () => void }) {
+/** Строка «Дальше»: «Завтра · 09:00–10:00», ниже кабинет · центр, справа всегда
+ *  одно и то же — сумма или «Абонемент»; бейдж — только «ждёт одобрения» /
+ *  «на пересдаче» (09.11 фаза 3: «Оплачено» у каждой строки — шум). */
+function NextRow({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: Date; onOpen: () => void }) {
     const place = bookingPlace(booking);
-    const right = booking.status === 'pending_approval'
+    const price = priceTrail(booking);
+    const badge = booking.status === 'pending_approval'
         ? <StatusBadge kind="booking" status="pending_approval" />
         : booking.isReRentListed
             ? <StatusBadge kind="booking" status="re-rent-listed" />
-            : booking.paymentStatus === 'paid'
-                ? <StatusBadge kind="payment" status="paid" />
-                : <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, whiteSpace: 'nowrap' }}>{priceLabel(booking)}</span>;
+            : null;
     return (
-        <button
-            type="button"
+        <ListRow
             onClick={onOpen}
-            className="press"
-            style={{
-                width: '100%', minHeight: 64,
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 16px',
-                background: 'transparent', border: 'none',
-                borderTop: first ? 'none' : `1px solid ${COLOR.ink10}`,
-                fontFamily: 'inherit', textAlign: 'left', color: COLOR.ink, cursor: 'pointer',
-            }}
-        >
-            <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>
-                    {formatRelativeDay(dt, { capitalize: true })} · <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span>
-                </span>
-                <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60 }}>{place.title}</span>
-            </span>
-            {right}
-        </button>
+            title={<>{formatRelativeDay(dt, { capitalize: true })} · <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span></>}
+            subtitle={place.title}
+            meta={badge ?? undefined}
+            trail={<span className="num">{price.main}</span>}
+            trailSub={price.sub ? <span className="num">{price.sub}</span> : undefined}
+        />
     );
 }
 
@@ -731,53 +650,14 @@ function NextRow({ booking, dt, first, onOpen }: { booking: BookingHistoryItem; 
 function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: Date; onPick: () => void }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     return (
-        <button
+        <ListRow
             onClick={onPick}
-            style={{
-                width: '100%',
-                background: 'transparent',
-                border: 'none',
-                borderTop: `1px solid ${COLOR.ink10}`,
-                minHeight: 56,
-                padding: '8px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                color: COLOR.ink,
-                textAlign: 'left',
-            }}
-        >
-            <div>
-                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>
-                    {formatWeekdayShort(dt)}, <span className="num">{booking.startTime}</span>
-                </div>
-                <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
-                    {resource?.name ?? booking.resourceId} · {formatBookingDuration(booking.duration ?? 60)}
-                </div>
-            </div>
-            <ArrowRight size={16} color={COLOR.ink60} aria-hidden="true" />
-        </button>
+            lead={<ListIcon>{null}</ListIcon>}
+            title={<>{formatWeekdayShort(dt)}, <span className="num">{booking.startTime}</span></>}
+            subtitle={`${resource?.name ?? booking.resourceId} · ${formatBookingDuration(booking.duration ?? 60)}`}
+        />
     );
 }
-
-const quietCard: React.CSSProperties = {
-    width: '100%',
-    minHeight: 48,
-    background: COLOR.card,
-    color: COLOR.ink,
-    border: `1px solid ${COLOR.ink10}`,
-    borderRadius: RADIUS.sheet,
-    padding: '12px 16px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    textAlign: 'left',
-};
 
 const linkBtn: React.CSSProperties = {
     background: 'none',

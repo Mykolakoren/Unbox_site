@@ -143,7 +143,10 @@ def test_statuses_from_one_dictionary():
     area = {p.name: _code(p) for p in _files()}
     books = area["MobileAdminBookings.tsx"]
     assert "function StatusBadge" not in books, "в «Бронях» снова своя копия StatusBadge"
-    assert '<StatusBadge kind="booking"' in books and "audience=\"staff\"" in books
+    # 09.11 фаза 3: строка брони — общий AdminBookingRow, статус словом из statuses.ts
+    # (statusLabel(..., 'staff')), без своей копии словаря.
+    row = _code(ROOT / "src/pages/mobile/admin/AdminBookingRow.tsx")
+    assert "<AdminBookingRow" in books and "statusLabel('booking', status, 'staff')" in row
     assert "statusLabel(" in books  # сторож фундамента тоже это проверяет
     today = area["MobileCrmToday.tsx"]
     assert '<StatusBadge kind="session"' in today and '<StatusBadge kind="payment"' in today, \

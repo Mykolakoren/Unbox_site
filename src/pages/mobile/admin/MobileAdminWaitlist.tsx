@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, X, Loader2, Bell } from 'lucide-react';
+import { Search, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { waitlistApi } from '../../../api/waitlist';
@@ -12,6 +12,8 @@ import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatDateLabel } from '../../../utils/format';
 import { toastApiError } from '../../../utils/errors';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { ListGroup, ListRow, ListTime } from '../../../components/ui/ListRow';
 
 /**
  * Mobile admin — waitlist (Слежу за слотами).
@@ -101,21 +103,19 @@ export function MobileAdminWaitlist() {
     };
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    Ожидание слотов
-                </h1>
-                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {entries === null ? 'Загружаем…' : `Активных записей: ${filtered.length}`}
-                </p>
-            </div>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 09.11 фаза 3: внутренний экран — шапка со «←», число в подзаголовке. */}
+            <MobilePageHeader
+                title="Ожидание слотов"
+                subtitle={entries === null ? 'Загружаем…' : `Активных записей: ${filtered.length}`}
+                fallbackTo="/m/admin/dashboard"
+            />
 
             <div style={{ padding: '0 16px' }}>
                 <div style={{
                     display: 'flex', alignItems: 'center',
-                    background: 'var(--color-sunken)', borderRadius: 12,
-                    padding: '0 12px', gap: 8, minHeight: 44,
+                    background: 'var(--color-sunken)', borderRadius: 8,
+                    padding: '0 12px', gap: 8, minHeight: 44, marginTop: 4,
                 }}>
                     <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
@@ -153,42 +153,24 @@ export function MobileAdminWaitlist() {
                     />
                 </div>
             ) : (
-                <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ padding: '0 16px' }}>
                     {grouped.map(([dateKey, items]) => (
-                        <div key={dateKey}>
-                            <div style={{
-                                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
-                                textTransform: 'uppercase', color: 'var(--color-ink-60)', marginBottom: 6,
-                            }}>
-                                {formatDateLabel(dateKey, { capitalize: true })} · {items.length}
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                {items.map(e => {
-                                    const r = RESOURCES.find(x => x.id === e.resourceId);
-                                    const l = LOCATIONS.find(x => x.id === r?.locationId);
-                                    const u = userByEmail.get(e.userId);
-                                    return (
-                                        <div
-                                            key={e.id}
-                                            style={{
-                                                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
-                                                borderRadius: 12, padding: '6px 6px 6px 14px',
-                                                display: 'flex', gap: 10, alignItems: 'center',
-                                            }}
-                                        >
-                                            <Bell size={14} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 14, fontWeight: 600 }}>
-                                                    {u?.name || e.userId}
-                                                    <span style={{ color: 'var(--color-ink-60)', fontWeight: 500 }}>
-                                                        {' '}· {e.startTime}–{e.endTime}
-                                                    </span>
-                                                </div>
-                                                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2 }}>
-                                                    {r?.name || e.resourceId}
-                                                    {l && <span> · {l.name}</span>}
-                                                </div>
-                                            </div>
+                        <ListGroup
+                            key={dateKey}
+                            title={formatDateLabel(dateKey, { capitalize: true })}
+                            aside={<span className="num">{items.length}</span>}
+                        >
+                            {items.map(e => {
+                                const r = RESOURCES.find(x => x.id === e.resourceId);
+                                const l = LOCATIONS.find(x => x.id === r?.locationId);
+                                const u = userByEmail.get(e.userId);
+                                return (
+                                    <ListRow
+                                        key={e.id}
+                                        lead={<ListTime start={e.startTime} end={e.endTime} />}
+                                        title={u?.name || e.userId}
+                                        subtitle={<>{r?.name || e.resourceId}{l && <span> · {l.name}</span>}</>}
+                                        action={
                                             <button
                                                 onClick={() => remove(e.id)}
                                                 disabled={busy === e.id}
@@ -205,11 +187,11 @@ export function MobileAdminWaitlist() {
                                             >
                                                 {busy === e.id ? <Loader2 size={16} className="animate-spin" /> : <X size={18} aria-hidden="true" />}
                                             </button>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                                        }
+                                    />
+                                );
+                            })}
+                        </ListGroup>
                     ))}
                 </div>
             )}

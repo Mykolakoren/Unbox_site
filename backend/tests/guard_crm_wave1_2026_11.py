@@ -306,7 +306,9 @@ def test_one_price_and_partial_on_screens():
     assert "sessionPriceOf(session, client)" in sheet and "' · по ставке клиента'" in sheet
     assert "'цена не указана'" not in sheet, "п. 1: шторка снова «цена не указана» при ставке клиента"
     client = _code(MCRM + "MobileCrmClient.tsx")
-    assert "sessionMoneyLine(s, client" in client and "оплачено ${formatMoney(partial.paid" in client
+    # 09.11 фаза 3: строка цены — sessionPriceLine, «оплачено / не оплачено» — бейджем (sessionPayState).
+    assert "sessionPriceLine(s, client" in client and "оплачено ${formatMoney(partial.paid" in client
+    assert "sessionPayState(s, client" in client
     assert "` · за ${formatDayMonth(parseUTC(forSession.date), TZ)}`" in client, "п. 8: платёж без «за какую сессию»"
     assert "s.price ? ` · ${formatMoney(s.price" not in client
     sess = _code(MCRM + "MobileCrmSessions.tsx")
@@ -333,11 +335,14 @@ def test_sheet_status_words_and_tiles():
     assert "sessionStatusWords(session, client, cabinetShort)" in sheet
     assert "parts.push('не оплачена')" in sheet
     main = sheet[sheet.index("function Main("):sheet.index("\nfunction PayAmountForm")]
-    assert "else if (isCompleted) tiles = [payTile, cancelTile];" in main
+    # 09.11 фаза 3 (дизайн-ревью п. 8): «Отменить» — не плитка рядом с главными, а тихая
+    # кнопка внизу шторки (текст danger); у прошедшей главная плитка — «Оплата».
+    assert "else if (isCompleted) tiles = [payTile];" in main
+    assert "canCancel && (" in main and "Отменить сессию" in main, "в шторке нет «Отменить сессию»"
     assert 'label="Запланирована"' not in main, "п. 3: плитка «Запланирована» читается как статус"
-    assert 'label="Вернуть в план"' in main and "↶" in main
+    assert 'label="Вернуть в план"' in main and "<RotateCcw" in main
     assert "!hasRescheduleTile && (" in main, "п. 11: «Перенести время» дублирует плитку «Перенести»"
-    assert "<FileText size={16}" in main, "дизайн п. 9: у заметки иконка-стрелка"
+    assert "<FileText size={20}" in main, "дизайн п. 9: у заметки иконка-стрелка"  # 09.11 фаза 3: значки строк 20 px
     assert "truncate(latestNote" not in main and "`Заметки · ${noteCount}`" in main, \
         "п. 10: начало заметки на главном экране шторки"
 
@@ -375,13 +380,19 @@ def test_search_and_code():
     for name in ("MobileCrmClients.tsx", "MobileCrmSessions.tsx"):
         code = _code(MCRM + name)
         assert "normalizeClientQuery(" in code and 'placeholder="Имя, код, телефон"' in code, name
-        assert "aliasLabel(" in code, f"{name}: код без «#»"
+        # 09.11 фаза 3 (дизайн-ревью п. 10): в строках списков — только имя, без «#4150 ·»;
+        # поиск по коду остаётся (normalizeClientQuery). Код с «#» — в карточке клиента.
+        assert "aliasLabel(" not in code, f"{name}: служебный код снова перед именем в строке"
+    card = _code(MCRM + "MobileCrmClient.tsx")
+    assert '<span className="mono">{aliasLabel(client.aliasCode)}</span>' in card, "карточка: код для календаря без «#»"
 
 
 def test_clients_list_debt_first_and_chips():
     code = _code(MCRM + "MobileCrmClients.tsx")
-    sl = code[code.index("function ClientSecondLine("):]
-    assert sl.index("долг {formatMoney(debt") < sl.index("{parts.join(' · ')}"), "п. 12: долг снова в конце строки"
+    # 09.11 фаза 3 (дизайн-ревью п. 12): долг — справа суммой <Money tone="debt"> (не режется
+    # многоточием), а не началом второй строки; смысл тот же — долг виден всегда.
+    assert 'trail={debt > 0 ? <Money value={debt}' in code and 'tone="debt"' in code, "п. 12: долг снова в строке, где его режет многоточие"
+    assert "долг {formatMoney(debt" not in code, "п. 12: долг снова текстом во второй строке"
     assert "'С долгом'" in code and "'Без следующей'" in code
 
 
@@ -401,7 +412,8 @@ def test_sessions_tab():
 def test_client_card_bits():
     c = _code(MCRM + "MobileCrmClient.tsx")
     assert ".slice(0, 30)" not in c and "Показать ещё" in c, "п. 16: лента молча обрезается"
-    assert "оплачено за всё время" in c
+    # 09.11 фаза 3: «Ставка / Оплачено за всё время» — ячейки SummaryCard (подпись с заглавной).
+    assert "Оплачено за всё время" in c
     i = c.index("onClick={() => setUnpaidOpen(true)}")
     assert "Отметить оплату…" in c[i:c.index("</Button>", i)], "дизайн п. 7: сумма долга дважды"
 
@@ -417,7 +429,11 @@ def test_notes_hidden_everywhere():
 
 def test_today_small_things():
     today = _code(MCRM + "MobileCrmToday.tsx")
-    assert "WebkitLineClamp: 2" in today, "п. 18: имя снова обрезается кнопкой оплаты"
+    # 09.11 фаза 3: строки — общий ListRow (имя переносится, не режется); оплата — в action
+    # (отдельно от имени), а не в одной строке с ним.
+    close = today[today.index('title="Закрыть день"'):today.index('title="Аренда без сессии"')]
+    assert "<ListRow" in close and "action={s.isPaid ? undefined" in close, "п. 18: имя снова обрезается кнопкой оплаты"
+    assert "WebkitLineClamp: 1" not in today and "textOverflow: 'ellipsis'" not in close
     assert "shiftDay(-7)" in today and "shiftDay(7)" in today, "п. 19: нет стрелок недели"
     assert "s.status !== 'NO_SHOW'" in today, "неявка в будущем попала в «Дальше»"
 

@@ -42,3 +42,22 @@ export function priceLabel(b: BookingHistoryItem): string {
 function formatHours(h: number): string {
     return fmtHours(h);
 }
+
+/**
+ * 09.11 фаза 3 — та же цена, разложенная для правой колонки строки списка
+ * (ListRow trail / trailSub): справа коротко «Абонемент» / «Бонус» / сумма,
+ * доплата «+ 5 ₾» — второй строкой мелко. Длинное «2 ч из абонемента + 5 ₾»
+ * съедало строку и рвало время. Только вид: суммы те же, что у priceLabel.
+ */
+export function priceTrail(b: BookingHistoryItem): { main: string; sub?: string } {
+    const method = (b as any).paymentMethod as string | undefined;
+    const price = b.finalPrice ?? 0;
+    if (method === 'subscription') {
+        return price > 0
+            ? { main: 'Абонемент', sub: `+ ${formatGel(price, { fraction: 0 })}` }
+            : { main: 'Абонемент' };
+    }
+    if (method === 'bonus') return { main: 'Бонус' };
+    if (price <= 0) return { main: 'Бесплатно' };
+    return { main: formatGel(price, { fraction: 0 }) };
+}

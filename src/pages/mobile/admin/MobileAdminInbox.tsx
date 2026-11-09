@@ -19,6 +19,8 @@ import { formatDateLabel, formatGel } from '../../../utils/format';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { statusLabel } from '../../../design/statuses';
 import { bookingDayKey } from '../../../utils/adminToday';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { Money } from '../../../components/ui/Money';
 
 /** «через 9 ч» / «через 40 мин» / «уже началась» — время до начала (день и время — Тбилиси). */
 function startsIn(b: BookingHistoryItem): string | null {
@@ -132,16 +134,17 @@ export function MobileAdminInbox() {
 
     return (
         <>
-            <div style={{ paddingTop: 16, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ padding: '0 16px' }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                        Заявки
-                    </h1>
-                    <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+            <div style={{ paddingTop: 8, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* 09.11 фаза 3: общая крупная шапка раздела. */}
+                <MobilePageHeader
+                    variant="large"
+                    className="pb-0"
+                    title="Заявки"
+                    subtitle={<>
                         Срочные брони и анкеты специалистов, которые ждут вашего решения.
                         Число на вкладке «Заявки» — сколько их; колокольчик наверху — это уведомления, он считает другое.
-                    </p>
-                </div>
+                    </>}
+                />
 
                 {specPending.length > 0 && (
                     <div style={{ padding: '0 16px' }}>
@@ -150,7 +153,7 @@ export function MobileAdminInbox() {
                             style={{
                                 display: 'flex', alignItems: 'center', gap: 12, minHeight: 48,
                                 background: 'var(--status-pending-bg)', color: 'var(--status-pending-fg)',
-                                borderRadius: 14, padding: '10px 14px', textDecoration: 'none',
+                                borderRadius: 16, padding: '12px 16px', textDecoration: 'none',
                             }}
                         >
                             <UserCheck size={20} aria-hidden="true" />
@@ -158,7 +161,7 @@ export function MobileAdminInbox() {
                                 <span style={{ display: 'block', fontSize: 14, fontWeight: 600 }}>
                                     Специалисты на проверке: {specPending.length}
                                 </span>
-                                <span style={{ display: 'block', fontSize: 12 }}>
+                                <span style={{ display: 'block', fontSize: 14 }}>
                                     {specPending.slice(0, 3).map(s => `${s.firstName} ${s.lastName}`.trim()).join(', ')}
                                     {specPending.length > 3 ? ' и другие' : ''}
                                 </span>
@@ -206,8 +209,8 @@ export function MobileAdminInbox() {
                             <div key={b.id} style={{
                                 background: 'var(--color-card)',
                                 border: '1px solid var(--color-ink-10)',
-                                borderRadius: 14,
-                                padding: 14,
+                                borderRadius: 16,
+                                padding: 16,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: 8,
@@ -222,18 +225,18 @@ export function MobileAdminInbox() {
                                 <div data-decision-numbers style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                     <div>
                                         <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>Цена{formatLabel ? ` · ${formatLabel}` : ''}</div>
-                                        <div className="num" style={{ fontSize: 16, fontWeight: 600 }}>{formatGel(price)}</div>
+                                        <Money value={price} className="block text-body font-semibold" />
                                     </div>
                                     <div>
                                         <div style={{ fontSize: 12, color: 'var(--color-ink-60)' }}>Баланс клиента</div>
-                                        <div className="num" style={{ fontSize: 16, fontWeight: 600, color: bal !== null && bal < 0 ? 'var(--status-danger-fg)' : undefined }}>
-                                            {bal !== null ? formatGel(bal) : '—'}
-                                        </div>
+                                        {bal !== null
+                                            ? <Money value={bal} tone="balance" className="block text-body font-semibold" />
+                                            : <div style={{ fontSize: 16, fontWeight: 600 }}>—</div>}
                                     </div>
                                 </div>
                                 {short !== null && (
                                     <div style={{ fontSize: 14, fontWeight: 600, color: short > 0 ? 'var(--status-danger-fg)' : 'var(--status-ok-fg)', marginTop: -4 }}>
-                                        {short > 0 ? `не хватает ${formatGel(short)}` : 'баланса хватает'}
+                                        {short > 0 ? <>не хватает <Money value={short} inline /></> : 'баланса хватает'}
                                     </div>
                                 )}
 
@@ -254,7 +257,7 @@ export function MobileAdminInbox() {
                                     </div>
                                 )}
 
-                                <div style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-ink-80)' }}>
+                                <div className="num-inline" style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-ink-80)' }}>
                                     <Clock size={14} aria-hidden="true" />
                                     {dateLabel}, {b.startTime} · {formatBookingDuration(b.duration ?? 60)}
                                 </div>
@@ -265,7 +268,10 @@ export function MobileAdminInbox() {
 
 
                                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                                    {/* 09.11 фаза 3: решение в карточке — «вторая» кнопка (рамка), а не
+                                        бирюзовая заливка: N мятных «Одобрить» подряд кричали громче цифр. */}
                                     <Button
+                                        variant="secondary"
                                         style={{ flex: 1 }}
                                         loading={isThisItemBusy}
                                         icon={<Check size={16} aria-hidden="true" />}
@@ -274,7 +280,7 @@ export function MobileAdminInbox() {
                                         Одобрить
                                     </Button>
                                     <Button
-                                        variant="secondary"
+                                        variant="quiet"
                                         style={{ flex: 1 }}
                                         disabled={isThisItemBusy}
                                         icon={<X size={16} aria-hidden="true" />}

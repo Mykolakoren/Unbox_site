@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors, BookOpen } from 'lucide-react';
+import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors, BookOpen, UserRound, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
@@ -21,6 +21,8 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Field as FormField, Input } from '../../components/ui/Field';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
+import { ChoiceCard, ChoiceGroup } from '../../components/ui/ChoiceCard';
 import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
 import { hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../../utils/subscription';
 import { bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
@@ -355,7 +357,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                             «Клиенты» CRM
                         </button>.
                     </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <ChoiceGroup label="Клиент из CRM">
                         <ClientPickRow
                             active={!booking.crmClientId}
                             disabled={busy === 'link'}
@@ -374,36 +376,39 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                             />
                         ))}
                         {crmClients.length === 0 && (
-                            <div style={{ background: COLOR.sunken, borderRadius: 12, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: TEXT.small }}>
+                            <div style={{ background: COLOR.sunken, borderRadius: RADIUS.control, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: TEXT.small }}>
                                 Загружаем клиентов…
                             </div>
                         )}
-                    </div>
+                    </ChoiceGroup>
                 </div>
             ) : mode === 'view' ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                // 09.11 фаза 3: шапка (время 28/600, бирки) → одна группа сведений
+                // (Где / Оплата / Клиент из CRM) → главное действие (если есть) →
+                // группа действий → правило мелкой подписью. Раньше — шесть разных
+                // контейнеров подряд (серые плашки, карточки-действия в рамках).
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     {/* Время крупно */}
                     <div>
-                        <div className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.1 }}>
+                        <div className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap' }}>
                             {dt ? bookingTimeRange(booking, dt) : booking.startTime}
                         </div>
                         <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
                             {formatLabel(booking.format)} · {formatBookingDuration(booking.duration ?? 60)}
                         </div>
-                    </div>
-
-                    {/* Статусы брони и оплаты — слова из общего словаря (statuses.ts). */}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {isActive && <Tag tone="active">Идёт сейчас</Tag>}
-                        {booking.status === 'pending_approval' && <StatusBadge kind="booking" status="pending_approval" />}
-                        {isPast && booking.status !== 'cancelled' && <StatusBadge kind="booking" status="completed" />}
-                        {booking.status === 'cancelled' && <StatusBadge kind="booking" status="cancelled" />}
-                        {booking.isReRentListed && <StatusBadge kind="booking" status="re-rent-listed" />}
-                        {/* Отменённая: не «Оплачено», а что вернули (ревью №7). */}
-                        {isCancelled
-                            ? (refund?.badge ? <StatusBadge kind="payment" status={refund.badge} /> : null)
-                            : <PaymentBadge status={booking.paymentStatus} />}
-                        {(booking as any).recurringGroupId && <Tag tone="muted">Серия</Tag>}
+                        {/* Статусы брони и оплаты — слова из общего словаря (statuses.ts). */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                            {isActive && <Tag tone="active">Идёт сейчас</Tag>}
+                            {booking.status === 'pending_approval' && <StatusBadge kind="booking" status="pending_approval" />}
+                            {isPast && booking.status !== 'cancelled' && <StatusBadge kind="booking" status="completed" />}
+                            {booking.status === 'cancelled' && <StatusBadge kind="booking" status="cancelled" />}
+                            {booking.isReRentListed && <StatusBadge kind="booking" status="re-rent-listed" />}
+                            {/* Отменённая: не «Оплачено», а что вернули (ревью №7). */}
+                            {isCancelled
+                                ? (refund?.badge ? <StatusBadge kind="payment" status={refund.badge} /> : null)
+                                : <PaymentBadge status={booking.paymentStatus} />}
+                            {(booking as any).recurringGroupId && <Tag tone="muted">Серия</Tag>}
+                        </div>
                     </div>
 
                     {booking.status === 'pending_approval' && (
@@ -412,105 +417,102 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                         </div>
                     )}
 
-                    {/* Место */}
-                    <Field icon={<MapPin size={16} aria-hidden="true" />} label="Где">
-                        {place.title}
-                        {place.address && <span style={{ color: COLOR.ink60 }}>, {place.address}</span>}
-                        {route && isLive && (
-                            <div>
-                                <a href={route} target="_blank" rel="noopener noreferrer" style={{ ...inlineLink, display: 'inline-flex', alignItems: 'center', minHeight: 44, gap: 4 }}>
+                    <ListGroup bare aria-label="Сведения о брони">
+                        {/* Место; «Маршрут» — вторичная кнопка в строке, без подчёркивания. */}
+                        <ListRow
+                            lead={<ListIcon><MapPin size={20} /></ListIcon>}
+                            title={place.title}
+                            subtitle={place.address || undefined}
+                            action={route && isLive ? (
+                                <a
+                                    href={route}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="ui-btn ui-btn--secondary ui-btn--sm"
+                                >
                                     Маршрут <ArrowUpRight size={14} aria-hidden="true" />
                                 </a>
-                            </div>
-                        )}
-                    </Field>
+                            ) : undefined}
+                        />
 
-                    {/* Цена */}
-                    <Field icon={<Wallet size={16} aria-hidden="true" />} label="Оплата">
-                        <span style={{ fontSize: TEXT.body, fontWeight: 600, textDecoration: isCancelled ? 'line-through' : undefined, color: isCancelled ? COLOR.ink60 : undefined }}>
-                            {priceLabel(booking)}
-                        </span>
-                        {booking.paymentMethod === 'balance' && booking.finalPrice != null && !isCancelled && (
-                            <span style={{ color: COLOR.ink60, marginLeft: 8 }}>с баланса</span>
-                        )}
-                        {refund && (
-                            <div style={{ fontSize: TEXT.small, fontWeight: 600, marginTop: 4, color: refund.badge === 'refunded' ? STATUS.ok.fg : COLOR.ink80 }}>
-                                {refund.text}
-                            </div>
-                        )}
-                        {extrasNames && (
-                            // Допуслуги входят в цену — раньше на телефоне их не было видно (обход 10.10).
-                            <div style={{ fontSize: TEXT.small, color: COLOR.ink80, marginTop: 4 }}>
-                                в т.ч. допуслуги: {extrasNames}
-                            </div>
-                        )}
-                        {booking.paymentStatus === 'pending' && dt && !isCancelled && (
-                            // Обычное состояние будущей брони — нейтрально, не янтарём (G4-08).
-                            // Срочная бронь списывается при подтверждении админом
-                            // (charge_hot_booking_on_approval), не «за сутки» (обход 10.10).
-                            <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
-                                {booking.status === 'pending_approval'
-                                    ? 'Спишем, когда администратор подтвердит бронь'
-                                    : `Спишем ${formatChargeAt(dt)} — за сутки до начала`}
-                            </div>
-                        )}
-                    </Field>
-
-                    {/* CRM-клиент — только специалистам (G4-14). */}
-                    {showCrm && (
-                        <Field label="Клиент из CRM" subtle>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                {booking.crmClientId ? (
-                                    <span style={{ color: COLOR.ink }}>
-                                        {(() => {
-                                            const c = crmClients.find(x => x.id === booking.crmClientId);
-                                            return c?.name ?? 'Клиент привязан';
-                                        })()}
-                                    </span>
-                                ) : (
-                                    <span style={{ color: COLOR.ink60 }}>не привязан</span>
+                        {/* Цена */}
+                        <ListRow
+                            lead={<ListIcon><Wallet size={20} /></ListIcon>}
+                            title={<>
+                                <span className="num-inline" style={{ textDecoration: isCancelled ? 'line-through' : undefined, color: isCancelled ? COLOR.ink60 : undefined }}>
+                                    {priceLabel(booking)}
+                                </span>
+                                {booking.paymentMethod === 'balance' && booking.finalPrice != null && !isCancelled && (
+                                    <span style={{ color: COLOR.ink60, fontWeight: 400, marginLeft: 8 }}>с баланса</span>
                                 )}
-                                <Button variant="secondary" onClick={() => setMode('pickClient')}>
-                                    {booking.crmClientId ? 'Изменить' : 'Привязать'}
-                                </Button>
-                            </div>
-                        </Field>
-                    )}
+                            </>}
+                            subtitle={(refund || extrasNames || (booking.paymentStatus === 'pending' && dt && !isCancelled)) ? <>
+                                {refund && (
+                                    <span style={{ display: 'block', fontWeight: 600, color: refund.badge === 'refunded' ? STATUS.ok.fg : COLOR.ink80 }}>
+                                        {refund.text}
+                                    </span>
+                                )}
+                                {extrasNames && (
+                                    // Допуслуги входят в цену — раньше на телефоне их не было видно (обход 10.10).
+                                    <span style={{ display: 'block' }}>в т.ч. допуслуги: {extrasNames}</span>
+                                )}
+                                {booking.paymentStatus === 'pending' && dt && !isCancelled && (
+                                    // Обычное состояние будущей брони — нейтрально, не янтарём (G4-08).
+                                    // Срочная бронь списывается при подтверждении админом
+                                    // (charge_hot_booking_on_approval), не «за сутки» (обход 10.10).
+                                    <span style={{ display: 'block' }}>
+                                        {booking.status === 'pending_approval'
+                                            ? 'Спишем, когда администратор подтвердит бронь'
+                                            : `Спишем ${formatChargeAt(dt)} — за сутки до начала`}
+                                    </span>
+                                )}
+                            </> : undefined}
+                        />
 
-                    {/* Cancellation reason */}
-                    {/* По-русски, как на компьютере (ревью №10): без «User cancelled». */}
-                    {reasonText && (
-                        <Field label="Причина отмены" subtle>
-                            <span style={{ color: COLOR.ink60 }}>{reasonText}</span>
-                        </Field>
-                    )}
-
-                    {/* Actions */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                        {isLive && isActive && (
-                            <ActionRow
-                                primary
-                                icon={<Plus size={18} />}
-                                label={`Продлить на 30 минут${extendQuote ? ` · ${extendQuote.short}` : ''}`}
-                                sub="Если следующие полчаса свободны — спросим подтверждение"
-                                busy={busy === 'extend'}
-                                onClick={() => { void askExtend(); }}
+                        {/* CRM-клиент — только специалистам (G4-14). */}
+                        {showCrm && (
+                            <ListRow
+                                lead={<ListIcon><UserRound size={20} /></ListIcon>}
+                                title="Клиент из CRM"
+                                subtitle={booking.crmClientId
+                                    ? (crmClients.find(x => x.id === booking.crmClientId)?.name ?? 'Клиент привязан')
+                                    : 'не привязан'}
+                                trail={<span style={{ color: COLOR.accentInk }}>{booking.crmClientId ? 'Изменить' : 'Привязать'}</span>}
+                                onClick={() => setMode('pickClient')}
                             />
                         )}
 
+                        {/* Cancellation reason */}
+                        {/* По-русски, как на компьютере (ревью №10): без «User cancelled». */}
+                        {reasonText && (
+                            <ListRow
+                                lead={<ListIcon><Info size={20} /></ListIcon>}
+                                title="Причина отмены"
+                                subtitle={reasonText}
+                            />
+                        )}
+                    </ListGroup>
+
+                    {/* Главное действие шторки — одно, бирюзовое: «Продлить» у идущей,
+                        «Повторить» у прошедшей. */}
+                    {isLive && isActive && (
+                        <PrimaryAction
+                            icon={<Plus size={18} aria-hidden="true" />}
+                            label={`Продлить на 30 минут${extendQuote ? ` · ${extendQuote.short}` : ''}`}
+                            sub="Если следующие полчаса свободны — спросим подтверждение"
+                            busy={busy === 'extend'}
+                            onClick={() => { void askExtend(); }}
+                        />
+                    )}
+                    {/* Actions (у прошедшей брони действий, кроме «Повторить», нет — группу не рисуем). */}
+                    {(isLive || !isPast) && (
+                    <ListGroup bare title="Действия">
                         {/* Меньше суток до начала — клиенту только пересдача и связь (X3-21). */}
                         {isLive && !isActive && lateForClient && (
                             <>
-                                <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink80, background: COLOR.sunken, borderRadius: 12, padding: 12 }}>
-                                    {lateLeft > 0
-                                        ? 'До начала меньше 24 часов — отменить уже нельзя, но перенести можно: по абонементу есть бесплатные переносы.'
-                                        : 'До начала меньше 24 часов — отменить или перенести уже нельзя.'}
-                                    {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50 % тем же, чем платили.' : ''}
-                                    {' '}Или напишите администратору.
-                                </div>
                                 {lateLeft > 0 && (
                                     <ActionRow
-                                        icon={<CalendarClock size={18} />}
+                                        icon={<CalendarClock size={20} />}
                                         label={lateRescheduleLabel(lateLeft)}
                                         sub="Не позже чем за 3 часа, в пределах срока абонемента"
                                         onClick={() => {
@@ -521,7 +523,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                 )}
                                 {canReRent && (
                                     <ActionRow
-                                        icon={<Users size={18} />}
+                                        icon={<Users size={20} />}
                                         label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                         sub={booking.isReRentListed
                                             ? 'Бронь снова станет только вашей'
@@ -532,7 +534,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                 )}
                                 <ActionLink
                                     href={ADMIN_TG_URL}
-                                    icon={<MessageCircle size={18} />}
+                                    icon={<MessageCircle size={20} />}
                                     label="Написать администратору"
                                     sub="Telegram · @UnboxCenter"
                                 />
@@ -543,7 +545,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                             <>
                                 {!isRequest && (
                                 <ActionRow
-                                    icon={<CalendarClock size={18} />}
+                                    icon={<CalendarClock size={20} />}
                                     label="Перенести"
                                     sub="Выберите новое время в «Свободно»"
                                     onClick={() => {
@@ -555,7 +557,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
 
                                 {canReRent && (
                                     <ActionRow
-                                        icon={<Users size={18} />}
+                                        icon={<Users size={20} />}
                                         label={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                         sub={booking.isReRentListed
                                             ? 'Бронь снова станет только вашей'
@@ -564,15 +566,10 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                         onClick={doToggleReRent}
                                     />
                                 )}
-                                {reRentTooEarly && !isRequest && (
-                                    <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink60, padding: '0 4px' }}>
-                                        {RE_RENT_TOO_EARLY_HINT}
-                                    </div>
-                                )}
 
                                 <ActionRow
                                     danger
-                                    icon={<AlertTriangle size={18} />}
+                                    icon={<AlertTriangle size={20} />}
                                     label="Отменить бронь"
                                     sub={cancelHint}
                                     onClick={() => setMode('confirmCancel')}
@@ -581,7 +578,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                 {(booking.duration ?? 60) >= 120 && !booking.isReRentListed && (
                                     <ActionRow
                                         danger
-                                        icon={<Scissors size={18} />}
+                                        icon={<Scissors size={20} />}
                                         label="Отменить часть"
                                         sub="Убрать часть брони, остальное оставить"
                                         onClick={() => setTrimming(true)}
@@ -592,74 +589,92 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
 
                         {/* Repeat — works for past and future. Pre-fills the
                             checkout with this booking's slot on the next
-                            same weekday. Второстепенное действие. */}
-                        <ActionRow
-                            primary={!!isPast}
-                            icon={<Repeat size={18} />}
+                            same weekday. У будущей — второстепенное действие
+                            (у прошедшей это главная кнопка выше). */}
+                        {!isPast && (
+                            <ActionRow
+                                icon={<Repeat size={20} />}
+                                label="Повторить"
+                                sub={`${repeatDayLabel(repeatTargetDate(booking))} в ${booking.startTime}`}
+                                onClick={doRepeat}
+                            />
+                        )}
+
+                        {/* Ревью №11: правила — одной строкой из шторки. */}
+                        {isLive && (
+                            <ActionRow
+                                icon={<BookOpen size={20} />}
+                                label="Правила отмены и переноса"
+                                onClick={() => { onClose(); navigate('/m/booking-rules'); }}
+                            />
+                        )}
+                    </ListGroup>
+                    )}
+
+                    {/* У прошедшей брони «Повторить» — главная (бирюзовая) кнопка шторки. */}
+                    {isPast && (
+                        <PrimaryAction
+                            icon={<Repeat size={18} aria-hidden="true" />}
                             label="Повторить"
                             sub={`${repeatDayLabel(repeatTargetDate(booking))} в ${booking.startTime}`}
                             onClick={doRepeat}
                         />
+                    )}
 
-                        {/* Ревью №11: правила — одной ссылкой из шторки. */}
-                        {isLive && (
-                            <button
-                                type="button"
-                                onClick={() => { onClose(); navigate('/m/booking-rules'); }}
-                                style={{ ...inlineLink, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44, alignSelf: 'flex-start' }}
-                            >
-                                <BookOpen size={16} aria-hidden="true" /> Правила отмены и переноса
-                            </button>
-                        )}
+                    {/* Правило «меньше суток» — подписью под действиями, без серой заливки. */}
+                    {isLive && !isActive && lateForClient && (
+                        <p style={ruleNote}>
+                            {lateLeft > 0
+                                ? 'До начала меньше 24 часов — отменить уже нельзя, но перенести можно: по абонементу есть бесплатные переносы.'
+                                : 'До начала меньше 24 часов — отменить или перенести уже нельзя.'}
+                            {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50 % тем же, чем платили.' : ''}
+                            {' '}Или напишите администратору.
+                        </p>
+                    )}
+                    {isLive && !isActive && !lateForClient && reRentTooEarly && !isRequest && (
+                        <p style={ruleNote}>{RE_RENT_TOO_EARLY_HINT}</p>
+                    )}
 
-                        {/* Series actions — only when this booking is part of a recurring series. */}
-                        {(booking as any).recurringGroupId && isLive && (
-                            <>
-                                <h3 style={{
-                                    margin: '6px 0 0',
-                                    fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
-                                    textTransform: 'uppercase', color: COLOR.ink60,
-                                }}>
-                                    Серия
-                                </h3>
-                                <ActionRow
-                                    icon={<Plus size={18} />}
-                                    label="Продлить серию"
-                                    sub="Добавить ещё брони в конец серии"
-                                    busy={busy === 'extend_series'}
-                                    onClick={openExtendSeries}
-                                />
-                                <ActionRow
-                                    icon={<BellOff size={18} />}
-                                    label="Пусть завершится в срок"
-                                    sub="Не присылать больше напоминаний"
-                                    busy={busy === 'dismiss_series_reminder'}
-                                    onClick={doDismissSeriesReminder}
-                                />
-                                {/* Серию с бронью меньше чем за сутки сервер клиенту не отменит. */}
-                                {!lateForClient && (
-                                    <>
-                                        <ActionRow
-                                            danger
-                                            icon={<AlertTriangle size={18} />}
-                                            label="Отменить эту и следующие"
-                                            sub="Прошедшие брони серии не трогаем"
-                                            busy={busy === 'cancel_tail'}
-                                            onClick={() => doCancelSeries('tail')}
-                                        />
-                                        <ActionRow
-                                            danger
-                                            icon={<AlertTriangle size={18} />}
-                                            label="Отменить всю серию"
-                                            sub="Все будущие брони серии"
-                                            busy={busy === 'cancel_all_future'}
-                                            onClick={() => doCancelSeries('all_future')}
-                                        />
-                                    </>
-                                )}
-                            </>
-                        )}
-                    </div>
+                    {/* Series actions — only when this booking is part of a recurring series. */}
+                    {(booking as any).recurringGroupId && isLive && (
+                        <ListGroup bare title="Серия">
+                            <ActionRow
+                                icon={<Plus size={20} />}
+                                label="Продлить серию"
+                                sub="Добавить ещё брони в конец серии"
+                                busy={busy === 'extend_series'}
+                                onClick={openExtendSeries}
+                            />
+                            <ActionRow
+                                icon={<BellOff size={20} />}
+                                label="Пусть завершится в срок"
+                                sub="Не присылать больше напоминаний"
+                                busy={busy === 'dismiss_series_reminder'}
+                                onClick={doDismissSeriesReminder}
+                            />
+                            {/* Серию с бронью меньше чем за сутки сервер клиенту не отменит. */}
+                            {!lateForClient && (
+                                <>
+                                    <ActionRow
+                                        danger
+                                        icon={<AlertTriangle size={20} />}
+                                        label="Отменить эту и следующие"
+                                        sub="Прошедшие брони серии не трогаем"
+                                        busy={busy === 'cancel_tail'}
+                                        onClick={() => doCancelSeries('tail')}
+                                    />
+                                    <ActionRow
+                                        danger
+                                        icon={<AlertTriangle size={20} />}
+                                        label="Отменить всю серию"
+                                        sub="Все будущие брони серии"
+                                        busy={busy === 'cancel_all_future'}
+                                        onClick={() => doCancelSeries('all_future')}
+                                    />
+                                </>
+                            )}
+                        </ListGroup>
+                    )}
                 </div>
             ) : (
                 /* Confirm cancel mode */
@@ -670,7 +685,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                     {within24h ? (
                         // Сюда попадает только администратор: клиенту кнопку не показываем.
                         <>
-                            <div style={{ fontSize: TEXT.small, background: STATUS.danger.bg, color: STATUS.danger.fg, padding: 12, borderRadius: 12 }}>
+                            <div style={{ fontSize: TEXT.small, background: STATUS.danger.bg, color: STATUS.danger.fg, padding: 12, borderRadius: RADIUS.control }}>
                                 До начала меньше 24 часов. Клиент сам такую бронь отменить не может — вы отменяете как администратор.
                             </div>
                             {canReRent && (
@@ -738,6 +753,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
     );
 }
 
+/** Выбор CRM-клиента — общая ChoiceCard (тот же язык «выбрано»). */
 function ClientPickRow({ active, disabled, onClick, title, sub }: {
     active: boolean;
     disabled?: boolean;
@@ -746,114 +762,66 @@ function ClientPickRow({ active, disabled, onClick, title, sub }: {
     sub?: string;
 }) {
     return (
-        <button
-            onClick={onClick}
+        <ChoiceCard
+            selected={active}
             disabled={disabled}
-            aria-pressed={active}
-            style={{
-                width: '100%',
-                minHeight: 48,
-                background: active ? COLOR.accentSoft : COLOR.card,
-                color: COLOR.ink,
-                border: `1px solid ${active ? COLOR.accent : COLOR.ink10}`,
-                borderRadius: RADIUS.control,
-                padding: '10px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                cursor: disabled ? 'wait' : 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                opacity: disabled ? 0.6 : 1,
-            }}
-        >
-            <div style={{ flex: 1 }}>
-                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{title}</div>
-                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 1 }}>{sub}</div>}
-            </div>
-        </button>
+            onClick={onClick}
+            title={title}
+            description={sub}
+            style={disabled ? { cursor: 'wait' } : undefined}
+        />
     );
 }
 
-function Field({ icon, label, subtle, children }: {
-    icon?: React.ReactNode;
+/** Главное действие шторки: одна бирюзовая кнопка во всю ширину и пояснение под ней. */
+function PrimaryAction({ icon, label, sub, busy, onClick }: {
+    icon: React.ReactNode;
     label: string;
-    subtle?: boolean;
-    children: React.ReactNode;
+    sub?: string;
+    busy?: boolean;
+    onClick: () => void;
 }) {
     return (
-        <div style={{
-            background: subtle ? 'transparent' : COLOR.sunken,
-            borderRadius: 12,
-            padding: subtle ? '4px 0' : 12,
-        }}>
-            <div style={{
-                fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
-                textTransform: 'uppercase', color: COLOR.ink60,
-                display: 'flex', alignItems: 'center', gap: 6,
-                marginBottom: 4,
-            }}>
-                {icon} {label}
-            </div>
-            <div style={{ fontSize: TEXT.small, color: COLOR.ink }}>
-                {children}
-            </div>
+        <div>
+            <Button block icon={icon} loading={busy} onClick={onClick}>
+                {busy ? 'Секунду…' : label}
+            </Button>
+            {sub && <p style={{ ...ruleNote, marginTop: 6 }}>{sub}</p>}
         </div>
     );
 }
 
-const actionRowStyle = (primary?: boolean, danger?: boolean): React.CSSProperties => ({
-    background: primary ? COLOR.ink : danger ? STATUS.danger.bg : COLOR.card,
-    color: primary ? COLOR.onInk : danger ? STATUS.danger.fg : COLOR.ink,
-    border: primary ? 'none' : `1px solid ${danger ? `${STATUS.danger.fg}33` : COLOR.ink10}`,
-    borderRadius: 12,
-    minHeight: 56,
-    padding: '10px 14px',
-    display: 'flex', alignItems: 'center', gap: 12,
-    fontFamily: 'inherit',
-    textAlign: 'left',
-    textDecoration: 'none',
-});
-
-function ActionRow({ icon, label, sub, primary, danger, busy, onClick }: {
+/** Строка действия — общий ListRow (09.11 фаза 3; были карточки в рамках,
+ *  «главная» — чёрной плитой). Необратимое — красным словом и значком. */
+function ActionRow({ icon, label, sub, danger, busy, onClick }: {
     icon: React.ReactNode;
     label: string;
     sub?: string;
-    primary?: boolean;
     danger?: boolean;
     busy?: boolean;
     onClick: () => void;
 }) {
-    // Подпись без прозрачности: на красном фоне opacity .7 давала 3.2:1.
-    const subColor = primary ? COLOR.onInk : danger ? STATUS.danger.fg : COLOR.ink60;
     return (
-        <button
+        <ListRow
             onClick={onClick}
             disabled={busy}
-            className="press"
-            style={{ ...actionRowStyle(primary, danger), cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}
-        >
-            <span aria-hidden="true">{icon}</span>
-            <div style={{ flex: 1 }}>
-                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{busy ? 'Секунду…' : label}</div>
-                {sub && <div style={{ fontSize: TEXT.caption, color: subColor, marginTop: 2 }}>{sub}</div>}
-            </div>
-        </button>
+            lead={<ListIcon><span style={{ display: 'flex', color: danger ? STATUS.danger.fg : undefined }}>{icon}</span></ListIcon>}
+            title={<span style={danger ? { color: STATUS.danger.fg } : undefined}>{busy ? 'Секунду…' : label}</span>}
+            subtitle={sub}
+            chevron={!danger}
+        />
     );
 }
 
 function ActionLink({ href, icon, label, sub }: { href: string; icon: React.ReactNode; label: string; sub?: string }) {
     return (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="press" style={actionRowStyle()}>
-            <span aria-hidden="true">{icon}</span>
-            <div style={{ flex: 1 }}>
-                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>{label}</div>
-                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
-            </div>
-            <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
-        </a>
+        <ListRow href={href} target="_blank" lead={<ListIcon>{icon}</ListIcon>} title={label} subtitle={sub} />
     );
 }
+
+const ruleNote: React.CSSProperties = {
+    margin: 0, fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink60,
+};
 
 /** Статус оплаты — слова и цвета только из общего словаря (statuses.ts).
  *  «Ждёт списания» у будущей брони — обычное состояние: вместо янтарного
@@ -866,7 +834,8 @@ function PaymentBadge({ status }: { status?: 'pending' | 'paid' | 'waived' | nul
 function Tag({ children, tone }: { children: React.ReactNode; tone: 'muted' | 'active' }) {
     const colors: Record<string, { bg: string; fg: string }> = {
         muted: { bg: STATUS.muted.bg, fg: STATUS.muted.fg },
-        active: { bg: COLOR.ink, fg: COLOR.onInk },
+        // 09.11 фаза 3: «Идёт сейчас» — язык «выбрано/сейчас» (бирюза), не чёрная бирка.
+        active: { bg: COLOR.accentSoft, fg: COLOR.accentInk },
     };
     const c = colors[tone];
     return (

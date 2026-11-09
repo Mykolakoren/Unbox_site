@@ -24,7 +24,8 @@ import { toast } from 'sonner';
 import { CalendarPlus, Check } from 'lucide-react';
 import { apiErrorMessage } from '../../utils/errors';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { COLOR } from '../../design/tokens';
+import { COLOR, SHAPE } from '../../design/tokens';
+import { useInMobileShell } from '../../utils/catalogPath';
 import { formatGel, formatDateLabel, formatDayMonthShort } from '../../utils/format';
 import { useUserStore } from '../../store/userStore';
 import { Button } from '../ui/Button';
@@ -55,6 +56,14 @@ const DOW_LABELS = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
 const monoCaps: React.CSSProperties = {
     fontFamily: MONO,
     fontSize: 12,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+};
+/** Та же подпись внутри /m — Sans 12/600 капсом (как «КОШЕЛЁК»), не Mono. */
+const SKIN_CAPS: React.CSSProperties = {
+    fontFamily: SANS,
+    fontSize: 12,
+    fontWeight: 600,
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
 };
@@ -116,6 +125,13 @@ type Booked = { slot: AvailableSlot; name: string };
 
 export function SpecialistBookingChessboardGrid({ specialistId, specialistName, formats, basePriceGel }: Props) {
     const currentUser = useUserStore(s => s.currentUser);
+    // 09.11 фаза 3 (общие файлы): «мобильная кожа» внутри /m — подписи Sans-капсом, а не
+    // Mono в разрядку; цифры Sans с ровными цифрами; линии ink-10 вместо чёрных; карточки
+    // со скруглением 16; выбранный день и время — язык «выбрано» (accent-soft + рамка),
+    // не чёрная заливка. Компьютер (вне /m) — прежний Grid House.
+    const skin = useInMobileShell();
+    const caps = skin ? SKIN_CAPS : monoCaps;
+    const mono = skin ? SANS : MONO;
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [locationFilter, setLocationFilter] = useState<LocFilter>('all');
     const [allSlots, setAllSlots] = useState<AvailableSlot[]>([]);
@@ -353,7 +369,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
     );
 
     const weekNavButton: React.CSSProperties = {
-        ...monoCaps,
+        ...caps,
         background: 'transparent',
         border: 'none',
         color: GH.ink,
@@ -397,7 +413,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
             ref={panelRef}
             style={{
                 marginTop: '32px',
-                borderTop: `1px solid ${GH.ink}`,
+                borderTop: `1px solid ${skin ? GH.ink10 : GH.ink}`,
                 paddingTop: '28px',
                 display: 'grid',
                 gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
@@ -408,7 +424,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
         >
             {/* Левая колонка: сводка */}
             <div>
-                <h4 style={{ ...monoCaps, color: GH.ink60, margin: '0 0 14px', fontWeight: 500 }}>
+                <h4 style={{ ...caps, color: GH.ink60, margin: '0 0 14px', fontWeight: 500 }}>
                     Вы выбрали
                 </h4>
                 <dl style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '10px 16px', fontSize: 16, alignItems: 'baseline', margin: 0 }}>
@@ -419,7 +435,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                         ...(price !== null ? [{ label: 'Стоимость', value: formatGel(price), mono: true, bold: true }] : []),
                     ].map(({ label, value, mono, bold }: { label: string; value: string; mono: boolean; bold?: boolean }) => (
                         <div key={label} style={{ display: 'contents' }}>
-                            <dt style={{ ...monoCaps, color: GH.ink60 }}>{label}</dt>
+                            <dt style={{ ...caps, color: GH.ink60 }}>{label}</dt>
                             <dd className={mono ? 'num' : undefined} style={{ margin: 0, color: GH.ink, fontWeight: bold ? 600 : 500, fontFamily: mono ? MONO : SANS }}>{value}</dd>
                         </div>
                     ))}
@@ -434,7 +450,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                 noValidate
                 onSubmit={(e) => { e.preventDefault(); handleBook(); }}
             >
-                <h4 style={{ ...monoCaps, color: GH.ink60, margin: '0 0 14px', fontWeight: 500 }}>
+                <h4 style={{ ...caps, color: GH.ink60, margin: '0 0 14px', fontWeight: 500 }}>
                     Как с вами связаться
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -508,11 +524,12 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                     background: GH.paper,
                     padding: isMobile ? 20 : 40,
                     color: GH.ink,
-                    border: `1px solid ${GH.ink}`,
+                    border: `1px solid ${skin ? GH.ink10 : GH.ink}`,
+                    ...(skin ? { borderRadius: SHAPE.card } : {}),
                     fontFamily: SANS,
                 }}
             >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, ...monoCaps, color: GH.ink60, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, ...caps, color: GH.ink60, marginBottom: 12 }}>
                     <Check size={16} aria-hidden="true" /> Запись подтверждена
                 </div>
                 <h3
@@ -523,13 +540,13 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                     Вы записаны: {specialistName}, {dateLabel}, <span className="num">{s.startTime}</span>
                 </h3>
                 <dl style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '140px 1fr', gap: isMobile ? '4px 0' : '10px 16px', margin: '0 0 24px', fontSize: 16 }}>
-                    <dt style={{ ...monoCaps, color: GH.ink60 }}>Где</dt>
+                    <dt style={{ ...caps, color: GH.ink60 }}>Где</dt>
                     <dd style={{ margin: isMobile ? '0 0 12px' : 0 }}>{where}</dd>
-                    <dt style={{ ...monoCaps, color: GH.ink60 }}>Время</dt>
-                    <dd style={{ margin: isMobile ? '0 0 12px' : 0, fontFamily: MONO }}>{s.startTime} — {s.endTime}</dd>
+                    <dt style={{ ...caps, color: GH.ink60 }}>Время</dt>
+                    <dd style={{ margin: isMobile ? '0 0 12px' : 0, fontFamily: mono }}>{s.startTime} — {s.endTime}</dd>
                     {price !== null && (
                         <>
-                            <dt style={{ ...monoCaps, color: GH.ink60 }}>Оплата</dt>
+                            <dt style={{ ...caps, color: GH.ink60 }}>Оплата</dt>
                             <dd style={{ margin: 0 }}>{formatGel(price)} — специалисту, напрямую</dd>
                         </>
                     )}
@@ -585,13 +602,13 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         marginBottom: '24px',
-                        borderBottom: `1px solid ${GH.ink}`,
+                        borderBottom: `1px solid ${skin ? GH.ink10 : GH.ink}`,
                         paddingBottom: '8px',
                         gap: 16,
                         flexWrap: 'wrap',
                     }}
                 >
-                    <h3 style={{ ...monoCaps, color: GH.ink, margin: 0, fontWeight: 500 }}>
+                    <h3 style={{ ...caps, color: GH.ink, margin: 0, fontWeight: 500 }}>
                         Запись · <span className="num">{weekRangeLabel}</span>
                     </h3>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -623,7 +640,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                         style={{
                             display: 'grid',
                             gridTemplateColumns: `64px repeat(7, minmax(0, 1fr))`,
-                            borderTop: `1px solid ${GH.ink}`,
+                            borderTop: `1px solid ${skin ? GH.ink10 : GH.ink}`,
                             borderLeft: `1px solid ${GH.ink10}`,
                         }}
                     >
@@ -631,7 +648,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                         <div
                             style={{
                                 borderRight: `1px solid ${GH.ink10}`,
-                                borderBottom: `1px solid ${GH.ink}`,
+                                borderBottom: `1px solid ${skin ? GH.ink10 : GH.ink}`,
                                 background: GH.paper,
                             }}
                         />
@@ -642,9 +659,9 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                     key={i}
                                     style={{
                                         borderRight: `1px solid ${GH.ink10}`,
-                                        borderBottom: `1px solid ${GH.ink}`,
+                                        borderBottom: `1px solid ${skin ? GH.ink10 : GH.ink}`,
                                         padding: '12px 14px',
-                                        fontFamily: MONO,
+                                        fontFamily: mono,
                                         background: isCurrentDay ? GH.ink5 : GH.paper,
                                     }}
                                 >
@@ -665,7 +682,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                     style={{
                                         borderRight: `1px solid ${GH.ink10}`,
                                         borderBottom: `1px solid ${GH.ink10}`,
-                                        fontFamily: MONO,
+                                        fontFamily: mono,
                                         fontSize: 12,
                                         color: GH.ink60,
                                         padding: '0 10px',
@@ -723,7 +740,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    fontFamily: MONO,
+                                                    fontFamily: mono,
                                                     fontSize: 12,
                                                     color: isSelected ? GH.paper : GH.ink60,
                                                     letterSpacing: '0.06em',
@@ -739,7 +756,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                                     position: 'absolute',
                                                     top: '3px',
                                                     right: '5px',
-                                                    fontFamily: MONO,
+                                                    fontFamily: mono,
                                                     fontSize: 12,
                                                     color: isSelected ? GH.paper : GH.ink,
                                                     letterSpacing: '0.05em',
@@ -764,7 +781,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                             marginTop: '18px',
                             display: 'flex',
                             gap: '28px',
-                            ...monoCaps,
+                            ...caps,
                             color: GH.ink60,
                             alignItems: 'center',
                             flexWrap: 'wrap',
@@ -801,16 +818,17 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
         <div
             style={{
                 marginTop: '32px',
-                background: GH.paper,
+                background: skin ? COLOR.card : GH.paper,
                 padding: '16px',
                 color: GH.ink,
                 border: `1px solid ${GH.ink10}`,
+                borderRadius: skin ? SHAPE.card : undefined,
                 fontFamily: SANS,
             }}
         >
-            <div style={{ borderBottom: `1px solid ${GH.ink}`, paddingBottom: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ borderBottom: `1px solid ${skin ? GH.ink10 : GH.ink}`, paddingBottom: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <button type="button" onClick={() => goWeek(subWeeks(weekStart, 1))} style={weekNavButton} aria-label="Предыдущая неделя">←</button>
-                <h3 style={{ ...monoCaps, color: GH.ink, margin: 0, fontWeight: 500, textAlign: 'center' }}>
+                <h3 style={{ ...caps, color: GH.ink, margin: 0, fontWeight: 500, textAlign: 'center' }}>
                     Запись · <span className="num">{weekRangeLabel}</span>
                 </h3>
                 <button type="button" onClick={() => goWeek(addWeeks(weekStart, 1))} style={weekNavButton} aria-label="Следующая неделя">→</button>
@@ -825,8 +843,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                 style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(7, 1fr)',
-                    borderTop: `1px solid ${GH.ink}`,
-                    borderLeft: `1px solid ${GH.ink10}`,
+                    ...(skin ? { gap: 4 } : { borderTop: `1px solid ${GH.ink}`, borderLeft: `1px solid ${GH.ink10}` }),
                     marginBottom: '18px',
                 }}
             >
@@ -846,11 +863,12 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                 borderBottom: `1px solid ${GH.ink10}`,
                                 borderTop: 'none',
                                 borderLeft: 'none',
-                                background: isActive ? GH.ink : GH.paper,
-                                color: isActive ? GH.paper : dayHasSlots ? GH.ink : GH.ink60,
+                                background: isActive ? (skin ? COLOR.accentSoft : GH.ink) : (skin ? 'transparent' : GH.paper),
+                                color: isActive ? (skin ? COLOR.accentInk : GH.paper) : dayHasSlots ? GH.ink : GH.ink60,
+                                ...(skin ? { borderRadius: SHAPE.control, boxShadow: isActive ? `inset 0 0 0 1.5px ${COLOR.accent}` : undefined, border: 'none' } : {}),
                                 padding: '8px 2px',
                                 minHeight: 64,
-                                fontFamily: MONO,
+                                fontFamily: mono,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 alignItems: 'center',
@@ -866,7 +884,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                             </span>
                             <span
                                 aria-hidden="true"
-                                style={{ width: 6, height: 6, borderRadius: '50%', background: dayHasSlots ? (isActive ? GH.paper : GH.accent) : 'transparent' }}
+                                style={{ width: 6, height: 6, borderRadius: '50%', background: dayHasSlots ? (isActive && !skin ? GH.paper : GH.accent) : 'transparent' }}
                             />
                         </button>
                     );
@@ -881,7 +899,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
             ) : mobileDaySlots.length === 0 ? (
                 emptyWeek
             ) : (
-                <div role="group" aria-label="Время" style={{ borderTop: `1px solid ${GH.ink}` }}>
+                <div role="group" aria-label="Время" style={{ borderTop: `1px solid ${skin ? GH.ink10 : GH.ink}` }}>
                     {mobileDaySlots.map((slot, i) => {
                         const isSelected = selectedSlot?.date === slot.date && selectedSlot?.startTime === slot.startTime;
                         return (
@@ -900,17 +918,18 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
                                     padding: '0 8px',
                                     border: 'none',
                                     borderBottom: `1px solid ${GH.ink10}`,
-                                    background: isSelected ? GH.ink : 'transparent',
-                                    color: isSelected ? GH.paper : GH.ink,
+                                    background: isSelected ? (skin ? COLOR.accentSoft : GH.ink) : 'transparent',
+                                    color: isSelected ? (skin ? COLOR.accentInk : GH.paper) : GH.ink,
+                                    ...(skin ? { borderRadius: SHAPE.control, boxShadow: isSelected ? `inset 0 0 0 1.5px ${COLOR.accent}` : undefined, padding: '0 12px' } : {}),
                                     cursor: 'pointer',
                                     fontFamily: SANS,
                                     textAlign: 'left',
                                 }}
                             >
-                                <span style={{ fontFamily: MONO, fontSize: 18, fontWeight: 500, letterSpacing: '0.02em', fontFeatureSettings: '"tnum"' }}>
+                                <span className={skin ? 'num' : undefined} style={{ fontFamily: mono, fontSize: 18, fontWeight: skin ? 600 : 500, letterSpacing: skin ? 0 : '0.02em', fontFeatureSettings: '"tnum"' }}>
                                     {slot.startTime}
                                 </span>
-                                <span style={{ ...monoCaps, color: isSelected ? GH.paper : GH.ink60 }}>
+                                <span style={skin ? { fontSize: 14, color: isSelected ? COLOR.accentInk : GH.ink60 } : { ...caps, color: isSelected ? GH.paper : GH.ink60 }}>
                                     {locationName(slot.locationId)}
                                 </span>
                             </button>

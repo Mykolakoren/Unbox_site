@@ -71,7 +71,7 @@ export function ClientPickerSheet({ open, onClose, people, self, value, onPick }
                         />
                     ))}
                     {found.length === 0 && (
-                        <div style={{ background: COLOR.sunken, borderRadius: 12, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: TEXT.small }}>
+                        <div style={{ background: COLOR.sunken, borderRadius: RADIUS.control, padding: 16, textAlign: 'center', color: COLOR.ink60, fontSize: TEXT.small }}>
                             {people.length === 0 ? 'Загружаем список…' : 'Никого не нашли — проверьте имя или номер.'}
                         </div>
                     )}

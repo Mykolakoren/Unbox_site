@@ -20,7 +20,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { MapPin } from 'lucide-react';
 import { RESOURCES, LOCATIONS, CABINET_SERVICES } from '../utils/data';
 import { useBookingStore } from '../store/bookingStore';
-import { COLOR, FONT, Z } from '../design/tokens';
+import { COLOR, FONT, RADIUS, TEXT, Z } from '../design/tokens';
 import { formatGel } from '../utils/format';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -117,7 +117,9 @@ export function CabinetPage() {
     const stickyCta = !wide;
 
     return (
-        <div style={{ background: GH.paper, color: GH.ink, fontFamily: GH_SANS, minHeight: inShell ? undefined : '100vh' }}>
+        // 09.11 фаза 3 (общие файлы): в /m отступ под липкую «Забронировать» — у самой страницы,
+        // а не у ленты «Другие кабинеты» (её может не быть — кнопка закрывала последние факты).
+        <div style={{ background: GH.paper, color: GH.ink, fontFamily: GH_SANS, minHeight: inShell ? undefined : '100vh', paddingBottom: inShell && stickyCta ? 88 : undefined }}>
             <PublicHeader subnav={crumbs} />
             {inShell && (
                 <MobilePageHeader title={resource.name} fallbackTo={`/m/location/${location.id}`} />
@@ -125,12 +127,14 @@ export function CabinetPage() {
 
             <div style={{
                 maxWidth: 1280, margin: '0 auto',
-                padding: wide ? '40px 24px 80px' : `16px 16px ${stickyCta ? 112 : 48}px`,
+                // В /m отступ под липкую кнопку — у ленты «Другие кабинеты» ниже.
+                padding: wide ? '40px 24px 80px' : `16px 16px ${inShell ? 24 : stickyCta ? 112 : 48}px`,
             }}>
                 <div className="cabpg-grid">
                     {/* ── Data spine ── */}
                     <aside className="cabpg-spine">
-                        <h1 style={{
+                        {/* 09.11 фаза 3: в /m название уже в шапке — второй раз крупно не пишем. */}
+                        <h1 className={inShell ? 'sr-only' : undefined} style={{
                             margin: 0,
                             fontSize: 'clamp(28px, 5vw, 56px)',
                             fontWeight: 600,
@@ -144,7 +148,7 @@ export function CabinetPage() {
                             href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.name} ${location.address} Batumi`)}`}
                             target="_blank" rel="noopener noreferrer"
                             style={{
-                                marginTop: 8,
+                                marginTop: inShell ? 0 : 8,
                                 minHeight: 44,
                                 fontSize: 14,
                                 color: GH.ink60, textDecoration: 'none',
@@ -152,17 +156,20 @@ export function CabinetPage() {
                             }}
                         >
                             <MapPin size={14} aria-hidden="true" />
-                            <span style={{ borderBottom: `1px solid ${GH.ink10}` }}>{location.name} · {location.address}</span>
+                            <span style={inShell ? { color: COLOR.accentInk, fontWeight: 600 } : { borderBottom: `1px solid ${GH.ink10}` }}>{location.name} · {location.address}</span>
                         </a>
 
-                        <dl style={{ margin: '16px 0 0', padding: 0, borderTop: `1px solid ${GH.ink}` }}>
-                            {facts.map(([label, value]) => (
+                        {/* 09.11 фаза 3: в /m — карточка (радиус 16) без чёрной черты сверху. */}
+                        <dl style={inShell
+                            ? { margin: '12px 0 0', padding: '0 16px', background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet }
+                            : { margin: '16px 0 0', padding: 0, borderTop: `1px solid ${GH.ink}` }}>
+                            {facts.map(([label, value], i) => (
                                 <div key={label} style={{
                                     display: 'grid',
-                                    gridTemplateColumns: '120px minmax(0, 1fr)',
+                                    gridTemplateColumns: inShell ? '112px minmax(0, 1fr)' : '120px minmax(0, 1fr)',
                                     gap: 12,
                                     padding: '12px 0',
-                                    borderBottom: `1px solid ${GH.ink10}`,
+                                    borderBottom: inShell && i === facts.length - 1 ? 'none' : `1px solid ${GH.ink10}`,
                                     alignItems: 'baseline',
                                 }}>
                                     <dt style={{ fontSize: 14, color: GH.ink60 }}>{label}</dt>
@@ -179,7 +186,7 @@ export function CabinetPage() {
 
                         {services.length > 0 && (
                             <div style={{ marginTop: 24 }}>
-                                <div style={{
+                                <div className={inShell ? 'ui-overline' : undefined} style={inShell ? { margin: '0 4px 8px' } : {
                                     fontFamily: GH_MONO, fontSize: 12,
                                     letterSpacing: '0.06em', textTransform: 'uppercase',
                                     color: GH.ink60, marginBottom: 8,
@@ -188,7 +195,12 @@ export function CabinetPage() {
                                 </div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                     {services.map(s => (
-                                        <span key={s} style={{
+                                        <span key={s} style={inShell ? {
+                                            padding: '6px 12px',
+                                            background: COLOR.sunken,
+                                            borderRadius: RADIUS.control,
+                                            fontSize: TEXT.small,
+                                        } : {
                                             padding: '4px 10px',
                                             border: `1px solid ${GH.ink20}`,
                                             fontSize: 14,
@@ -209,6 +221,11 @@ export function CabinetPage() {
 
                     {/* ── Фото. На узком экране — первым (CSS order). ── */}
                     <div className="cabpg-photos">
+                        {/* 09.11 фаза 3: в /m — одна карусель 4:3 (радиус 16, счётчик «1 / 6»),
+                            а не большое фото и под ним лента с тем же кадром. */}
+                        {inShell ? (
+                            <PhotoStrip photos={photos} onOpen={i => setLightbox(i)} altFor={altFor} radius={RADIUS.sheet} />
+                        ) : (<>
                         <button
                             type="button"
                             onClick={() => setLightbox(0)}
@@ -261,11 +278,12 @@ export function CabinetPage() {
                                 />
                             </div>
                         ))}
+                        </>)}
                     </div>
                 </div>
             </div>
 
-            <SiblingCabinets currentId={resource.id} locationId={location.id} toCatalog={toCatalog} />
+            <SiblingCabinets currentId={resource.id} locationId={location.id} toCatalog={toCatalog} inShell={inShell} />
 
             {stickyCta && (
                 <div style={{
@@ -326,16 +344,58 @@ const crumbLink: React.CSSProperties = {
     minHeight: 36, display: 'inline-flex', alignItems: 'center',
 };
 
-function SiblingCabinets({ currentId, locationId, toCatalog }: {
+function SiblingCabinets({ currentId, locationId, toCatalog, inShell = false }: {
     currentId: string;
     locationId: string;
     toCatalog: (path: string) => string;
+    inShell?: boolean;
 }) {
     const siblings = RESOURCES
         .filter(r => r.locationId === locationId && r.id !== currentId && r.isActive !== false)
         .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
     if (siblings.length === 0) return null;
+
+    // 09.11 фаза 3: в /m — горизонтальная лента карточек 200×150 (радиус 16),
+    // а не огромные фото на всю ширину (страница уходила за 3000 px).
+    if (inShell) {
+        return (
+            <section style={{ padding: '0 0 24px' }} aria-labelledby="cab-siblings">
+                <h2 id="cab-siblings" className="ui-overline" style={{ margin: '0 20px 8px' }}>Другие кабинеты в этом центре</h2>
+                <div className="ui-chip-row ui-chip-row--scroll" style={{ gap: 12, padding: '0 16px 4px' }}>
+                    {siblings.map(r => (
+                        <Link
+                            key={r.id}
+                            to={toCatalog(`/cabinet/${r.id}`)}
+                            style={{
+                                flex: '0 0 200px',
+                                background: COLOR.card,
+                                border: `1px solid ${COLOR.ink10}`,
+                                borderRadius: RADIUS.sheet,
+                                overflow: 'hidden',
+                                textDecoration: 'none',
+                                color: COLOR.ink,
+                                display: 'block',
+                            }}
+                        >
+                            <span style={{ display: 'block', width: '100%', height: 150, background: COLOR.sunken }}>
+                                {r.photos && r.photos[0] && (
+                                    <img src={photoVariant(r.photos[0], 'sm')} alt="" loading="lazy" decoding="async"
+                                         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                )}
+                            </span>
+                            <span style={{ display: 'block', padding: '10px 12px' }}>
+                                <span style={{ display: 'block', fontWeight: 600, fontSize: TEXT.body }}>{r.name}</span>
+                                <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60, marginTop: 2, whiteSpace: 'normal' }}>
+                                    {r.area} м² · <span className="num">{formatGel(r.hourlyRate)}/ч</span>
+                                </span>
+                            </span>
+                        </Link>
+                    ))}
+                </div>
+            </section>
+        );
+    }
 
     return (
         <div style={{

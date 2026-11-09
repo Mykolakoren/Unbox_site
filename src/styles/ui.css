@@ -45,15 +45,19 @@
   .ui-btn--sm::after { content: ""; position: absolute; inset: -4px 0; }
   .ui-btn--sm.ui-btn--icon { padding: 0; }
   .ui-btn--block   { width: 100%; }
+  /* «Ещё: e-mail, теги, счёт» — раскрыть дополнительные поля (09.11 фаза 3):
+   * 14/600 бирюзовым текстом со стрелкой, не похоже на заголовок раздела. */
+  .ui-btn.ui-more-toggle { padding: 0; font-size: var(--text-small); color: var(--color-accent-ink); }
   .ui-btn--icon    { padding: 0; width: var(--btn-h); }
 
-  .ui-btn--primary { background: var(--color-accent); color: var(--color-on-accent); }
+  /* 09.11 фаза 3: заливка — accent-fill (в тёмной теме темнее accent, не мятная) */
+  .ui-btn--primary { background: var(--color-accent-fill); color: var(--color-on-accent-fill); }
   .ui-btn--secondary { background: var(--color-card); color: var(--color-ink); border-color: var(--color-ink-20); }
   .ui-btn--quiet { background: transparent; color: var(--color-ink); padding: 0 var(--space-3); }
   .ui-btn--danger { background: var(--status-danger-solid); color: var(--color-on-accent); }
 
   @media (hover: hover) and (pointer: fine) {
-    .ui-btn--primary:hover:not(:disabled)   { background: var(--color-accent-hover); }
+    .ui-btn--primary:hover:not(:disabled)   { background: var(--color-accent-fill-hover); }
     .ui-btn--secondary:hover:not(:disabled) { background: var(--color-sunken); }
     .ui-btn--quiet:hover:not(:disabled)     { background: var(--color-ink-05); }
     .ui-btn--danger:hover:not(:disabled)    { background: var(--status-danger-fg); }
@@ -290,6 +294,16 @@
     font-size: var(--control-font, 1rem);
     pointer-events: none;
   }
+  /* Сумма — главное поле шторки денег (09.11 фаза 3): 64 px, 28/600, «₾» того же кегля */
+  .ui-input--hero {
+    min-height: 64px;
+    font-size: var(--text-heading);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ui-input--hero.ui-input--with-suffix { padding-right: 48px; }
+  .ui-input-wrap--hero .ui-input__suffix { right: var(--space-4); font-size: var(--text-heading); font-weight: 500; }
 
   /* ── Chip / Segmented ───────────────────────────────────────────────── */
   .ui-chip {
@@ -498,6 +512,8 @@
     white-space: nowrap;
   }
   .ui-m-header__slot { flex: none; display: flex; align-items: center; }
+  /* 09.11 фаза 3: в тёмной теме шапка — цвет страницы (paper), а не светлее неё (card) */
+  :root[data-theme="dark"] .ui-m-header { background: var(--color-paper); }
 
   /* ── MobilePageHeader: подзаголовок и крупный вариант (09.11) ──────────
    * bar   — липкая строка 56 px для внутренних экранов («←» + 20 px);
@@ -559,6 +575,9 @@
    * стрелка/тихое действие. Вся строка нажимается, если есть onClick/to. */
   .ui-list-group { font-family: var(--font-sans); min-width: 0; }
   .ui-list-group + .ui-list-group { margin-top: var(--space-5); }
+  /* 09.11 фаза 3: родитель уже раздвигает детей (gap) — свой отступ не добавляем,
+   * иначе между группами 24 + 24. Ловим inline gap и Tailwind gap-*/space-y-*. */
+  :is([style*="gap"], [class*="gap-"], [class*="space-y-"]) > .ui-list-group + .ui-list-group { margin-top: 0; }
   .ui-list-group__head {
     display: flex;
     align-items: baseline;
@@ -686,7 +705,8 @@
   .ui-row__subtitle { font-size: var(--text-small); line-height: 1.45; color: var(--color-ink-60); overflow-wrap: anywhere; }
   .ui-row__meta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
   .ui-row--dimmed .ui-row__title,
-  .ui-row--disabled .ui-row__title { color: var(--color-ink-60); }
+  .ui-row--disabled .ui-row__title,
+  .ui-row--dimmed .ui-row__trail-main { color: var(--color-ink-60); }
 
   /* Справа — короткое: сумма, бейдж, «Абонемент». Не переносится и не режется;
    * длинное («2 ч из абонемента + 5 ₾») — в подпись строки или во вторую строку справа. */
@@ -695,6 +715,13 @@
   .ui-row__trail-sub { font-size: var(--text-caption); line-height: 1.35; color: var(--color-ink-60); white-space: nowrap; }
   .ui-row__chevron { flex: none; color: var(--color-ink-40); margin-right: calc(var(--space-1) * -1); }
   .ui-row__action { flex: none; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-4); }
+  /* 09.11 фаза 3: узкий телефон (≤ 360) — поля строки 12, чтобы имени хватало места */
+  @media (max-width: 360px) {
+    .ui-row__main { padding-left: var(--space-3); padding-right: var(--space-3); }
+    .ui-row--with-action > .ui-row__main { padding-right: var(--space-2); }
+    .ui-row + .ui-row::before { left: var(--space-3); }
+    .ui-row__action { padding-right: var(--space-3); }
+  }
 
   /* Полоса слева — «к оплате» (danger) или «ждёт» (pending). Только вместе
    * со словом в строке или скрытой подписью для диктора — не цвет вместо смысла. */
@@ -868,4 +895,96 @@
   .ui-summary--panel .ui-summary__caption,
   .ui-summary--panel .ui-summary__stat-label { color: var(--color-on-panel); opacity: 0.72; }
   .ui-summary--panel .ui-summary__stat { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-on-panel) 24%, transparent); }
+
+  /* ── Switch (09.11 фаза 3) ───────────────────────────────────────────── */
+  .ui-switch {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+  .ui-switch:disabled { cursor: not-allowed; opacity: 0.5; }
+  .ui-switch:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: var(--radius-control); }
+  .ui-switch__track {
+    position: relative;
+    width: 44px;
+    height: 26px;
+    border-radius: var(--radius-pill);
+    background: var(--color-ink-20);
+    transition: background-color var(--dur-ui) ease;
+  }
+  .ui-switch[aria-checked="true"] .ui-switch__track { background: var(--color-accent); }
+  .ui-switch__knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-pill);
+    background: var(--color-card);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: transform var(--dur-ui) var(--ease-out-strong);
+  }
+  .ui-switch[aria-checked="true"] .ui-switch__knob { transform: translateX(18px); }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-switch__track, .ui-switch__knob { transition: none; }
+  }
+
+  /* ── Counter (09.11 фаза 3): один вид счётчика ───────────────────────── */
+  .ui-counter {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    background: var(--status-danger-solid);
+    color: var(--color-on-accent);
+    box-shadow: 0 0 0 2px var(--counter-ring, var(--color-card));
+    font-family: var(--font-sans);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ui-counter--accent { background: var(--color-accent-fill); color: var(--color-on-accent-fill); }
+
+  /* ── PageTabs (09.11 фаза 3): вкладки страницы ───────────────────────── */
+  .ui-page-tabs {
+    display: flex;
+    gap: var(--space-5);
+    margin-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-ink-10);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ui-page-tabs::-webkit-scrollbar { display: none; }
+  .ui-page-tabs__tab {
+    flex: none;
+    min-height: 44px;
+    margin-bottom: -1px;
+    padding: 0 2px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--color-ink-60);
+    font-family: inherit;
+    font-size: var(--text-body);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .ui-page-tabs__tab[aria-selected="true"] { color: var(--color-ink); border-bottom-color: var(--color-accent); }
+  .ui-page-tabs__tab:focus-visible { outline-offset: -2px; }
 }
+
+/* 09.11 фаза 3 (ревизия регрессий): строка ListRow внутри обёртки свайпа
+   («Мои брони» → SwipeRow) тянется на всю ширину, сумма и «›» — у правого края. */
+.ui-row > * > .ui-row,
+.ui-row > .ui-row { flex: 1 1 auto; min-width: 0; }

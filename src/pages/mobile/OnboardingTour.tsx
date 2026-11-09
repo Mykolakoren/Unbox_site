@@ -2,7 +2,8 @@ import { useLayoutEffect, useState } from 'react';
 import { useScrollLock } from './useScrollLock';
 import { ArrowRight, Calendar, CheckCircle2, Home, Search, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { COLOR, FONT, Z } from '../../design/tokens';
+import { COLOR, FONT, RADIUS, SHAPE, TEXT, Z } from '../../design/tokens';
+import { Button } from '../../components/ui/Button';
 
 /**
  * First-visit onboarding tour for /m.
@@ -196,8 +197,8 @@ export function OnboardingTour({
                     position: 'relative',
                     background: COLOR.card,
                     color: COLOR.ink,
-                    borderRadius: '24px 24px 0 0',
-                    padding: '24px 22px',
+                    borderRadius: `${RADIUS.sheet}px ${RADIUS.sheet}px 0 0`,
+                    padding: '24px 20px',
                     paddingBottom: 'calc(22px + env(safe-area-inset-bottom, 0px))',
                     width: '100%',
                     maxWidth: 480,
@@ -224,8 +225,8 @@ export function OnboardingTour({
                             style={{
                                 flex: 1,
                                 height: 4,
-                                borderRadius: 2,
-                                background: i <= step ? COLOR.ink : COLOR.ink10,
+                                borderRadius: SHAPE.pill,
+                                background: i <= step ? COLOR.accent : COLOR.ink10,
                                 transition: 'background 200ms',
                             }}
                         />
@@ -235,8 +236,8 @@ export function OnboardingTour({
                 {/* Icon + pill */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{
-                        width: 42, height: 42,
-                        borderRadius: 12,
+                        width: 40, height: 40,
+                        borderRadius: RADIUS.control,
                         background: COLOR.accentSoft,
                         color: COLOR.accentInk,
                         display: 'grid', placeItems: 'center',
@@ -244,7 +245,7 @@ export function OnboardingTour({
                         <Icon size={22} />
                     </div>
                     <div style={{
-                        fontSize: 12,
+                        fontSize: TEXT.caption,
                         fontWeight: 600,
                         letterSpacing: '0.06em',
                         textTransform: 'uppercase',
@@ -256,7 +257,7 @@ export function OnboardingTour({
 
                 {/* Title */}
                 <h2 style={{
-                    fontSize: 22,
+                    fontSize: TEXT.title,
                     fontWeight: 600,
                     letterSpacing: '-0.01em',
                     lineHeight: 1.2,
@@ -267,7 +268,7 @@ export function OnboardingTour({
 
                 {/* Body */}
                 <p style={{
-                    fontSize: 14,
+                    fontSize: TEXT.small,
                     lineHeight: 1.5,
                     color: COLOR.ink80,
                     margin: 0,
@@ -291,7 +292,7 @@ export function OnboardingTour({
                                 background: 'transparent',
                                 color: COLOR.ink60,
                                 border: 'none',
-                                fontSize: 14,
+                                fontSize: TEXT.small,
                                 fontWeight: 600,
                                 minHeight: 44,
                                 padding: '0 4px',
@@ -309,7 +310,7 @@ export function OnboardingTour({
                                 background: 'transparent',
                                 color: COLOR.ink60,
                                 border: 'none',
-                                fontSize: 14,
+                                fontSize: TEXT.small,
                                 fontWeight: 600,
                                 minHeight: 44,
                                 padding: '0 4px',
@@ -323,50 +324,16 @@ export function OnboardingTour({
                         <div />
                     )}
                     <div style={{ flex: 1 }} />
+                    {/* 09.11 фаза 3: главная кнопка тура — общая бирюзовая Button primary
+                        (была чёрная — в тёмной теме белое пятно). */}
                     {step < total - 1 ? (
-                        <button
-                            onClick={() => setStep(s => s + 1)}
-                            style={{
-                                background: COLOR.ink,
-                                color: COLOR.onInk,
-                                border: 'none',
-                                borderRadius: 12,
-                                minHeight: 44,
-                                padding: '0 22px',
-                                fontSize: 14,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                            }}
-                        >
+                        <Button onClick={() => setStep(s => s + 1)} iconRight={<ArrowRight size={16} aria-hidden="true" />}>
                             Дальше
-                            <ArrowRight size={16} />
-                        </button>
+                        </Button>
                     ) : (
-                        <button
-                            onClick={finish}
-                            style={{
-                                background: COLOR.ink,
-                                color: COLOR.onInk,
-                                border: 'none',
-                                borderRadius: 12,
-                                minHeight: 44,
-                                padding: '0 22px',
-                                fontSize: 14,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                            }}
-                        >
-                            <CheckCircle2 size={16} />
+                        <Button onClick={finish} icon={<CheckCircle2 size={16} aria-hidden="true" />}>
                             Готово
-                        </button>
+                        </Button>
                     )}
                 </div>
             </div>
@@ -440,7 +407,11 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
 
     // Pad the cutout a bit so the highlighted element gets some breathing
     // room — looks like a halo, not a tight crop.
-    const pad = 6;
+    // 09.11 фаза 3: подсветка — бирюзовое кольцо вокруг самой цели, без белой
+    // рамки; рамку не выпускаем за экран (у вкладки меню она торчала и обрезалась снизу).
+    const pad = 4;
+    const top = Math.max(2, rect.top - pad);
+    const bottom = Math.min(window.innerHeight - 2, rect.bottom + pad);
     return (
         <>
             <div
@@ -455,16 +426,16 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
             <div
                 style={{
                     position: 'fixed',
-                    top: rect.top - pad,
+                    top,
                     left: rect.left - pad,
                     width: rect.width + pad * 2,
-                    height: rect.height + pad * 2,
-                    borderRadius: 12,
+                    height: bottom - top,
+                    borderRadius: RADIUS.control,
                     pointerEvents: 'none',
                     // The inset shadow draws a glowing rim; the wide outset
                     // shadow paints the rest of the screen dim. The viewport
                     // size cap (200vmax) ensures coverage on any device.
-                    boxShadow: `0 0 0 200vmax ${COLOR.panel}BF, 0 0 0 3px ${COLOR.onPanel}E6`,
+                    boxShadow: `0 0 0 200vmax ${COLOR.panel}BF, 0 0 0 3px ${COLOR.accent}`,
                     transition: 'top 200ms ease, left 200ms ease, width 200ms ease, height 200ms ease',
                     zIndex: Z.tour + 1,
                 }}

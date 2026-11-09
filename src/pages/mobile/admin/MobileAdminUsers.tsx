@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Search, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
 import type { User } from '../../../store/types';
@@ -7,7 +6,10 @@ import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
-import { formatGel } from '../../../utils/format';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { ListGroup, ListRow, ListAvatar } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { Button } from '../../../components/ui/Button';
 import { TopupSheet } from './TopupSheet';
 import { userCanAccessFinance } from '../../../utils/permissions';
 import { matchesPerson } from './searchMatch';
@@ -95,22 +97,21 @@ export function MobileAdminUsers() {
     }, [users]);
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    Клиенты
-                </h1>
-                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    {loading && (users?.length ?? 0) === 0 ? 'Загружаем…' : `Всего: ${users?.length ?? 0}`}
-                </p>
-            </div>
+        <div style={{ paddingTop: 8, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 09.11 фаза 3: общая крупная шапка раздела (28 / 14). */}
+            <MobilePageHeader
+                variant="large"
+                title="Клиенты"
+                subtitle={loading && (users?.length ?? 0) === 0 ? 'Загружаем…' : `В базе ${users?.length ?? 0}`}
+                className="pb-0"
+            />
 
             <div style={{ padding: '0 16px' }}>
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
                     background: 'var(--color-sunken)',
-                    borderRadius: 12,
+                    borderRadius: 8,
                     padding: '0 12px',
                     minHeight: 44,
                     gap: 8,
@@ -138,7 +139,7 @@ export function MobileAdminUsers() {
             {/* Filter chips — replace the flat-list scroll-fest with quick
                 cuts admins actually use: должники, специалисты, админы. */}
             <div style={{ padding: '0 16px' }}>
-                <div role="group" aria-label="Кого показать" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                <div role="group" aria-label="Кого показать" className="ui-chip-row ui-chip-row--scroll" style={{ paddingBottom: 4 }}>
                     {([
                         { id: 'all', label: 'Все', count: counts.all },
                         { id: 'debtors', label: 'Должники', count: counts.debtors },
@@ -170,105 +171,61 @@ export function MobileAdminUsers() {
                 </div>
             )}
 
-            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* 09.11 фаза 3: одна группа строк ListRow. Баланс — Money tone="balance"
+                (минус — красный, 0 — серый обычным весом, плюс — обычный); «＋₾» —
+                тихая кнопка sm без рамки (действие вне ссылки, две цели по 44 px).
+                Роль — только у сотрудников и специалистов: у клиента метка не нужна. */}
+            {filtered.length > 0 && (
+            <div style={{ padding: '0 16px' }}>
+                <ListGroup aria-label="Клиенты">
                 {filtered.map(u => {
                     const isAdmin = u.role === 'owner' || u.role === 'senior_admin' || u.role === 'admin' || u.isAdmin;
                     const balance = u.balance ?? 0;
-                    const debt = balance < 0 ? -balance : 0;
+                    const showRole = !!u.role && u.role !== 'user';
                     return (
-                        // Строка — ссылка на карточку и рядом отдельная кнопка «＋₾»:
-                        // раньше кнопка была внутри ссылки (вложенные цели нажатия).
-                        <div
+                        <ListRow
                             key={u.id}
-                            style={{
-                                background: 'var(--color-card)',
-                                border: '1px solid var(--color-ink-08)',
-                                borderRadius: 12,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                paddingRight: 6,
-                            }}
-                        >
-                            <Link
-                                to={`/m/admin/users/${encodeURIComponent(u.email)}`}
-                                style={{
-                                    flex: 1,
-                                    minWidth: 0,
-                                    padding: '12px 8px 12px 14px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 10,
-                                    color: 'var(--color-ink)',
-                                    textDecoration: 'none',
-                                }}
-                            >
-                                <div style={{
-                                    width: 36, height: 36,
-                                    borderRadius: 999,
-                                    background: 'var(--color-sunken)',
-                                    display: 'grid', placeItems: 'center',
-                                    fontSize: 14, fontWeight: 600,
-                                    color: 'var(--color-ink-60)',
-                                    flexShrink: 0,
-                                }}>
-                                    {(u.name || u.email || '?').slice(0, 1).toUpperCase()}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || u.email}</span>
-                                        {isAdmin && <ShieldCheck size={12} color={COLOR.ink60} aria-hidden="true" style={{ flexShrink: 0 }} />}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {u.email}
-                                        {u.role && <span> · {ROLE_LABEL[u.role] ?? 'Другая роль'}</span>}
-                                    </div>
-                                </div>
-                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                    <div className="num" style={{
-                                        fontSize: 14,
-                                        fontWeight: 600,
-                                        color: debt > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
-                                    }}>
-                                        {formatGel(balance)}
-                                    </div>
-                                    {u.subscription && (
-                                        <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                            {u.subscription.remainingHours} ч абон.
-                                        </div>
-                                    )}
-                                </div>
-                            </Link>
-                            {canCash && <button
-                                onClick={() => setTopupUser(u)}
-                                aria-label={`Пополнить баланс: ${u.name || u.email}`}
-                                style={{
-                                    flexShrink: 0,
-                                    width: 44, height: 44,
-                                    borderRadius: 8,
-                                    border: '1px solid var(--color-ink-10)',
-                                    background: 'var(--color-sunken)',
-                                    color: 'var(--color-ink)',
-                                    fontSize: 14, fontWeight: 600,
-                                    display: 'grid', placeItems: 'center',
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                }}
-                            >
-                                ＋₾
-                            </button>}
-                        </div>
+                            to={`/m/admin/users/${encodeURIComponent(u.email)}`}
+                            lead={<ListAvatar name={u.name || u.email || '?'} />}
+                            title={u.name || u.email}
+                            // Роль (только у сотрудников и специалистов) — своей строкой; почта —
+                            // одной строкой с многоточием: на 360 px режется первой, имя — нет.
+                            subtitle={<>
+                                {showRole && (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        {isAdmin && <ShieldCheck size={12} color={COLOR.ink60} aria-hidden="true" />}
+                                        {ROLE_LABEL[u.role!] ?? 'Другая роль'}
+                                    </span>
+                                )}
+                                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</span>
+                            </>}
+                            trail={<Money value={balance} tone="balance" />}
+                            trailSub={u.subscription ? <span className="num-inline">{u.subscription.remainingHours} ч абон.</span> : undefined}
+                            chevron={false}
+                            action={canCash ? (
+                                <Button
+                                    variant="quiet"
+                                    size="sm"
+                                    onClick={() => setTopupUser(u)}
+                                    aria-label={`Пополнить баланс: ${u.name || u.email}`}
+                                >
+                                    ＋₾
+                                </Button>
+                            ) : undefined}
+                        />
                     );
                 })}
+                </ListGroup>
             </div>
+            )}
 
             {canCash && <div style={{ padding: '0 16px' }}>
                 <div style={{
                     background: 'var(--color-sunken)',
                     color: 'var(--color-ink-80)',
-                    borderRadius: 10,
-                    padding: '10px 12px',
-                    fontSize: 12,
+                    borderRadius: 16,
+                    padding: '12px 16px',
+                    fontSize: 14,
                     lineHeight: 1.5,
                 }}>
                     Кнопка «＋₾» пополняет баланс клиента прямо с телефона — приход в кассу и зачисление одной операцией.

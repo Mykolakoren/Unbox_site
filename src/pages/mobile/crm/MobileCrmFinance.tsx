@@ -12,7 +12,11 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
-import { formatGel, formatMoney, formatMonthLabel } from '../../../utils/format';
+import { formatMoney, formatMonthLabel } from '../../../utils/format';
+import { ListAvatar, ListGroup, ListRow } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { SummaryCard } from '../../../components/ui/SummaryCard';
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../../utils/crmNextSession';
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle';
 import { usePullToRefresh } from '../usePullToRefresh';
@@ -127,94 +131,85 @@ export function MobileCrmFinance() {
         return entries.length > 1 ? entries.map(([cur, v]) => formatMoney(v, { currency: cur })).join(' + ') : '';
     };
 
-    return (
-        <div style={{ padding: '14px 14px 90px' }}>
-            <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
-            <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: '2px 2px 12px' }}>
-                Финансы
-            </h1>
+    const monthLabel = formatMonthLabel(`${monthParam}-15`, { capitalize: true });
+    const cell = (value: number | undefined, isLoading: boolean, tone?: 'debt') =>
+        isLoading ? '…' : value === undefined || value === null ? '—'
+            : <Money value={value} tone={tone} />;
 
+    return (
+        <div style={{ paddingBottom: 90 }}>
+            <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
+            <MobilePageHeader variant="large" title="Финансы" />
+
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 24 }}>
             {failed && !loading && (
                 <ErrorBar
                     message="Не удалось загрузить финансы"
                     onRetry={() => load()}
-                    className="mb-3"
                 />
             )}
 
             {/* ── Месяц ─────────────────────────────────────────────── */}
-            <section aria-labelledby="crm-fin-month" style={{ marginBottom: 20 }}>
+            <section aria-labelledby="crm-fin-month" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <h2 id="crm-fin-month" style={sectionTitle}>Месяц</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Button
                         variant="secondary"
-                        size="touch"
                         icon={<ChevronLeft size={20} aria-hidden="true" />}
                         aria-label="Предыдущий месяц"
                         onClick={() => setMonthOffset(o => o - 1)}
                     />
                     <div style={{
-                        flex: 1, textAlign: 'center', padding: '0 10px',
-                        minHeight: 44,
-                        border: '1px solid var(--color-ink-08)', borderRadius: 8,
-                        fontSize: 14, fontWeight: 600,
+                        flex: 1, textAlign: 'center', minHeight: 44,
+                        fontSize: 16, fontWeight: 600,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     }}>
                         <Calendar size={16} color={COLOR.ink60} aria-hidden="true" />
-                        {formatMonthLabel(`${monthParam}-15`, { capitalize: true })}
+                        {monthLabel}
                     </div>
+                    {/* Недоступная «вперёд» — та же secondary, бледнее (не серая заливка). */}
                     <Button
                         variant="secondary"
-                        size="touch"
                         icon={<ChevronRight size={20} aria-hidden="true" />}
                         aria-label="Следующий месяц"
                         disabled={monthOffset >= 0}
                         onClick={() => setMonthOffset(o => o + 1)}
+                        style={monthOffset >= 0 ? { background: 'var(--color-card)', opacity: 0.4 } : undefined}
                     />
                 </div>
-                <div style={totalsCard}>
-                    <TotalCell
-                        label="Заработано за месяц"
-                        hint="Проведённые и оплаченные сессии этого месяца — по дате сессии"
-                        value={earned?.gel}
-                        extra={byCurrency(earned?.byCur)}
-                        loading={!earned && !failed}
-                        money
-                    />
-                    <TotalCell
-                        label="Касса · с долгами"
-                        hint="Все оплаты за месяц, вместе с оплатой старых долгов"
-                        value={dashboard?.revenueThisMonth}
-                        extra={byCurrency(dashboard?.revenueByCurrency)}
-                        loading={pending}
-                        money
-                    />
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', margin: '8px 2px 0' }}>
-                    Сессий за месяц: <span className="num" style={{ color: 'var(--color-ink)', fontWeight: 600 }}>
-                        {pending ? '…' : dashboard?.sessionsThisMonth ?? '—'}
-                    </span>
-                </div>
+                {/* 09.11 фаза 3: итог месяца — общий SummaryCard (одно крупное число + ячейки). */}
+                <SummaryCard
+                    label="Заработано за месяц"
+                    value={earned ? <Money value={earned.gel} /> : (!failed ? '…' : '—')}
+                    caption={<>
+                        {byCurrency(earned?.byCur) && <span className="num-inline" style={{ display: 'block' }}>{byCurrency(earned?.byCur)}</span>}
+                        Проведённые и оплаченные сессии этого месяца — по дате сессии
+                    </>}
+                    stats={[
+                        { label: 'Касса · с долгами', value: cell(dashboard?.revenueThisMonth, pending) },
+                        { label: 'Сессий за месяц', value: pending ? '…' : <span className="num">{dashboard?.sessionsThisMonth ?? '—'}</span> },
+                    ]}
+                />
+                <p style={{ margin: 0, padding: '0 4px', fontSize: 12, color: 'var(--color-ink-60)', lineHeight: 1.45 }}>
+                    Касса — все оплаты за месяц, вместе с оплатой старых долгов
+                    {byCurrency(dashboard?.revenueByCurrency) ? ` (${byCurrency(dashboard?.revenueByCurrency)})` : ''}.
+                </p>
             </section>
 
             {/* ── Долги сейчас — не зависят от месяца ───────────────── */}
-            <section aria-labelledby="crm-fin-debts">
+            <section aria-labelledby="crm-fin-debts" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <h2 id="crm-fin-debts" style={sectionTitle}>Долги сейчас</h2>
-                <div style={{ ...totalsCard, marginBottom: 10 }}>
-                    <TotalCell
-                        label="Долг всего"
-                        value={dashboard?.totalActiveDebt}
-                        extra={byCurrency(dashboard?.debtByCurrency)}
-                        loading={pending}
-                        money
-                        warning
-                    />
-                    <TotalCell
-                        label="Сессий без оплаты"
-                        value={dashboard?.unpaidSessions}
-                        loading={pending}
-                    />
-                </div>
+                <SummaryCard
+                    stats={[
+                        { label: 'Долг всего', value: cell(dashboard?.totalActiveDebt, pending, 'debt') },
+                        { label: 'Сессий без оплаты', value: pending ? '…' : <span className="num">{dashboard?.unpaidSessions ?? '—'}</span> },
+                    ]}
+                />
+                {byCurrency(dashboard?.debtByCurrency) && (
+                    <p style={{ margin: 0, padding: '0 4px', fontSize: 12, color: 'var(--color-ink-60)' }} className="num-inline">
+                        {byCurrency(dashboard?.debtByCurrency)}
+                    </p>
+                )}
                 {pending ? (
                     <SkeletonList count={3} label="Загружаем должников" cardHeight={56} />
                 ) : !dashboard ? (
@@ -225,82 +220,43 @@ export function MobileCrmFinance() {
                 ) : debts.length === 0 ? (
                     <EmptyState compact title="Нет задолженностей" hint="Все клиенты рассчитались." />
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    // Дизайн-ревью п. 17: аватары нейтральные, красным — только суммы.
+                    <ListGroup aria-label="Должники">
                         {debts.map(d => (
-                            <div key={d.clientId} style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
-                            <button
+                            <ListRow
+                                key={d.clientId}
+                                lead={<ListAvatar name={d.clientName} />}
+                                title={d.clientName}
+                                subtitle={<>
+                                    Без оплаты: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
+                                    {(d.partialSessionsCount ?? 0) > 0 && (
+                                        d.unpaidSessionsCount === 1 ? ', оплачена частично'
+                                            : `, ${d.partialSessionsCount === d.unpaidSessionsCount ? 'все' : `из них ${d.partialSessionsCount}`} частично`
+                                    )}
+                                </>}
+                                trail={<Money value={d.totalDebt} currency={d.currency || 'GEL'} tone="debt" />}
                                 onClick={() => {
                                     const c = clients.find(x => x.id === d.clientId);
                                     if (c && !viewingOther) setDebtor(c);
                                     else navigate(`/m/crm/clients/${d.clientId}`);
                                 }}
-                                className="press"
                                 aria-label={`${d.clientName}: долг ${formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })} — отметить оплату`}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 10,
-                                    padding: '11px 12px',
-                                    minHeight: 56,
-                                    background: 'var(--color-card)',
-                                    border: '1px solid var(--color-ink-08)',
-                                    borderRadius: 10,
-                                    cursor: 'pointer',
-                                    textAlign: 'left',
-                                    width: '100%',
-                                    fontFamily: 'inherit',
-                                }}
-                            >
-                                <div style={{
-                                    width: 36, height: 36, borderRadius: 9,
-                                    background: 'var(--status-danger-bg)',
-                                    color: 'var(--status-danger-fg)',
-                                    display: 'grid', placeItems: 'center',
-                                    fontSize: 14, fontWeight: 600,
-                                    flexShrink: 0,
-                                }}>
-                                    {initials(d.clientName)}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {d.clientName}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 1 }}>
-                                        Без оплаты: {d.unpaidSessionsCount} {pluralizeSessions(d.unpaidSessionsCount)}
-                                        {(d.partialSessionsCount ?? 0) > 0 && (
-                                            d.unpaidSessionsCount === 1 ? ', оплачена частично'
-                                                : `, ${d.partialSessionsCount === d.unpaidSessionsCount ? 'все' : `из них ${d.partialSessionsCount}`} частично`
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="num" style={{
-                                    fontSize: 14,
-                                    fontWeight: 600,
-                                    color: 'var(--status-danger-fg)',
-                                    textAlign: 'right',
-                                    whiteSpace: 'nowrap',
-                                }}>
-                                    {formatMoney(d.totalDebt, { currency: d.currency || 'GEL' })}
-                                </div>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
-                                aria-label={`Карточка клиента: ${d.clientName}`}
-                                className="press"
-                                style={{
-                                    width: 44, flexShrink: 0, borderRadius: 10, cursor: 'pointer',
-                                    background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
-                                    display: 'grid', placeItems: 'center', color: 'var(--color-ink-60)',
-                                }}
-                            >
-                                <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />
-                            </button>
-                            </div>
+                                action={(
+                                    <Button
+                                        variant="quiet"
+                                        size="sm"
+                                        icon={<ChevronRight size={18} aria-hidden="true" />}
+                                        onClick={() => navigate(`/m/crm/clients/${d.clientId}`)}
+                                        aria-label={`Карточка клиента: ${d.clientName}`}
+                                        style={{ color: 'var(--color-ink-60)' }}
+                                    />
+                                )}
+                            />
                         ))}
-                    </div>
+                    </ListGroup>
                 )}
             </section>
+            </div>
             {debtor && (
                 <UnpaidSessionsSheet
                     open
@@ -313,61 +269,10 @@ export function MobileCrmFinance() {
     );
 }
 
-function TotalCell({
-    label, hint, value, extra, loading, warning, money,
-}: {
-    label: string;
-    hint?: string;
-    value?: number;
-    extra?: string;
-    loading?: boolean;
-    warning?: boolean;
-    money?: boolean;
-}) {
-    const shown = loading ? '…'
-        : value === undefined || value === null ? '—'
-        : money ? formatGel(value) : String(Math.round(value));
-    return (
-        <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink-60)', marginBottom: 4 }}>
-                {label}
-            </div>
-            <div className="num" style={{
-                fontSize: 20,
-                fontWeight: 600,
-                color: warning && (value ?? 0) > 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)',
-                lineHeight: 1.1,
-            }}>
-                {shown}
-            </div>
-            {extra && !loading && (
-                <div className="num" style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 4 }}>{extra}</div>
-            )}
-            {hint && (
-                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 4, lineHeight: 1.35 }}>{hint}</div>
-            )}
-        </div>
-    );
-}
-
 const sectionTitle: React.CSSProperties = {
-    margin: '0 2px 8px', fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+    margin: 0, padding: '0 4px', fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
     textTransform: 'uppercase', color: 'var(--color-ink-60)',
 };
-
-const totalsCard: React.CSSProperties = {
-    background: 'var(--color-sunken)',
-    color: 'var(--color-ink)',
-    borderRadius: 14,
-    padding: '14px 16px',
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 12,
-};
-
-function initials(name: string): string {
-    return name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('') || '?';
-}
 
 /** 1 сессия, 2 сессии, 5 сессий, 11 сессий, 21 сессия. */
 function pluralizeSessions(n: number): string {

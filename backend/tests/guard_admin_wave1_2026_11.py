@@ -286,7 +286,8 @@ def test_one_due_list_and_top_summary():
     for t in ('title="Сегодня"', 'title="Старые долги"', 'title="Скоро уйдут за лимит"'):
         assert t in d, f"нет раздела {t}"
     assert d.count("Принять оплату · ") == 1 and "payButton(d.amount" in d and "payButton(c.overLimitBy" in d
-    assert "minHeight: 44" in d[d.index("const renderOther"):d.index("return (\n        <div style={{ paddingTop: 16")]
+    # 09.11 фаза 3: отступ сверху 8 — под общей крупной шапкой MobilePageHeader.
+    assert "minHeight: 44" in d[d.index("const renderOther"):d.index("return (\n        <div style={{ paddingTop: 8")]
     assert "data-today-summary" in d and "<SummaryCell" in d, "нет сводки наверху"
     assert "bannerStyle" not in d and "'var(--status-ok-bg)'" not in d, "хорошая новость снова ярким баннером"
     assert "<MorningChecklistCard adminEmail={currentUser.email} />" in d
@@ -300,8 +301,12 @@ def test_bookings_filters_one_row():
     assert "plural(counts.past, 'прошедшая скрыта', 'прошедшие скрыты', 'прошедших скрыто')" in b
     assert "прошедших скрыто)` : ''" not in b
     raw = _read(MA + "MobileAdminBookings.tsx")
-    i = raw.index("Статус — второй строкой под именем")
-    assert '<StatusBadge kind="booking"' in raw[i:i + 400], "статус снова справа, рядом с меткой оплаты"
+    # 09.11 фаза 3: строка брони — общий AdminBookingRow; статус — словом в подписи
+    # под именем (слово из statuses.ts), справа только одна метка оплаты.
+    i = raw.index("Статус — словом в подписи под именем")
+    assert "status={b.status}" in raw[i:i + 200], "статус снова справа, рядом с меткой оплаты"
+    row = _code(MA + "AdminBookingRow.tsx")
+    assert "statusLabel('booking', status, 'staff')" in row and "subtitle=" in row and "trail={badge}" in row
     assert "label: 'Unbox One'" not in b and "LOC_LABEL" in b
 
 

@@ -15,6 +15,7 @@ import { formatGel } from '../../../utils/format';
 import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 import { topupLooksLikeTypo, topupTypoQuestion } from '../../../utils/topupGuard';
 import { branchLabel } from './branchLabel';
+import { Money } from '../../../components/ui/Money';
 
 /**
  * Пополнить баланс клиента с телефона (волна 4, пакет A).
@@ -132,7 +133,7 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
             description={
                 <>
                     {user.name || user.email} · сейчас{' '}
-                    <b className="num" style={{ color: balance < 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)' }}>{formatGel(balance)}</b>
+                    <Money value={balance} tone="balance" inline className="font-semibold" />
                 </>
             }
             footer={
@@ -156,8 +157,17 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
             }
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* 09.11 фаза 3 (admin-design №17): сумма — главное поле шторки (крупно,
+                    64 px), порядок «подпись → поле → готовые суммы»; без «0» в пустом поле. */}
                 <div>
-                    <div role="group" aria-label="Быстрая сумма" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <Field
+                        label="Сумма"
+                        error={amountError}
+                        hint={todayAmount && todayAmount > 0 ? `Из них за сегодня ${formatGel(todayAmount)}` : undefined}
+                    >
+                        <Input kind="money" suffix="₾" value={amount} onChange={e => { setAmount(e.target.value); setConfirmFor(null); }} size="hero" />
+                    </Field>
+                    <div role="group" aria-label="Быстрая сумма" className="ui-chip-row" style={{ marginTop: 8 }}>
                         {fullDebt > 0 && (
                             <Chip selected={value === fullDebt} onClick={() => setAmount(String(fullDebt))}>
                                 Весь долг ({formatGel(fullDebt)})
@@ -172,15 +182,8 @@ export function TopupSheet({ user, onClose, onDone, defaultAmount, todayAmount, 
                             <Chip key={v} selected={value === v} onClick={() => setAmount(String(v))}>{formatGel(v)}</Chip>
                         ))}
                     </div>
-                    <Field
-                        label="Сумма"
-                        error={amountError}
-                        hint={todayAmount && todayAmount > 0 ? `Из них за сегодня ${formatGel(todayAmount)}` : undefined}
-                    >
-                        <Input kind="money" suffix="₾" value={amount} placeholder="0" onChange={e => { setAmount(e.target.value); setConfirmFor(null); }} />
-                    </Field>
                     {askTypo && (
-                        <p role="alert" data-topup-typo style={{ margin: '8px 0 0', fontSize: 14, fontWeight: 600, color: 'var(--status-danger-fg)', background: 'var(--status-danger-bg)', borderRadius: 12, padding: '8px 12px' }}>
+                        <p role="alert" data-topup-typo style={{ margin: '8px 0 0', fontSize: 14, fontWeight: 600, color: 'var(--status-danger-fg)', background: 'var(--status-danger-bg)', borderRadius: 8, padding: '8px 12px' }}>
                             {topupTypoQuestion(value, expected, formatGel)}
                         </p>
                     )}

@@ -13,6 +13,8 @@ import { ADMIN_REQUESTS_CHANGED } from './sheetLayers';
 import { MobilePageHeader } from '../../../components/ui/PageHeader';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { toastApiError } from '../../../utils/errors';
+import { ListGroup, ListRow, ListAvatar } from '../../../components/ui/ListRow';
+import { Counter } from '../../../components/ui/Counter';
 
 interface SpecialistRow {
     id: string;
@@ -133,8 +135,14 @@ export function MobileAdminSpecialists() {
     const pendingCount = rows.filter(r => r.applicationStatus === 'pending').length;
 
     return (
-        <div style={{ padding: '0 16px 90px' }}>
-            <MobilePageHeader title="Специалисты" fallbackTo="/m/admin/dashboard" />
+        // 09.11 фаза 3: шапка во всю ширину, строки — ListRow, действие — тихая кнопка sm.
+        <div style={{ paddingBottom: 90 }}>
+            <MobilePageHeader
+                title="Специалисты"
+                subtitle={loading ? undefined : `Анкет: ${rows.length}${pendingCount > 0 ? ` · на проверке ${pendingCount}` : ''}`}
+                fallbackTo="/m/admin/dashboard"
+            />
+            <div style={{ padding: '16px 16px 0' }}>
             {pendingCount > 0 && filter !== 'pending' && (
                 <button
                     onClick={() => setFilter('pending')}
@@ -145,7 +153,7 @@ export function MobileAdminSpecialists() {
                         background: 'var(--status-pending-bg)',
                         color: 'var(--status-pending-fg)',
                         border: 'none',
-                        borderRadius: 10,
+                        borderRadius: 8,
                         fontSize: 14,
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -158,13 +166,8 @@ export function MobileAdminSpecialists() {
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <Clock size={16} aria-hidden="true" /> Анкеты ждут проверки
                     </span>
-                    <span style={{
-                        background: 'var(--status-pending-fg)',
-                        color: 'var(--color-on-ink)',
-                        padding: '2px 8px',
-                        borderRadius: 999,
-                        fontSize: 12,
-                    }}>{pendingCount}</span>
+                    {/* Один вид счётчика во всей админке (admin-design №14). */}
+                    <Counter value={pendingCount} style={{ boxShadow: 'none' }} />
                 </button>
             )}
 
@@ -180,10 +183,11 @@ export function MobileAdminSpecialists() {
                         width: '100%',
                         minHeight: 44,
                         padding: '10px 12px 10px 36px',
-                        border: '1px solid var(--color-ink-20)',
+                        border: 'none',
                         borderRadius: 8,
                         fontSize: 16,
-                        background: 'var(--color-card)',
+                        // Поле поиска — как на остальных экранах: sunken, без рамки.
+                        background: 'var(--color-sunken)',
                         color: 'var(--color-ink)',
                         outline: 'none',
                     }}
@@ -210,87 +214,52 @@ export function MobileAdminSpecialists() {
             ) : failed ? null : filtered.length === 0 ? (
                 <EmptyState compact title="Ничего не найдено" hint={q ? 'Попробуйте другое имя.' : undefined} />
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {filtered.map(r => (
-                        <div key={r.id} style={{
-                            background: 'var(--color-card)',
-                            border: '1px solid var(--color-ink-08)',
-                            borderRadius: 11,
-                            padding: '8px 8px 8px 12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                        }}>
-                            {r.photoUrl ? (
-                                <img
-                                    src={r.photoUrl}
-                                    alt={r.firstName}
-                                    style={{
-                                        width: 36, height: 36,
-                                        borderRadius: 9,
-                                        objectFit: 'cover',
-                                        flexShrink: 0,
-                                    }}
-                                />
-                            ) : (
-                                <div style={{
-                                    width: 36, height: 36, borderRadius: 9,
-                                    background: 'var(--color-ink-05)',
-                                    color: 'var(--color-ink-60)',
-                                    display: 'grid', placeItems: 'center',
-                                    fontSize: 12, fontWeight: 600,
-                                    flexShrink: 0,
-                                }}>
-                                    {r.firstName[0]?.toUpperCase()}{r.lastName[0]?.toUpperCase()}
-                                </div>
-                            )}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{
-                                    fontWeight: 600, fontSize: 14, color: 'var(--color-ink)',
-                                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                }}>
-                                    {r.firstName} {r.lastName}
-                                    {r.isOwner && <Star size={12} aria-label="Владелец" style={{ marginLeft: 4, color: 'var(--color-ink-60)', verticalAlign: '-1px' }} />}
-                                </div>
-                                <div style={{
-                                    fontSize: 12, color: 'var(--color-ink-60)',
-                                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                    marginTop: 1,
-                                }}>
-                                    {CATEGORY_LABEL[r.category || ''] || 'Направление не указано'}
-                                </div>
-                                {/* Состояние — своей строкой, чтобы не обрезалось (ревью 09.11, №23). */}
-                                <div style={{ marginTop: 4 }}>
-                                    {r.applicationStatus === 'pending'
-                                        ? <span className="ui-badge ui-badge--pending">Ждёт проверки</span>
-                                        : r.isVerified
-                                            ? <span className="ui-badge ui-badge--ok">На сайте</span>
-                                            : <span className="ui-badge ui-badge--muted">Скрыт с сайта</span>}
-                                </div>
-                            </div>
-                            <Button
-                                variant="quiet"
-                                size="touch"
-                                loading={busyId === r.id}
-                                icon={r.isVerified ? <ShieldX size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
-                                onClick={() => handleVerify(r, !r.isVerified)}
-                                aria-label={`${r.isVerified ? 'Скрыть с сайта' : 'Опубликовать'}: ${r.firstName} ${r.lastName}`}
-                                title={r.isVerified ? 'Скрыть с сайта' : 'Опубликовать на сайте'}
-                                style={{ flexShrink: 0 }}
-                            >
-                                {r.isVerified ? 'Скрыть' : 'Показать'}
-                            </Button>
-                        </div>
-                    ))}
-                </div>
+                <ListGroup aria-label="Специалисты">
+                    {filtered.map(r => {
+                        const name = `${r.firstName} ${r.lastName}`.trim();
+                        return (
+                            <ListRow
+                                key={r.id}
+                                lead={<ListAvatar name={name} src={r.photoUrl} />}
+                                title={<>
+                                    {name}
+                                    {r.isOwner && <Star size={12} aria-label="Владелец" style={{ display: 'inline-block', marginLeft: 4, color: 'var(--color-ink-60)', verticalAlign: '-1px' }} />}
+                                </>}
+                                subtitle={CATEGORY_LABEL[r.category || ''] || 'Направление не указано'}
+                                // Состояние — своей строкой, чтобы не обрезалось (ревью 09.11, №23).
+                                // «На сайте» — обычное состояние, плашку не рисуем; отличаются
+                                // только «Ждёт проверки» и скрытые (бледнее).
+                                meta={r.applicationStatus === 'pending'
+                                    ? <span className="ui-badge ui-badge--pending">Ждёт проверки</span>
+                                    : r.isVerified
+                                        ? undefined
+                                        : <span className="ui-badge ui-badge--muted">Скрыт с сайта</span>}
+                                dimmed={!r.isVerified && r.applicationStatus !== 'pending'}
+                                action={
+                                    <Button
+                                        variant="quiet"
+                                        size="sm"
+                                        loading={busyId === r.id}
+                                        icon={r.isVerified ? <ShieldX size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
+                                        onClick={() => handleVerify(r, !r.isVerified)}
+                                        aria-label={`${r.isVerified ? 'Скрыть с сайта' : 'Опубликовать'}: ${r.firstName} ${r.lastName}`}
+                                        title={r.isVerified ? 'Скрыть с сайта' : 'Опубликовать на сайте'}
+                                    >
+                                        {r.isVerified ? 'Скрыть' : 'Показать'}
+                                    </Button>
+                                }
+                            />
+                        );
+                    })}
+                </ListGroup>
             )}
 
             <div style={{
                 marginTop: 16,
                 padding: 12,
                 background: 'var(--color-sunken)',
-                borderRadius: 10,
-                fontSize: 12,
+                borderRadius: 16,
+                fontSize: 14,
                 color: 'var(--color-ink-80)',
                 lineHeight: 1.5,
                 display: 'flex',
@@ -303,6 +272,7 @@ export function MobileAdminSpecialists() {
                     <br />
                     <DesktopLink href="/admin/specialists">Открыть полную версию →</DesktopLink>
                 </span>
+            </div>
             </div>
         </div>
     );

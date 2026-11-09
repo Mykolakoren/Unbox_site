@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ChevronRight, Sprout, Flame, Star, Handshake, Moon, AlertTriangle } from 'lucide-react';
+import { Search, Sprout, Flame, Star, Handshake, Moon, AlertTriangle } from 'lucide-react';
 import { isAfter, subDays } from 'date-fns';
 import { useUserStore } from '../../../store/userStore';
 import { ADMIN_ROLES } from '../../../utils/permissions';
@@ -9,7 +9,9 @@ import { Chip } from '../../../components/ui/Chip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
-import { formatGel } from '../../../utils/format';
+import { MobilePageHeader } from '../../../components/ui/PageHeader';
+import { ListGroup, ListRow, ListAvatar } from '../../../components/ui/ListRow';
+import { Money } from '../../../components/ui/Money';
 import { matchesPerson } from './searchMatch';
 
 /**
@@ -90,32 +92,30 @@ export function MobileAdminCrm() {
     }, [users, stageByEmail, stage, query]);
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    CRM-воронка
-                </h1>
-                <p style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
-                    Здесь только просмотр. Переносить клиентов между стадиями удобнее на компьютере.
-                </p>
-            </div>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 09.11 фаза 3: экран из «Ещё» / «Админка ▾» — внутренний: шапка со «←». */}
+            <MobilePageHeader
+                title="CRM-воронка"
+                subtitle="Только просмотр — стадии меняют на компьютере"
+                fallbackTo="/m/admin/dashboard"
+            />
 
             <div style={{ padding: '0 16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-sunken)', borderRadius: 12, padding: '10px 12px', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-sunken)', borderRadius: 8, padding: '0 12px', minHeight: 44, gap: 8, marginTop: 4 }}>
                     <Search size={16} color={COLOR.ink60} aria-hidden="true" />
                     <input
                         value={query}
                         onChange={e => setQuery(e.target.value)}
                         aria-label="Поиск клиента"
                         placeholder="Имя, email, телефон…"
-                        style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', minWidth: 0 }}
+                        style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 16, fontFamily: 'inherit', minWidth: 0, color: 'var(--color-ink)' }}
                     />
                 </div>
             </div>
 
             {/* Stage chips */}
             <div style={{ padding: '0 16px' }}>
-                <div role="group" aria-label="Стадия" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                <div role="group" aria-label="Стадия" className="ui-chip-row ui-chip-row--scroll" style={{ paddingBottom: 4 }}>
                     {STAGES.map(s => {
                         const Icon = s.icon;
                         return (
@@ -133,55 +133,34 @@ export function MobileAdminCrm() {
                 </div>
             </div>
 
-            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ padding: '0 16px' }}>
                 {!usersTried && users.length === 0 && (
                     <SkeletonList count={4} label="Загружаем клиентов" cardHeight={56} />
                 )}
                 {(usersTried || users.length > 0) && stageClients.length === 0 && (
                     <EmptyState compact title="В этой стадии никого нет" hint={query ? 'Попробуйте другой запрос.' : undefined} />
                 )}
-                {stageClients.map(u => (
-                    <ClientRow key={u.id} user={u} onClick={() => navigate(`/m/admin/users/${encodeURIComponent(u.email)}`)} />
-                ))}
+                {stageClients.length > 0 && (
+                    <ListGroup aria-label="Клиенты стадии">
+                        {stageClients.map(u => (
+                            <ClientRow key={u.id} user={u} onClick={() => navigate(`/m/admin/users/${encodeURIComponent(u.email)}`)} />
+                        ))}
+                    </ListGroup>
+                )}
             </div>
         </div>
     );
 }
 
+/** Строка клиента — общий ListRow; баланс — Money tone="balance" (09.11 фаза 3). */
 function ClientRow({ user, onClick }: { user: User; onClick: () => void }) {
-    const balance = user.balance ?? 0;
     return (
-        <button
+        <ListRow
             onClick={onClick}
-            style={{
-                background: 'var(--color-card)', border: '1px solid var(--color-ink-08)',
-                borderRadius: 12, padding: '12px 14px',
-                display: 'flex', alignItems: 'center', gap: 10,
-                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--color-ink)',
-                minHeight: 56,
-            }}
-        >
-            <div style={{
-                width: 36, height: 36, borderRadius: 999, background: 'var(--color-sunken)',
-                display: 'grid', placeItems: 'center',
-                fontSize: 13, fontWeight: 600, color: 'var(--color-ink-60)', flexShrink: 0,
-            }}>
-                {(user.name || user.email || '?').slice(0, 1).toUpperCase()}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {user.name || user.email}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--color-ink-60)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {user.email}
-                </div>
-            </div>
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: balance < 0 ? 'var(--status-danger-fg)' : 'var(--color-ink)' }}>
-                    {formatGel(balance)}
-                </div>
-            </div>
-            <ChevronRight size={16} color={COLOR.ink40} aria-hidden="true" />
-        </button>
+            lead={<ListAvatar name={user.name || user.email || '?'} />}
+            title={user.name || user.email}
+            subtitle={<span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>}
+            trail={<Money value={user.balance ?? 0} tone="balance" />}
+        />
     );
 }

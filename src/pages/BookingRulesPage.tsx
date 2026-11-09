@@ -1,3 +1,5 @@
+import { createContext, useContext } from 'react';
+import { COLOR, RADIUS, SHAPE, TEXT } from '../design/tokens';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { PublicHeader } from '../components/public/PublicHeader';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -11,6 +13,7 @@ import { MobilePageHeader } from '../components/ui/PageHeader';
 export function BookingRulesPage({ mobile = false }: { mobile?: boolean } = {}) {
     useDocumentTitle('Правила бронирования');
     return (
+        <MobileSkin.Provider value={mobile}>
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: mobile ? undefined : '100vh' }}>
             {/* G1-21: общая шапка сайта вместо «← На главную / Тарифы →».
                 09.11 (ревью клиентской части №11): в /m — мобильная шапка с «Назад»
@@ -19,8 +22,13 @@ export function BookingRulesPage({ mobile = false }: { mobile?: boolean } = {}) 
             {mobile && <RulesSummary />}
 
             <main id="rules-full" style={{ maxWidth: 920, margin: '0 auto', padding: mobile ? '8px 16px 32px' : 'clamp(24px, 5vw, 48px) clamp(16px, 4vw, 32px)' }}>
-                <div style={mono}>{mobile ? 'ПОЛНЫЙ ТЕКСТ · ПУБЛИЧНАЯ ОФЕРТА' : 'ПУБЛИЧНАЯ ОФЕРТА'}</div>
-                <h1 style={{ fontSize: 'clamp(28px, 4vw, 44px)', fontWeight: 700, margin: '8px 0 24px', letterSpacing: '-0.02em' }}>
+                {/* 09.11 фаза 3: в /m — подписи Sans-капсом (.ui-overline), веса 600, шкала 16/20/28. */}
+                {mobile
+                    ? <div className="ui-overline">Полный текст · публичная оферта</div>
+                    : <div style={mono}>ПУБЛИЧНАЯ ОФЕРТА</div>}
+                <h1 style={mobile
+                    ? { fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: '8px 0 24px', letterSpacing: '-0.01em' }
+                    : { fontSize: 'clamp(28px, 4vw, 44px)', fontWeight: 700, margin: '8px 0 24px', letterSpacing: '-0.02em' }}>
                     Правила бронирования и&nbsp;аренды
                 </h1>
 
@@ -217,6 +225,7 @@ export function BookingRulesPage({ mobile = false }: { mobile?: boolean } = {}) 
                 </div>
             </main>
         </div>
+        </MobileSkin.Provider>
     );
 }
 
@@ -251,19 +260,28 @@ const SUMMARY: Array<{ title: string; text: string }> = [
 function RulesSummary() {
     return (
         <section aria-label="Коротко о главном" style={{ padding: '8px 16px 0' }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '8px 0 12px', letterSpacing: '-0.01em' }}>Коротко о главном</h2>
-            <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2 style={{ fontSize: TEXT.title, fontWeight: 600, margin: '8px 0 12px', letterSpacing: '-0.01em' }}>Коротко о главном</h2>
+            {/* 09.11 фаза 3: одна карточка (радиус 16) со строками и номером в кружке —
+                вместо пяти серых плашек с моно-цифрами. */}
+            <ol style={{
+                margin: 0, padding: '0 16px', listStyle: 'none',
+                background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet,
+            }}>
                 {SUMMARY.map((p, i) => (
-                    <li key={p.title} style={{ display: 'flex', gap: 12, background: GH.sunken, borderRadius: 12, padding: '12px 14px' }}>
-                        <span style={{ ...mono, color: GH.ink60, paddingTop: 3, flexShrink: 0 }}>{i + 1}</span>
+                    <li key={p.title} style={{ display: 'flex', gap: 12, padding: '14px 0', borderTop: i === 0 ? 'none' : `1px solid ${COLOR.ink10}` }}>
+                        <span aria-hidden="true" className="num" style={{
+                            flex: 'none', width: 24, height: 24, borderRadius: SHAPE.pill,
+                            background: COLOR.accentSoft, color: COLOR.accentInk,
+                            display: 'grid', placeItems: 'center', fontSize: TEXT.caption, fontWeight: 600, marginTop: 1,
+                        }}>{i + 1}</span>
                         <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>{p.title}</div>
-                            <div style={{ fontSize: 14, lineHeight: 1.5, color: GH.ink80, marginTop: 4 }}>{p.text}</div>
+                            <div style={{ fontSize: TEXT.body, fontWeight: 600, lineHeight: 1.35 }}>{p.title}</div>
+                            <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink80, marginTop: 4 }}>{p.text}</div>
                         </div>
                     </li>
                 ))}
             </ol>
-            <a href="#rules-full" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44, fontSize: 14, fontWeight: 600, color: GH.ink, textDecoration: 'underline', marginTop: 4 }}>
+            <a href="#rules-full" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44, fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk, textDecoration: 'none', marginTop: 4, padding: '0 4px' }}>
                 Полный текст правил ↓
             </a>
         </section>
@@ -284,12 +302,18 @@ const para: React.CSSProperties = {
     marginBottom: 16,
 };
 
+/** 09.11 фаза 3: внутри /m — те же разделы в языке приложения. */
+const MobileSkin = createContext(false);
+
 function Section({ num, title, children }: { num: string; title: string; children: React.ReactNode }) {
+    const m = useContext(MobileSkin);
     return (
-        <section style={{ marginTop: 48 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, paddingBottom: 8, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 16 }}>
-                <span style={{ ...mono, color: GH.ink60 }}>{num}</span>
-                <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{title}</h2>
+        <section style={{ marginTop: m ? 32 : 48 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: m ? 12 : 16, paddingBottom: 8, borderBottom: `1px solid ${GH.ink10}`, marginBottom: m ? 8 : 16 }}>
+                <span className={m ? 'num' : undefined} style={m ? { fontSize: TEXT.small, fontWeight: 600, color: COLOR.ink60 } : { ...mono, color: GH.ink60 }}>{num}</span>
+                <h2 style={m
+                    ? { fontSize: TEXT.title, fontWeight: 600, margin: 0, lineHeight: 1.25 }
+                    : { fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{title}</h2>
             </div>
             <div>{children}</div>
         </section>
@@ -297,10 +321,13 @@ function Section({ num, title, children }: { num: string; title: string; childre
 }
 
 function Item({ n, children }: { n: string; children: React.ReactNode }) {
+    const m = useContext(MobileSkin);
     return (
-        <div style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: `1px dashed ${GH.ink10}` }}>
-            <span style={{ ...mono, color: GH.ink60, minWidth: 32, flexShrink: 0, paddingTop: 4 }}>{n}</span>
-            <div style={{ fontSize: 15.5, lineHeight: 1.65, color: GH.ink }}>{children}</div>
+        <div style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: m ? `1px solid ${COLOR.ink08}` : `1px dashed ${GH.ink10}` }}>
+            <span className={m ? 'num' : undefined} style={m
+                ? { fontSize: TEXT.caption, fontWeight: 600, color: COLOR.ink60, minWidth: 32, flexShrink: 0, paddingTop: 4 }
+                : { ...mono, color: GH.ink60, minWidth: 32, flexShrink: 0, paddingTop: 4 }}>{n}</span>
+            <div style={{ fontSize: m ? TEXT.body : 15.5, lineHeight: m ? 1.6 : 1.65, color: GH.ink }}>{children}</div>
         </div>
     );
 }

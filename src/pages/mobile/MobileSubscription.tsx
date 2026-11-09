@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Snowflake, Ticket, Plus, MessageCircle } from 'lucide-react';
+import { Snowflake, Plus, MessageCircle } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { fmtHours, reservedSubscriptionHours, subscriptionHours } from '../../utils/paymentPriority';
 import { extraKindLabel, extraPool } from '../../utils/subscriptionHours';
@@ -11,6 +11,8 @@ import { fmtFreezeDays, freezeBudget } from '../../utils/subscription';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
+import { SummaryCard } from '../../components/ui/SummaryCard';
+import { SkeletonList } from '../../components/ui/Skeleton';
 
 const ADMIN_TG = 'UnboxCenter';
 
@@ -56,8 +58,8 @@ export function MobileSubscription() {
 
     if (!currentUser) {
         return (
-            <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
-                <Loader2 size={20} className="animate-spin" style={{ color: COLOR.ink60 }} aria-label="Загружаем" />
+            <div style={{ padding: '24px 16px' }}>
+                <SkeletonList count={3} label="Загружаем" />
             </div>
         );
     }
@@ -71,7 +73,7 @@ export function MobileSubscription() {
             <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {!sub ? (
                     <EmptyState
-                        icon={<Ticket size={28} />}
+                        illustration="chair"
                         title="Абонемента пока нет"
                         hint="Час по абонементу дешевле обычного. Подберите тариф под то, как часто вы бронируете."
                         action={{ label: 'Выбрать тариф', onClick: () => navigate('/m/tariffs') }}
@@ -94,46 +96,29 @@ export function MobileSubscription() {
                     const freeze = freezeBudget(sub);
                     return (
                         <>
-                            {/* Hero: свободно для брони X ч из Y. */}
-                            <section
-                                aria-label="Остаток абонемента"
-                                style={{
-                                    // Заморожен — статус «инфо», а не декоративный голубой.
-                                    background: sub.isFrozen ? STATUS.info.bg : COLOR.panel,
-                                    color: sub.isFrozen ? STATUS.info.fg : COLOR.onPanel,
-                                    borderRadius: RADIUS.sheet,
-                                    padding: 20,
-                                    display: 'flex', flexDirection: 'column', gap: 8,
-                                }}
-                            >
-                                <div style={{
-                                    fontSize: TEXT.caption, fontWeight: 600,
-                                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                }}>
+                            {/* 09.11 фаза 3: итог — общий SummaryCard, крупно ОДНА цифра
+                                («свободно для брони»); остальное — строками ниже. Была
+                                тёмная плита, в шапке «2 ч из 10 ч», а ниже «Осталось 7 ч». */}
+                            <SummaryCard
+                                size="lg"
+                                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                                     {sub.isFrozen && <Snowflake size={14} aria-hidden="true" />}
-                                    {sub.isFrozen ? 'Заморожен' : 'Активный'} · {sub.name}
-                                </div>
-                                <div style={{ fontSize: TEXT.small }}>Свободно для брони</div>
-                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                    <span className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1 }}>
-                                        {fmtHours(free)}
-                                    </span>
-                                    <span className="num" style={{ fontSize: TEXT.small }}>
-                                        из {fmtHours(poolTotal)}
-                                    </span>
-                                </div>
-                                {reserved > 0.01 && (
-                                    <div style={{ fontSize: TEXT.small, lineHeight: 1.45 }}>
-                                        Ещё {fmtHours(reserved)} в ваших бронях — спишутся за сутки до встреч.
-                                    </div>
-                                )}
-                                {!!sub.bonusHours && (
-                                    <div style={{ fontSize: TEXT.small }}>
-                                        Из них {fmtHours(sub.bonusHours)} — бонусные
-                                    </div>
-                                )}
-                            </section>
+                                    {sub.isFrozen ? 'Заморожен' : 'Свободно для брони'}
+                                </span>}
+                                value={<span className="num">{hoursNumber(free)}</span>}
+                                unit={<>ч из {fmtHours(poolTotal)}</>}
+                                caption={<>
+                                    {sub.name} · до {formatDayMonth(sub.expiryDate, { withYear: 'auto' })}
+                                    {reserved > 0.01 && (
+                                        <span style={{ display: 'block', marginTop: 4 }}>
+                                            Ещё {fmtHours(reserved)} в ваших бронях — спишутся за сутки до встреч.
+                                        </span>
+                                    )}
+                                    {!!sub.bonusHours && (
+                                        <span style={{ display: 'block' }}>Из них {fmtHours(sub.bonusHours)} — бонусные</span>
+                                    )}
+                                </>}
+                            />
 
                             {/* Подробности — строками, без плиток с нулями. */}
                             <dl style={{
@@ -142,8 +127,7 @@ export function MobileSubscription() {
                                 overflow: 'hidden',
                             }}>
                                 <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
-                                {/* Свободно + в бронях + использовано = всего (как в герое). */}
-                                <InfoRow label="Свободно для брони" value={fmtHours(free)} />
+                                {/* Свободно (крупно выше) + в бронях + использовано = всего. */}
                                 {reserved > 0.01 && <InfoRow label="В ваших бронях" value={fmtHours(reserved)} />}
                                 <InfoRow label="Уже использовано" value={fmtHours(usedHours)} />
                                 <InfoRow label="Всего в абонементе" value={fmtHours(poolTotal)} />
@@ -172,7 +156,7 @@ export function MobileSubscription() {
                             {sub.isFrozen && (
                                 <div role="status" style={{
                                     background: STATUS.info.bg, color: STATUS.info.fg,
-                                    borderRadius: 12, padding: '12px 14px',
+                                    borderRadius: RADIUS.sheet, padding: '12px 16px',
                                     fontSize: TEXT.small, lineHeight: 1.45,
                                     display: 'flex', alignItems: 'flex-start', gap: 8,
                                 }}>
@@ -249,4 +233,9 @@ function TgButton({ href, label, icon }: { href: string; label: string; icon?: R
             {label}
         </a>
     );
+}
+
+/** «7» / «1,5» — число часов без «ч» (единица — рядом, мельче). */
+function hoursNumber(h: number): string {
+    return fmtHours(h).replace(/\s*ч$/, '');
 }

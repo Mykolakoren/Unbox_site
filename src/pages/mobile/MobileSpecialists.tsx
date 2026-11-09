@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, ChevronRight } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { api } from '../../api/client';
 import type { Specialist } from '../../components/Specialists/SpecialistCard';
-import { COLOR } from '../../design/tokens';
+import { COLOR, SHAPE, TEXT } from '../../design/tokens';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
+import { ListGroup, ListRow } from '../../components/ui/ListRow';
+import { Input } from '../../components/ui/Field';
+import { ruPlural } from '../../utils/plural';
 import { formatGel } from '../../utils/format';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
@@ -48,33 +51,25 @@ export function MobileSpecialists() {
     }, [items, query, format]);
 
     return (
-        <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                    Специалисты
-                </h1>
-                <p style={{ fontSize: 12, color: COLOR.ink60, marginTop: 4 }}>
-                    {items === null ? (loadFailed ? '' : 'Загружаем…') : `Всего: ${items.length}`}
-                </p>
-            </div>
+        <div style={{ paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 09.11 фаза 3: общая шапка со стрелкой «назад» (сюда приходят из «Я»,
+                соседние экраны каталога её уже имеют), поиск — общее поле. */}
+            <MobilePageHeader
+                title="Специалисты"
+                fallbackTo="/m/me"
+                subtitle={items === null ? (loadFailed ? undefined : 'Загружаем…') : `${items.length} ${ruPlural(items.length, ['специалист', 'специалиста', 'специалистов'])}`}
+            />
 
-            <div style={{ padding: '0 16px' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center',
-                    background: COLOR.sunken, borderRadius: 12,
-                    padding: '10px 12px', gap: 8,
-                }}>
-                    <Search size={16} color={COLOR.ink60} />
-                    <input
-                        value={query}
-                        onChange={e => setQuery(e.target.value)}
-                        placeholder="Имя, специализация…"
-                        style={{
-                            flex: 1, background: 'transparent', border: 'none',
-                            outline: 'none', fontSize: 16, fontFamily: 'inherit', minWidth: 0,
-                        }}
-                    />
-                </div>
+            <div style={{ padding: '0 16px', position: 'relative' }}>
+                <Search size={18} color={COLOR.ink60} aria-hidden="true" style={{ position: 'absolute', left: 28, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                <Input
+                    kind="search"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Имя, специализация…"
+                    aria-label="Поиск специалиста"
+                    style={{ paddingLeft: 40 }}
+                />
             </div>
 
             <div style={{ padding: '0 16px' }}>
@@ -103,51 +98,46 @@ export function MobileSpecialists() {
                 <div style={{ padding: '0 16px' }}>
                     <EmptyState
                         compact
+                        illustration="chair"
                         title="Никого не нашлось"
                         hint="Попробуйте другое имя или уберите фильтр."
                     />
                 </div>
             ) : (
-                <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {filtered.map(s => (
-                        <Link
-                            key={s.id}
-                            to={`/m/specialists/${s.id}`}
-                            style={{
-                                display: 'flex', gap: 12, alignItems: 'center',
-                                background: COLOR.card, border: `1px solid ${COLOR.ink08}`,
-                                borderRadius: 14, padding: '12px 14px',
-                                color: COLOR.ink, textDecoration: 'none',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            <div style={{
-                                width: 56, height: 56, borderRadius: '50%',
-                                background: COLOR.sunken,
-                                backgroundImage: s.photoUrl ? `url(${s.photoUrl})` : undefined,
-                                backgroundSize: 'cover', backgroundPosition: 'center',
-                                flexShrink: 0,
-                                display: 'grid', placeItems: 'center',
-                                fontSize: 18, fontWeight: 600, color: COLOR.ink60,
-                            }}>
-                                {!s.photoUrl && `${s.firstName?.[0] ?? ''}${s.lastName?.[0] ?? ''}`.toUpperCase()}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2 }}>
-                                    {s.firstName} {s.lastName}
-                                </div>
-                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 3, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                                    {s.tagline}
-                                </div>
-                                {s.basePriceGel > 0 && (
-                                    <div style={{ fontSize: 12, color: COLOR.ink, fontWeight: 600, marginTop: 4 }}>
-                                        от {formatGel(s.basePriceGel)}
-                                    </div>
-                                )}
-                            </div>
-                            <ChevronRight size={16} color={COLOR.ink60} style={{ flexShrink: 0 }} />
-                        </Link>
-                    ))}
+                <div style={{ padding: '0 16px' }}>
+                    {/* Одна группа строк вместо отдельной карточки на каждого. */}
+                    <ListGroup aria-label="Специалисты">
+                        {filtered.map(s => {
+                            const recommended = (s.badges || []).includes('recommended');
+                            return (
+                                <ListRow
+                                    key={s.id}
+                                    to={`/m/specialists/${s.id}`}
+                                    lead={
+                                        <span aria-hidden="true" style={{
+                                            width: 56, height: 56, borderRadius: SHAPE.pill,
+                                            background: COLOR.accentSoft,
+                                            backgroundImage: s.photoUrl ? `url(${s.photoUrl})` : undefined,
+                                            backgroundSize: 'cover', backgroundPosition: 'center',
+                                            flexShrink: 0,
+                                            display: 'grid', placeItems: 'center',
+                                            fontSize: TEXT.title, fontWeight: 600, color: COLOR.accentInk,
+                                        }}>
+                                            {!s.photoUrl && `${s.firstName?.[0] ?? ''}${s.lastName?.[0] ?? ''}`.toUpperCase()}
+                                        </span>
+                                    }
+                                    title={`${s.firstName} ${s.lastName}`}
+                                    subtitle={s.tagline ? (
+                                        <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                                            {s.tagline}
+                                        </span>
+                                    ) : undefined}
+                                    meta={recommended ? <span className="ui-badge ui-badge--ok">Рекомендуем</span> : undefined}
+                                    trail={s.basePriceGel > 0 ? <span className="num">от {formatGel(s.basePriceGel)}</span> : undefined}
+                                />
+                            );
+                        })}
+                    </ListGroup>
                 </div>
             )}
         </div>
