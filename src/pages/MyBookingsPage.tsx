@@ -50,7 +50,7 @@ import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatSt
 import { ruCountWord } from '../utils/plural';
 import { seriesApprovalNote } from '../utils/approvalNote';
 import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
-import { RE_RENT_TOO_EARLY_HINT } from './mobile/refundText';
+import { RE_RENT_TOO_EARLY_HINT, refundMoney } from './mobile/refundText';
 import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHours';
 import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
@@ -3182,7 +3182,7 @@ function BookingCard({
                         const pm = /(\d+(?:\.\d+)?)\s*%/.exec(reason);
                         const pct = pm ? parseFloat(pm[1]) : 50;
                         const m = /([0-9]+(?:\.[0-9]+)?)\s*GEL/i.exec(reason);
-                        const refunded = m ? parseFloat(m[1]) : (booking.finalPrice || 0) * pct / 100;
+                        const refunded = m ? parseFloat(m[1]) : refundMoney(booking.finalPrice || 0, pct / 100);
                         return (
                             <div className="mt-3 inline-flex flex-wrap items-center gap-2 bg-[var(--status-ok-bg)] px-3 py-1.5 text-small text-[var(--status-ok-fg)]">
                                 <Repeat size={14} aria-hidden="true" />

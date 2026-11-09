@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import logging
+import math
 from typing import Any, List, Optional
 from datetime import date, datetime, timedelta
 from uuid import UUID
@@ -1228,6 +1229,21 @@ def _subscription_money_row(booking: Booking) -> bool:
             and subscription_hours_held(booking) <= 0)
 
 
+def _partial_refund_gel(full_amount: float, refund_percent: float) -> float:
+    """Частичный денежный возврат — вверх до 50 тетри, в пользу клиента
+    (владелец 09.11: 50 % от 17,5 ₾ давали 8,75 ₾ и хвост 0,25 на балансе).
+    Полный возврат — ровно списанное. Больше списанного не возвращаем."""
+    full = float(full_amount or 0.0)
+    if refund_percent >= 1.0 or full <= 0:
+        return round(full * min(refund_percent, 1.0), 2)
+    if refund_percent <= 0:
+        return 0.0
+    # Сначала до копеек: доля пересдачи куска округлена до 4 знаков
+    # (0,1667 × 30 = 5,001), без этого ceil поднял бы точные 5 ₾ до 5,5.
+    raw = round(full * refund_percent, 2)
+    return round(min(math.ceil(raw * 2 - 1e-9) / 2, full), 2)
+
+
 def _refund_booking_to_owner(
     session: Session, booking: Booking, owner: User, refund_percent: float = 1.0
 ) -> dict:
@@ -1328,7 +1344,7 @@ def _refund_booking_to_owner(
         # Единое правило (billing_defer): деньги брони с часами = final_price,
         # их снял тот же путь, что и часы.
         from app.services.billing_defer import subscription_money_taken
-        _peak = round(subscription_money_taken(booking) * refund_percent, 2)
+        _peak = _partial_refund_gel(subscription_money_taken(booking), refund_percent)
         if _peak >= 0.01:
             wallet.credit(session, owner, _peak, reason="booking_refund",
                           description="Возврат пиковой надбавки абонемента",
@@ -1343,7 +1359,7 @@ def _refund_booking_to_owner(
             booking.charge_amount if booking.charge_amount is not None
             else (booking.final_price or 0.0)
         )
-        refund_amount = round(full_amount * refund_percent, 2)
+        refund_amount = _partial_refund_gel(full_amount, refund_percent)
         retained_amount = round(full_amount - refund_amount, 2)
         if abs(refund_amount) >= 0.01:
             wallet.credit(session, owner, refund_amount, reason="booking_refund",

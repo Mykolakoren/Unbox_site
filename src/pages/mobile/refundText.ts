@@ -33,16 +33,29 @@ function refundParts(b: BookingHistoryItem, pct: number): { parts: Parts; notCha
     if (method === 'subscription' && hours > 0) {
         parts.subH = round2(hours * pct);
         // У абонементной брони final_price — это деньги сверх часов (пиковая надбавка, допуслуги).
-        parts.money = round2(Math.max(0, Number(b.finalPrice) || 0) * pct);
+        parts.money = refundMoney(Number(b.finalPrice) || 0, pct);
     } else {
         const charged = b.chargeAmount != null ? Number(b.chargeAmount) : Number(b.finalPrice) || 0;
-        parts.money = round2(Math.max(0, charged) * pct);
+        parts.money = refundMoney(charged, pct);
     }
     return { parts, notCharged };
 }
 
 function round2(n: number): number {
     return Math.round(n * 100) / 100;
+}
+
+/**
+ * Денежный возврат долей `pct` — зеркало сервера (_partial_refund_gel, владелец
+ * 09.11): частичный — вверх до 50 тетри (50 % от 17,5 = 9, а не 8,75), но не
+ * больше списанного; полный — ровно списанное.
+ */
+export function refundMoney(charged: number, pct: number): number {
+    const full = Math.max(0, charged);
+    if (pct >= 1 || full <= 0) return round2(full * Math.min(pct, 1));
+    if (pct <= 0) return 0;
+    const raw = round2(full * pct);
+    return round2(Math.min(Math.ceil(raw * 2 - 1e-9) / 2, full));
 }
 
 function partsText(p: Parts): string[] {

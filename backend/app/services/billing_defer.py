@@ -608,6 +608,15 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
     50%», «возврат 50%», «refunded 50%»)."""
     if money_base >= 0.01:
         return max(0.0, min(1.0, refunded / money_base))
+    pct = _policy_refund_share(session, b)
+    return 1.0 if pct is None else pct
+
+
+def _policy_refund_share(session: Session, b: Booking) -> Optional[float]:
+    """Доля возврата ПО ПРАВИЛУ из события отмены (0.5 при 50 %), None — события
+    нет. С 09.11 деньги частичного возврата округляются вверх до 50 тетри, так
+    что доля по ленте денег (9 из 17,5) уже не равна доле правила — часы и
+    бонус-часы считаем по этой."""
     try:
         from app.models.timeline import TimelineEvent
         ev = session.exec(
@@ -627,7 +636,7 @@ def _cancel_refund_share(session: Session, b: Booking, money_base: float, refund
                 return max(0.0, min(1.0, float(pct)))
     except Exception:
         logger.warning("[waive] booking %s: доля возврата при отмене не прочиталась", b.id, exc_info=True)
-    return 1.0
+    return None
 
 
 def _left_after_cancel(hours: float, share_returned: float) -> float:
@@ -857,6 +866,12 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User,
     refunded = booking_refunded_money(session, b)
     money_back = round(max(0.0, money_base - refunded), 2)
     share_returned = _cancel_refund_share(session, b, money_base, refunded) if b.status == "cancelled" else 0.0
+    # Часы — долей правила, если она известна: деньги частичного возврата с 09.11
+    # округляются вверх до 50 тетри, и доля по деньгам часы бы недодала.
+    if b.status == "cancelled" and hours_used > 0:
+        _pol = _policy_refund_share(session, b)
+        if _pol is not None:
+            share_returned = _pol
     hours_back = round(hours_used * (1.0 - share_returned), 4)
     extra_back = round(subscription_pool.booking_extra(b) * (1.0 - share_returned), 4)
 

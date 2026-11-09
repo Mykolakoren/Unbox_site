@@ -93,13 +93,23 @@ class FakeTG:
         return True
 
 
-def main():
+def test_rules():
+    """Подмена бота и id админ-чата — только на время проверки (общий прогон
+    гоняет следующие сторожа в том же процессе)."""
     from app.api.v1 import telegram as tgmod
     from app.core.config import settings
 
+    orig_tg, orig_chat = tgmod.telegram_service, settings.TELEGRAM_ADMIN_CHAT_ID
     fake = FakeTG()
     tgmod.telegram_service = fake
     settings.TELEGRAM_ADMIN_CHAT_ID = "-1"
+    try:
+        _rules(tgmod, fake)
+    finally:
+        tgmod.telegram_service, settings.TELEGRAM_ADMIN_CHAT_ID = orig_tg, orig_chat
+
+
+def _rules(tgmod, fake):
     fails = []
 
     def check(cond, msg):
@@ -164,13 +174,13 @@ def main():
     check(re.search(r"try:\s+series_admin_alerts = _series_end_admin_digest", body) is not None,
           "7: /send-reminders вызывает сводку внутри try")
 
-    if fails:
-        print("СТОРОЖ series_end_admin: ПРОВАЛ")
-        for f in fails:
-            print("  ✗", f)
-        sys.exit(1)
+    assert not fails, "; ".join(fails)
     print("СТОРОЖ series_end_admin: OK (7 правил)")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        test_rules()
+    except AssertionError as e:
+        print("СТОРОЖ series_end_admin: ПРОВАЛ —", e)
+        sys.exit(1)
