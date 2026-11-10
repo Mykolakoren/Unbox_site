@@ -414,7 +414,39 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     const isNewAccount = (dashboard?.activeClients ?? 0) === 0 && clients !== null && clients.length === 0;
 
     const debts = dashboard?.debtByClient ?? [];
-    const noNext = dashboard?.clientsWithoutFutureSessions ?? [];
+    // 10.11 (владелец): «Поставить на паузу» прямо из «Без следующей встречи» —
+    // туда попадали и случайные события календаря («Новое событие»). Поставленных
+    // на паузу прячем сразу, не дожидаясь перечитывания сводки.
+    const [pausedIds, setPausedIds] = useState<Set<string>>(() => new Set());
+    const [pausingId, setPausingId] = useState<string | null>(null);
+    const noNext = (dashboard?.clientsWithoutFutureSessions ?? []).filter(c => !pausedIds.has(c.id));
+    const pauseClient = async (id: string, name: string) => {
+        if (pausingId) return;
+        setPausingId(id);
+        const mark = (paused: boolean) => setPausedIds(prev => {
+            const next = new Set(prev);
+            if (paused) next.add(id); else next.delete(id);
+            return next;
+        });
+        try {
+            await crmApi.deleteClient(id); // без permanent — только пауза, как в карточке клиента
+            mark(true);
+            refreshAll();
+            undoToast(`${name} на паузе`, async () => {
+                try {
+                    await crmApi.updateClient(id, { isActive: true });
+                    mark(false);
+                    refreshAll();
+                } catch (e) {
+                    toastApiError(e, 'Не удалось вернуть как было');
+                }
+            });
+        } catch (e) {
+            toastApiError(e, 'Не удалось поставить на паузу');
+        } finally {
+            setPausingId(null);
+        }
+    };
     // «Дальше на неделе» — сегодняшние уже наверху, в «Сегодня».
     const laterSessions = (dashboard?.upcomingSessions ?? []).filter(
         x => utcNaiveToTbilisi(x.date)?.date !== today,
@@ -720,9 +752,16 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         </div>
                                     </div>
                                     {!viewingOther && (
-                                        <Button variant="secondary" disabled={!client} onClick={() => client && setNewFor(client)}>
-                                            Записать
-                                        </Button>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                            <Button variant="quiet" loading={pausingId === c.id}
+                                                disabled={!!pausingId && pausingId !== c.id}
+                                                onClick={() => pauseClient(c.id, c.name)}>
+                                                Поставить на паузу
+                                            </Button>
+                                            <Button variant="secondary" disabled={!client} onClick={() => client && setNewFor(client)}>
+                                                Записать
+                                            </Button>
+                                        </div>
                                     )}
                                 </div>
                             );
