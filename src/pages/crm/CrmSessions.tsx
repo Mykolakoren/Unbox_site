@@ -13,7 +13,7 @@ import {
     AlertTriangle,
     MoreHorizontal,
     Pencil,
-    Trash2,
+    Trash2, RotateCcw,
 } from 'lucide-react';
 import {
     format, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
@@ -34,6 +34,7 @@ import { statusLabel } from '../../design/statuses';
 import { STATUS, SHADOW, Z } from '../../design/tokens';
 import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { unmarkPaidWithConfirm } from './unmarkPaid';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
@@ -803,6 +804,11 @@ function SessionEditPanel({
                         />
                         Оплачено
                     </label>
+                    {!isPaid && session.isPaid && (
+                        <span className="text-xs text-[var(--status-danger-fg)]">
+                            При сохранении платёж удалится, сессия снова станет долгом
+                        </span>
+                    )}
                     {isPaid && !session.isPaid && (
                         <AccountSelect
                             value={account}
@@ -1520,6 +1526,13 @@ function GHSessionRow({
         border: 'none', cursor: 'pointer',
     };
 
+    // Чужой календарь («просмотр как специалист») — только смотрим, оплату не трогаем.
+    const viewingOther = useCrmStore(s => !!s.viewAsSpecialistId);
+    const canUnmark = !!session.isPaid && !viewingOther;
+    const handleUnmark = async () => {
+        if (await unmarkPaidWithConfirm(session, client)) onReload();
+    };
+
     const [paying, setPaying] = useState(false);
     const handleQuickPay = async () => {
         if (paying) return;
@@ -1588,6 +1601,11 @@ function GHSessionRow({
                         {canPay && primary !== 'pay' && (
                             <MenuItem onSelect={() => { close(); handleQuickPay(); }}>
                                 <Banknote size={14} aria-hidden="true" /> {payVerb}{owed.amount ? ` · ${owedText}` : ''}
+                            </MenuItem>
+                        )}
+                        {canUnmark && (
+                            <MenuItem onSelect={() => { close(); void handleUnmark(); }}>
+                                <RotateCcw size={14} aria-hidden="true" /> Снять отметку об оплате
                             </MenuItem>
                         )}
                         {canBook && primary !== 'cab' && (

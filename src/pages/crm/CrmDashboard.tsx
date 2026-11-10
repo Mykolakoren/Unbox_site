@@ -29,7 +29,8 @@ import { NewClientSheet } from '../../components/crm/NewClientSheet';
 import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { toastApiError } from '../../utils/errors';
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../utils/crmNextSession';
-import { Check, Plus, Circle, CheckCircle2 } from 'lucide-react';
+import { Check, Plus, Circle, CheckCircle2, RotateCcw } from 'lucide-react';
+import { unmarkPaidWithConfirm } from './unmarkPaid';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
 function sessionsWord(n: number): string {
@@ -491,6 +492,17 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             {s.isPaid
                                                 ? <StatusBadge kind="payment" status="paid" audience="staff" />
                                                 : <StatusBadge kind="session" status={shownStatus} audience="staff" />}
+                                            {/* 10.11: снять ошибочную отметку прямо здесь (с вопросом). */}
+                                            {s.isPaid && !cancelled && !viewingOther && (
+                                                <Button variant="quiet" size="sm" onClick={async () => {
+                                                    if (await unmarkPaidWithConfirm(s, client)) {
+                                                        setTodayList(list => list?.map(x => (x.id === s.id ? { ...x, isPaid: false, paidAmount: undefined, remaining: undefined } : x)) ?? list);
+                                                        refreshAll();
+                                                    }
+                                                }}>
+                                                    <RotateCcw size={14} aria-hidden="true" /> Снять оплату
+                                                </Button>
+                                            )}
                                             {/* В «просмотре как специалист» оплату не отмечаем — как везде. */}
                                             {!cancelled && !s.isPaid && started && !viewingOther && (
                                                 <Button

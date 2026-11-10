@@ -1132,14 +1132,14 @@ function HistorySection(props: HistoryProps) {
                                                         title="Снять отметку об оплате"
                                                         aria-label="Снять отметку об оплате"
                                                         style={{
-                                                            width: 32, height: 32,
-                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            minHeight: 32, padding: '0 8px', gap: 4, fontSize: 12,
+                                                            display: 'inline-flex', alignItems: 'center',
                                                             background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
                                                         }}
                                                         onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
                                                         onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
                                                     >
-                                                        <X size={12} />
+                                                        <X size={12} aria-hidden="true" /> снять
                                                     </button>
                                                     )}
                                                 </span>

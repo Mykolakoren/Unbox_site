@@ -623,7 +623,7 @@ function Main({
             icon={session.isPaid ? <Check size={18} aria-hidden="true" /> : currencyIcon}
             label={session.isPaid ? 'Оплачено' : partial ? 'Доплатить' : 'Оплата'}
             sub={session.isPaid
-                ? (price > 0 ? formatMoney(price, { currency }) : undefined)
+                ? (price > 0 ? `${formatMoney(price, { currency })} · нажмите, чтобы снять` : 'нажмите, чтобы снять')
                 : partial ? formatMoney(partial.remaining, { currency })
                 : price > 0 ? formatMoney(price, { currency }) : 'указать сумму'}
             tone={session.isPaid ? 'ok' : 'primary'}
@@ -706,7 +706,9 @@ function Main({
                     <Row
                         icon={<Wallet size={20} aria-hidden="true" />}
                         label={session.isPaid ? 'Оплачено' : partial ? `Доплатить ${formatMoney(partial.remaining, { currency })}` : 'Отметить оплату'}
-                        sub={partial
+                        sub={session.isPaid
+                            ? `${priceText ? `${priceText} · ` : ''}нажмите, чтобы снять оплату`
+                            : partial
                             ? `Оплачено ${formatMoney(partial.paid, { currency })} из ${formatMoney(partial.price, { currency })}`
                             : (priceText ?? 'цены нет — спросим сумму')}
                         pressed={!!session.isPaid}
