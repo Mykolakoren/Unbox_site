@@ -1125,7 +1125,7 @@ function HistorySection(props: HistoryProps) {
                                                 // один клик по нему удалял платёж (G5-07). Снять
                                                 // оплату — отдельный крестик с подтверждением.
                                                 <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                                    <StatusBadge kind="payment" status="paid" audience="staff" />
+                                                    <StatusBadge kind="payment" status="paid" audience="client" />
                                                     {!viewingOther && (
                                                     <button
                                                         onClick={() => handleUnmarkPaid(session.id)}

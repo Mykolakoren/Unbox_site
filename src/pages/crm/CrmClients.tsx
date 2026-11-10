@@ -467,7 +467,7 @@ function ClientsTable({
                                     {formatMoney(c.unpaidSum, { currency: client.currency })}
                                 </span>
                             ) : (c.sessionCount || 0) > 0 ? (
-                                <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" />
+                                <StatusBadge kind="payment" status="paid" audience="client" variant="dot" />
                             ) : (
                                 <span style={{ color: GH.ink60 }}>—</span>
                             )}

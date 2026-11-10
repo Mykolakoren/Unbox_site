@@ -8,6 +8,7 @@ import { toastApiError } from '../../utils/errors';
 import { partialPayment, paymentMismatch, sessionCurrencyOf, sessionPriceOf } from '../../utils/sessionMoney';
 import { accountLabel } from '../../utils/paymentAccounts';
 import { PaymentEditSheet } from './PaymentEditSheet';
+import { unmarkPaidWithConfirm } from './unmarkPaid';
 
 /**
  * SessionPaymentBlock — «Оплата» по сессии в Psy-CRM (этап А, 02.10).
@@ -46,6 +47,7 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
     const paymentAccounts = useCrmStore(s => s.paymentAccounts);
     const [editing, setEditing] = useState(false);
     const [topping, setTopping] = useState(false);
+    const [unmarking, setUnmarking] = useState(false);
 
     if (!payment) return null;
 
@@ -55,6 +57,16 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
     const mismatch = paymentMismatch(session, client, payment.currency);
     const accountText = accountLabel(payment.account, paymentAccounts);
     const topUpAmount = partial ? partial.remaining : (mismatch?.shortfall ?? 0);
+
+    const unmark = async () => {
+        if (unmarking) return;
+        setUnmarking(true);
+        try {
+            if (await unmarkPaidWithConfirm(session, client)) await onChanged();
+        } finally {
+            setUnmarking(false);
+        }
+    };
 
     const topUp = async () => {
         if (topping || topUpAmount <= 0) return;
@@ -108,6 +120,13 @@ export function SessionPaymentBlock({ session, client, payment, readOnly, onChan
                 {!readOnly && (
                     <Button size="compact" variant="secondary" onClick={() => setEditing(true)}>
                         Изменить
+                    </Button>
+                )}
+                {/* 10.11 (владелец): «поставил оплачено — не вижу, как отменить». Снять —
+                    здесь же, рядом с «Изменить»; платёж удаляется целиком, поэтому с вопросом. */}
+                {!readOnly && (
+                    <Button size="compact" variant="quiet" loading={unmarking} onClick={unmark}>
+                        Снять оплату
                     </Button>
                 )}
             </div>

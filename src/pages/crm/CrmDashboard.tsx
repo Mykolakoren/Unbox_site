@@ -30,7 +30,7 @@ import { UnpaidSessionsSheet } from '../../components/crm/UnpaidSessionsSheet';
 import { toastApiError } from '../../utils/errors';
 import { addDaysYmd, tbilisiToday, utcNaiveToTbilisi } from '../../utils/crmNextSession';
 import { Check, Plus, Circle, CheckCircle2, RotateCcw } from 'lucide-react';
-import { unmarkPaidWithConfirm } from './unmarkPaid';
+import { unmarkPaidWithConfirm } from '../../components/crm/unmarkPaid';
 
 /** «1 сессия / 2 сессии / 5 сессий». */
 function sessionsWord(n: number): string {
@@ -490,7 +490,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                                             {s.isPaid
-                                                ? <StatusBadge kind="payment" status="paid" audience="staff" />
+                                                ? <StatusBadge kind="payment" status="paid" audience="client" />
                                                 : <StatusBadge kind="session" status={shownStatus} audience="staff" />}
                                             {/* 10.11: снять ошибочную отметку прямо здесь (с вопросом). */}
                                             {s.isPaid && !cancelled && !viewingOther && (

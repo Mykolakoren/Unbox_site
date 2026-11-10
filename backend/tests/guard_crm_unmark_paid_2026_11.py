@@ -12,6 +12,10 @@
   4  Карточка клиента: подписанная кнопка «снять» (обработчик с вопросом — прежний, заморожен).
   5  Правка сессии: сняли галочку «Оплачено» — предупреждение, что платёж удалится.
   6  Телефон: на плитке «Оплачено» подсказка «нажмите, чтобы снять».
+  7  Блок «Оплата» в правке сессии (карточка клиента, шторка на телефоне): кнопка
+     «Снять оплату» рядом с «Изменить», через ту же функцию с вопросом.
+  8  В CRM оплаченная сессия — «Оплачено», а не «Списано с баланса» (это слова
+     админки кабинетов; у Елены Bilgin оплата была на TBC).
 
     python3 backend/tests/guard_crm_unmark_paid_2026_11.py
 """
@@ -28,7 +32,7 @@ def _code(rel: str) -> str:
 
 
 def test_helper_confirms_first():
-    c = _code("src/pages/crm/unmarkPaid.ts")
+    c = _code("src/components/crm/unmarkPaid.ts")
     i_confirm, i_api = c.find("await confirmAction("), c.find("crmApi.unmarkPaidSession(")
     assert 0 <= i_confirm < i_api, "1: снятие оплаты без вопроса"
     assert "if (!ok) return false;" in c and "tone: 'danger'" in c, "1: вопрос не блокирует или не красный"
@@ -58,6 +62,19 @@ def test_mobile_hint():
     i_confirm = m.find("title: 'Снять оплату?'")
     i_api = m.find("crmApi.unmarkPaidSession(session.id)")
     assert 0 <= i_confirm < i_api, "6: на телефоне снятие без вопроса"
+
+
+def test_payment_block_button():
+    c = _code("src/components/crm/SessionPaymentBlock.tsx")
+    assert "unmarkPaidWithConfirm(session, client)" in c, "7: блок «Оплата» без снятия"
+    assert re.search(r"\{!readOnly && \(\s*<Button size=\"compact\" variant=\"quiet\" loading=\{unmarking\} onClick=\{unmark\}>\s*Снять оплату", c), "7: нет кнопки «Снять оплату»"
+
+
+def test_crm_paid_label_not_balance():
+    for rel in ("src/pages/crm/CrmDashboard.tsx", "src/pages/crm/CrmSessions.tsx",
+                "src/pages/crm/CrmClients.tsx", "src/pages/crm/CrmClientDetail.tsx"):
+        c = _code(rel)
+        assert 'kind="payment" status="paid" audience="staff"' not in c, f"8: {rel} снова пишет «Списано с баланса»"
 
 
 if __name__ == "__main__":

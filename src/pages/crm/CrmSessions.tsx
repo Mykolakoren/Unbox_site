@@ -34,7 +34,7 @@ import { statusLabel } from '../../design/statuses';
 import { STATUS, SHADOW, Z } from '../../design/tokens';
 import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
-import { unmarkPaidWithConfirm } from './unmarkPaid';
+import { unmarkPaidWithConfirm } from '../../components/crm/unmarkPaid';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
@@ -1505,7 +1505,7 @@ function GHSessionRow({
     // В узкой колонке таблицы длинный статус («Отменил специалист») переносится.
     const badgeClass = narrow ? undefined : 'whitespace-normal';
     const statusBadge = session.isPaid
-        ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" className={badgeClass} />
+        ? <StatusBadge kind="payment" status="paid" audience="client" variant="dot" className={badgeClass} />
         : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" className={badgeClass} />;
     const amount = session.price ?? client?.basePrice;
     const price = formatMoney(amount, { currency: sessionCurrencyOf(session, client) });
