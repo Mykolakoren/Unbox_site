@@ -1059,7 +1059,7 @@ console.log(JSON.stringify({ shown: due.get('N').due, hidden: h.map(x => [x.user
     for rel in ("src/pages/admin/Dashboard.tsx", "src/pages/mobile/admin/MobileAdminDashboard.tsx"):
         code = _code(rel)
         assert "hiddenDebts(dueMap, bookings, allocIndex," in code, f"{rel}: нет «Долги по броням вне списка»"
-        assert "Долги по броням вне списка:" in code and "data-hidden-debts" in code
+        assert "Долги вне списка броней:" in code and "data-hidden-debts" in code
         assert "hidden.length > 0 &&" in code, f"{rel}: блок показывается и без долгов"
 
 

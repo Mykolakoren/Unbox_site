@@ -14,7 +14,7 @@ import { futureChargedDue, todayRows, todaySummary, byClient, batumiDayKey, type
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 import { useAdminDueMap, acceptPaymentFor, branchOfBooking, type AcceptPayment } from './adminPayment';
 import { useAllocationIndex } from '../../../hooks/useBalanceAllocation';
-import { hiddenDebts } from '../../../utils/balanceAllocation';
+import { hiddenDebts, hiddenDebtNote, type HiddenDebt } from '../../../utils/balanceAllocation';
 import { userCanAccessFinance, hasPermission } from '../../../utils/permissions';
 import { TopupSheet } from './TopupSheet';
 import { DueBadge } from '../../../components/admin/DueBadge';
@@ -139,8 +139,8 @@ export function MobileAdminDashboard() {
     const otherDebtors = useMemo(() => {
         const inOwing = new Set<string>();
         for (const c of owing) for (const r of c.rows) { inOwing.add(r.userId); inOwing.add(c.userId); }
-        const hiddenOf = new Map<string, number>();
-        for (const h of hidden) { hiddenOf.set(h.userId, h.amount); if (h.email) hiddenOf.set(h.email, h.amount); }
+        const hiddenOf = new Map<string, HiddenDebt>();
+        for (const h of hidden) { hiddenOf.set(h.userId, h); if (h.email) hiddenOf.set(h.email, h); }
         const out: OtherDebtor[] = [];
         for (const u of users || []) {
             const keys = [String(u.id || ''), u.email || ''].filter(Boolean);
@@ -149,8 +149,8 @@ export function MobileAdminDashboard() {
             const future = keys.reduce((s, k) => s + (futureDue.get(k) || 0), 0);
             const amount = Math.round((Math.max(0, -bal) - future) * 100) / 100;
             if (!(amount > 0)) continue;
-            const hiddenAmount = keys.map(k => hiddenOf.get(k)).find(v => v !== undefined) ?? 0;
-            out.push({ user: u, amount, hidden: hiddenAmount > 0 });
+            const h = keys.map(k => hiddenOf.get(k)).find(v => v !== undefined);
+            out.push({ user: u, amount, hidden: !!h && h.amount > 0, note: h && h.amount > 0 ? hiddenDebtNote(h) : undefined });
         }
         out.sort((a, b) => b.amount - a.amount || (a.user.name || '').localeCompare(b.user.name || '', 'ru'));
         return out;
@@ -240,7 +240,7 @@ export function MobileAdminDashboard() {
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, color: 'var(--color-ink)', textDecoration: 'none' }}>
                 <span style={{ minWidth: 0 }}>
                     <span style={{ display: 'block', fontSize: 16, fontWeight: 600, overflowWrap: 'anywhere' }}>{d.user.name || d.user.email}</span>
-                    {d.hidden && <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>долг по броням вне списка</span>}
+                    {d.hidden && <span style={{ display: 'block', fontSize: 14, color: 'var(--color-ink-60)' }}>{d.note || 'долг по броням вне списка'}</span>}
                 </span>
                 <Money value={d.amount} tone="debt" className="text-body font-semibold" />
             </Link>
@@ -367,8 +367,8 @@ export function MobileAdminDashboard() {
                                     {owingLater.map(c => renderOwing(c, true))}
                                     {hidden.length > 0 && (
                                         <div data-hidden-debts style={{ fontSize: 14, color: 'var(--color-ink-60)', lineHeight: 1.45 }}>
-                                            Долги по броням вне списка: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}
-                                            {' '}(старые брони, отмены со штрафом, списания не за бронь), всего <Money value={hiddenTotal} inline />
+                                            Долги вне списка броней: {hidden.length} {plural(hidden.length, 'клиент', 'клиента', 'клиентов')}
+                                            {' '}(пакеты и абонементы в долг, старые брони, отмены со штрафом), всего <Money value={hiddenTotal} inline />
                                         </div>
                                     )}
                                     {otherDebtors.map(renderOther)}
@@ -475,6 +475,8 @@ interface OtherDebtor {
     amount: number;
     /** Часть долга — по броням вне списка (старые, отменённые со штрафом…). */
     hidden: boolean;
+    /** Подпись: «пакет 16 ч на неделю 09.11–15.11» или «долг по броням вне списка». */
+    note?: string;
 }
 
 /** Раздел «Должны»: заголовок с числом, пояснение, строки. */

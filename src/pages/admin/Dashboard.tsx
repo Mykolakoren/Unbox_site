@@ -14,7 +14,7 @@ import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 import { statusLabel, getStatusDef } from '../../design/statuses';
 import { STATUS, COLOR } from '../../design/tokens';
 import { computeDueByBooking } from '../../utils/dueAmounts';
-import { applyAllocation, hiddenDebts, type HiddenDebt } from '../../utils/balanceAllocation';
+import { applyAllocation, hiddenDebts, hiddenDebtNote, type HiddenDebt } from '../../utils/balanceAllocation';
 import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { todayRows, todaySummary, byClient, batumiDayKey, futureChargedDue, type TodayRow, type TodayClient } from '../../utils/adminToday';
 import { hasPermission } from '../../utils/permissions';
@@ -482,10 +482,10 @@ function GridHouseToday({
                         <section aria-labelledby="today-hidden" data-hidden-debts style={{ border: hairline }}>
                             <div style={{ padding: '12px 16px', borderBottom: hairline }}>
                                 <h2 id="today-hidden" style={{ fontSize: 16, fontWeight: 600, margin: 0, color: STATUS.danger.fg }}>
-                                    Долги по броням вне списка: {ruCountWord(hidden.length, ['клиент', 'клиента', 'клиентов'])}, <span className="num">{formatGel(hidden.reduce((s, h) => s + h.amount, 0))}</span>
+                                    Долги вне списка броней: {ruCountWord(hidden.length, ['клиент', 'клиента', 'клиентов'])}, <span className="num">{formatGel(hidden.reduce((s, h) => s + h.amount, 0))}</span>
                                 </h2>
                                 <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2 }}>
-                                    Старые брони, отменённые со штрафом, списания не за бронь — на бронях в списке их не видно
+                                    Пакеты и абонементы в долг, старые брони, отменённые со штрафом, — на бронях в списке их не видно
                                 </div>
                             </div>
                             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -496,6 +496,7 @@ function GridHouseToday({
                                             <Link to={`/admin/users/${encodeURIComponent(h.email || h.userId)}`} title={h.debts.map(d => `${d.label} — ${formatGel(d.amount)}`).join('; ')}
                                                 style={{ color: GH.ink, textDecoration: 'none', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                 {u?.name || h.email || h.userId}
+                                                <span data-hidden-debt-note style={{ display: 'block', fontWeight: 400, color: GH.ink60, whiteSpace: 'normal' }}>{hiddenDebtNote(h)}</span>
                                             </Link>
                                             <span className="num" style={{ whiteSpace: 'nowrap', color: STATUS.danger.fg }}>{formatGel(h.amount)}</span>
                                         </li>

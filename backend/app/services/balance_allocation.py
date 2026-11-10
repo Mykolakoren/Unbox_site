@@ -254,7 +254,13 @@ def debit_label(row: Row, booking: Optional[BookingRef]) -> str:
     r = row.reason or ""
     if r == "subscription_purchase":
         m = re.search(r"«([^»]+)»", row.description or "")
-        return f"абонемент «{m.group(1)}»" if m else f"абонемент {d}"
+        if m:
+            return f"абонемент «{m.group(1)}»"
+        # Недельный пакет (weekly_package.py): «Пакет 16 ч на неделю 09.11–15.11».
+        w = re.search(r"Пакет\s+([\d.,]+)\s*ч на неделю\s+(\S+)", row.description or "")
+        if w:
+            return f"пакет {w.group(1)} ч на неделю {w.group(2)}"
+        return f"абонемент {d}"
     if r == "correction":
         return f"корректировка {d}"
     if r == "baseline":
@@ -516,6 +522,9 @@ def allocate(
             "rowIds": [str(p.row.id) for p in d.portions if p.left > 0],
             "amount": _g(left),
             "label": debit_label(first, b),
+            # 10.11: экран отличает долг за пакет/абонемент от долга за брони —
+            # его не раскладывают по броням, а показывают одной строкой.
+            "reason": first.reason or "",
             "booking": booking_public(b),
             "date": first.at.isoformat(),
         }

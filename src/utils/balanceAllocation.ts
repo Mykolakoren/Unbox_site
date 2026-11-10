@@ -59,6 +59,17 @@ export interface AllocDebt {
     label: string;
     booking: AllocBooking | null;
     date?: string | null;
+    /** Причина списания из ленты (10.11): 'subscription_purchase' — пакет/абонемент. */
+    reason?: string | null;
+}
+
+/**
+ * Долг за пакет или абонемент (10.11, владелец): он не за бронь — по броням его
+ * не раскладываем, показываем одной строкой «пакет 16 ч на неделю 09.11–15.11».
+ * Раньше 160 ₾ недельного пакета Гали делились на 108 «на бронях» и 52 «вне списка».
+ */
+export function isPackageDebt(d: AllocDebt | null | undefined): boolean {
+    return !!d && !d.bookingId && d.reason === 'subscription_purchase';
 }
 
 /** На что ушли деньги начисления / что вернул возврат. */
@@ -236,6 +247,7 @@ export function applyAllocation(
         let loose = 0;
         let penalty = 0;
         for (const d of entry.debts || []) {
+            if (isPackageDebt(d)) continue; // пакет/абонемент — не на брони, отдельной строкой
             if (PENALTY_DEBT_ON_ACTIVE_BOOKINGS && d.booking?.status === 'cancelled') penalty += cents(d.amount);
             else if (d.bookingId) debtBy.set(d.bookingId, (debtBy.get(d.bookingId) || 0) + cents(d.amount));
             else loose += cents(d.amount);
@@ -319,6 +331,16 @@ export interface HiddenDebt {
     amount: number;
     /** Из чего он: брони вне окна админки, отменённые со штрафом, списания не за бронь. */
     debts: AllocDebt[];
+    /** Подписи долгов за пакет/абонемент («пакет 16 ч на неделю 09.11–15.11»). */
+    packageLabels: string[];
+}
+
+/** Короткая подпись под именем должника: пакеты — по названию, прочее — одним словом. */
+export function hiddenDebtNote(h: HiddenDebt): string {
+    const other = h.debts.some(d => !isPackageDebt(d));
+    const parts = [...h.packageLabels];
+    if (other || parts.length === 0) parts.push('долг по броням вне списка');
+    return parts.join(' · ');
 }
 
 /**
@@ -351,8 +373,9 @@ export function hiddenDebts(
         const total = (entry.debts || []).reduce((s, d) => s + cents(d.amount), 0);
         const hidden = total - (shown.get(entry) || 0);
         if (hidden > 0) {
-            out.push({ userId: entry.userId, email: entry.email, amount: hidden / 100,
-                debts: debtsOutsideList(entry, ids.get(entry) || new Set()) });
+            const debts = debtsOutsideList(entry, ids.get(entry) || new Set());
+            out.push({ userId: entry.userId, email: entry.email, amount: hidden / 100, debts,
+                packageLabels: debts.filter(isPackageDebt).map(d => d.label) });
         }
     }
     return out.sort((a, b) => b.amount - a.amount);
