@@ -8239,6 +8239,46 @@ def split_booking_rows(session: Session, booking: Booking, parts: list, current_
             _st = booking.date.replace(hour=_m // 60, minute=_m % 60, second=0, microsecond=0)
             weights.append(float(PricingService.subscription_peak_money(_st, p)) if float(booking.hours_deducted or 0) > 0 else 0.0)
             _off += p
+    # 17.11 (владелец): у брони с подарочными (бонусными) часами подарок — ПЕРВЫЕ
+    # часы. При делении бонус-часы заполняют части по порядку, с первой; часть,
+    # целиком покрытая подарком, стоит 0 ₾, частично — остаток по обычной цене
+    # (_bonus_tail_price), остальные — по своей цене. Деньги брони делим этими
+    # весами — итог по-прежнему ровно исходный. Раньше часы делились по минутам,
+    # а деньги долями цены: «подарочная» часть держала 6,92 ₾, платная 3,08.
+    _bonus_split = ((booking.payment_method or "").lower() == "bonus"
+                    and float(booking.hours_deducted or 0) > 0)
+    _bonus_hours_parts = None
+    if _bonus_split:
+        _left = round(float(booking.hours_deducted or 0), 2)
+        _bonus_hours_parts = []
+        for p in parts:
+            _c = round(min(_left, p / 60.0), 2)
+            _bonus_hours_parts.append(_c)
+            _left = round(_left - _c, 2)
+        if _left > 0:
+            _bonus_hours_parts[-1] = round(_bonus_hours_parts[-1] + _left, 2)
+        weights, _off = [], 0
+        for idx, p in enumerate(parts):
+            _m = start_min0 + _off
+            _st = booking.date.replace(hour=_m // 60, minute=_m % 60, second=0, microsecond=0)
+            _c, _ph, q = _bonus_hours_parts[idx], p / 60.0, quotes[idx]
+            _full = float(q.final_price) if q is not None else float(p)
+            if _c >= _ph - 1e-6:
+                weights.append(0.0)
+            elif _c <= 0:
+                weights.append(_full)
+            else:
+                weights.append(_bonus_tail_price(
+                    pricing, owner, full_price=_full, resource_id=booking.resource_id, start_dt=_st,
+                    duration_minutes=p, format_type=booking.format or "individual", covered_hours=_c,
+                    exclude_booking_id=str(booking.id)))
+            _off += p
+        if any(q is None for q in quotes) or sum(weights) <= 0:
+            # Котировок нет (хоть у одной части) — по непокрытым минутам, чтобы не
+            # смешивать минуты и ₾; всё покрыто — деньги в первую часть.
+            weights = [max(0.0, p / 60.0 - c) for p, c in zip(parts, _bonus_hours_parts)]
+            if sum(weights) <= 0:
+                weights = [1.0] + [0.0] * (len(parts) - 1)
     if sum(weights) <= 0:
         weights = [float(p) for p in parts]
     wsum = sum(weights)
@@ -8246,6 +8286,12 @@ def split_booking_rows(session: Session, booking: Booking, parts: list, current_
     def _split_amount(total: float) -> list:
         """Разложить сумму по долям так, чтобы части дали ровно total."""
         out = [round(total * w / wsum, 2) for w in weights]
+        if _bonus_split:
+            # у подарочной брони остаток — в самую «платную» часть, чтобы
+            # целиком подарочная не получила копейку (17.11)
+            k = weights.index(max(weights))
+            out[k] = round(total - sum(out[:k] + out[k + 1:]), 2)
+            return out
         out[0] = round(total - sum(out[1:]), 2)      # остаток округления — в первую
         return out
 
@@ -8320,6 +8366,8 @@ def split_booking_rows(session: Session, booking: Booking, parts: list, current_
 
     hours_total = float(booking.hours_deducted or 0)
     hours = _split_by_minutes(hours_total) if hours_total > 0 else None
+    if _bonus_hours_parts is not None:
+        hours = _bonus_hours_parts  # подарок — первые часы (17.11)
     # Доп. пул — тоже по минутам; каждая часть берёт не больше своих часов,
     # а сумма частей остаётся равной исходной (остаток — в первую часть).
     extra_total = subscription_pool.booking_extra(booking) if hours is not None else 0.0

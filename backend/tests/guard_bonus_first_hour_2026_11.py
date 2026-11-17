@@ -12,8 +12,9 @@
   5  Правки (перенос, формат, продление) идут через ту же функцию с контекстом брони.
   6  Сайт считает так же: bonusSlotMoney берёт tail() — цену остатка; оформление на
      компьютере и телефоне, «Итого» мастера и быстрая бронь на телефоне передают tail.
-  7  (не держим) «Разделить» подарочной брони делит деньги и бонус-часы долями —
-     суммы сходятся; правило «первые часы» при делении — отдельное решение владельца.
+  7  «Разделить» (владелец 17.11, второе решение): бонус-часы заполняют части по
+     порядку с первой; целиком подарочная часть — 0 ₾, остальные по обычной цене;
+     сумма частей = цена брони, отмена всех частей возвращает и час, и деньги.
   8  Допы частично подарочной брони при правках — целиком (booking_extras_money).
 
     python3 backend/tests/guard_bonus_first_hour_2026_11.py
@@ -101,6 +102,36 @@ def test_more_screens_split_extras():
     from app.services.pricing import PricingService
     listed = PricingService.calculate_extras_price(["coffee"])
     assert booking_extras_money(b) == round(min(listed, 23.0), 2), f"8: допы ужаты долей: {booking_extras_money(b)}"
+
+
+def test_split_gift_goes_to_first_parts():
+    mh = _mh()
+
+    @mh._scenario
+    def run():
+        s = mh._db()
+        admin = mh._admin(s)
+        u = mh._client(s, None, balance=100.0)
+        mh._bonus(s, u, 1.0)
+        b = mh._book(s, admin, u, start="09:30", minutes=90, method="bonus")
+        assert float(b.final_price) == 10.0, b.final_price
+        a, c = mh._split(s, admin, b, [60, 30])
+        got = [(float(x.hours_deducted or 0), float(x.final_price)) for x in (a, c)]
+        assert got == [(1.0, 0.0), (0.0, 10.0)], f"7: подарок — первая часть, вторая 10 ₾: {got}"
+
+        v = mh._client(s, None, balance=500.0)
+        mh._bonus(s, v, 1.0)
+        b2 = mh._book(s, admin, v, days=3, start="12:00", minutes=180, method="bonus")
+        total = float(b2.final_price)
+        parts = mh._split(s, admin, b2, [60, 60, 60])
+        assert [float(x.hours_deducted or 0) for x in parts] == [1.0, 0.0, 0.0]
+        assert float(parts[0].final_price) == 0.0 and round(sum(float(x.final_price) for x in parts), 2) == total, \
+            [x.final_price for x in parts]
+        for x in parts:
+            mh._cancel(s, admin, x)
+        assert (mh._free_hours(s, v), mh._bal(s, v)) == (1.0, 500.0), (mh._free_hours(s, v), mh._bal(s, v))
+
+    run()
 
 
 if __name__ == "__main__":

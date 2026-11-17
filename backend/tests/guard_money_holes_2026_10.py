@@ -2914,11 +2914,11 @@ def test_r5_5_trim_and_split_across_midnight_refuse_clearly():
 
 @_scenario
 def test_r5_6_split_bonus_hours_in_hundredths():
-    """Деление брони с частичным бонусом (3 ч, бонус 1 ч) на [60, 60, 60]: бонус-
-    часы делились до 4 знаков (0,3334 / 0,3333 / 0,3333), а возврат при отмене
-    округляется до сотых — после отмены всех частей 0,99 ч вместо 1,0. Теперь
-    в сотых, остаток — в первую часть: 0,34 / 0,33 / 0,33."""
-    for cuts, want in (([60, 60, 60], [0.34, 0.33, 0.33]), ([30, 60, 90], [0.17, 0.33, 0.5])):
+    """Деление брони с частичным бонусом (3 ч, бонус 1 ч): бонус-часы в сотых, после
+    отмены всех частей — ровно 1,0 ч (было 0,99 при делении до 4 знаков).
+    17.11 (владелец): подарок — ПЕРВЫЕ часы, при делении бонус заполняет части по
+    порядку: [60, 60, 60] → 1 / 0 / 0, [30, 60, 90] → 0,5 / 0,5 / 0."""
+    for cuts, want in (([60, 60, 60], [1.0, 0.0, 0.0]), ([30, 60, 90], [0.5, 0.5, 0.0])):
         s = _db()
         admin = _admin(s)
         u = _client(s, None, balance=500.0)
@@ -3242,20 +3242,21 @@ def test_r6_a_convert_gift_booking_returns_gift_hour():
 
 @_scenario
 def test_r6_b_waive_after_partial_cancel_returns_exact_remainder():
-    """Бонус-часы части с нечётными сотыми (3 ч, бонус 1 ч → [120, 60] → 0,67 и
-    0,33): отмена 50 % возвращает 0,34, «Снять штраф» — остаток 0,33 (а не второе
-    округление 0,34 — было 1,01 ч из 1,0). Seed 411 ревизора."""
+    """Отмена части со штрафом, потом «Снять штраф» — бонус-часы возвращаются ровно
+    (seed 411 ревизора: было 1,01 ч из 1,0 из-за второго округления).
+    17.11 (владелец): подарок — первые часы, [30, 150] → 0,5 и 0,5; отмена 50 %
+    первой части возвращает 0,25, «Снять штраф» — остаток 0,25."""
     s = _db()
     admin = _admin(s)
     u = _client(s, None, balance=500.0)
     _bonus(s, u, 1.0)
     b = _book(s, admin, u, days=3, start="12:00", minutes=180, method="balance")
-    a, c = _split(s, admin, b, [120, 60])
-    assert (float(a.hours_deducted), float(c.hours_deducted)) == (0.67, 0.33)
+    a, c = _split(s, admin, b, [30, 150])
+    assert (float(a.hours_deducted), float(c.hours_deducted)) == (0.5, 0.5)
     _cancel(s, admin, a, refund_percent=0.5)
-    assert _free_hours(s, u) == 0.34, _free_hours(s, u)
+    assert _free_hours(s, u) == 0.25, _free_hours(s, u)
     _waive(s, admin, a)
-    assert _free_hours(s, u) == 0.67, _free_hours(s, u)
+    assert _free_hours(s, u) == 0.5, _free_hours(s, u)
     _cancel(s, admin, c)
     assert (_free_hours(s, u), _bal(s, u)) == (1.0, 500.0), (_free_hours(s, u), _bal(s, u))
     # то же на подарке: отмена 50 % → 0,5, «Снять штраф» → ещё 0,5
