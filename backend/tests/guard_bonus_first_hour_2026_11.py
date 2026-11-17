@@ -1,0 +1,111 @@
+"""СТОРОЖ: подарочный час — это ПЕРВЫЙ час брони, остаток по обычной цене (владелец 17.11).
+
+Повод: Мила, 1,5 ч с 09:30 (09:30–10:00 — пик +5 ₾/ч) = 32,5 ₾, подарок 1 ч.
+Бонус снимал долю цены: 32,5 × ⅓ = 10,83 ₾. Решение: «подарочный час и потом
+по обычной цене» — 10:30–11:00 = 10 ₾.
+
+Что держит:
+  1  Создание брони: 1,5 ч с 09:30, подарок 1 ч → 10 ₾ (а не 10,83).
+  2  Подарок покрывает всю бронь → 0 ₾ (как раньше, вместе с пиком).
+  3  Остаток в пике — по цене пика: 2 ч с 19:00, подарок 1 ч → 20:00–21:00 = 25 ₾.
+  4  Продление подарочной брони 1 ч → 2 ч: доплата = обычная цена второго часа.
+  5  Правки (перенос, формат, продление) идут через ту же функцию с контекстом брони.
+  6  Сайт считает так же: bonusSlotMoney берёт tail() — цену остатка; оформление на
+     компьютере и телефоне, «Итого» мастера и быстрая бронь на телефоне передают tail.
+  7  (не держим) «Разделить» подарочной брони делит деньги и бонус-часы долями —
+     суммы сходятся; правило «первые часы» при делении — отдельное решение владельца.
+  8  Допы частично подарочной брони при правках — целиком (booking_extras_money).
+
+    python3 backend/tests/guard_bonus_first_hour_2026_11.py
+"""
+import os
+import pathlib
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, ".."))
+os.environ.setdefault("ENVIRONMENT", "development")
+ROOT = pathlib.Path(HERE).resolve().parents[1]
+
+
+def _mh():
+    import guard_money_holes_2026_10 as mh
+    return mh
+
+
+def test_create_partial_bonus_first_hour():
+    mh = _mh()
+
+    @mh._scenario
+    def run():
+        s = mh._db()
+        admin = mh._admin(s)
+        u = mh._client(s, None)
+        mh._bonus(s, u, 1.0)
+        b = mh._book(s, admin, u, start="09:30", minutes=90, method="bonus")
+        assert b.payment_method == "bonus" and float(b.hours_deducted or 0) == 1.0, (b.payment_method, b.hours_deducted)
+        assert float(b.base_price or 0) == 32.5, f"база 1,5 ч с 09:30 — 32,5 (пик): {b.base_price}"
+        assert float(b.final_price) == 10.0, f"1: остаток 10:30–11:00 = 10 ₾, а {b.final_price}"
+
+        v = mh._client(s, None)
+        mh._bonus(s, v, 1.0)
+        full = mh._book(s, admin, v, days=1, start="09:00", minutes=60, method="bonus")
+        assert float(full.final_price) == 0.0, f"2: подарок на весь час — 0 ₾, а {full.final_price}"
+
+        w = mh._client(s, None)
+        mh._bonus(s, w, 1.0)
+        ev = mh._book(s, admin, w, days=2, start="19:00", minutes=120, method="bonus")
+        assert float(ev.final_price) == 25.0, f"3: остаток 20:00–21:00 в пик = 25 ₾, а {ev.final_price}"
+
+    run()
+
+
+def test_extend_gift_booking_charges_normal_hour():
+    mh = _mh()
+    from app.api.v1.bookings import routes as R
+    src = (ROOT / "backend/app/api/v1/bookings/routes.py").read_text(encoding="utf-8")
+    body = src[src.index("def extend_booking("):]
+    body = body[:body.index("\n@router")]
+    assert "_bonus_uncovered_price(booking, float(new_quote.final_price or 0), new_duration, **_ctx)" in body, \
+        "4: продление подарочной брони без контекста — снова доля цены"
+    for needle in ("resource_id=new_resource, start_dt=new_start_dt",
+                   "resource_id=booking.resource_id, start_dt=start_dt, format_type=new_format"):
+        assert needle in src, f"5: правка брони считает подарок без контекста ({needle})"
+    assert "def _bonus_tail_price(" in src and "start_time=start_dt + timedelta(minutes=head_min)" in src
+    assert R._bonus_tail_price is not None
+
+
+def test_front_mirrors_tail():
+    pp = (ROOT / "src/utils/paymentPriority.ts").read_text(encoding="utf-8")
+    assert "export function bonusSlotMoney(" in pp and "it.tail(c)" in pp, "6: сайт снова считает долю цены"
+    assert "bonusBySlots(opts.items!, bonusHours).money" in pp
+    for rel, start in (("src/components/Wizard/ConfirmationStep.tsx", "i.startDateTime.getTime()"),
+                       ("src/pages/mobile/MobileCheckout.tsx", "i.start.getTime()")):
+        c = (ROOT / rel).read_text(encoding="utf-8")
+        assert re.search(r"tail: \(c: number\) => calculatePrice\(\{", c) and start in c, f"6: {rel} без tail"
+
+
+def test_more_screens_split_extras():
+    for rel, needle in (("src/components/Summary.tsx", "tail: b.tail"),
+                        ("src/pages/mobile/MobileFind.tsx", "tail: (c: number) => calculatePrice({")):
+        c = (ROOT / rel).read_text(encoding="utf-8")
+        assert needle in c, f"6: {rel} снова считает долю цены"
+    from types import SimpleNamespace
+    from datetime import datetime as _dt
+    from app.services.pricing import booking_extras_money
+    b = SimpleNamespace(extras=["coffee"], final_price=23.0, payment_method="bonus", base_price=40.0,
+                        discount_amount=4.0, duration=120, hours_deducted=1.0, start_time="13:00",
+                        date=_dt(2026, 11, 20))
+    from app.services.pricing import PricingService
+    listed = PricingService.calculate_extras_price(["coffee"])
+    assert booking_extras_money(b) == round(min(listed, 23.0), 2), f"8: допы ужаты долей: {booking_extras_money(b)}"
+
+
+if __name__ == "__main__":
+    for name, fn in sorted(dict(globals()).items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print("  ✓", name)
+    print("СТОРОЖ bonus_first_hour: OK")

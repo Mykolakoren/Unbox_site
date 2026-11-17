@@ -735,8 +735,8 @@ def booking_extras_money(booking) -> float:
       * абонементная бронь — пиковая надбавка за её время (5 ₾/ч), часы — в пуле;
       * денежная — base_price − discount_amount (тот же расчёт движка, что лёг в
         бронь при создании/пересчёте);
-      * бонусная — то же, умноженное на непокрытую бонусом долю (бонус покрывает
-        и аренду, и допы — см. bookings/routes._resolve_with_bonus).
+      * бонусная целиком — 0 (подарок покрывает и аренду, и допы); частично
+        подарочная (17.11) — допы целиком, не больше цены брони.
     Старая бронь без base_price — допы из реестра, не больше цены брони.
     """
     listed = round(float(PricingService.calculate_extras_price(list(getattr(booking, "extras", None) or []))), 2)
@@ -759,6 +759,13 @@ def booking_extras_money(booking) -> float:
         if method == "bonus":
             hrs = float(booking.duration or 0) / 60.0
             covered = min(max(0.0, float(getattr(booking, "hours_deducted", 0) or 0)), hrs)
+            if 0 < covered < hrs:
+                # 17.11 (владелец): подарок — первые часы, остаток по обычной цене,
+                # допы — по своей цене целиком (bookings/routes._bonus_tail_price):
+                # final = аренда остатка + допы. Аренду остатка тут не пересчитать
+                # без движка — допы берём из реестра, не больше цены брони. (Доп,
+                # оплаченный на месте наличными, у частично подарочной брони — редкость.)
+                return round(min(listed, final), 2)
             share = (hrs - covered) / hrs if hrs > 0 else 1.0
             room *= share
             cap = listed * share

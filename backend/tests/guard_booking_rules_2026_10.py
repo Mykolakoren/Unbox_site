@@ -551,8 +551,8 @@ def test_crm_past_booking_moved_within_past_keeps_price():
 
 def test_extend_bonus_booking_pays_its_share():
     """17.10 (Максим Кочерженко): 1 ч приветственным часом, потом «Продлить» на
-    1 ч. 2 ч стоят 40 − 10 % = 36 ₾; подарок покрывает половину брони — доплата
-    18 ₾ (как при создании 2-часовой брони с бонусом), а не 36 − 20 = 16."""
+    1 ч. 17.11 (владелец): «подарочный час и потом по обычной цене» — подарок
+    это первый час, второй час — обычная цена 1 ч = 20 ₾ (раньше доля 36 × ½ = 18)."""
     from datetime import timedelta
     from app.api.v1.bookings import routes
     from app.models.booking import Booking
@@ -571,8 +571,8 @@ def test_extend_bonus_booking_pays_its_share():
         assert not (isinstance(out, dict) and "http" in out), out
         s.expire_all()
         b = s.get(Booking, b.id)
-        assert (b.duration, float(b.final_price)) == (120, 18.0), (b.duration, b.final_price)
-        assert _bal(s, u) == -18.0, _bal(s, u)
+        assert (b.duration, float(b.final_price)) == (120, 20.0), (b.duration, b.final_price)
+        assert _bal(s, u) == -20.0, _bal(s, u)
 
 
 def test_reschedule_picker_frees_own_booking():

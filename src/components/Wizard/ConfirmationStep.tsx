@@ -302,7 +302,21 @@ export function ConfirmationStep() {
         () => paymentPlan({
             hours: totalBookingHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: totalPrice,
             // Слоты — в порядке отправки на сервер (бонус тратится по слотам).
-            items: cartDetails.map(i => ({ hours: i.duration / 60, price: i.price.finalPrice })),
+            // tail — цена слота без подарочных первых часов (владелец 17.11).
+            items: cartDetails.map(i => ({
+                hours: i.duration / 60, price: i.price.finalPrice,
+                tail: (c: number) => calculatePrice({
+                    format: state.format,
+                    startTime: new Date(i.startDateTime.getTime() + Math.round(c * 60) * 60000),
+                    endTime: i.endDateTime,
+                    extras: EXTRAS.filter(e => state.extras.includes(e.id)),
+                    paymentMethod: 'balance',
+                    resourceId: i.resourceId,
+                    accumulatedWeeklyHours,
+                    personalDiscountPercent: effectiveUser?.personalDiscountPercent,
+                    pricingSystem: effectiveUser?.pricingSystem,
+                }).finalPrice,
+            })),
         }),
         [totalBookingHours, totalBonusHours, subHours, isSeries, totalPrice, cartDetails],
     );

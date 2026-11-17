@@ -1826,9 +1826,67 @@ def _resolve_with_bonus(
     else:
         covered = round(min(max(float(bonus_left or 0), 0.0), hrs), 2)
     if hrs > 0 and covered > 0:
-        _uncovered = max(0.0, hrs - covered)
-        quote.final_price = round(float(quote.final_price or 0) * (_uncovered / hrs), 2)
+        quote.final_price = _bonus_tail_price(
+            pricing_service, owner, full_price=float(quote.final_price or 0),
+            resource_id=resource_id, start_dt=start_dt, duration_minutes=duration_minutes,
+            format_type=format_type, covered_hours=covered, extras_price=extras_price,
+        )
     return method, quote, covered
+
+
+def _bonus_tail_price(
+    pricing_service,
+    owner: Optional[User],
+    *,
+    full_price: float,
+    resource_id: str,
+    start_dt: datetime,
+    duration_minutes: int,
+    format_type: str,
+    covered_hours: float,
+    extras_price: float = 0.0,
+    exclude_booking_id: Optional[str] = None,
+) -> float:
+    """Сколько деньгами за бронь, первые `covered_hours` которой — подарок.
+
+    Владелец 17.11: «подарочный час и потом по обычной цене». Подарок — это
+    ПЕРВЫЕ часы брони; остаток считается как отдельная обычная бронь этого
+    времени (пик, скидка за длительность остатка, личная скидка — как всегда),
+    допы (кофе, песочница…) — по своей цене. Раньше бонус снимал долю цены:
+    Мила, 1,5 ч с 09:30 = 32,5 ₾ (пик 09:30–10:00), подарок 1 ч → 32,5 × ⅓ =
+    10,83 ₾; теперь 10:30–11:00 = 10 ₾.
+
+    Покрыто всё — 0 (подарок покрывает и пик, и допы, как раньше). Если остаток
+    не делится на получасовые слоты (бонус-часы дробные) или движок упал —
+    прежняя доля цены, чтобы бронь не сорвалась.
+    """
+    hrs = (duration_minutes or 0) / 60.0
+    covered = min(max(float(covered_hours or 0), 0.0), hrs)
+    if hrs <= 0 or covered <= 0:
+        return round(float(full_price or 0), 2)
+    if covered >= hrs - 1e-6:
+        return 0.0
+    head_min = int(round(covered * 60))
+    tail_min = int(duration_minutes) - head_min
+    share = round(float(full_price or 0) * (hrs - covered) / hrs, 2)
+    if tail_min <= 0 or head_min % 30 or tail_min % 30:
+        return share
+    try:
+        tail = pricing_service.calculate_price(
+            user=owner,
+            resource_id=resource_id,
+            start_time=start_dt + timedelta(minutes=head_min),
+            duration_minutes=tail_min,
+            format_type=format_type or "individual",
+            exclude_booking_id=exclude_booking_id,
+            # Часами абонемента остаток не покрываем (иначе 0 ₾), скидку тарифа
+            # оставляем — «обычная цена» этого клиента (ревью денег 17.11).
+            subscription_hours_cover=False,
+        )
+    except Exception:
+        logger.warning("[bonus-tail] цена остатка не посчиталась — берём долю", exc_info=True)
+        return share
+    return round(float(tail.final_price or 0) + float(extras_price or 0), 2)
 
 
 def _bonus_hours_on(booking: Booking) -> float:
@@ -1845,19 +1903,39 @@ def _bonus_hours_on(booking: Booking) -> float:
     return max(0.0, float(booking.hours_deducted or 0))
 
 
-def _bonus_uncovered_price(booking: Booking, price: float, duration_minutes: int) -> float:
-    """Цена брони за вычетом доли, покрытой её бонусными часами.
+def _bonus_uncovered_price(
+    booking: Booking,
+    price: float,
+    duration_minutes: int,
+    *,
+    session: Optional[Session] = None,
+    owner: Optional[User] = None,
+    resource_id: Optional[str] = None,
+    start_dt: Optional[datetime] = None,
+    format_type: Optional[str] = None,
+) -> float:
+    """Цена брони за вычетом её подарочных (бонусных) часов.
 
-    Та же формула, что при создании (_resolve_with_bonus): бонус покрывает
-    covered/hrs брони, деньгами — остальное. Длительность не меняется, значит
-    потраченные бонус-часы по-прежнему покрывают ту же долю — пул бонусов не
-    трогаем. Не бонусная бронь — цена как есть.
+    То же правило, что при создании (_bonus_tail_price, владелец 17.11):
+    подарок — первые часы брони, остаток — по обычной цене этого времени.
+    Длительность может поменяться, бонус-часы брони те же — пул не трогаем.
+    Без контекста брони (время/кабинет) — прежняя доля цены. Не бонусная бронь —
+    цена как есть. `price` — цена движка за всю бронь без допов.
     """
     hrs = (duration_minutes or 0) / 60.0
     covered = min(_bonus_hours_on(booking), hrs)
     if hrs <= 0 or covered <= 0:
         return price
-    return round(float(price or 0) * (hrs - covered) / hrs, 2)
+    if session is None or start_dt is None:
+        return round(float(price or 0) * (hrs - covered) / hrs, 2)
+    from app.services.pricing import PricingService as _PS
+    return _bonus_tail_price(
+        _PS(session), owner, full_price=float(price or 0),
+        resource_id=resource_id or booking.resource_id, start_dt=start_dt,
+        duration_minutes=duration_minutes, format_type=format_type or booking.format or "individual",
+        covered_hours=covered, exclude_booking_id=str(booking.id),
+    )
+
 
 
 # Правки, меняющие длительность бонусной брони, требуют вернуть/дотратить
@@ -5658,8 +5736,10 @@ def _reprice_for_move(
             # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту же долю
             # — деньгами считаем только непокрытое (как при создании). Допы, что
             # едут с бронью, остаются в цене (снятые уходят — их возврат в разнице).
-            new_price = round(_bonus_uncovered_price(booking, new_quote.final_price, new_duration)
-                              + kept_extras_money, 2)
+            new_price = round(_bonus_uncovered_price(
+                booking, new_quote.final_price, new_duration, session=session, owner=owner,
+                resource_id=new_resource, start_dt=new_start_dt, format_type=booking.format)
+                + kept_extras_money, 2)
         price_diff = round(new_price - old_price, 2)
         # `pending` bookings haven't been charged yet — the T-24h cron will
         # capture the (new) final_price in full. Touching the balance here would
@@ -6753,7 +6833,9 @@ def change_booking_format(
             # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
             # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
             # клиент доплачивал весь слот, уже оплаченный бонус-часом.
-            quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
+            quote.final_price = _bonus_uncovered_price(
+                booking, quote.final_price, booking.duration, session=session, owner=booking_owner,
+                resource_id=booking.resource_id, start_dt=start_dt, format_type=new_format)
             # Допы брони (песочница, кофе…) остаются в цене — движок про них не знает
             # (ревизия 03.10, как «часы подряд» и перенос).
             quote.final_price = round(float(quote.final_price or 0) + _extras_money(booking), 2)
@@ -7300,9 +7382,13 @@ def extend_booking(
             # 36 − 20 = 16 ₾ — подарочный час шёл по полной цене, а вся скидка за
             # 2 ч — на платный. Доля бонуса — как при создании брони
             # (_resolve_with_bonus / _bonus_uncovered_price): 36 × ½ = 18 ₾.
+            # 17.11 (владелец): подарок — первые часы, остаток по обычной цене —
+            # доплата = цена остатка после продления − цена остатка до него.
+            _ctx = dict(session=session, owner=target_user, resource_id=booking.resource_id,
+                        start_dt=_start_dt, format_type=booking.format or "individual")
             extra_price = round(
-                _bonus_uncovered_price(booking, float(new_quote.final_price or 0), new_duration)
-                - _bonus_uncovered_price(booking, float(old_quote.final_price or 0), booking.duration), 2
+                _bonus_uncovered_price(booking, float(new_quote.final_price or 0), new_duration, **_ctx)
+                - _bonus_uncovered_price(booking, float(old_quote.final_price or 0), booking.duration, **_ctx), 2
             )
         else:
             extra_price = round(

@@ -102,7 +102,20 @@ export function Summary() {
             totalPeakSurcharge += p.peakSurcharge;
             totalSubPeakDebt += p.subscriptionPeakDebt;
 
-            return { ...b, price: p };
+            // 17.11 (владелец): подарок — первые часы, остаток по обычной цене.
+            const tail = (c: number) => calculatePrice({
+                format: state.format,
+                startTime: new Date(startDateTime.getTime() + Math.round(c * 60) * 60000),
+                endTime: endDateTime,
+                extras: selectedExtras,
+                paymentMethod: 'balance',
+                resourceId: b.resourceId,
+                accumulatedWeeklyHours: accumulatedWeeklyHours,
+                personalDiscountPercent: effectiveUser?.personalDiscountPercent,
+                pricingSystem: effectiveUser?.pricingSystem,
+            }).finalPrice;
+
+            return { ...b, price: p, tail };
         });
 
         return {
@@ -295,7 +308,7 @@ export function Summary() {
                                 // смежных часов, точная сумма — после брони.
                                 const hrs = cartBookings.reduce((s, b) => s + b.duration / 60, 0);
                                 const { covered, money } = bonusBySlots(
-                                    cartBookings.map(b => ({ hours: b.duration / 60, price: b.price.finalPrice })),
+                                    cartBookings.map(b => ({ hours: b.duration / 60, price: b.price.finalPrice, tail: b.tail })),
                                     bonusHours,
                                 );
                                 if (hrs <= 0 || covered >= hrs - 0.01) return formatGel(0);

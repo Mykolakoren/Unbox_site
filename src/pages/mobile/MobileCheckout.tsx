@@ -301,7 +301,21 @@ export function MobileCheckout() {
     const plan = useMemo(
         // Слоты (items) — в порядке отправки на сервер: бонус тратится по слотам.
         () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total,
-            items: priced.items.map(i => ({ hours: i.duration / 60, price: i.price.finalPrice })) }),
+            // tail — цена слота без подарочных первых часов (владелец 17.11).
+            items: priced.items.map(i => ({
+                hours: i.duration / 60, price: i.price.finalPrice,
+                tail: (c: number) => calculatePrice({
+                    format: state.format,
+                    startTime: new Date(i.start.getTime() + Math.round(c * 60) * 60000),
+                    endTime: i.end,
+                    extras: EXTRAS.filter(e => state.extras.includes(e.id)),
+                    paymentMethod: 'balance',
+                    resourceId: i.resourceId,
+                    accumulatedWeeklyHours,
+                    personalDiscountPercent: effectiveUser?.personalDiscountPercent,
+                    pricingSystem: effectiveUser?.pricingSystem,
+                }).finalPrice,
+            })) }),
         [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total, priced.items],
     );
 

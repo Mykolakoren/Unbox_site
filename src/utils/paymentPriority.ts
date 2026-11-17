@@ -280,8 +280,10 @@ export function paymentPlan(opts: {
     /** Цена брони деньгами (без абонемента). 0 — бронь бесплатна. */
     moneyPrice?: number;
     /** Слоты корзины в порядке отправки на сервер (часы и цена деньгами).
-     *  Бонус тратится по слотам так же, как на сервере. */
-    items?: Array<{ hours: number; price: number }>;
+     *  Бонус тратится по слотам так же, как на сервере. `tail(c)` — цена слота
+     *  без первых c часов (подарок — первые часы, остаток по обычной цене,
+     *  владелец 17.11); без него — прежняя доля цены. */
+    items?: BonusSlot[];
 }): PaymentPlan {
     const { hours, bonusHours } = opts;
     const subCovers = opts.sub.ok && hours > 0 && opts.sub.remaining >= hours - 0.01;
@@ -302,7 +304,7 @@ export function paymentPlan(opts: {
     const multi = (opts.items?.length ?? 0) > 1;
     const bonusMoney = !bonusPartial
         ? 0
-        : multi
+        : (opts.items?.length ?? 0) > 0
             ? bonusBySlots(opts.items!, bonusHours).money
             : Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100;
     const bonusApprox = bonusPartial && multi;
@@ -314,8 +316,31 @@ export function paymentPlan(opts: {
 /** Бонус по слотам, как сервер (multi-slot / по одной брони подряд): слот,
  *  который бонус покрывает целиком, — бесплатно; слот, где бонуса меньше, —
  *  бонус-часы бесплатно, остаток его цены деньгами; дальше — деньгами. */
+export interface BonusSlot {
+    hours: number;
+    price: number;
+    /** Цена слота без первых `covered` часов — как отдельная обычная бронь. */
+    tail?: (covered: number) => number;
+}
+
+/** Деньгами за слот, первые `c` часов которого — подарок. Зеркало сервера
+ *  (_bonus_tail_price, владелец 17.11): остаток — по обычной цене своего
+ *  времени; не по получасам — прежняя доля цены. */
+export function bonusSlotMoney(it: BonusSlot, c: number): number {
+    const h = Math.max(0, it.hours);
+    const price = Math.max(0, it.price);
+    if (h <= 0 || c <= 0) return price;
+    if (c >= h - 1e-6) return 0;
+    const headMin = Math.round(c * 60);
+    const tailMin = Math.round(h * 60) - headMin;
+    if (it.tail && headMin % 30 === 0 && tailMin % 30 === 0 && tailMin > 0) {
+        return Math.round(Math.max(0, it.tail(c)) * 100) / 100;
+    }
+    return Math.round(price * ((h - c) / h) * 100) / 100;
+}
+
 export function bonusBySlots(
-    items: Array<{ hours: number; price: number }>,
+    items: BonusSlot[],
     bonusHours: number,
 ): { covered: number; money: number } {
     let left = Math.max(0, bonusHours);
@@ -323,11 +348,10 @@ export function bonusBySlots(
     let money = 0;
     for (const it of items) {
         const h = Math.max(0, it.hours);
-        const price = Math.max(0, it.price);
         const c = h > 0 ? Math.min(left, h) : 0;
         left -= c;
         covered += c;
-        money += h > 0 ? price * ((h - c) / h) : price;
+        money += bonusSlotMoney(it, c);
     }
     return { covered: Math.round(covered * 100) / 100, money: Math.round(money * 100) / 100 };
 }

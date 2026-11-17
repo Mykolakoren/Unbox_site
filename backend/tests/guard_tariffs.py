@@ -101,7 +101,9 @@ def _book(s: Session, u: User, hours: float, requested="balance"):
 # ─────────────────────────────────────────────────────────────────────────
 
 def test_welcome_hour_partial_without_subscription():
-    """Бронь 2 ч без абонемента, 1 ч бонуса → 1 ч бесплатно + 1 ч деньгами."""
+    """Бронь 2 ч без абонемента, 1 ч бонуса → 1 ч бесплатно + 1 ч деньгами.
+    17.11 (владелец): подарок — первый час, второй (13:00–14:00) — по обычной
+    цене часа 20 ₾ (раньше доля цены 2 ч: 36 × ½ = 18)."""
     from app.services.bonus_service import available_free_hours
     s = _db()
     u = _user(s, bonus_hours=1.0)
@@ -109,7 +111,7 @@ def test_welcome_hour_partial_without_subscription():
     assert full > 0
     assert method == "bonus", f"частичный бонус не потратился сам: {method}"
     assert covered == 1.0, covered
-    assert abs(quote.final_price - full / 2) < 0.01, (quote.final_price, full)
+    assert abs(quote.final_price - 20.0) < 0.01, (quote.final_price, full)
     assert quote.applied_rule != "SUBSCRIPTION" and float(quote.hours_deducted or 0) == 0
     assert available_free_hours(s, u.id) == 0.0, "бонус-час не списан"
 

@@ -551,7 +551,18 @@ export function MobileFind() {
             resourceKind: resourceKind(linkPick.resourceId), liftPause: true,
         });
         // Сервер сам выбирает: бонус → абонемент → баланс (оплата «balance» = «реши сам»).
-        const plan = paymentPlan({ hours, bonusHours: bonusHoursAvail, sub, moneyPrice: price.finalPrice });
+        // 17.11 (владелец): подарок — первые часы, остаток по обычной цене (tail).
+        const plan = paymentPlan({
+            hours, bonusHours: bonusHoursAvail, sub, moneyPrice: price.finalPrice,
+            items: [{
+                hours, price: price.finalPrice,
+                tail: (c: number) => calculatePrice({
+                    format, startTime: new Date(start.getTime() + Math.round(c * 60) * 60000), endTime: end,
+                    extras: [], resourceId: linkPick.resourceId,
+                    personalDiscountPercent: currentUser?.personalDiscountPercent, pricingSystem: currentUser?.pricingSystem,
+                }).finalPrice,
+            }],
+        });
         const peak = price.peakSurcharge ?? 0;
         const pay = plan.auto === 'bonus'
             ? (plan.bonusPartial
