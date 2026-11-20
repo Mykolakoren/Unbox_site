@@ -26,6 +26,8 @@ import type { BookingHistoryItem, Subscription } from '../store/types';
 import type { Format } from '../types';
 import { pauseLiftExpired, subscriptionLifecycle } from './subscription';
 import { extraAvailable, extraKindLabel, extraPool, type ResourceKind } from './subscriptionHours';
+import { isPeakTime } from './pricing';
+import { PRICING_CONFIG } from './pricingConfig';
 
 export type PayMethod = 'balance' | 'subscription' | 'bonus';
 
@@ -253,9 +255,12 @@ export interface PaymentPlan {
     bonusPartial: boolean;
     /** Сколько часов брони покроет бонус (0, если бонус не пойдёт). */
     bonusCovered: number;
-    /** Сколько деньгами при оплате бонусом: непокрытая доля цены (0 при
-     *  полном покрытии). Та же формула, что _resolve_with_bonus. */
+    /** Сколько деньгами при оплате бонусом: остаток по обычной цене + надбавка
+     *  за пиковые часы подарка (владелец 20.11; при полном покрытии вне пика — 0).
+     *  Та же формула, что _bonus_tail_price на сервере. */
     bonusMoney: number;
+    /** Оплата бонусом всё же требует денег: частичный бонус или подарок в пик. */
+    bonusPays: boolean;
     /** Несколько слотов и частичный бонус: сумма — оценка (≈). Сервер идёт по
      *  слотам (бонус целиком закрывает первые, остальные — деньгами) и после
      *  создания пересчитывает цепочку смежных часов (consecutive_pricing) —
@@ -302,15 +307,17 @@ export function paymentPlan(opts: {
         && hours > 0 && bonusHours > 0.001 && moneyPrice > 0;
     const bonusCovered = bonusCovers ? hours : bonusPartial ? Math.min(bonusHours, hours) : 0;
     const multi = (opts.items?.length ?? 0) > 1;
-    const bonusMoney = !bonusPartial
+    // 20.11 (владелец): и при полном покрытии в пик деньгами идёт надбавка подарочных часов.
+    const bonusMoney = !bonusPartial && !bonusCovers
         ? 0
         : (opts.items?.length ?? 0) > 0
             ? bonusBySlots(opts.items!, bonusHours).money
-            : Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100;
+            : bonusPartial ? Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100 : 0;
+    const bonusPays = bonusPartial || (bonusCovers && bonusMoney > 0);
     const bonusApprox = bonusPartial && multi;
     const subFreeCovers = subCovers && sub.free >= hours - 0.01;
     const auto: PayMethod = bonusCovers ? 'bonus' : subCovers ? 'subscription' : bonusPartial ? 'bonus' : 'balance';
-    return { hours, bonusHours, free, bonusCovers, bonusPartial, bonusCovered, bonusMoney, bonusApprox, sub, subCovers, subFreeCovers, auto };
+    return { hours, bonusHours, free, bonusCovers, bonusPartial, bonusCovered, bonusMoney, bonusPays, bonusApprox, sub, subCovers, subFreeCovers, auto };
 }
 
 /** Бонус по слотам, как сервер (multi-slot / по одной брони подряд): слот,
@@ -321,20 +328,38 @@ export interface BonusSlot {
     price: number;
     /** Цена слота без первых `covered` часов — как отдельная обычная бронь. */
     tail?: (covered: number) => number;
+    /** Начало слота — по нему считаем надбавку за пик подарочных часов. */
+    start?: Date;
+}
+
+/** Надбавка за пиковые часы отрезка [start, start+minutes): 5 ₾ за каждый
+ *  пиковый час шагом 30 мин — как subscription_peak_money на сервере. */
+export function giftPeakMoney(start: Date, minutes: number): number {
+    const per = PRICING_CONFIG.peak_hours.subscription_surcharge_gel;
+    const from = start.getHours() * 60 + start.getMinutes();
+    let slots = 0;
+    for (let m = from; m < from + Math.max(0, Math.round(minutes)); m += 30) {
+        const hh = String(Math.floor(m / 60) % 24).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        if (isPeakTime(`${hh}:${mm}`)) slots += 1;
+    }
+    return Math.round(slots / 2 * per * 100) / 100;
 }
 
 /** Деньгами за слот, первые `c` часов которого — подарок. Зеркало сервера
- *  (_bonus_tail_price, владелец 17.11): остаток — по обычной цене своего
- *  времени; не по получасам — прежняя доля цены. */
+ *  (_bonus_tail_price): остаток — по обычной цене своего времени (владелец
+ *  17.11), плюс надбавка за пиковые часы подарка — как по абонементу
+ *  (владелец 20.11); не по получасам — прежняя доля цены. */
 export function bonusSlotMoney(it: BonusSlot, c: number): number {
     const h = Math.max(0, it.hours);
     const price = Math.max(0, it.price);
     if (h <= 0 || c <= 0) return price;
-    if (c >= h - 1e-6) return 0;
     const headMin = Math.round(c * 60);
+    const giftPeak = it.start && price > 0 ? giftPeakMoney(it.start, Math.min(headMin, Math.round(h * 60))) : 0;
+    if (c >= h - 1e-6) return Math.round(Math.min(giftPeak, price) * 100) / 100;
     const tailMin = Math.round(h * 60) - headMin;
     if (it.tail && headMin % 30 === 0 && tailMin % 30 === 0 && tailMin > 0) {
-        return Math.round(Math.max(0, it.tail(c)) * 100) / 100;
+        return Math.round((Math.max(0, it.tail(c)) + giftPeak) * 100) / 100;
     }
     return Math.round(price * ((h - c) / h) * 100) / 100;
 }
@@ -388,7 +413,7 @@ export function balanceLockedReason(plan: PaymentPlan): string {
 /** Деньгами при оплате бонусом (частичный бонус) — для итога, проверки
  *  баланса и подписи. 0 — бронь целиком бонусом. */
 export function bonusMoneyDue(plan: PaymentPlan): number {
-    return plan.bonusPartial ? plan.bonusMoney : 0;
+    return plan.bonusPays ? plan.bonusMoney : 0;
 }
 
 /** Подпись рядом с оплатой, когда бронь снимет паузу абонемента (владелец 03.10). */

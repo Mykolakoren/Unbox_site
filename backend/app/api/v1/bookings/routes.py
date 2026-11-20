@@ -1795,8 +1795,9 @@ def _resolve_with_bonus(
 
     Бонусную бронь перекотируем БЕЗ абонемента: иначе непокрытый остаток
     посчитался бы по абонементной цене 0 ₾ (утечка 1630 ₾), а в брони остались
-    бы правило SUBSCRIPTION и часы абонемента. Бонус покрывает всю цену брони
-    вместе с пиком и допуслугами — как и раньше («выданное бонусом бесплатно»).
+    бы правило SUBSCRIPTION и часы абонемента. Бонус покрывает аренду и допы
+    своих часов; надбавку за пиковые часы клиент платит, как по абонементу
+    (владелец 20.11) — см. _bonus_tail_price.
 
     Возвращает (method, quote, bonus_covered). consume=False — «примерка»
     без записи: покрытие считается из `bonus_left`, пул бонусов не трогаем.
@@ -1856,17 +1857,30 @@ def _bonus_tail_price(
     Мила, 1,5 ч с 09:30 = 32,5 ₾ (пик 09:30–10:00), подарок 1 ч → 32,5 × ⅓ =
     10,83 ₾; теперь 10:30–11:00 = 10 ₾.
 
-    Покрыто всё — 0 (подарок покрывает и пик, и допы, как раньше). Если остаток
-    не делится на получасовые слоты (бонус-часы дробные) или движок упал —
-    прежняя доля цены, чтобы бронь не сорвалась.
+    Владелец 20.11 (чат админов, бронь Милы): подарок закрывает АРЕНДУ, а
+    надбавку за пиковые часы (9–10, 20–22: +5 ₾/ч) клиент платит — как по
+    абонементу (subscription_peak_money). Мила: 09:30–10:30 подарок, из них
+    09:30–10:00 пик → 2,5 ₾ + остаток 10:30–11:00 = 10 ₾ → 12,5 ₾.
+
+    Покрыто всё — только надбавка за пик подарочных часов (допы подарок
+    покрывает, как раньше). Бесплатная бронь (comp, полная цена 0) — 0. Если
+    остаток не делится на получасовые слоты (бонус-часы дробные) или движок
+    упал — прежняя доля цены, чтобы бронь не сорвалась.
     """
+    from app.services.pricing import PricingService as _PS
     hrs = (duration_minutes or 0) / 60.0
     covered = min(max(float(covered_hours or 0), 0.0), hrs)
     if hrs <= 0 or covered <= 0:
         return round(float(full_price or 0), 2)
-    if covered >= hrs - 1e-6:
-        return 0.0
     head_min = int(round(covered * 60))
+    # Надбавка — только если аренда чего-то стоит: у comp / «личных 100 %» цена
+    # брони = одни допы, и пик за бесплатную аренду брать нельзя (ревью денег 20.11).
+    rent = float(full_price or 0) - float(extras_price or 0)
+    gift_peak = 0.0
+    if rent > 0.001:
+        gift_peak = float(_PS.subscription_peak_money(start_dt, min(head_min, int(duration_minutes))))
+    if covered >= hrs - 1e-6:
+        return round(min(gift_peak, rent), 2) if gift_peak > 0 else 0.0
     tail_min = int(duration_minutes) - head_min
     share = round(float(full_price or 0) * (hrs - covered) / hrs, 2)
     if tail_min <= 0 or head_min % 30 or tail_min % 30:
@@ -1886,7 +1900,7 @@ def _bonus_tail_price(
     except Exception:
         logger.warning("[bonus-tail] цена остатка не посчиталась — берём долю", exc_info=True)
         return share
-    return round(float(tail.final_price or 0) + float(extras_price or 0), 2)
+    return round(float(tail.final_price or 0) + float(extras_price or 0) + gift_peak, 2)
 
 
 def _bonus_hours_on(booking: Booking) -> float:
@@ -7193,8 +7207,18 @@ def apply_bonus_hour(
     # Стоимость одного часа в ТЕКУЩЕЙ цене АРЕНДЫ (со скидками): 36₾/2ч → 18₾.
     # Допы (песочница, кофе) в подарок не входят — они остаются в цене целиком
     # (ревизия 03.10: раньше «час» откусывал и долю допов).
-    from app.services.pricing import booking_extras_money
+    from app.services.pricing import PricingService, booking_extras_money
     _rent = max(0.0, old_price - booking_extras_money(booking))
+    # 20.11 (владелец): подарок закрывает аренду, надбавку за пиковые часы
+    # (+5 ₾/ч) клиент платит — как у брони бонусом и по абонементу. Час считаем
+    # от аренды БЕЗ надбавки: 09:00–10:00 за 25 ₾ → подарок 20, остаётся 5.
+    try:
+        _h, _m = map(int, str(booking.start_time or "00:00").split(":")[:2])
+        _peak = float(PricingService.subscription_peak_money(
+            booking.date.replace(hour=_h, minute=_m, second=0, microsecond=0), duration))
+    except Exception:
+        _peak = 0.0
+    _rent = max(0.0, _rent - min(_peak, _rent))
     hour_cost = round(_rent * 60.0 / duration, 2)
     if hour_cost < 0.01:
         raise HTTPException(400, "Аренда в этой брони уже 0 ₾ — скидывать нечего (в цене только допы)")
@@ -8241,8 +8265,9 @@ def split_booking_rows(session: Session, booking: Booking, parts: list, current_
             _off += p
     # 17.11 (владелец): у брони с подарочными (бонусными) часами подарок — ПЕРВЫЕ
     # часы. При делении бонус-часы заполняют части по порядку, с первой; часть,
-    # целиком покрытая подарком, стоит 0 ₾, частично — остаток по обычной цене
-    # (_bonus_tail_price), остальные — по своей цене. Деньги брони делим этими
+    # целиком покрытая подарком, стоит 0 ₾ (в пик — только надбавка, владелец
+    # 20.11), частично — остаток по обычной цене (_bonus_tail_price), остальные —
+    # по своей цене. Деньги брони делим этими
     # весами — итог по-прежнему ровно исходный. Раньше часы делились по минутам,
     # а деньги долями цены: «подарочная» часть держала 6,92 ₾, платная 3,08.
     _bonus_split = ((booking.payment_method or "").lower() == "bonus"
@@ -8263,11 +8288,11 @@ def split_booking_rows(session: Session, booking: Booking, parts: list, current_
             _st = booking.date.replace(hour=_m // 60, minute=_m % 60, second=0, microsecond=0)
             _c, _ph, q = _bonus_hours_parts[idx], p / 60.0, quotes[idx]
             _full = float(q.final_price) if q is not None else float(p)
-            if _c >= _ph - 1e-6:
-                weights.append(0.0)
-            elif _c <= 0:
+            if _c <= 0:
                 weights.append(_full)
             else:
+                # Целиком подарочная часть — только надбавка за пик (владелец 20.11),
+                # частично — она же + остаток по обычной цене.
                 weights.append(_bonus_tail_price(
                     pricing, owner, full_price=_full, resource_id=booking.resource_id, start_dt=_st,
                     duration_minutes=p, format_type=booking.format or "individual", covered_hours=_c,

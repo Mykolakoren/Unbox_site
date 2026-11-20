@@ -77,8 +77,9 @@ export function paymentLine(b: BookingHistoryItem, start: Date | null): string {
     const price = priceLabel(b);
     if (b.paymentStatus === 'paid') return `Оплачено: ${price}`;
     if (b.paymentStatus === 'waived') return 'Без оплаты';
-    // Бонусный час уже потрачен при брони — «Спишем…» тут неправда.
-    if (b.paymentMethod === 'bonus') return price;
+    // Бонусный час уже потрачен при брони — «Спишем…» тут неправда, если денег
+    // сверх подарка нет (остаток / надбавка за пик списываются за сутки, 20.11).
+    if (b.paymentMethod === 'bonus' && !((b.finalPrice ?? 0) > 0)) return price;
     if (b.paymentStatus === 'pending' && start) return `Спишем ${formatChargeAt(start)}: ${price}`;
     return price;
 }

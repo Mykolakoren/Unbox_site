@@ -555,7 +555,7 @@ export function MobileFind() {
         const plan = paymentPlan({
             hours, bonusHours: bonusHoursAvail, sub, moneyPrice: price.finalPrice,
             items: [{
-                hours, price: price.finalPrice,
+                hours, price: price.finalPrice, start,
                 tail: (c: number) => calculatePrice({
                     format, startTime: new Date(start.getTime() + Math.round(c * 60) * 60000), endTime: end,
                     extras: [], resourceId: linkPick.resourceId,
@@ -565,7 +565,7 @@ export function MobileFind() {
         });
         const peak = price.peakSurcharge ?? 0;
         const pay = plan.auto === 'bonus'
-            ? (plan.bonusPartial
+            ? (plan.bonusPays
                 ? `${fmtHours(plan.bonusCovered)} бонусом + ${formatGel(plan.bonusMoney)} с баланса`
                 : `${fmtHours(hours)} бонусных часов`)
             : plan.auto === 'subscription'

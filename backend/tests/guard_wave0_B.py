@@ -374,6 +374,12 @@ def _run_with_fakes(fn, booking, per_hour: float):
         def calculate_extras_price(ids):
             return 0.0
 
+        # 20.11: надбавка за пик подарочных часов (_bonus_tail_price) — в этой
+        # упрощённой цене пиков нет, как и в calculate_price выше.
+        @staticmethod
+        def subscription_peak_money(start_time, duration_minutes):
+            return 0.0
+
     _silent = SimpleNamespace(log_event=lambda **kw: None,
                               send_booking_rescheduled=lambda **kw: None,
                               send_admin_event=lambda **kw: None,

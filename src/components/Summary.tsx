@@ -115,7 +115,7 @@ export function Summary() {
                 pricingSystem: effectiveUser?.pricingSystem,
             }).finalPrice;
 
-            return { ...b, price: p, tail };
+            return { ...b, price: p, tail, start: startDateTime };
         });
 
         return {
@@ -308,10 +308,11 @@ export function Summary() {
                                 // смежных часов, точная сумма — после брони.
                                 const hrs = cartBookings.reduce((s, b) => s + b.duration / 60, 0);
                                 const { covered, money } = bonusBySlots(
-                                    cartBookings.map(b => ({ hours: b.duration / 60, price: b.price.finalPrice, tail: b.tail })),
+                                    cartBookings.map(b => ({ hours: b.duration / 60, price: b.price.finalPrice, tail: b.tail, start: b.start })),
                                     bonusHours,
                                 );
-                                if (hrs <= 0 || covered >= hrs - 0.01) return formatGel(0);
+                                // 20.11: подарок в пик — надбавка деньгами, как по абонементу.
+                                if (hrs <= 0 || covered >= hrs - 0.01) return money > 0 ? `${fmtHours(covered)} бонусом + ${formatGel(money)}` : formatGel(0);
                                 return `${fmtHours(covered)} бонусом + ${cartBookings.length > 1 ? '≈ ' : ''}${formatGel(money)}`;
                             })()
                             : formatGel(total.finalPrice)}</span>

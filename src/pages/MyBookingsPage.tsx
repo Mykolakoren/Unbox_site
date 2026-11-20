@@ -2993,7 +2993,9 @@ function BookingCard({
     // Чем оплачено: «Бонус / Абонемент / С баланса» (было «Депозит 0 ₾» у бонусной брони — G3-14, X3-05).
     const hours = Number(booking.hoursDeducted) || (booking.duration || 0) / 60;
     const payment = booking.paymentMethod === 'bonus'
-        ? { Icon: Gift, label: 'Бонус', value: fmtHoursShort(hours) }
+        ? { Icon: Gift, label: 'Бонус', value: Number(booking.finalPrice) > 0
+            ? `${fmtHoursShort(hours)} + ${formatGel(booking.finalPrice)}` // остаток/пик с баланса (20.11)
+            : fmtHoursShort(hours) }
         : booking.paymentMethod === 'subscription'
             ? { Icon: Ticket, label: 'Абонемент', value: Number(booking.finalPrice) > 0
                 ? `${fmtHoursShort(hours)} + ${formatGel(booking.finalPrice)}` // пик/допуслуги с баланса

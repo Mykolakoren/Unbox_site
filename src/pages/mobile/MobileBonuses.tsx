@@ -154,7 +154,7 @@ export function MobileBonuses() {
                 />
                 <ListRow
                     lead={<ListIcon>{null}</ListIcon>}
-                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}><b>Нет абонемента?</b> Бонус идёт на любую бронь: например, 1 бонусный час на бронь в 2 часа — первый час бесплатно, второй оплачивается как обычно.</span>}
+                    title={<span style={{ fontWeight: 500, fontSize: TEXT.small }}><b>Нет абонемента?</b> Бонус идёт на любую бронь: например, 1 бонусный час на бронь в 2 часа — первый час бесплатно, второй оплачивается как обычно. В часы пик (9–10, 20–22) — только надбавка +5 ₾/ч, как по абонементу.</span>}
                 />
                 <ListRow
                     lead={<ListIcon>{null}</ListIcon>}

@@ -303,7 +303,7 @@ export function MobileCheckout() {
         () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total,
             // tail — цена слота без подарочных первых часов (владелец 17.11).
             items: priced.items.map(i => ({
-                hours: i.duration / 60, price: i.price.finalPrice,
+                hours: i.duration / 60, price: i.price.finalPrice, start: i.start,
                 tail: (c: number) => calculatePrice({
                     format: state.format,
                     startTime: new Date(i.start.getTime() + Math.round(c * 60) * 60000),
@@ -477,7 +477,7 @@ export function MobileCheckout() {
         : '';
     // Частичный бонус (без абонемента, владелец 01.10): «1 ч бонусом + 20 ₾».
     const payLabel = payMethod === 'bonus'
-        ? (plan.bonusPartial
+        ? (plan.bonusPays
             ? `${fmtHours(plan.bonusCovered)} бонусом + ${bonusMoneyText(plan, formatGel)}`
             : `${fmtHours(totalDurationHours)} из бонусов`)
         : payMethod === 'subscription'
@@ -941,7 +941,7 @@ export function MobileCheckout() {
                                 value={payMethod === 'balance'
                                     ? formatGel(priced.total)
                                     : payMethod === 'bonus'
-                                        ? (plan.bonusPartial
+                                        ? (plan.bonusPays
                                             ? `${fmtHours(plan.bonusCovered)} + ${bonusMoneyText(plan, formatGel)}`
                                             : formatGel(0))
                                         : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`}
@@ -1161,6 +1161,8 @@ export function MobileCheckout() {
                         {!isSeries && payMethod === 'bonus' && (
                             plan.bonusPartial
                                 ? <li>Спишется {fmtHours(plan.bonusCovered)} из бонусов, остальное — {bonusMoneyText(plan, formatGel)} с баланса{plan.bonusApprox ? ' (точная сумма — после брони)' : ''}.</li>
+                                : plan.bonusPays
+                                ? <li>Оплатим {totalDurationHours === 1 ? 'бонусным часом' : `бонусными часами (${fmtHours(totalDurationHours)})`}, а надбавку за пиковые часы — {formatGel(plan.bonusMoney)} спишем с баланса (как по абонементу).</li>
                                 : <li>Оплатим {totalDurationHours === 1 ? 'бонусным часом' : `бонусными часами (${fmtHours(totalDurationHours)})`} — с баланса ничего не спишем.</li>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
@@ -1407,7 +1409,9 @@ export function MobileCheckout() {
                         <PaymentRow
                             label="Бонусные часы"
                             sub={plan.bonusCovers
-                                ? `${fmtHours(totalBonusHours)} бесплатно`
+                                ? (plan.bonusPays
+                                    ? `${fmtHours(plan.bonusCovered)} бесплатно + ${formatGel(plan.bonusMoney)} за пиковые часы`
+                                    : `${fmtHours(totalBonusHours)} бесплатно`)
                                 : plan.bonusPartial
                                     ? `${fmtHours(plan.bonusCovered)} бесплатно + ${bonusMoneyText(plan, formatGel)} с баланса`
                                     : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${plan.sub.active ? '. С абонементом бонус идёт только на бронь, которую оплатит полностью (1 ч бонуса — на бронь ровно в 1 ч)' : ''}`}

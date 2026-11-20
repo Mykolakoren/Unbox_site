@@ -32,7 +32,10 @@ export function priceLabel(b: BookingHistoryItem): string {
             : `${formatHours(hoursDeducted)} из абонемента`;
     }
     if (method === 'bonus') {
-        return `${formatHours(hoursDeducted)} из бонусов`;
+        // Деньги сверх подарка: остаток брони и надбавка за пик (владелец 20.11).
+        return price > 0
+            ? `${formatHours(hoursDeducted)} из бонусов + ${formatGel(price)}`
+            : `${formatHours(hoursDeducted)} из бонусов`;
     }
     if (price <= 0) return 'Бесплатно';
     return formatGel(price, { fraction: 0 });
@@ -57,7 +60,7 @@ export function priceTrail(b: BookingHistoryItem): { main: string; sub?: string 
             ? { main: 'Абонемент', sub: `+ ${formatGel(price, { fraction: 0 })}` }
             : { main: 'Абонемент' };
     }
-    if (method === 'bonus') return { main: 'Бонус' };
+    if (method === 'bonus') return price > 0 ? { main: 'Бонус', sub: `+ ${formatGel(price)}` } : { main: 'Бонус' };
     if (price <= 0) return { main: 'Бесплатно' };
     return { main: formatGel(price, { fraction: 0 }) };
 }

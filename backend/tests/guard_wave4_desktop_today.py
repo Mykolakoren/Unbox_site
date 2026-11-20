@@ -196,7 +196,8 @@ def test_chessboard_slot_width_and_scroll_to_now():
 
 CHESS_MONEY_FP = {
     ("const handleCancelConfirm = async", "    // «Час в подарок»"): "b655ef28838f2ce0",
-    ("const handleBonusHour = async", "    const handleEditPrice"): "5dd48359a96a3409",
+    # 20.11: в подтверждении «Час в подарок» — про надбавку за пик (владелец 20.11).
+    ("const handleBonusHour = async", "    const handleEditPrice"): "082a468ce560454a",
     ("const handleToggleReRent = async", "    /** \"Продлить +30 мин\""): "ca17d5c2b7b11ee0",  # 24.10: + вопрос перед «Пересдать»
     ("const handleExtend = async", "    /** Сократить бронь"): "64740fef41a09aa5",
     ("const doShorten = async", "    /** \"Перенести\""): "b86af22b8d2abc49",

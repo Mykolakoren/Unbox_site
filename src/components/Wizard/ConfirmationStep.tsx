@@ -304,7 +304,7 @@ export function ConfirmationStep() {
             // Слоты — в порядке отправки на сервер (бонус тратится по слотам).
             // tail — цена слота без подарочных первых часов (владелец 17.11).
             items: cartDetails.map(i => ({
-                hours: i.duration / 60, price: i.price.finalPrice,
+                hours: i.duration / 60, price: i.price.finalPrice, start: i.startDateTime,
                 tail: (c: number) => calculatePrice({
                     format: state.format,
                     startTime: new Date(i.startDateTime.getTime() + Math.round(c * 60) * 60000),
@@ -1082,7 +1082,7 @@ export function ConfirmationStep() {
                                         <Gift size={16} className="text-ink-60" aria-hidden="true" />
                                         <span className="font-semibold text-ink">Бонус</span>
                                     </div>
-                                    {plan.bonusPartial ? (
+                                    {plan.bonusPays ? (
                                         <span className="num font-semibold text-ink text-right">
                                             {fmtHours(plan.bonusCovered)} бонусом + {bonusMoneyText(plan, formatGel)}
                                         </span>
@@ -1096,6 +1096,11 @@ export function ConfirmationStep() {
                                         <span className="text-ink ml-1">
                                             · остальное ({fmtHours(totalBookingHours - plan.bonusCovered)}) — с баланса
                                             {plan.bonusApprox ? '; точная сумма — после брони' : ''}
+                                        </span>
+                                    )}
+                                    {plan.bonusCovers && plan.bonusPays && (
+                                        <span className="text-ink ml-1">
+                                            · надбавка за пиковые часы (+5 ₾/ч) — с баланса, как по абонементу
                                         </span>
                                     )}
                                     {!isBonusEligible && (
@@ -1379,7 +1384,7 @@ export function ConfirmationStep() {
                                     : recurringPattern
                                         ? `Создать серию · ${ruCountWord(recurringOccurrences, ['бронь', 'брони', 'броней'])}`
                                         : payMethod === 'bonus'
-                                            ? (plan.bonusPartial
+                                            ? (plan.bonusPays
                                                 ? `Оплатить ${bonusMoneyText(plan, formatGel)} + ${fmtHours(plan.bonusCovered)} бонусом`
                                                 : 'Забронировать бесплатно')
                                             : payMethod === 'subscription'
