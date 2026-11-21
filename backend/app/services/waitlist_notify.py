@@ -74,6 +74,10 @@ def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
         # whole branch we collect every resource in the same location and
         # match on that set.
         freed_resource = session.get(Resource, booking.resource_id)
+        # Закреплённый кабинет (21.11.2026) в аренду не сдаётся — звать в него
+        # людей из листа ожидания нельзя: бронь им всё равно откажут.
+        if freed_resource is not None and freed_resource.allowed_user_ids:
+            return 0
         freed_location_id = freed_resource.location_id if freed_resource else None
         if freed_location_id:
             sibling_resources = session.exec(

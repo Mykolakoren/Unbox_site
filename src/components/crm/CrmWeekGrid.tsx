@@ -42,6 +42,7 @@ import { Field, Input } from '../ui/Field';
 import { PickList, PickRow } from './CrmChessboardView';
 import { themed } from '../../design/tokens';
 import { isResourceOpenOn } from '../../utils/locationDates';
+import { canBookRoomFor } from '../../utils/roomAccess';
 
 const SLOT = 30;            // шаг сетки, мин
 const ROW_H = 22;           // высота 30 минут, px
@@ -480,13 +481,15 @@ function Legend({ kind, label }: { kind: 'ok' | 'nocab' | 'rental'; label: strin
 }
 
 // ── Свободные кабинеты на время ────────────────────────────────────────────
-type Res = { id: string; name: string; locationId?: string; isActive?: boolean; type?: string };
+type Res = { id: string; name: string; locationId?: string; isActive?: boolean; type?: string; allowedUserIds?: string[] | null };
 
 function freeRooms(resources: Res[], bookings: BookingHistoryItem[], day: string, start: number, minutes: number, location: string): Res[] {
     const end = start + minutes;
+    const userId = useUserStore.getState().currentUser?.id;
     const list = (resources.length ? resources : (RESOURCES as unknown as Res[]))
         .filter(r => r.isActive !== false && (location === 'all' || r.locationId === location)
-            && isResourceOpenOn(r, day));   // переезд 21.11.2026: филиал в этот день работает
+            && isResourceOpenOn(r, day)     // переезд 21.11.2026: филиал в этот день работает
+            && canBookRoomFor(r, userId));  // закреплённый кабинет — только своим
     return list.filter(r => !bookings.some(b => {
         if (b.resourceId !== r.id || !BUSY_BOOKING.has(b.status) || !b.startTime) return false;
         if (bookingDay(b) !== day) return false;

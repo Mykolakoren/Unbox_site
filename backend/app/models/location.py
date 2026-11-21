@@ -28,6 +28,15 @@ class LocationBase(SQLModel):
 class Location(LocationBase, table=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # Кто из администраторов ведёт филиал (21.11.2026): список id пользователей.
+    # Пусто = все администраторы. Если список задан, чужие брони, блокировки и
+    # карточки кабинетов этого филиала меняют только владелец и люди из списка;
+    # остальные администраторы здесь — как обычные клиенты (только свои брони).
+    # Проверяет сервер (services/staff_scope.py). Поля нет ни в Read, ни в
+    # Create, ни в Update нарочно: наружу id не уходят, а список меняет только
+    # владелец через базу, а не любой админ с правом «редактировать филиалы».
+    staff_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+
 class LocationCreate(LocationBase):
     pass
 

@@ -235,6 +235,23 @@ def migrate_add_columns():
             except Exception:
                 conn.rollback()
 
+    # Кто что может менять (переезд 21.11.2026): администраторы филиала,
+    # закреплённый кабинет, «только просмотр» для администратора.
+    for _tbl, _col, _pg, _lite in (
+        ("location", "staff_ids", "JSON", "TEXT"),
+        ("resource", "allowed_user_ids", "JSON", "TEXT"),
+        ('"user"', "view_only_from", "VARCHAR", "VARCHAR"),
+    ):
+        with engine.connect() as conn:
+            try:
+                if dialect == 'postgresql':
+                    conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS {_col} {_pg}"))
+                else:
+                    conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_lite}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
     # resource table: services column (JSONB in Postgres, TEXT in SQLite)
     with engine.connect() as conn:
         try:

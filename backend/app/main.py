@@ -81,7 +81,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix=settings.API_V1_STR)
+# Турникет «кто из администраторов что может менять» (переезд 21.11.2026) —
+# один на весь API, см. services/staff_scope.py.
+from fastapi import Depends as _Depends  # noqa: E402
+from .api.staff_guard import enforce_staff_scope  # noqa: E402
+app.include_router(api_router, prefix=settings.API_V1_STR,
+                   dependencies=[_Depends(enforce_staff_scope)])
 
 # Per-post SEO (root-level /news/{slug}, /articles/{slug}) — nginx проксирует
 # только эти паттерны сюда, отдаём index.html с per-post og-мета (см. app/seo.py).

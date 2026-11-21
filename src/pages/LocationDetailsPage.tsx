@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
+import { isPinnedRoom } from '../utils/roomAccess';
 import { MapPin } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { PRICING_CONFIG } from '../utils/pricingConfig';
@@ -111,7 +112,7 @@ export function LocationDetailsPage() {
 
     // Только сдаваемые кабинеты (кабинет 9 закрыт — isActive: false).
     const locationResources = resources
-        .filter(r => r.locationId === id && r.isActive !== false)
+        .filter(r => r.locationId === id && r.isActive !== false && !isPinnedRoom(r))
         .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
     // Порядок фото (G2-14): фото центра → по одному лучшему кадру каждого

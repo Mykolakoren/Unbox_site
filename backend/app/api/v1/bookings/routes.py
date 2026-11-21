@@ -1737,8 +1737,14 @@ def check_slots_availability(
     *,
     session: Session = Depends(deps.get_session),
     slots: List[SlotCheckItem],
+    viewer: Optional[User] = Depends(deps.get_optional_current_user),
 ) -> Any:
     """Pre-check slot availability (no auth required)."""
+    # Закреплённый кабинет (21.11.2026): «свободно» показываем тому, на кого там
+    # можно ставить бронь. Администратор ставит на других, поэтому ему кабинет
+    # не закрываем — на кого бронь, сервер проверит при создании.
+    _viewer_uuid = viewer.id if viewer is not None else None
+    _viewer_staff = viewer is not None and viewer.role in ADMIN_ROLES
     results = []
     for slot in slots:
         try:
@@ -1753,6 +1759,8 @@ def check_slots_availability(
             date=date,
             start_time=slot.start_time,
             duration=slot.duration,
+            requester_user_uuid=_viewer_uuid,
+            skip_room_access=_viewer_staff,
         )
 
         if not available:
@@ -1768,6 +1776,7 @@ def check_slots_availability(
             if re_rent and check_availability(
                 session=session, resource_id=slot.resource_id, date=date,
                 start_time=slot.start_time, duration=slot.duration, ignore_re_rent=True,
+                requester_user_uuid=_viewer_uuid, skip_room_access=_viewer_staff,
             )[0]:
                 results.append({
                     "available": False,
@@ -2271,6 +2280,11 @@ def create_booking(
             lock_rows=True,  # SELECT FOR UPDATE: prevents race condition on double booking
             requester_user_uuid=booking_owner.id,
         )
+        # Отказ не из-за занятости (филиал в этот день не работает, кабинет закреплён,
+        # время вне окна) — причину говорим как есть. Раньше она уходила с приставкой
+        # «Это время уже занято», хотя время свободно.
+        if not is_available and reason and not reason.startswith(("Слот занят", "У вас уже есть")):
+            raise HTTPException(status_code=400, detail=reason)
 
         # Privilege-escalation guard: spec A must not be able to attach
         # a booking to spec B's CRM client. Without this check the booking's
@@ -2315,6 +2329,7 @@ def create_booking(
                 start_time=booking_in.start_time,
                 duration=booking_in.duration,
                 ignore_re_rent=True,
+                requester_user_uuid=booking_owner.id,
             )
             if not _free_besides:
                 raise HTTPException(status_code=400, detail=f"Это время уже занято: {_other_reason}")

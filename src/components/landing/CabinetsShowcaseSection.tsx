@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { MapPin, ArrowRight, Wifi, Coffee, Shield, Volume2, Users, Armchair } from 'lucide-react';
 import { useLocations } from '../../hooks/useLocations';
 import { useBookingStore } from '../../store/bookingStore';
+import { isPinnedRoom } from '../../utils/roomAccess';
 import { Link } from 'react-router-dom';
 
 // Location-specific data for rich showcase cards
@@ -82,7 +83,7 @@ export function CabinetsShowcaseSection() {
                     {mainLocations.map((loc, i) => {
                         const meta = LOCATION_META[loc.id];
                         const photos = meta?.photos || [];
-                        const locResources = resources.filter(r => r.locationId === loc.id && r.isActive !== false);
+                        const locResources = resources.filter(r => r.locationId === loc.id && r.isActive !== false && !isPinnedRoom(r));
                         const cabinetCount = locResources.filter(r => r.type === 'cabinet').length;
                         const capsuleCount = locResources.filter(r => r.type === 'capsule').length;
 

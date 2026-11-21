@@ -56,6 +56,7 @@ class UserBase(SQLModel):
     archived_by_id: Optional[str] = Field(default=None)
     archived_reason: Optional[str] = Field(default=None)
 
+
 class User(UserBase, table=True):
     __tablename__ = "user" # type: ignore
     
@@ -66,12 +67,19 @@ class User(UserBase, table=True):
     
     specialist_profile: Optional["Specialist"] = Relationship(back_populates="user")
 
+    # «Только просмотр» для администратора (переезд 21.11.2026): с этой даты
+    # ('ГГГГ-ММ-ДД' по Тбилиси, включительно) он видит админку, но менять может
+    # только своё — свои брони, свой профиль, свою Psy-CRM. Пусто = обычный доступ.
+    # Проверяет сервер на каждом изменяющем запросе (services/staff_scope.py).
+    view_only_from: Optional[str] = Field(default=None)
+
 class UserCreate(UserBase):
     password: str
 
 class UserRead(UserBase):
     id: UUID
     created_at: datetime
+    view_only_from: Optional[str] = None  # экран показывает плашку «Только просмотр»
     # Аудит безопасности 23.10: одноразовый ключ привязки Telegram уходил админам
     # в списке пользователей — по чужому ключу админ привязывал свой Telegram к
     # аккаунту владельца. Ключ живёт только в ответе /telegram/link-token.

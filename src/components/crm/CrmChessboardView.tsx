@@ -49,6 +49,7 @@ import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
 import { createSessionResolvingCalendar, type SeriesCalendarChoice } from '../../utils/crmCalendarConflict';
 import { IS_DARK } from '../../design/tokens';
 import { isResourceOpenOn } from '../../utils/locationDates';
+import { canBookRoomFor } from '../../utils/roomAccess';
 
 const _minToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -842,9 +843,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // ещё стоят брони — их нужно видеть, чтобы перенести в новый центр.
     const filteredResources = useMemo(() =>
         resourcesByFilter.filter(r =>
-            isResourceOpenOn(r, selectedDate) || bookingsOnDate.some(b => b.resourceId === r.id)
+            // Закреплённый кабинет (кабинет 1 в UNBOX 99) — только тем, кому в нём можно бронировать.
+            canBookRoomFor(r, currentUser?.id)
+            && (isResourceOpenOn(r, selectedDate) || bookingsOnDate.some(b => b.resourceId === r.id))
         ),
-        [resourcesByFilter, selectedDate, bookingsOnDate]
+        [resourcesByFilter, selectedDate, bookingsOnDate, currentUser?.id]
     );
 
     // Slot map

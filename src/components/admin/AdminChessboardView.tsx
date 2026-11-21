@@ -51,6 +51,7 @@ import { useArchivedClients } from '../../hooks/useArchivedClients';
 import { toastApiError } from '../../utils/errors';
 import { themed } from '../../design/tokens';
 import { isResourceOpenOn } from '../../utils/locationDates';
+import { isPinnedRoom } from '../../utils/roomAccess';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1359,7 +1360,7 @@ export function AdminChessboardView() {
                         >
                             <div className="font-bold whitespace-nowrap">{r.name}</div>
                             <div className="text-xs whitespace-nowrap">
-                                {LOCATIONS.find(l => l.id === r.locationId)?.name ?? ''}
+                                {LOCATIONS.find(l => l.id === r.locationId)?.name ?? ''}{isPinnedRoom(r) ? ' · закреплён' : ''}
                             </div>
                         </button>
                     ))}
@@ -1828,6 +1829,14 @@ export function AdminChessboardView() {
                                         <div className="text-xs text-ink-60 font-normal mt-0.5">
                                             {LOCATIONS.find(l => l.id === resource.locationId)?.name ?? ''}
                                         </div>
+                                        {isPinnedRoom(resource) && (
+                                            <div
+                                                className="text-xs text-ink-60 font-normal mt-0.5"
+                                                title="Кабинет закреплён за специалистами центра: бронь здесь можно ставить только на них"
+                                            >
+                                                закреплён
+                                            </div>
+                                        )}
                                     </td>
 
                                     {/* Time cells */}

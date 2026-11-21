@@ -60,10 +60,14 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
     rooms_by_center: dict[str, int] = {}
     room_names: dict[str, str] = {}
     room_center: dict[str, str] = {}
+    # Закреплённый кабинет (21.11.2026) в аренду не сдаётся: в загрузку и
+    # «бесплатные часы» филиала его не считаем, иначе цифры UNBOX 99 врут.
+    pinned_rooms = {r.id for r in resources if r.allowed_user_ids}
+    bookings = [b for b in bookings if b.resource_id not in pinned_rooms]
     for r in resources:
         room_names[r.id] = r.name
         room_center[r.id] = r.location_id
-        if getattr(r, "is_active", True):
+        if getattr(r, "is_active", True) and r.id not in pinned_rooms:
             rooms_by_center[r.location_id] = rooms_by_center.get(r.location_id, 0) + 1
 
     centers: dict[str, dict] = {}

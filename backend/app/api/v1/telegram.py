@@ -1395,10 +1395,11 @@ def _book_step_format(session: Session, callback_id: str, chat_id: int, message_
         _answer_callback(callback_id, "Локация не найдена", show_alert=True)
         return {"ok": True}
 
-    resources = session.exec(
+    # Закреплённые кабинеты (21.11.2026) бот не предлагает — их ведут на сайте.
+    resources = [r for r in session.exec(
         select(Resource)
         .where(Resource.location_id == loc, Resource.is_active == True)  # noqa: E712
-    ).all()
+    ).all() if not r.allowed_user_ids]
     if not resources:
         _edit(chat_id, message_id,
               f"В локации <b>{escape(_loc_label(location))}</b> нет доступных кабинетов.",
@@ -1485,7 +1486,8 @@ def _list_resources_for_selection(session: Session, loc: str, fmt: str) -> list[
         select(Resource)
         .where(Resource.location_id == loc, Resource.is_active == True)  # noqa: E712
     ).all()
-    filtered = [r for r in resources if fmt in (r.formats or [])]
+    # Закреплённые кабинеты (21.11.2026) бот не предлагает — их ведут на сайте.
+    filtered = [r for r in resources if fmt in (r.formats or []) and not r.allowed_user_ids]
     filtered.sort(key=lambda r: (r.sort_order, r.name, r.id))
     return filtered
 
@@ -1818,6 +1820,7 @@ def _book_step_confirm(
         date=datetime.combine(d_obj, datetime.min.time()),
         start_time=f"{start_h:02d}:{start_m:02d}",
         duration=mins,
+        requester_user_uuid=user.id,
     )
     if not ok:
         _edit(chat_id, message_id,
@@ -2097,6 +2100,14 @@ def _handle_welcome_callback(session: Session, callback_id: str, chat_id: int, m
         _answer_callback(callback_id, "Недостаточно прав", show_alert=True)
         return {"ok": True}
     label = (actor.name or actor.email) if actor else "админ (TG-чат)"
+    # Те же ограничения, что на сайте (21.11.2026): админ «только просмотр»
+    # подарочный час не выдаёт и через кнопку в Telegram.
+    if actor is not None:
+        from app.services.staff_scope import write_refusal
+        _no = write_refusal(session, actor, "POST", "/bonuses")
+        if _no:
+            _answer_callback(callback_id, _no, show_alert=True)
+            return {"ok": True}
     action, raw_id = data.split(":", 1)
     result = welcome_bonus.decide(session, raw_id, action, label)
     _answer_callback(callback_id, result, show_alert=True)
@@ -2151,6 +2162,15 @@ def _handle_hot_booking_callback(
     except (ValueError, TypeError):
         _answer_callback(callback_id, "Неверный ID брони", show_alert=True)
         return {"ok": True}
+
+    # Те же ограничения, что на сайте (21.11.2026): «только просмотр» и «филиал
+    # ведёт другой администратор» действуют и на кнопки в Telegram.
+    if actor is not None:
+        from app.services.staff_scope import write_refusal
+        _no = write_refusal(session, actor, "POST", f"/bookings/{b_uuid}/approve")
+        if _no:
+            _answer_callback(callback_id, _no, show_alert=True)
+            return {"ok": True}
 
     # Row lock — два админа double-tap «Подтвердить» подряд раньше
     # успевали оба пройти status-check и оба списать баланс. SELECT FOR
@@ -2392,6 +2412,15 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
         return True
     actor_label = (actor.name or actor.email) if actor else "админ (TG-чат)"
     actor_email = actor.email if actor else "tg-group"
+
+    # Те же ограничения, что на сайте (21.11.2026), — см. _handle_hot_booking_callback.
+    if actor is not None:
+        from app.services.staff_scope import write_refusal
+        _no = write_refusal(session, actor, "POST", f"/bookings/{b_uuid}/reject")
+        if _no:
+            if chat_id:
+                _send(chat_id, _no, parse_mode="HTML")
+            return True
 
     # Под замком строки, как одобрение: два отклонения подряд не вернут бонус дважды.
     booking = session.exec(

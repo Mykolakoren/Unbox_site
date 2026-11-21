@@ -47,9 +47,14 @@ def check_availability(
     lock_rows: bool = False,
     requester_user_uuid=None,
     ignore_re_rent: bool = False,
+    skip_room_access: bool = False,
 ) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
+    requester_user_uuid — на кого бронь (хозяин). По нему же проверяется
+    закреплённый кабинет: бронь на человека не из списка кабинета не пройдёт.
+    skip_room_access=True — только для предварительного «свободно ли» у
+    администратора, который ещё не выбрал, на кого бронь.
     ignore_re_rent=True: брони на пересдаче не считаются помехой (можно ли занять слот,
     если их время забрать).
     Returns (True, None) if available, (False, reason) if overlapping.
@@ -82,6 +87,13 @@ def check_availability(
     closed = closure_reason(session, resource_id, date)
     if closed:
         return False, closed
+
+    # Закреплённый кабинет (кабинет 1 в UNBOX 99): бронь только на людей из списка.
+    if not skip_room_access:
+        from app.services.staff_scope import room_access_reason
+        not_for_you = room_access_reason(session, resource_id, requester_user_uuid)
+        if not_for_you:
+            return False, not_for_you
 
     # Take the day-scope advisory lock FIRST — before any reads.
     # This is what actually prevents the race (SELECT FOR UPDATE alone cannot).

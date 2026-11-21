@@ -15,6 +15,8 @@ export interface Location {
     openFrom?: string | null;
     /** Последний день работы филиала включительно ('ГГГГ-ММ-ДД'); пусто — без границы. */
     openUntil?: string | null;
+    /** Администраторы, которые ведут филиал (21.11.2026). Пусто — все администраторы. */
+    staffIds?: string[] | null;
 }
 
 export interface Resource {
@@ -35,6 +37,8 @@ export interface Resource {
     videoUrl?: string; // Mapped from video_url
     isActive?: boolean;
     sortOrder?: number;
+    /** Закреплённый кабинет (21.11.2026): id тех, на кого здесь можно ставить бронь. Пусто — кабинет для всех. */
+    allowedUserIds?: string[] | null;
 }
 
 export interface TimeSlot {

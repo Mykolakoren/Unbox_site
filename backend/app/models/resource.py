@@ -27,11 +27,19 @@ class ResourceBase(SQLModel):
 class Resource(ResourceBase, table=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # Закреплённый кабинет (21.11.2026, кабинет 1 в UNBOX 99 — практика владельца):
+    # список id тех, на чьё имя здесь может стоять бронь. Пусто = кабинет для всех.
+    # Кабинет виден на шахматке, но бронь на другого человека сервер не примет
+    # (services/staff_scope.py → check_availability). В Create и Update поля нет
+    # нарочно: закрепляет кабинет только владелец через базу.
+    allowed_user_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+
 class ResourceCreate(ResourceBase):
     pass
 
 class ResourceRead(ResourceBase):
-    pass
+    # Экранам нужно знать, кому кабинет не предлагать (utils/roomAccess.ts).
+    allowed_user_ids: Optional[List[str]] = None
 
 class ResourceUpdate(SQLModel):
     name: Optional[str] = None

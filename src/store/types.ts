@@ -81,6 +81,8 @@ export interface User {
     balance: number;
     subscription?: Subscription;
     creditLimit?: number;
+    /** «Только просмотр» для администратора с этой даты ('ГГГГ-ММ-ДД'); правило держит сервер. */
+    viewOnlyFrom?: string | null;
     discountHistory?: DiscountLogEntry[]; // New history
     pricingSystem?: 'standard' | 'personal';
     personalDiscountPercent?: number; // Added field
