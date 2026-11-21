@@ -206,13 +206,23 @@ def test_post_list_header_fits_narrow_screen():
 
 
 def _data_cabinets():
-    """{номер кабинета: (вместимость, активен)} из src/utils/data.ts."""
+    """{номер кабинета: (вместимость, активен)} из src/utils/data.ts.
+
+    21.11 (переезд): в UNBOX 99 свои «Кабинет 2/3/4» — номера повторяются, поэтому
+    по умолчанию берём старые центры, а новый — отдельно (new_branch=True).
+    """
+    return _data_cabinets_of(new_branch=False)
+
+
+def _data_cabinets_of(new_branch: bool):
     data = (ROOT / "src/utils/data.ts").read_text(encoding="utf-8")
     out = {}
-    for m in re.finditer(r"\{\s*id: '[^']+',\s*name: 'Кабинет (\d+)',(.*?)\n    \},", data, re.S):
-        body = m.group(2)
+    for m in re.finditer(r"\{\s*id: '([^']+)',\s*name: 'Кабинет (\d+)',(.*?)\n    \},", data, re.S):
+        if m.group(1).startswith("unbox_99_") != new_branch:
+            continue
+        body = m.group(3)
         cap = re.search(r"capacity:\s*(\d+)", body)
-        out[int(m.group(1))] = (int(cap.group(1)) if cap else 0, "isActive: false" not in body)
+        out[int(m.group(2))] = (int(cap.group(1)) if cap else 0, "isActive: false" not in body)
     return out
 
 
@@ -231,6 +241,11 @@ def test_individual_cabinets_list_matches_data():
     # Кабинет 9 закрыт (владелец, 30.09): на тарифах только сдаваемые.
     individual = sorted(n for n, (cap, active) in cabs.items() if cap < 20 and active)
     assert individual == [1, 2, 5, 6], f"сдаваемые индивидуальные кабинеты по data.ts: {individual} (ждали 1, 2, 5, 6)"
+    # 21.11 (переезд): страница тарифов называет кабинеты только тех центров,
+    # что работают сегодня, — иначе до 30.11 в списке были бы и кабинеты UNBOX 99.
+    assert "isResourceOpenOn(r, new Date())" in src, "SubscriptionsPage: в списке кабинеты центра, который сегодня не работает"
+    new_rooms = sorted(n for n, (cap, active) in _data_cabinets_of(new_branch=True).items() if active)
+    assert new_rooms == [2, 3, 4], f"кабинеты UNBOX 99 по data.ts: {new_rooms} (ждали 2, 3, 4)"
 
 
 def test_phq_orange_result_uses_warn_pair():

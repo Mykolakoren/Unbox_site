@@ -48,6 +48,7 @@ const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code ||
 import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
 import { createSessionResolvingCalendar, type SeriesCalendarChoice } from '../../utils/crmCalendarConflict';
 import { IS_DARK } from '../../design/tokens';
+import { isResourceOpenOn } from '../../utils/locationDates';
 
 const _minToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -814,7 +815,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         [weekStart]
     );
 
-    const filteredResources = useMemo(() =>
+    const resourcesByFilter = useMemo(() =>
         resources.filter(r =>
             r.isActive !== false &&
             (filterLocation === 'all' || r.locationId === filterLocation)
@@ -835,6 +836,16 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             } catch { return false; }
         });
     }, [bookings, selectedDate]);
+
+    // Переезд 21.11.2026: кабинет показываем, только если его филиал в этот день
+    // работает. Закрывшийся филиал остаётся на экране, пока в нём в этот день
+    // ещё стоят брони — их нужно видеть, чтобы перенести в новый центр.
+    const filteredResources = useMemo(() =>
+        resourcesByFilter.filter(r =>
+            isResourceOpenOn(r, selectedDate) || bookingsOnDate.some(b => b.resourceId === r.id)
+        ),
+        [resourcesByFilter, selectedDate, bookingsOnDate]
+    );
 
     // Slot map
     const slotMap = useMemo(() => {

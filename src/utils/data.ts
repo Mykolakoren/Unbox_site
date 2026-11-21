@@ -2,12 +2,64 @@ import type { Location, Resource, ExtraOption } from '../types';
 
 export const LOCATIONS: Location[] = [
     // 2026-05-06: One ставим первым (логично — «One» = первый филиал, открыт раньше).
-    { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4' },
-    { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38' },
+    // Переезд (владелец 21.11.2026): Палиашвили работает по 29.11, Абусеридзе по
+    // 30.11, новый центр UNBOX 99 — с 30.11. Те же даты лежат в базе
+    // (location.open_from / open_until) и проверяются сервером; здесь — запасная
+    // копия для экранов, пока список филиалов не загрузился. См. utils/locationDates.ts.
+    { id: 'unbox_99', name: 'UNBOX 99', address: 'Парнаваз Мепе, 99', openFrom: '2026-11-30' },
+    { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4', openUntil: '2026-11-29' },
+    { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38', openUntil: '2026-11-30' },
     { id: 'neo_school', name: 'Neo School', address: 'Алесандра Сулаберидзе, 80' },
 ];
 
 export const RESOURCES: Resource[] = [
+    // UNBOX 99 (Парнаваз Мепе 99, Батуми) — открывается 30.11.2026.
+    // Кабинет 1 (практика Николая и Иры) заводится отдельно: он виден, но
+    // самостоятельно не бронируется.
+    {
+        id: 'unbox_99_room_2',
+        name: 'Кабинет 2',
+        type: 'cabinet',
+        hourlyRate: 20,
+        capacity: 4,
+        locationId: 'unbox_99',
+        area: 10,
+        minBookingHours: 1,
+        formats: ['individual'],
+        description: 'Кабинет 10 м² для индивидуальной работы в новом центре UNBOX 99.',
+        services: ['climate_control', 'wifi'],
+        sortOrder: 2,
+    },
+    {
+        id: 'unbox_99_room_3',
+        name: 'Кабинет 3',
+        type: 'cabinet',
+        hourlyRate: 20,
+        groupRate: 35,
+        capacity: 12,
+        locationId: 'unbox_99',
+        area: 20,
+        minBookingHours: 1,
+        formats: ['individual', 'group', 'intervision'],
+        description: 'Кабинет 20 м² в новом центре UNBOX 99 — для индивидуальной работы и групп до 12 человек.',
+        services: ['climate_control', 'wifi'],
+        sortOrder: 3,
+    },
+    {
+        id: 'unbox_99_room_4',
+        name: 'Кабинет 4',
+        type: 'cabinet',
+        hourlyRate: 20,
+        groupRate: 35,
+        capacity: 10,
+        locationId: 'unbox_99',
+        area: 18,
+        minBookingHours: 1,
+        formats: ['individual', 'group', 'intervision'],
+        description: 'Кабинет 18 м² в новом центре UNBOX 99 — для индивидуальной работы и групп до 10 человек.',
+        services: ['climate_control', 'wifi'],
+        sortOrder: 4,
+    },
     // Unbox One (Палиашвили 4, Батуми)
     {
         id: 'unbox_one_room_1',

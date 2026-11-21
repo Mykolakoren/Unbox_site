@@ -7,9 +7,10 @@ import { useEffect } from 'react';
 // 2026-05-06: One ставим первым — это «первый» центр (открыт раньше),
 // логика «1 = One, 2 = Uni» совпадает с названиями.
 const LOCATION_ORDER: Record<string, number> = {
-    unbox_one: 0,
-    unbox_uni: 1,
-    neo_school: 2,
+    unbox_99: 0,
+    unbox_one: 1,
+    unbox_uni: 2,
+    neo_school: 3,
 };
 
 export function useLocations() {

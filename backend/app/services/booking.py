@@ -76,6 +76,13 @@ def check_availability(
     if not within:
         return False, win_reason
 
+    # Даты работы филиала (переезд 21.11.2026): закрывшийся центр не принимает
+    # брони после последнего дня, новый — до дня открытия.
+    from app.services.location_dates import closure_reason
+    closed = closure_reason(session, resource_id, date)
+    if closed:
+        return False, closed
+
     # Take the day-scope advisory lock FIRST — before any reads.
     # This is what actually prevents the race (SELECT FOR UPDATE alone cannot).
     if lock_rows:

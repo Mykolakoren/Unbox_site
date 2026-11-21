@@ -44,7 +44,7 @@ function plural(n: number, one: string, few: string, many: string): string {
  * row is tappable → opens an action sheet with cancel / approve. The
  * full chessboard remains available via the desktop escape in /m/me.
  */
-type LocFilter = 'all' | 'unbox_one' | 'unbox_uni';
+type LocFilter = 'all' | 'unbox_99' | 'unbox_one' | 'unbox_uni';
 
 export function MobileAdminBookings() {
     // 2026-06-02 owner: fetchBookings() мержит /bookings/me + /bookings/public,
@@ -369,7 +369,7 @@ export function MobileAdminBookings() {
                         <GroupLabel>Филиал</GroupLabel>
                         <Segmented<LocFilter>
                             aria-label="Филиал"
-                            options={(['all', 'unbox_one', 'unbox_uni'] as LocFilter[]).map(id => ({ value: id, label: LOC_LABEL[id] }))}
+                            options={(['all', 'unbox_99', 'unbox_one', 'unbox_uni'] as LocFilter[]).map(id => ({ value: id, label: LOC_LABEL[id] }))}
                             value={loc}
                             onChange={setLoc}
                         />
@@ -451,7 +451,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 /** Филиал по-человечески — без кодов unbox_one / unbox_uni. */
-const LOC_LABEL: Record<LocFilter, string> = { all: 'Все филиалы', unbox_one: 'One', unbox_uni: 'Uni' };
+const LOC_LABEL: Record<LocFilter, string> = { all: 'Все', unbox_99: '99', unbox_one: 'One', unbox_uni: 'Uni' };
 
 /** «Сегодня» / «Завтра» / «Вчера» / «12 ноября». */
 function dayChipLabel(key: string, todayKey: string): string {

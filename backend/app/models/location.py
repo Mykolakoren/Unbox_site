@@ -18,6 +18,13 @@ class LocationBase(SQLModel):
     
     is_active: bool = True
 
+    # Переезд 21.11.2026: филиал принимает брони только в этом промежутке дат
+    # (обе границы включительно, 'ГГГГ-ММ-ДД' по Тбилиси; пусто = без границы).
+    # Проверяет сервер (services/location_dates.py → check_availability),
+    # экраны берут эти же даты из /locations и закрывают клетки заранее.
+    open_from: Optional[str] = None
+    open_until: Optional[str] = None
+
 class Location(LocationBase, table=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -35,3 +42,5 @@ class LocationUpdate(SQLModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     is_active: Optional[bool] = None
+    open_from: Optional[str] = None
+    open_until: Optional[str] = None

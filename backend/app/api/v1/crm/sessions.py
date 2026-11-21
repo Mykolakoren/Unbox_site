@@ -540,6 +540,19 @@ def update_session(
                             status_code=409,
                             detail="Сессию нельзя перенести вместе с кабинетом на ближайшие часы. " + HOT_MOVE_REFUSAL,
                         )
+                # Переезд 21.11.2026: филиал в новый день не работает — это не «занято»,
+                # и совет «выберите другое время» тут неверный: нужен другой кабинет.
+                from app.services.location_dates import closure_reason as _closure_reason
+                _closed = _closure_reason(session, bk.resource_id, new_booking_date)
+                if _closed:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Не получилось перенести сессию: {_closed} "
+                            f"Сначала отвяжите кабинет от сессии (шаг «Кабинет») "
+                            f"и выберите кабинет в новом центре."
+                        ),
+                    )
                 # Check availability — must NOT count this booking itself.
                 available, conflict_msg = _check_avail(
                     session=session,

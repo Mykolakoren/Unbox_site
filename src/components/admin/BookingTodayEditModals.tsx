@@ -10,6 +10,7 @@ import { STATUS } from '../../design/tokens';
 import { formatGel } from '../../utils/format';
 import { ruCountWord } from '../../utils/plural';
 import { toastApiError } from '../../utils/errors';
+import { isResourceOpenOn } from '../../utils/locationDates';
 
 /**
  * Быстрые правки СЕГОДНЯШНЕЙ брони для админа:
@@ -427,15 +428,25 @@ export function MoveBookingModal({
                 <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Кабинет</label>
                 <select value={resourceId} onChange={(e) => setResourceId(e.target.value)}
                     style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 10, fontFamily: GH_SANS, fontSize: 14, background: GH.paper }}>
-                    {LOCATIONS.map((loc) => (
-                        <optgroup key={loc.id} label={loc.name}>
-                            {RESOURCES.filter((r) => r.locationId === loc.id).map((r) => (
-                                <option key={r.id} value={r.id}>
-                                    {r.name}{r.id === booking.resourceId ? ' (текущий)' : ''}
-                                </option>
-                            ))}
-                        </optgroup>
-                    ))}
+                    {/* Переезд 21.11.2026: на выбранную дату предлагаем только кабинеты
+                        филиалов, которые в этот день работают (и сдаются); текущий
+                        кабинет брони остаётся в списке всегда. */}
+                    {LOCATIONS.map((loc) => {
+                        const rooms = RESOURCES.filter((r) => r.locationId === loc.id && (
+                            r.id === booking.resourceId
+                            || (r.isActive !== false && isResourceOpenOn(r, date))
+                        ));
+                        if (rooms.length === 0) return null;
+                        return (
+                            <optgroup key={loc.id} label={loc.name}>
+                                {rooms.map((r) => (
+                                    <option key={r.id} value={r.id}>
+                                        {r.name}{r.id === booking.resourceId ? ' (текущий)' : ''}
+                                    </option>
+                                ))}
+                            </optgroup>
+                        );
+                    })}
                 </select>
 
                 <div style={{ fontSize: 12, marginBottom: 16, lineHeight: 1.45 }}>

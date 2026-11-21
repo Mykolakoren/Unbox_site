@@ -811,7 +811,8 @@ export function ConfirmationStep() {
         const end = new Date(start.getTime() + duration * 60000);
 
         const resource = RESOURCES.find(r => r.id === (item?.resourceId || state.resourceId));
-        const loc = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
+        const loc = resource?.locationId === 'unbox_99' ? 'UNBOX 99, ул. Парнаваз Мепе 99, Батуми'
+            : resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
             : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
             : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
             : 'Unbox, Батуми';

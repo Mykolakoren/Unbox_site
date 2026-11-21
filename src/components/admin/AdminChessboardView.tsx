@@ -50,6 +50,7 @@ import { BATUMI_TZ } from '../../utils/dateUtils';
 import { useArchivedClients } from '../../hooks/useArchivedClients';
 import { toastApiError } from '../../utils/errors';
 import { themed } from '../../design/tokens';
+import { isResourceOpenOn } from '../../utils/locationDates';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -257,7 +258,7 @@ export function AdminChessboardView() {
     );
 
     // ── Filtered resources ────────────────────────────────────────────────────
-    const filteredResources = useMemo(() =>
+    const resourcesByFilter = useMemo(() =>
         resources.filter(r =>
             r.isActive !== false &&
             (filterLocation === 'all' || r.locationId === filterLocation)
@@ -319,6 +320,16 @@ export function AdminChessboardView() {
             }
         });
     }, [bookings, selectedDate]);
+
+    // Переезд 21.11.2026: кабинет показываем, только если его филиал в этот день
+    // работает. Закрывшийся филиал остаётся на экране, пока в нём в этот день
+    // ещё стоят брони — их нужно видеть, чтобы перенести в новый центр.
+    const filteredResources = useMemo(() =>
+        resourcesByFilter.filter(r =>
+            isResourceOpenOn(r, selectedDate) || bookingsOnDate.some(b => b.resourceId === r.id)
+        ),
+        [resourcesByFilter, selectedDate, bookingsOnDate]
+    );
 
     // ── Slot map: `${resourceId}|${slot}` → {booking, isStart} ───────────────
     const slotMap = useMemo(() => {
@@ -1590,7 +1601,7 @@ export function AdminChessboardView() {
                                         // Cab 2 in One ("мини-группы" — до 4 чел) добавлен по запросу
                                         // админа: помещение хоть и небольшое, но позволяет вести группу
                                         // или семью. Кабинеты 7/8 — большие групповые залы (20 чел).
-                                        const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2'].includes(selectedBooking.resourceId || '');
+                                        const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2', 'unbox_99_room_3', 'unbox_99_room_4'].includes(selectedBooking.resourceId || '');
                                         if (!groupCapable) return null;
                                         const target: 'individual' | 'group' =
                                             (selectedBooking.format === 'group') ? 'individual' : 'group';

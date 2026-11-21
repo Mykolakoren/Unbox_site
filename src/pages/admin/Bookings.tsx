@@ -36,6 +36,7 @@ import { hasPermission } from '../../utils/permissions';
 import { useRecentWeeklyRebates } from '../../hooks/useRecentWeeklyRebates';
 import { weeklyRebateNote, rebateRowsOnce } from '../../utils/weeklyRebateNote';
 import { toastApiError } from '../../utils/errors';
+import { branchLabel } from '../mobile/admin/branchLabel';
 
 type ViewMode = 'list' | 'grid';
 type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
@@ -1155,7 +1156,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 {getUserName(booking.userId)}
                                             </div>
                                             <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
-                                                {resourceName} · {booking.locationId === 'unbox_one' ? 'One' : 'Uni'} · {(booking.duration ?? 0) / 60}ч
+                                                {resourceName} · {branchLabel(booking.locationId)} · {(booking.duration ?? 0) / 60}ч
                                             </div>
                                         </div>
                                         <div>
@@ -1254,7 +1255,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 <td style={{ padding: '12px 10px' }}>
                                                     <div style={{ color: GH.ink }}>{resourceName}</div>
                                                     <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
-                                                        {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}
+                                                        {LOCATIONS.find(l => l.id === booking.locationId)?.name ?? branchLabel(booking.locationId)}
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '12px 10px' }}>

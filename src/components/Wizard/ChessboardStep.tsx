@@ -19,6 +19,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { ErrorBar } from '../ui/ErrorBar';
 import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
 import { formatDateLabel, formatDayMonthShort, formatGel } from '../../utils/format';
+import { isResourceOpenOn } from '../../utils/locationDates';
 
 // Hook to detect mobile viewport
 function useIsMobile(breakpoint = 768) {
@@ -166,9 +167,11 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     // in the admin panel must NEVER appear in the booking grid, even if the
     // static data list still has them. Treat `isActive: undefined` as
     // active (legacy rows without the flag set).
+    // Переезд 21.11.2026: кабинет предлагаем только на те дни, когда его филиал
+    // работает (Палиашвили по 29.11, Абусеридзе по 30.11, UNBOX 99 с 30.11).
     const activeResources = useMemo(
-        () => RESOURCES.filter(r => r.isActive !== false),
-        [],
+        () => RESOURCES.filter(r => r.isActive !== false && isResourceOpenOn(r, new Date(date))),
+        [date],
     );
 
     // Auto-expand to all locations when current location has no matching cabinets

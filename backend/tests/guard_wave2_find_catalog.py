@@ -82,7 +82,10 @@ def test_find_protected_logic_untouched():
     # 12.10 (разобрано): «на подтверждении» тоже держит время — как
     # check_availability на сервере (срочные брони корзины/серии ждут одобрения).
     # 25.10: + daysBack (прошлые дни задним числом у админа) — осознанная правка.
-    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "813ccaeb726ffff1", \
+    # 21.11 (переезд, владелец): кандидаты — только кабинеты центров, которые в этот
+    # день работают (locsOpenOn: Палиашвили по 29.11, Абусеридзе по 30.11, UNBOX 99
+    # с 30.11). Расчёт занятости и окон не менялся — осознанная правка.
+    assert _sha(_block(src, "function buildFreeWindows(", "\n}\n")) == "4026ef293b4291d8", \
         "buildFreeWindows изменилась — расчёт свободных окон трогать нельзя"
     assert _sha(_block(src, "const inFlightRef", "\n    const chipsBusy")) == "fe70d7f6e804df6d", \
         "блокировка повторного тапа (inFlightRef/pendingChip) изменилась"
@@ -125,7 +128,9 @@ def test_find_results_first_filters_in_sheet():
     assert i_summary < i_results < i_sheet < i_when, \
         "фильтры снова стоят над результатами — ответ уезжает со первого экрана"
     assert ">\n                            Изменить\n" in ret, "в строке-сводке нет «Изменить»"
-    assert "formatRelativeDay(targetDate)" in src and "'оба центра'" in src, "сводка «Сегодня · 1 ч · оба центра» пропала"
+    # 21.11 (переезд): центров стало три, сводка называет те, где поиск в этот день идёт.
+    assert "formatRelativeDay(targetDate)" in src and "locsOpenOn(locs, fmtDate(targetDate" in src, \
+        "сводка «Сегодня · 1 ч · центры» пропала"
 
 
 def test_find_prefs_in_try_catch():

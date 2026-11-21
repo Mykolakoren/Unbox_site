@@ -1,6 +1,8 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { RESOURCES } from '../../utils/data';
 import type { BookingHistoryItem } from '../../store/types';
+import { toast } from 'sonner';
+import { locationClosedReason } from '../../utils/locationDates';
 
 /**
  * Schedule a fresh booking on the next same-weekday occurrence of `source`.
@@ -38,6 +40,15 @@ export function prepareRepeat(source: BookingHistoryItem): Date | null {
     if (!source.resourceId || !source.startTime) return null;
 
     const pick = repeatTargetDate(source);
+
+    // Переезд 21.11.2026: тот же кабинет через неделю может уже не работать
+    // (Палиашвили по 29.11, Абусеридзе по 30.11) — говорим сразу, а не после
+    // отказа сервера на последнем шаге оформления.
+    const closed = locationClosedReason(RESOURCES.find(r => r.id === source.resourceId)?.locationId, pick);
+    if (closed) {
+        toast.info(`${closed}. Повторить бронь в этом кабинете не получится — выберите кабинет в новом центре.`);
+        return null;
+    }
 
     const duration = source.duration ?? 60;
     const [h, m] = source.startTime.split(':').map(Number);

@@ -16,6 +16,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { tbilisiNow } from '../../utils/dateUtils';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { isResourceOpenOn } from '../../utils/locationDates';
 
 // Compact enough that 09:00–22:00 (13h) fits within 2 phone-screens worth of
 // scroll while still leaving each row tappable. Earlier 56px wasted vertical
@@ -96,10 +97,20 @@ export function MobileCalendar() {
 
     // Visible cabinets — exclude Neo School (group-only, niche) and any
     // resource explicitly marked inactive (e.g., temporarily not rented).
+    // Переезд 21.11.2026: на выбранный день показываем только кабинеты
+    // филиалов, которые в этот день работают.
     const visibleCabinets = useMemo(
-        () => RESOURCES.filter(r => r.locationId !== 'neo_school' && r.isActive !== false),
-        [],
+        () => RESOURCES.filter(r => r.locationId !== 'neo_school' && r.isActive !== false
+            && isResourceOpenOn(r, dayKey)),
+        [dayKey],
     );
+    // Выбранный кабинет в этот день закрыт (перелистнули за дату переезда) —
+    // переключаемся на первый работающий.
+    useEffect(() => {
+        if (visibleCabinets.length && !visibleCabinets.some(r => r.id === activeResId)) {
+            setActiveResId(visibleCabinets[0].id);
+        }
+    }, [visibleCabinets, activeResId]);
 
     /** Тап по часу → сразу на страницу оформления с этим часом. Начало (шаг 30 мин),
      *  длительность, формат, допуслуги и цена правятся уже ТАМ — на одной

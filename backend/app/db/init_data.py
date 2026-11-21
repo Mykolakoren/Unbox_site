@@ -223,6 +223,18 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # location: даты работы филиала (переезд 21.11.2026) — open_from / open_until.
+    for _loc_col in ("open_from", "open_until"):
+        with engine.connect() as conn:
+            try:
+                if dialect == 'postgresql':
+                    conn.execute(text(f"ALTER TABLE location ADD COLUMN IF NOT EXISTS {_loc_col} VARCHAR"))
+                else:
+                    conn.execute(text(f"ALTER TABLE location ADD COLUMN {_loc_col} VARCHAR"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
     # resource table: services column (JSONB in Postgres, TEXT in SQLite)
     with engine.connect() as conn:
         try:

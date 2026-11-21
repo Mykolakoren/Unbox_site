@@ -8,6 +8,9 @@
  * подчёркиваний и с заглавной, но не сырым кодом.
  */
 const KNOWN: Record<string, string> = {
+    'unbox 99': 'UNBOX 99',
+    unbox_99: 'UNBOX 99',
+    '99': 'UNBOX 99',
     'unbox uni': 'Uni',
     unbox_uni: 'Uni',
     uni: 'Uni',
@@ -48,5 +51,5 @@ export function humanizeMoneyText(text: string | null | undefined): string {
     return text
         .replace(/\s*\((cash|card_tbc|card_bog|card|transfer|balance|adjustment)\)/gi,
             (_m, code: string) => ` · ${(CASH_METHOD_LABEL[code.toLowerCase()] || code).toLowerCase()}`)
-        .replace(/\b(unbox_uni|unbox_one|neo_school)\b/gi, m => branchLabel(m));
+        .replace(/\b(unbox_99|unbox_uni|unbox_one|neo_school)\b/gi, m => branchLabel(m));
 }

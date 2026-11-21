@@ -111,6 +111,7 @@ import { CmdKProvider } from './components/admin/CmdKSearch';
 import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
 import { FONT, Z, IS_DARK } from './design/tokens';
 import { UpdateBanner } from './components/UpdateBanner';
+import { MoveNotice } from './components/MoveNotice';
 
 // Витрина дизайн-системы — только в `npm run dev`. В прод-сборке
 // import.meta.env.DEV === false, ветка и сам чанк выбрасываются сборщиком.
@@ -272,6 +273,7 @@ function App() {
       <Toaster position="top-center" richColors closeButton theme={IS_DARK ? 'dark' : 'light'} style={{ zIndex: Z.toast, fontFamily: FONT.sans }} />
       <CmdKProvider />
       <UpdateBanner />
+      <MoveNotice />
       {/* Общая граница над всеми ленивыми маршрутами (в т.ч. /login): устаревший чанк после выкладки → автоперезагрузка. */}
       <ModuleErrorBoundary moduleName="Сайт">
       <Suspense fallback={lazyFallback}>

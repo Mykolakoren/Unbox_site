@@ -32,6 +32,7 @@ import { Button } from '../ui/Button';
 import { Field, Input } from '../ui/Field';
 import { Skeleton } from '../ui/Skeleton';
 import { Chip } from '../ui/Chip';
+import { isLocationOpenOn } from '../../utils/locationDates';
 
 interface Props {
     specialistId: string;
@@ -72,6 +73,7 @@ const SKIN_CAPS: React.CSSProperties = {
 const CENTER_TAGS: Record<string, string> = {
     OFFLINE_UNBOX_ONE: 'unbox_one',
     OFFLINE_UNBOX_UNI: 'unbox_uni',
+    OFFLINE_UNBOX_99: 'unbox_99',
     OFFLINE_NEO_SCHOOL: 'neo_school',
 };
 
@@ -81,6 +83,7 @@ const getLocationMark = (locId: string | null): string => {
     if (!locId) return 'O';
     if (locId === 'unbox_one') return '1';
     if (locId === 'unbox_uni') return 'U';
+    if (locId === 'unbox_99') return '99';
     if (locId === 'neo_school') return 'N';
     return '•';
 };
@@ -201,7 +204,9 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
         }
         let alive = true;
         specialistsApi.getAvailableSlots(specialistId, dateFrom, dateTo)
-            .then(list => { if (alive) setAllSlots(list); })
+            // Переезд 21.11.2026: приём в филиале, который в этот день уже не
+            // работает (или ещё не открылся), клиенту не предлагаем.
+            .then(list => { if (alive) setAllSlots(list.filter(x => isLocationOpenOn(x.locationId, x.date))); })
             .catch(() => { if (alive) { setAllSlots([]); setLoadFailed(true); } })
             .finally(() => { if (alive) setLoading(false); });
         return () => { alive = false; };

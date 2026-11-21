@@ -37,6 +37,7 @@ import { ruPlural } from '../../utils/plural';
 import { isBookingAdmin } from './crmAccess';
 import { resourceKind } from '../../utils/subscriptionHours';
 import { useAdminFlow } from './adminFlow';
+import { isLocationOpenOn, isLocationStillRunning } from '../../utils/locationDates';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
@@ -51,8 +52,19 @@ const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
  * на этом устройстве, чтобы сводка «Сегодня · 1 ч · оба центра» чаще всего
  * была готовой. Хранилище может быть недоступно (приватный режим, запрет
  * сайта) — тогда просто работаем с настройками по умолчанию. */
-const FIND_PREFS_KEY = 'unbox_find_prefs_v1';
-const ALL_LOCS = ['unbox_one', 'unbox_uni'];
+// v2 (переезд 21.11.2026): появился UNBOX 99 — старый сохранённый выбор
+// «Где» его не содержал, поэтому начинаем с чистого листа (все центры).
+const FIND_PREFS_KEY = 'unbox_find_prefs_v2';
+const ALL_LOCS = ['unbox_99', 'unbox_one', 'unbox_uni'];
+
+/** Центры, в которых ищем на этот день. Выбранные, но уже закрытые на эту дату
+ *  (Палиашвили после 29.11, Абусеридзе после 30.11) отбрасываем; если так не
+ *  осталось ни одного — ищем во всех работающих, чтобы человек не упёрся в
+ *  пустой список из-за старой галочки. */
+function locsOpenOn(locs: Set<string>, dayKey: string): Set<string> {
+    const chosen = [...locs].filter(l => isLocationOpenOn(l, dayKey));
+    return new Set(chosen.length ? chosen : ALL_LOCS.filter(l => isLocationOpenOn(l, dayKey)));
+}
 const ALL_SPACES: SpaceType[] = ['individual', 'group', 'capsule'];
 type FindPrefs = { locs?: string[]; spaces?: string[]; dur?: number };
 
@@ -494,7 +506,10 @@ export function MobileFind() {
     // «Сообщить, когда освободится» (G4-06, X2-08): когда окон нет или нужного
     // кабинета нет в списке — подписка через общее окно WaitlistSubscribeModal.
     const waitlistEnabled = canBook && !rescheduleId && !linkSessionMeta;
-    const waitlistRooms = useMemo(() => searchRooms(locs, spaces), [locs, spaces]);
+    const waitlistRooms = useMemo(
+        () => searchRooms(locsOpenOn(locs, fmtDate(targetDate, 'yyyy-MM-dd')), spaces),
+        [locs, spaces, targetDate],
+    );
     const waitlistStarts = useMemo(() => {
         const out: number[] = [];
         const minStart = dayOffset === 0 ? tbilisiNow().totalMins : 0;
@@ -517,9 +532,10 @@ export function MobileFind() {
     const summary = [
         formatRelativeDay(targetDate),
         formatBookingDuration(duration),
-        locs.size === ALL_LOCS.length ? 'оба центра'
-            : locs.size === 0 ? 'центр не выбран'
-                : LOCATIONS.filter(l => locs.has(l.id)).map(l => l.name).join(', '),
+        // Называем центры, в которых поиск на этот день идёт на самом деле
+        // (закрывшиеся к этой дате отпадают — см. locsOpenOn).
+        locs.size === 0 ? 'центр не выбран'
+            : LOCATIONS.filter(l => locsOpenOn(locs, fmtDate(targetDate, 'yyyy-MM-dd')).has(l.id)).map(l => l.name).join(', '),
         spaces.size === ALL_SPACES.length ? 'все помещения'
             : spaces.size === 0 ? 'тип не выбран'
                 : ALL_SPACES.filter(x => spaces.has(x)).map(x => SPACE_WORD[x]).join(', '),
@@ -1443,7 +1459,7 @@ export function MobileFind() {
                     {/* Where — multi-select */}
                     <FieldGroup label="Где">
                         <ChoiceGroup label="Где" columns={2}>
-                            {LOCATIONS.filter(l => l.id === 'unbox_one' || l.id === 'unbox_uni').map(l => (
+                            {LOCATIONS.filter(l => ALL_LOCS.includes(l.id) && isLocationStillRunning(l.id)).map(l => (
                                 <ChoiceCard
                                     key={l.id}
                                     selected={locs.has(l.id)}
@@ -1709,11 +1725,13 @@ function buildFreeWindows(
         return false;
     };
 
+    // Переезд 21.11.2026: только центры, которые в этот день работают.
+    const dayLocs = locsOpenOn(locs, dayKey);
     const candidates = RESOURCES.filter(r =>
         r.locationId !== 'neo_school'
         && r.locationId
         && r.isActive !== false
-        && locs.has(r.locationId)
+        && dayLocs.has(r.locationId)
         && matchesSpace(r)
     );
 

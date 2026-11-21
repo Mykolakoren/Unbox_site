@@ -12,6 +12,7 @@ import { useUserStore } from '../store/userStore';
 import { COLOR, RADIUS, SHAPE, TEXT } from '../design/tokens';
 import { formatDayMonth } from '../utils/format';
 import type { Subscription } from '../store/types';
+import { isResourceOpenOn } from '../utils/locationDates';
 
 /**
  * Тарифы — /subscriptions и /m/tariffs.
@@ -36,6 +37,8 @@ import type { Subscription } from '../store/types';
 // (владелец, 30.09) — isActive: false в data.ts, в список не попадает.
 const INDIVIDUAL_ROOMS = RESOURCES
     .filter(r => r.type === 'cabinet' && (r.capacity ?? 0) < 20 && r.isActive !== false)
+    // Переезд 21.11.2026: только центры, которые работают сегодня (UNBOX 99 — с 30.11).
+    .filter(r => isResourceOpenOn(r, new Date()))
     .map(r => r.name.replace(/^Кабинет\s*/, ''));
 const INDIVIDUAL_DESC = INDIVIDUAL_ROOMS.length > 0
     ? `Кабинеты ${INDIVIDUAL_ROOMS.join(', ')}`
@@ -43,6 +46,7 @@ const INDIVIDUAL_DESC = INDIVIDUAL_ROOMS.length > 0
 // Большие залы (X3-20: было «залы 7, 8, 9», а 9 закрыт).
 const GROUP_ROOMS = RESOURCES
     .filter(r => r.type === 'cabinet' && (r.capacity ?? 0) >= 20 && r.isActive !== false)
+    .filter(r => isResourceOpenOn(r, new Date()))
     .map(r => r.name.replace(/^Кабинет\s*/, ''));
 const GROUP_DESC = GROUP_ROOMS.length > 0
     ? `Залы ${GROUP_ROOMS.join(', ')} · до 20 человек`

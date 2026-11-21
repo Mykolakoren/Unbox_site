@@ -22,7 +22,7 @@ from app.core.permissions import ADMIN_ROLES
 router = APIRouter()
 
 WORKING_HOURS_PER_DAY = 13  # 09:00–22:00 — знаменатель загрузки
-CENTER_NAMES = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "neo_school": "Neo School"}
+CENTER_NAMES = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "unbox_99": "UNBOX 99", "neo_school": "Neo School"}
 
 # Owner-аналитика — строго персональный доступ (owner попросил «только мне»
 # 2026-07-11). Не роль, а конкретный аккаунт: системный Admin и senior_admin

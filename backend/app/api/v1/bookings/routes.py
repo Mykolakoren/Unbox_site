@@ -755,6 +755,19 @@ def _send_owner_safe(text: str) -> None:
         logger.exception("[override] owner telegram failed")
 
 
+def _location_of_room(session: Session, resource_id: str, fallback: Optional[str]) -> Optional[str]:
+    """Филиал брони — это филиал её кабинета, а не то, что прислал экран.
+
+    Переезд 21.11.2026: экраны подставляли филиал из своего состояния, а при его
+    отсутствии — «unbox_one» (полтора десятка мест). Бронь кабинета нового центра
+    могла записаться как бронь Палиашвили и уйти не в тот отчёт и не в ту кассу.
+    Теперь филиал при создании брони всегда берётся из кабинета в базе.
+    """
+    from app.models.resource import Resource as _RoomModel
+    room = session.get(_RoomModel, resource_id)
+    return (room.location_id if room and room.location_id else fallback)
+
+
 def _staff_may(user: User, permission: str) -> bool:
     """09.11 (ревизия): сотрудник действует с ЧУЖОЙ бронью только при своём праве.
 
@@ -2532,6 +2545,8 @@ def create_booking(
                    "waiver_reason", "waived_at", "waived_by"):
             # charged_at / charge_amount сервер сам выставляет выше (paid / pending) — не трогаем.
             booking_data.pop(_k, None)
+        booking_data["location_id"] = _location_of_room(
+            session, booking_data.get("resource_id"), booking_data.get("location_id"))
         booking = Booking(**booking_data)
         # Из какого пула абонемента часы (доп. / основной). Для брони заранее
         # (pending) — прикидка; точную раскладку пишет крон T-24ч.
@@ -3118,7 +3133,7 @@ def create_multi_slot_booking(
         booking = Booking(
             id=_slot_id,
             resource_id=s.resource_id,
-            location_id=s.location_id,
+            location_id=_location_of_room(session, s.resource_id, s.location_id),
             date=d,
             start_time=s.start_time,
             duration=s.duration,
@@ -3820,7 +3835,7 @@ def create_recurring_booking(
         booking = Booking(
             id=_occ_id,
             resource_id=data.resource_id,
-            location_id=data.location_id,
+            location_id=_location_of_room(session, data.resource_id, data.location_id),
             date=d,
             start_time=data.start_time,
             duration=data.duration,
@@ -4057,9 +4072,11 @@ def create_recurring_booking(
         from app.models.resource import Resource as ResModel
         from app.models.location import Location as LocModel
         res_obj = session.get(ResModel, data.resource_id)
-        loc_obj = session.get(LocModel, data.location_id)
+        # Филиал — по кабинету (как записано в брони), а не из запроса экрана.
+        _series_loc = _location_of_room(session, data.resource_id, data.location_id)
+        loc_obj = session.get(LocModel, _series_loc)
         res_name = res_obj.name if res_obj else data.resource_id
-        loc_name = loc_obj.name if loc_obj else data.location_id
+        loc_name = loc_obj.name if loc_obj else _series_loc
         first_label = dates[0].strftime("%d.%m.%Y") if dates else "—"
         last_label = dates[-1].strftime("%d.%m.%Y") if dates else "—"
         telegram_service.send_admin_event(
@@ -7311,6 +7328,13 @@ def extend_booking(
     )
     new_end_time = f"{new_end_h:02d}:{new_end_m:02d}"
 
+    # Филиал в этот день уже не работает (переезд 21.11.2026) — продлевать нечего:
+    # бронь сначала переносят в новый центр.
+    from app.services.location_dates import closure_reason as _closure_reason
+    _closed = _closure_reason(session, booking.resource_id, booking.date)
+    if _closed:
+        raise HTTPException(status_code=409, detail=_closed)
+
     # Check for conflicts in the extended slot
     all_bookings = session.exec(
         select(Booking).where(
@@ -7546,7 +7570,7 @@ def extend_booking(
 #               двойная оплата);
 #   balance   → доп идёт в цену брони и списывается с депозита владельца,
 #               как /extend.
-_LOCATION_TO_BRANCH = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "neo_school": "Neo School"}
+_LOCATION_TO_BRANCH = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "unbox_99": "UNBOX 99", "neo_school": "Neo School"}
 
 
 class AddExtrasRequest(PydanticBaseModel):

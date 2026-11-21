@@ -882,7 +882,7 @@ function GHBookingRow({ booking, linkedClient, linkedSessionId, linkedSessions, 
     // Cabinets 7 & 8 have a group rate that differs from individual; for
     // others the toggle would be a no-op so we hide the button.
     // Cab 2 in One — мини-группы до 4 чел, добавлен по запросу админа.
-    const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2'].includes(booking.resourceId || '');
+    const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2', 'unbox_99_room_3', 'unbox_99_room_4'].includes(booking.resourceId || '');
     const fetchBookings = useUserStore(s => s.fetchBookings);
     const { confirm } = useConfirmDialog();
 

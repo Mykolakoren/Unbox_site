@@ -11,6 +11,10 @@ export interface Location {
     lat?: number;
     lng?: number;
     isActive?: boolean;
+    /** Филиал принимает брони с этой даты включительно ('ГГГГ-ММ-ДД'); пусто — без границы. */
+    openFrom?: string | null;
+    /** Последний день работы филиала включительно ('ГГГГ-ММ-ДД'); пусто — без границы. */
+    openUntil?: string | null;
 }
 
 export interface Resource {

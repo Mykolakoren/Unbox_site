@@ -1268,7 +1268,7 @@ def _handle_book_start(session: Session, chat_id: int, user: Optional[User]) -> 
 
     # Explicit ordering: Unbox One → Unbox Uni → Neo School. Falls back to
     # alphabetical for any new locations that show up later.
-    LOCATION_ORDER = ["unbox_one", "unbox_uni", "neo_school"]
+    LOCATION_ORDER = ["unbox_99", "unbox_one", "unbox_uni", "neo_school"]
     raw_locations = session.exec(select(Location)).all()
     def _loc_key(loc):
         try:
@@ -1535,6 +1535,10 @@ def _book_step_resource(session: Session, callback_id: str, chat_id: int, messag
 def _get_busy_slots(session: Session, resource_id: str, d_obj: date) -> set[int]:
     """Return set of minutes-since-midnight that are occupied by confirmed bookings
     for this resource on this date."""
+    # Филиал в этот день не работает (переезд 21.11.2026) — свободного времени нет.
+    from app.services.location_dates import closure_reason
+    if closure_reason(session, resource_id, d_obj):
+        return set(range(SLOT_START_HOUR * 60, SLOT_END_HOUR * 60, SLOT_STEP_MIN))
     start_of_day = datetime.combine(d_obj, datetime.min.time())
     end_of_day = start_of_day + timedelta(days=1)
     bookings = session.exec(

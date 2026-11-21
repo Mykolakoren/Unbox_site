@@ -55,6 +55,7 @@ import { extraPool, extraPoolLabel, resourceKind } from '../utils/subscriptionHo
 import { PAUSE_LIFT_NOTE, subscriptionHours } from '../utils/paymentPriority';
 import { ADMIN_ROLES } from '../utils/permissions';
 import { toastApiError } from '../utils/errors';
+import { isResourceOpenOn } from '../utils/locationDates';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
  *  пересдачу (флаг isReRentListed, не отдельный статус). Вид — как у
@@ -269,7 +270,15 @@ function BookingsChessboard({
     // Owner 2026-05-27: filter out admin-disabled cabinets from the user-
     // facing booking grid. Static data carries the same `isActive` flag,
     // so this works without a backend round-trip.
-    const resources = RESOURCES.filter(r => r.isActive !== false);
+    // Переезд 21.11.2026: кабинет закрывшегося филиала на этот день не
+    // предлагаем — кроме случая, когда у человека там ещё стоит своя бронь
+    // (её нужно видеть, пока администратор не перенёс её в новый центр).
+    const resources = RESOURCES.filter(r =>
+        r.isActive !== false && (
+            isResourceOpenOn(r, selectedDate)
+            || userBookings.some(b => b.resourceId === r.id && b.status !== 'cancelled'
+                && isSameDay(parseUTC(b.date), selectedDate))
+        ));
 
     // Build day's booking map — include completed bookings
     const dayUserBookings = useMemo(() =>
@@ -3011,7 +3020,8 @@ function BookingCard({
     const addToCalendar = () => {
         if (!startAt) return;
         const end = new Date(startAt.getTime() + booking.duration * 60000);
-        const location = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
+        const location = resource?.locationId === 'unbox_99' ? 'UNBOX 99, ул. Парнаваз Мепе 99, Батуми'
+            : resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
             : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
             : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
             : 'Unbox, Батуми';
