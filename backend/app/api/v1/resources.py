@@ -16,11 +16,24 @@ ALLOWED_ROLES = ["owner", "senior_admin", "admin"]
 def read_resources(
     skip: int = 0,
     limit: int = 100,
+    include_inactive: bool = Query(
+        False,
+        description="Admins pass true to see cabinets whose parent location is "
+        "hidden (Location.is_active=False). Default filters them out so a "
+        "deactivated branch hides its cabinets everywhere clients can reach.",
+    ),
     session: Session = Depends(get_session)
 ):
-    resources = session.exec(
-        select(Resource).order_by(Resource.sort_order, Resource.name).offset(skip).limit(limit)
-    ).all()
+    from app.models.location import Location
+    stmt = select(Resource).order_by(Resource.sort_order, Resource.name)
+    if not include_inactive:
+        # Exclude cabinets whose location is inactive.
+        inactive_ids = session.exec(
+            select(Location.id).where(Location.is_active == False)  # noqa: E712
+        ).all()
+        if inactive_ids:
+            stmt = stmt.where(Resource.location_id.notin_(inactive_ids))  # type: ignore
+    resources = session.exec(stmt.offset(skip).limit(limit)).all()
     return resources
 
 
