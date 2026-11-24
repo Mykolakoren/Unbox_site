@@ -6315,6 +6315,130 @@ def trim_booking(
     }
 
 
+# ─── Trim "this and following" in a recurring series (Валентина 24.11) ────────
+
+@router.post("/{booking_id}/trim-series")
+def trim_booking_series(
+    booking_id: str,
+    data: TrimRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Вырезать один и тот же отрезок времени из брони И всех следующих броней
+    её серии (чат админов 24.11: из постоянной брони 3 ч клиентка отказалась от
+    одного часа — админ резала каждую неделю до конца года вручную).
+
+    Каждая бронь режется обычной вырезкой (trim_booking) — те же проверки, цены
+    и возвраты, что у одиночной. Якорь обязан пройти (иначе ошибка и ничего не
+    тронуто). Следующие — по возможности: бронь серии, которая в свою неделю
+    стоит в другое время или другой длины, уже прошла или не режется по
+    правилам (бонус, снятый штраф…), пропускается и возвращается в `skipped`.
+    Правые остатки при вырезке из середины получают ОДИН новый номер серии —
+    иначе они выпали бы из серии и «отменить эту и следующие» их не задело бы.
+    """
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
+    anchor = session.get(Booking, b_uuid)
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    if not anchor.recurring_group_id:
+        raise HTTPException(status_code=400, detail="Эта бронь не входит в серию — вырежьте время только в ней")
+
+    group_id = anchor.recurring_group_id
+    anchor_date = anchor.date
+    shape = (anchor.start_time, int(anchor.duration or 0))
+
+    # 1) Якорь — обычной вырезкой (свои проверки прав, 24 ч, денег); упала — всё.
+    first = trim_booking(  # type: ignore[misc]
+        booking_id=booking_id, data=data, background_tasks=background_tasks,
+        session=session, current_user=current_user,
+    )
+    from uuid import uuid4 as _uuid4
+    new_group: Optional[str] = None
+
+    def _adopt_remnant(remnant_id: Optional[str]) -> None:
+        nonlocal new_group
+        if not remnant_id:
+            return
+        rem = session.get(Booking, UUID(remnant_id))
+        if rem is None:
+            return
+        if new_group is None:
+            new_group = str(_uuid4())
+        rem.recurring_group_id = new_group
+        session.add(rem)
+        session.commit()
+
+    _adopt_remnant(first.get("new_remnant_id"))
+
+    # 2) Следующие брони серии — по датам.
+    siblings = session.exec(
+        select(Booking).where(
+            Booking.recurring_group_id == group_id,
+            Booking.status == "confirmed",
+            Booking.id != anchor.id,
+            Booking.date > anchor_date,
+        ).order_by(Booking.date)
+    ).all()
+    trimmed = 1
+    refunded_gel = float(first.get("refunded_amount") or 0)
+    refunded_h = float(first.get("refunded_hours") or 0)
+    skipped: list[dict] = []
+    for sib in siblings:
+        sib_id, sib_date = str(sib.id), sib.date
+        if _is_past(sib):
+            skipped.append({"id": sib_id, "date": sib_date.isoformat(), "reason": "уже прошла"})
+            continue
+        if (sib.start_time, int(sib.duration or 0)) != shape:
+            try:
+                _h, _m = map(int, str(sib.start_time).split(":")[:2])
+                _e = _h * 60 + _m + int(sib.duration or 0)
+                _end = f"{(_e // 60) % 24:02d}:{_e % 60:02d}"
+            except (ValueError, AttributeError):
+                _end = "?"
+            skipped.append({"id": sib_id, "date": sib_date.isoformat(),
+                            "reason": f"в эту неделю бронь другая ({sib.start_time}–{_end}) — вырежьте вручную"})
+            continue
+        try:
+            res = trim_booking(  # type: ignore[misc]
+                booking_id=sib_id, data=data, background_tasks=background_tasks,
+                session=session, current_user=current_user,
+            )
+        except HTTPException as e:
+            session.rollback()
+            skipped.append({"id": sib_id, "date": sib_date.isoformat(), "reason": str(e.detail)})
+            continue
+        trimmed += 1
+        refunded_gel += float(res.get("refunded_amount") or 0)
+        refunded_h += float(res.get("refunded_hours") or 0)
+        _adopt_remnant(res.get("new_remnant_id"))
+
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(anchor.id),
+        target_type="booking",
+        event_type="booking_trimmed",
+        description=(f"Серия: вырезано {data.remove_from}–{data.remove_to} в {trimmed} бронях"
+                     + (f", пропущено {len(skipped)}" if skipped else "")),
+        metadata={"via": "trim-series", "group_id": group_id, "new_group_id": new_group,
+                  "remove_from": data.remove_from, "remove_to": data.remove_to,
+                  "trimmed": trimmed, "skipped": skipped},
+    )
+    return {
+        "ok": True,
+        "trimmed": trimmed,
+        "skipped": skipped,
+        "refunded_amount": round(refunded_gel, 2),
+        "refunded_hours": round(refunded_h, 4),
+        "new_group_id": new_group,
+    }
+
+
 # ─── Reschedule "this and following" in a recurring series ───────────────────
 
 @router.patch("/{booking_id}/reschedule-series")

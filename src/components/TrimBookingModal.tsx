@@ -13,6 +13,9 @@ import { formatGel } from '../utils/format';
  * discount-adjusted server-side, so we never try to compute money here, we
  * only show the surviving ranges as a preview.
  *
+ * Бронь из серии (Валентина 24.11): «только эту» или «эту и все следующие» —
+ * второе зовёт POST /bookings/{id}/trim-series (тот же отрезок в каждой неделе).
+ *
  * Validation mirrors the backend so the user gets instant feedback:
  *   - each surviving part must be ≥ 1h (60 min), and
  *   - trimming the whole booking is rejected (use the regular cancel flow).
@@ -36,7 +39,7 @@ export function TrimBookingModal({
     onClose,
     onDone,
 }: {
-    booking: { id: string; startTime: string; duration: number; date?: string };
+    booking: { id: string; startTime: string; duration: number; date?: string; recurringGroupId?: string | null };
     onClose: () => void;
     onDone: () => void;
 }) {
@@ -47,6 +50,8 @@ export function TrimBookingModal({
     const [removeFrom, setRemoveFrom] = useState(startMin);
     const [removeTo, setRemoveTo] = useState(Math.min(startMin + 60, endMin));
     const [busy, setBusy] = useState(false);
+    const inSeries = !!booking.recurringGroupId;
+    const [scope, setScope] = useState<'one' | 'series'>('one');
 
     // Every 30-min mark inside the booking window.
     const marks = useMemo(() => {
@@ -85,6 +90,27 @@ export function TrimBookingModal({
         if (!valid || busy) return;
         setBusy(true);
         try {
+            if (inSeries && scope === 'series') {
+                const r = await bookingsApi.trimBookingSeries(booking.id, {
+                    remove_from: fmt(removeFrom),
+                    remove_to: fmt(effectiveTo),
+                });
+                const money = r.refunded_amount > 0 ? ` Возвращено ${formatGel(r.refunded_amount)}.` : '';
+                toast.success(`Готово: ${r.trimmed} ${r.trimmed === 1 ? 'бронь' : r.trimmed < 5 ? 'брони' : 'броней'} в серии.${money}`);
+                if (r.skipped.length > 0) {
+                    const list = r.skipped.slice(0, 6).map(x => {
+                        const d = new Date(x.date);
+                        const dd = Number.isNaN(d.getTime()) ? x.date.slice(0, 10)
+                            : `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+                        return `${dd} — ${x.reason}`;
+                    }).join('; ');
+                    toast.warning(`Не тронуты (${r.skipped.length}) — поправьте вручную`,
+                        { description: `${list}${r.skipped.length > 6 ? '; …' : ''}`, duration: 15000 });
+                }
+                onDone();
+                onClose();
+                return;
+            }
             const res = await bookingsApi.trimBooking(booking.id, {
                 remove_from: fmt(removeFrom),
                 remove_to: fmt(effectiveTo),
@@ -164,6 +190,24 @@ export function TrimBookingModal({
                         </label>
                     </div>
 
+                    {inSeries && (
+                        <div role="radiogroup" aria-label="Где убрать время" className="space-y-1.5">
+                            <div className="text-caption text-ink-60">Бронь из постоянной серии. Где убрать это время?</div>
+                            {([['one', 'Только в этой брони'], ['series', 'Эту и все следующие в серии']] as const).map(([v, label]) => (
+                                <label key={v} className="flex items-center gap-2 min-h-11 px-3 rounded-lg border border-ink-20 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="trim-scope"
+                                        checked={scope === v}
+                                        onChange={() => setScope(v)}
+                                        disabled={busy}
+                                    />
+                                    <span className="text-sm text-ink">{label}</span>
+                                </label>
+                            ))}
+                        </div>
+                    )}
+
                     {/* Error / preview */}
                     {error ? (
                         <div className="text-sm text-[var(--status-danger-fg)]">{error}</div>
@@ -173,7 +217,9 @@ export function TrimBookingModal({
                                 Останется: <span className="font-medium">{remnantRanges.join(' и ')}</span>
                             </div>
                             <div className="text-caption text-ink-60">
-                                Сумма возврата и пересчёт скидки рассчитаются при подтверждении.
+                                {inSeries && scope === 'series'
+                                    ? 'Так же — в каждой следующей неделе серии; цена пересчитается сама. Недели, где бронь стоит иначе, покажем списком.'
+                                    : 'Сумма возврата и пересчёт скидки рассчитаются при подтверждении.'}
                             </div>
                         </div>
                     )}

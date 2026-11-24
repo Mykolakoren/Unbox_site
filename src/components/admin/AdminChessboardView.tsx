@@ -27,6 +27,7 @@ import { applyAllocation } from '../../utils/balanceAllocation';
 import { useAllocationIndex } from '../../hooks/useBalanceAllocation';
 import { hoursUntilBookingStart } from '../../utils/subscription';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type RefundOption } from './AdminCancelBookingModal';
+import { TrimBookingModal } from '../TrimBookingModal';
 import { BookingPriceModal } from './BookingPriceModal';
 import { ruCountWord, ruPlural } from '../../utils/plural';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
@@ -98,6 +99,8 @@ export function AdminChessboardView() {
     const [splitModalBooking, setSplitModalBooking] = useState<any>(null);
     const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
     const [shortenModalBooking, setShortenModalBooking] = useState<BookingHistoryItem | null>(null);
+    // «Вырезать часть» — любой отрезок, в т.ч. во всей серии вперёд (Валентина 24.11).
+    const [trimModalBooking, setTrimModalBooking] = useState<BookingHistoryItem | null>(null);
     // Перетаскиваемая бронь (drag-and-drop переноса по сетке, десктоп).
     const [draggedBooking, setDraggedBooking] = useState<BookingHistoryItem | null>(null);
     // 15.09 (Лиза): «+Доп» был виден только на СЕГОДНЯШНИХ бронях — а допы
@@ -1577,6 +1580,11 @@ export function AdminChessboardView() {
                                         {!bCompleted && (selectedBooking.duration || 60) > 60 && (
                                             <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">Сократить (— минут)</button>
                                         )}
+                                        {!bCompleted && (selectedBooking.duration || 60) >= 120 && (
+                                            <button onClick={() => setTrimModalBooking(selectedBooking)} className="col-span-2 py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">
+                                                {selectedBooking.recurringGroupId ? 'Вырезать часть (можно во всей серии)' : 'Вырезать часть'}
+                                            </button>
+                                        )}
                                     </div>
                                     <div className={clsx("grid gap-1.5", bCompleted ? "grid-cols-1" : "grid-cols-3")}>
                                         <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
@@ -1683,6 +1691,19 @@ export function AdminChessboardView() {
                     onClose={() => setShortenModalBooking(null)}
                     onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
                 />
+                {trimModalBooking && (
+                    <TrimBookingModal
+                        booking={{
+                            id: trimModalBooking.id,
+                            startTime: trimModalBooking.startTime!,
+                            duration: trimModalBooking.duration || 60,
+                            date: trimModalBooking.date as any,
+                            recurringGroupId: trimModalBooking.recurringGroupId,
+                        }}
+                        onClose={() => setTrimModalBooking(null)}
+                        onDone={async () => { await fetchAllBookings(); setSelectedBooking(null); }}
+                    />
+                )}
                 {cancelAndPriceModals}
             </div>
         );
@@ -2353,6 +2374,19 @@ export function AdminChessboardView() {
                 onClose={() => setShortenModalBooking(null)}
                 onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
             />
+            {trimModalBooking && (
+                <TrimBookingModal
+                    booking={{
+                        id: trimModalBooking.id,
+                        startTime: trimModalBooking.startTime!,
+                        duration: trimModalBooking.duration || 60,
+                        date: trimModalBooking.date as any,
+                        recurringGroupId: trimModalBooking.recurringGroupId,
+                    }}
+                    onClose={() => setTrimModalBooking(null)}
+                    onDone={async () => { await fetchAllBookings(); setSelectedBooking(null); }}
+                />
+            )}
             {cancelAndPriceModals}
 
             {seriesMoveTarget && (

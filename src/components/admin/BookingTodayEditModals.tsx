@@ -516,6 +516,9 @@ export function ShortenBookingModal({
                 <div style={title}>Сократить бронь</div>
                 <div style={{ fontSize: 13, color: GH.ink60, marginBottom: 14 }}>
                     Сейчас {fmt(startMin)}–{fmt(startMin + dur)}. Деньги или часы за убранное время вернутся клиенту.
+                    {booking.recurringGroupId && (
+                        <> Это бронь из серии: чтобы убрать время во всех следующих неделях сразу — «Вырезать часть».</>
+                    )}
                 </div>
                 {options.length === 0 ? (
                     <div style={{ fontSize: 14, marginBottom: 16 }}>Бронь уже минимальная (60 мин) — сократить нельзя.</div>

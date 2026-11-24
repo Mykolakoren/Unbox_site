@@ -2314,6 +2314,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         startTime: trimTarget.startTime!,
                         duration: trimTarget.duration,
                         date: trimTarget.date as any,
+                        recurringGroupId: trimTarget.recurringGroupId,
                     }}
                     onClose={() => setTrimTarget(null)}
                     onDone={async () => {

@@ -374,6 +374,24 @@ export const bookingsApi = {
         return res.data;
     },
 
+    /** «Эту и все следующие» (Валентина 24.11): тот же отрезок вырезается из этой
+     *  брони и всех следующих в её серии. Бронь серии, которая в свою неделю стоит
+     *  в другое время / другой длины или не режется по правилам, — в `skipped`. */
+    trimBookingSeries: async (
+        id: string,
+        data: { remove_from: string; remove_to: string },
+    ): Promise<{
+        ok: boolean;
+        trimmed: number;
+        skipped: Array<{ id: string; date: string; reason: string }>;
+        refunded_amount: number;
+        refunded_hours: number;
+        new_group_id: string | null;
+    }> => {
+        const res = await api.post(`/bookings/${id}/trim-series`, data);
+        return res.data;
+    },
+
     rejectBooking: async (bookingId: string, reason?: string): Promise<BookingHistoryItem> => {
         // Reason — admin-supplied text shown to the client in their TG/in-app
         // notification. Optional — backend falls back to «Слот недоступен»

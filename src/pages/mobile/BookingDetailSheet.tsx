@@ -744,6 +744,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                     startTime: booking.startTime!,
                     duration: booking.duration ?? 60,
                     date: booking.date as any,
+                    recurringGroupId: (booking as any).recurringGroupId,
                 }}
                 onClose={() => setTrimming(false)}
                 onDone={() => { fetchBookings(); }}

@@ -1448,6 +1448,7 @@ function BookingsChessboard({
                             startTime: trimBooking.startTime!,
                             duration: trimBooking.duration,
                             date: trimBooking.date as any,
+                            recurringGroupId: trimBooking.recurringGroupId,
                         }}
                         onClose={() => setTrimBooking(null)}
                         onDone={refreshBookings}
