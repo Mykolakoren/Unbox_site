@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Briefcase, Check, CheckSquare, ChevronDown, Gift, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Briefcase, CalendarClock, Check, CheckSquare, ChevronDown, Gift, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
@@ -20,8 +20,12 @@ import { canBookCabinets, ADMIN_ROLES } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard } from '../../components/SpecialistGate';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
-import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatWeekdayShort } from '../../utils/format';
-import { fmtHours } from '../../utils/paymentPriority';
+import { formatDateLabel, formatDayMonth, formatDayMonthShort, formatGel, formatRelativeDay, formatStartsIn, formatWeekdayShort } from '../../utils/format';
+import { fmtHours, subscriptionOverview } from '../../utils/paymentPriority';
+import { ruPlural } from '../../utils/plural';
+import { Money } from '../../components/ui/Money';
+import { dismissedSeriesEnds } from './seriesEnd';
+import { locationClosedReason } from '../../utils/locationDates';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Button } from '../../components/ui/Button';
 import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
@@ -40,8 +44,10 @@ const sectionPad: React.CSSProperties = { padding: '0 16px' };
  *
  * Сверху — тёмная карточка ближайшей встречи (в том числе брони, которая
  * ждёт одобрения администратора): относительный день и «через 3 ч», время,
- * кабинет и адрес, строка оплаты, «Маршрут» и «Детали». Ниже одна главная
- * кнопка «Забронировать кабинет», затем «Дальше» — три следующие брони.
+ * кабинет и адрес, строка оплаты, «Маршрут» и «Детали». Под ней — кошелёк
+ * одной строкой (баланс, абонемент, бонус; 28.11, шаг 1 плана мобильной брони),
+ * главная кнопка «Забронировать кабинет» и сразу «Как обычно» — привычное время
+ * в одно касание. Затем «Дальше» — три следующие брони.
  * Остальное (анкета, кредит, постоянный слот, задачи, связь с админом) —
  * ниже и спокойнее. Закреплённая внизу кнопка поиска убрана: она
  * дублировала кнопку и вкладку «Свободно» (X2-17).
@@ -57,6 +63,7 @@ export function MobileToday() {
     const bookingsStatus = useUserStore(s => s.bookingsStatus);
     const bookingsLoadedAt = useUserStore(s => s.bookingsLoadedAt);
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
+    const [openAtSeries, setOpenAtSeries] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [repeatOpen, setRepeatOpen] = useState(false);
     const pull = usePullToRefresh(async () => {
@@ -196,6 +203,11 @@ export function MobileToday() {
             return sameDay && `${x.b.resourceId}|${x.b.startTime}` === nextKey;
         });
         if (alreadyBooked) return null;
+        // Переезд: привычный кабинет к этому дню может уже не работать (Палиашвили
+        // по 29.11, Абусеридзе по 30.11). Строка «в одно касание», которая кончается
+        // отказом, хуже, чем её отсутствие — не показываем (ревизия удобства 28.11).
+        const room = RESOURCES.find(r => r.id === winner.latest.b.resourceId);
+        if (!room || locationClosedReason(room.locationId, next)) return null;
 
         return { booking: winner.latest.b, count: winner.count, nextDate: next };
     }, [myBookings, sortedFuture, now]);
@@ -221,12 +233,12 @@ export function MobileToday() {
         return out;
     }, [myBookings, now]);
 
-    // G4-12: новичку без броней — про приветственный час, но только если он
-    // правда есть; дата «до …» — из самого бонуса.
+    // Бонусные часы: строка кошелька (28.11) и подсказка новичку без броней
+    // (G4-12) — дата «до …» из самого бонуса. Один запрос на оба случая.
     const nothingBooked = bookingsLoadedAt != null && sortedFuture.length === 0;
-    const [welcome, setWelcome] = useState<{ hours: number; until?: string } | null>(null);
+    const [bonus, setBonus] = useState<{ hours: number; until?: string } | null>(null);
     useEffect(() => {
-        if (!nothingBooked || !currentUser?.id) return;
+        if (!currentUser?.id) return;
         let cancelled = false;
         bonusesApi.getMyBonuses()
             .then(list => {
@@ -235,11 +247,34 @@ export function MobileToday() {
                     .filter(b => !(b.expiresAt && new Date(b.expiresAt).getTime() < Date.now()))
                     .sort((a, b) => (a.expiresAt ?? '9').localeCompare(b.expiresAt ?? '9'));
                 const hours = active.reduce((s, b) => s + (b.quantity || 0), 0);
-                if (!cancelled) setWelcome(hours > 0 ? { hours, until: active[0]?.expiresAt } : null);
+                if (!cancelled) setBonus(hours > 0 ? { hours, until: active[0]?.expiresAt } : null);
             })
-            .catch(() => { if (!cancelled) setWelcome(null); });
+            .catch(() => { if (!cancelled) setBonus(null); });
         return () => { cancelled = true; };
-    }, [nothingBooked, currentUser?.id]);
+    }, [currentUser?.id]);
+    const welcome = nothingBooked ? bonus : null;
+
+    // Серия скоро закончится (28.11): по рабочему сайту у трети серий последняя
+    // бронь — в ближайший месяц, а узнавал об этом человек, только открыв серию.
+    // Показываем за две недели; «Пусть завершится в срок» в шторке брони прячет строку.
+    const endingSeries = useMemo(() => {
+        const groups = new Map<string, { b: BookingHistoryItem; dt: Date }[]>();
+        for (const x of sortedFuture) {
+            const gid = (x.b as { recurringGroupId?: string }).recurringGroupId;
+            if (!gid || !x.dt || x.b.status !== 'confirmed') continue;
+            const arr = groups.get(gid);
+            if (arr) arr.push({ b: x.b, dt: x.dt }); else groups.set(gid, [{ b: x.b, dt: x.dt }]);
+        }
+        const limit = now.getTime() + 14 * 24 * 3600 * 1000;
+        const dismissed = dismissedSeriesEnds();
+        const out: { gid: string; next: BookingHistoryItem; last: Date; left: number }[] = [];
+        for (const [gid, items] of groups) {
+            const last = items[items.length - 1];   // sortedFuture — по возрастанию
+            if (last.dt.getTime() > limit || dismissed.has(gid)) continue;
+            out.push({ gid, next: items[0].b, last: last.dt, left: items.length });
+        }
+        return out.sort((a, b) => a.last.getTime() - b.last.getTime()).slice(0, 2);
+    }, [sortedFuture, now]);
 
     // Бронировать сервер даёт только специалистам и админам. Новичку (роль
     // user) вместо кнопок брони — карточка с анкетой: раньше он проходил весь
@@ -280,6 +315,29 @@ export function MobileToday() {
     const repeatBooking = (booking: BookingHistoryItem) => {
         if (prepareRepeat(booking)) navigate('/m/checkout');
     };
+
+    // Кошелёк одной строкой (28.11): то же «свободно», что в «Я» и на оплате
+    // (subscriptionOverview — без часов, уже обещанных будущим броням).
+    const sub = currentUser.subscription;
+    const subView = subscriptionOverview(sub, bookings, currentUser.email);
+    const walletCells: { key: string; label: string; value: React.ReactNode; note: string; to: string }[] = [
+        { key: 'balance', label: 'Баланс', value: <Money value={balance} tone="balance" fraction={0} />, note: debt > 0 ? 'долг' : 'пополнить', to: '/m/balance' },
+    ];
+    if (sub && subView) {
+        walletCells.push({
+            key: 'sub', label: 'Абонемент', value: fmtHours(subView.free),
+            note: sub.isFrozen ? 'на паузе' : (sub.flexible || !sub.expiryDate) ? 'свободно' : `до ${formatDayMonthShort(sub.expiryDate)}`,
+            to: '/m/subscription',
+        });
+    }
+    if (bonus) {
+        walletCells.push({
+            key: 'bonus', label: 'Бонус', value: fmtHours(bonus.hours),
+            note: bonus.until ? `до ${formatDayMonthShort(bonus.until)}` : 'без срока',
+            to: '/m/bonuses',
+        });
+    }
+    const showWallet = canBook || balance !== 0 || walletCells.length > 1;
 
     const loading = bookingsLoadedAt == null && bookingsStatus !== 'error';
     const failed = bookingsLoadedAt == null && bookingsStatus === 'error';
@@ -334,12 +392,93 @@ export function MobileToday() {
                     )}
                 </div>
 
+                {/* Кошелёк (28.11): баланс, свободные часы абонемента и бонус — на
+                    первом экране. Раньше деньги были видны здесь, только когда уже долг. */}
+                {showWallet && (
+                    <div style={sectionPad}>
+                        <div role="group" aria-label="Кошелёк" style={{
+                            display: 'grid', gap: 8,
+                            gridTemplateColumns: `repeat(${walletCells.length}, minmax(0, 1fr))`,
+                        }}>
+                            {walletCells.map(c => (
+                                <button key={c.key} type="button" className="press" onClick={() => navigate(c.to)} style={walletCell}>
+                                    <span style={walletLine}>{c.label}</span>
+                                    <span className="num" style={{ ...walletLine, fontSize: TEXT.body, fontWeight: 600, color: COLOR.ink }}>{c.value}</span>
+                                    <span style={walletLine}>{c.note}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Credit-line warning — статус, поэтому цветом; рядом с кошельком. */}
+                {creditWarn && (
+                    <div style={sectionPad}>
+                        <div role="status" style={{
+                            background: creditWarn.tone === 'urgent' ? STATUS.danger.bg : STATUS.pending.bg,
+                            color: creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg,
+                            borderRadius: RADIUS.sheet,
+                            padding: '12px 16px',
+                            display: 'flex',
+                            gap: 10,
+                            alignItems: 'flex-start',
+                            fontSize: TEXT.small,
+                            lineHeight: 1.45,
+                        }}>
+                            <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                            <span>{creditWarn.text}</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* Одна главная кнопка — только тем, кому бронь откроется (иначе 403 в конце). */}
                 {canBook && (
                     <div style={sectionPad}>
                         <Button block size="touch" icon={<Plus size={20} aria-hidden="true" />} onClick={goToFind} style={{ minHeight: 52 }}>
                             Забронировать кабинет
                         </Button>
+                    </div>
+                )}
+
+                {/* «Как обычно» (Егор 27.05; 28.11 — поднято под главную кнопку): то же
+                    время, что человек брал 3+ раз за два месяца, на ближайший такой
+                    день недели — в одно касание. Если он уже забронирован, строки нет. */}
+                {canBook && regularSlot && (
+                    <div style={sectionPad}>
+                        <ListGroup aria-label="Как обычно">
+                            <ListRow
+                                onClick={() => repeatBooking(regularSlot.booking)}
+                                lead={<ListIcon><Repeat size={20} /></ListIcon>}
+                                title={<>
+                                    Как обычно: {formatRelativeDay(regularSlot.nextDate, { capitalize: false })}
+                                    {' в '}
+                                    <span className="num">{regularSlot.booking.startTime}</span>
+                                </>}
+                                subtitle={`Забронировать · ${(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId} · ${formatBookingDuration(regularSlot.booking.duration ?? 60)}`}
+                            />
+                        </ListGroup>
+                    </div>
+                )}
+
+                {/* Серия скоро закончится — продлить можно прямо отсюда. */}
+                {canBook && !loading && !failed && endingSeries.length > 0 && (
+                    <div style={sectionPad}>
+                        <ListGroup aria-label="Серия скоро закончится">
+                            {endingSeries.map(sr => (
+                                <ListRow
+                                    key={sr.gid}
+                                    onClick={() => { setOpenAtSeries(true); setOpenBooking(sr.next); }}
+                                    lead={<ListIcon><CalendarClock size={20} /></ListIcon>}
+                                    title={<>Последняя бронь серии — {formatDayMonthShort(sr.last)}</>}
+                                    subtitle={[
+                                        `${formatWeekdayShort(sr.last, { capitalize: false })}, ${sr.next.startTime}`,
+                                        RESOURCES.find(r => r.id === sr.next.resourceId)?.name ?? '',
+                                        sr.left === 1 ? 'осталась последняя бронь' : `осталось ${sr.left} ${ruPlural(sr.left, ['бронь', 'брони', 'броней'])}`,
+                                    ].filter(Boolean).join(' · ')}
+                                    meta={<span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk }}>Продлить серию</span>}
+                                />
+                            ))}
+                        </ListGroup>
                     </div>
                 )}
 
@@ -361,53 +500,13 @@ export function MobileToday() {
                     </div>
                 )}
 
-                {/* ── Ниже — спокойнее: предупреждения, привычный слот, задачи, связь. */}
-
-                {/* Credit-line warning — статус, поэтому цветом. */}
-                {creditWarn && (
-                    <div style={sectionPad}>
-                        <div role="status" style={{
-                            background: creditWarn.tone === 'urgent' ? STATUS.danger.bg : STATUS.pending.bg,
-                            color: creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg,
-                            borderRadius: RADIUS.sheet,
-                            padding: '12px 16px',
-                            display: 'flex',
-                            gap: 10,
-                            alignItems: 'flex-start',
-                            fontSize: TEXT.small,
-                            lineHeight: 1.45,
-                        }}>
-                            <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-                            <span>{creditWarn.text}</span>
-                        </div>
-                    </div>
-                )}
+                {/* ── Ниже — спокойнее: Telegram, повтор из последних, задачи, связь. */}
 
                 {/* Ревью №9 (09.11): пока бот не подключён — подтверждения, напоминания
                     и «пересдачу забрали» человек не получит. Скрывается на неделю. */}
                 {canBook && !isTelegramLinked(currentUser) && (
                     <div style={sectionPad}>
                         <TelegramConnectCard user={currentUser} />
-                    </div>
-                )}
-
-                {/* Regular-slot CTA — Egor 2026-05-27. If the user has a
-                    weekly pattern (e.g. Tue 17:00 Cabinet 5) and hasn't yet
-                    booked the next occurrence, surface a 1-tap shortcut. */}
-                {canBook && regularSlot && (
-                    <div style={sectionPad}>
-                        <ListGroup aria-label="Постоянный слот">
-                            <ListRow
-                                onClick={() => repeatBooking(regularSlot.booking)}
-                                lead={<ListIcon><Repeat size={20} /></ListIcon>}
-                                title={<>
-                                    Ваш постоянный слот: {(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId}
-                                    {' · '}
-                                    <span className="num">{regularSlot.booking.startTime}</span>
-                                </>}
-                                subtitle={`Забронировать на ${formatDateLabel(regularSlot.nextDate)} · ${regularSlot.count}× за 2 мес.`}
-                            />
-                        </ListGroup>
                     </div>
                 )}
 
@@ -529,7 +628,8 @@ export function MobileToday() {
             {openBooking && (
                 <BookingDetailSheet
                     booking={openBooking}
-                    onClose={() => setOpenBooking(null)}
+                    focusSeries={openAtSeries}
+                    onClose={() => { setOpenBooking(null); setOpenAtSeries(false); }}
                 />
             )}
         </>
@@ -658,6 +758,34 @@ function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: D
         />
     );
 }
+
+/** Ячейка кошелька: подпись, значение, срок — всегда три строки, чтобы высота
+ *  не менялась, когда догружается бонус. Нажимается — ведёт в свой раздел. */
+const walletLine: React.CSSProperties = {
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: TEXT.caption,
+    fontWeight: 500,
+    color: COLOR.ink60,
+};
+const walletCell: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 76,
+    minWidth: 0,
+    padding: '10px 12px',
+    background: COLOR.card,
+    border: 'none',
+    borderRadius: RADIUS.control,
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+};
 
 const linkBtn: React.CSSProperties = {
     background: 'none',

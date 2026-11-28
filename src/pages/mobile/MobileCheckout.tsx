@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { BookOpen, Check, ChevronDown, Hourglass, Repeat, UserRound, Wallet } from 'lucide-react';
+import { BookOpen, CalendarPlus, Check, ChevronDown, DoorOpen, Hourglass, Repeat, UserRound, Wallet } from 'lucide-react';
 import { ChoiceCard } from '../../components/ui/ChoiceCard';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -39,6 +39,11 @@ import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
 import { useAdminFlow } from './adminFlow';
 import { ClientPickerSheet } from './ClientPickerSheet';
 import { TelegramConnectCard } from './TelegramConnectCard';
+import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
+import { prepareRepeat } from './repeatBooking';
+import { bookingCalendarEvent, bookingEntry, bookingStartDate, paymentLine } from './bookingView';
+import { addToCalendar, calendarHint } from '../../utils/calendar';
+import type { BookingHistoryItem } from '../../store/types';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -67,6 +72,32 @@ function isSpecialistOnlyRefusal(e: any): boolean {
  *   - Reschedule confirmation (separate path planned)
  */
 export function MobileCheckout() {
+    // «Повторять каждую неделю» с экрана «Бронь ваша» (28.11) открывает оформление
+    // заново и с чистого листа: key пересоздаёт экран, чтобы от только что
+    // сделанной брони не осталось выбранной оплаты, клиента и прочего состояния.
+    // after — день только что оформленной брони («2 дек.»): новый экран честно
+    // говорит, что она уже есть, а здесь — продолжение со следующей недели.
+    // crmClientId — клиент CRM, к которому была привязана первая бронь: серия
+    // продолжает ту же привязку (ревизия регрессий 28.11 — иначе она молча терялась).
+    const [run, setRun] = useState<{ n: number; weekly: boolean; after: string | null; crmClientId: string }>(
+        { n: 0, weekly: false, after: null, crmClientId: '' });
+    return (
+        <MobileCheckoutScreen
+            key={run.n}
+            startWeekly={run.weekly}
+            afterBooking={run.after}
+            startCrmClientId={run.crmClientId}
+            onRepeatWeekly={(after, crmClientId) => setRun(r => ({ n: r.n + 1, weekly: true, after, crmClientId }))}
+        />
+    );
+}
+
+function MobileCheckoutScreen({ startWeekly, afterBooking, startCrmClientId, onRepeatWeekly }: {
+    startWeekly: boolean;
+    afterBooking: string | null;
+    startCrmClientId: string;
+    onRepeatWeekly: (after: string | null, crmClientId: string) => void;
+}) {
     const navigate = useNavigate();
     const { currentUser, addBookings, bookings, fetchBookings, fetchCurrentUser, users, fetchUsers } = useUserStore();
     const state = useBookingStore();
@@ -85,6 +116,9 @@ export function MobileCheckout() {
     const [done, setDone] = useState<{ pending: boolean; waiting?: number; total?: number } | null>(null);
     // Бронь админа «за другого»: экран успеха говорит, чья она (обход 10.10).
     const [doneFor, setDoneFor] = useState<string | null>(null);
+    // Сама созданная бронь (одиночная) — для «В календарь», «Как войти» и
+    // «Повторять каждую неделю» на экране «Бронь ваша» (28.11).
+    const [doneBooking, setDoneBooking] = useState<BookingHistoryItem | null>(null);
     const [timeOpen, setTimeOpen] = useState(false);
     const [payOpen, setPayOpen] = useState(false);
     const [extrasOpen, setExtrasOpen] = useState(false);
@@ -100,7 +134,7 @@ export function MobileCheckout() {
     };
     // Recurring series state — local to the checkout, not persisted in store
     // (one-shot decision). 'once' = single booking (default).
-    const [recurPattern, setRecurPattern] = useState<'once' | 'weekly' | 'biweekly' | 'monthly'>('once');
+    const [recurPattern, setRecurPattern] = useState<'once' | 'weekly' | 'biweekly' | 'monthly'>(startWeekly ? 'weekly' : 'once');
     // 09.11 (ревью №8): по умолчанию 4 встречи (было 8 — и сумма сразу пугала).
     const [recurOccurrences, setRecurOccurrences] = useState(4);
     // Owner+Galina 2026-05-31: дать возможность задать «продлить до даты Х»
@@ -109,14 +143,15 @@ export function MobileCheckout() {
     const [recurMode, setRecurMode] = useState<'count' | 'until'>('count');
     const [recurUntil, setRecurUntil] = useState<string>('');
     // Блок «Повторение» свёрнут по умолчанию — раскрывается по кнопке.
-    const [recurOpen, setRecurOpen] = useState(false);
+    // Пришли по «Повторять каждую неделю» — сразу раскрыт: видно, сколько раз.
+    const [recurOpen, setRecurOpen] = useState(startWeekly);
 
     // Привязка брони к клиенту Psy-CRM — как в десктопном мастере. Показывается
     // только специалистам (у кого есть клиенты в CRM). Одиночная бронь просто
     // помечается клиентом; сессию в CRM бэкенд создаёт только для серии — ровно
     // то же поведение, что на компьютере, без нового риска дублей.
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
-    const [selectedCrmClientId, setSelectedCrmClientId] = useState<string>('');
+    const [selectedCrmClientId, setSelectedCrmClientId] = useState<string>(startCrmClientId);
     // Только тем, кого сервер пускает в Psy-CRM: клиенту /crm/clients отвечает
     // 403 (обход мобильной версии 10.10).
     useEffect(() => {
@@ -648,6 +683,7 @@ export function MobileCheckout() {
                 // владельца). Статус — из ответа сервера на ЭТУ бронь:
                 // на одобрении — «Ждём подтверждения администратора».
                 setDoneFor(proxyName);
+                setDoneBooking(created);
                 setDone({ pending: (created as any).status === 'pending_approval' });
             } else {
                 // Multi-slot batch — addBookings handles its own toasts/errors.
@@ -693,6 +729,12 @@ export function MobileCheckout() {
                 total={done.total}
                 forName={doneFor}
                 summary={summaryRef.current}
+                booking={doneFor ? null : doneBooking}
+                onRepeatWeekly={() => {
+                    if (!doneBooking || !prepareRepeat(doneBooking)) return;
+                    const d = bookingStartDate(doneBooking);
+                    onRepeatWeekly(d ? formatDayMonthShort(d) : null, doneBooking.crmClientId ? String(doneBooking.crmClientId) : '');
+                }}
                 telegramCard={doneFor ? null : (
                     <TelegramConnectCard
                         user={currentUser}
@@ -1138,6 +1180,10 @@ export function MobileCheckout() {
                             </li>
                         ) : (
                             <li>Бронь сразу ваша — подтверждать не нужно.</li>
+                        )}
+                        {/* Пришли по «Повторять каждую неделю»: первая бронь уже есть. */}
+                        {startWeekly && afterBooking && isSeries && (
+                            <li>Бронь на {afterBooking} уже оформлена — здесь её продолжение со следующей недели.</li>
                         )}
 
                         {!isSeries && payMethod === 'subscription' && (() => {
@@ -1656,9 +1702,13 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
 
 /** Экран после брони (решение владельца): бронь на одобрении —
  *  «Ждём подтверждения администратора», обычная — «Бронь ваша». */
-function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onHome, telegramCard }: {
+function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onHome, telegramCard, booking, onRepeatWeekly }: {
     /** «Подключите Telegram», пока бот не подключён (ревью №9). */
     telegramCard?: React.ReactNode;
+    /** Своя одиночная бронь: по ней — «В календарь», «Как войти», «Повторять
+     *  каждую неделю» (28.11: раньше после брони был тупик из двух кнопок). */
+    booking?: BookingHistoryItem | null;
+    onRepeatWeekly?: () => void;
     pending: boolean;
     /** Корзина: сколько броней из скольких ждут подтверждения (остальные уже подтверждены). */
     waiting?: number;
@@ -1673,6 +1723,14 @@ function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onH
     // «2 из 3 броней» — только когда подтверждения ждёт не вся корзина.
     const partialWait = pending && waiting && total && waiting < total
         ? `${waiting} из ${total} ${ruPlural(total, ['брони', 'броней', 'броней'])}` : '';
+    // Что дальше — только у подтверждённой брони: заявку «на одобрении» в
+    // календарь не зовём и серию из неё не строим.
+    const calendarEvent = booking && !pending ? bookingCalendarEvent(booking) : null;
+    const entry = booking && !pending ? bookingEntry(booking) : [];
+    const canRepeat = !!booking && !pending && !!onRepeatWeekly;
+    // Итог по деньгам — из самой созданной брони (та же строка, что на «Сегодня»):
+    // «Спишем завтра в 09:00: 20 ₾» / «Оплачено: 1 ч из абонемента».
+    const moneyLine = booking && !pending ? paymentLine(booking, bookingStartDate(booking)) : '';
     return (
         <div style={{ padding: '48px 16px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
             <div aria-hidden="true" style={{
@@ -1703,6 +1761,42 @@ function DoneScreen({ pending, waiting, total, forName, summary, onBookings, onH
                         {summary.place}
                         {summary.more > 0 ? ` · и ещё ${summary.more} ${ruPlural(summary.more, ['бронь', 'брони', 'броней'])}` : ''}
                     </div>
+                    {moneyLine && (
+                        <div className="num-inline" style={{ fontSize: TEXT.small, color: COLOR.ink80, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${COLOR.ink08}` }}>
+                            {moneyLine}
+                        </div>
+                    )}
+                </div>
+            )}
+            {(calendarEvent || entry.length > 0 || canRepeat) && (
+                <div style={{ width: '100%', textAlign: 'left' }}>
+                    <ListGroup aria-label="Что дальше">
+                        {canRepeat && (
+                            <ListRow
+                                onClick={onRepeatWeekly}
+                                lead={<ListIcon><Repeat size={20} /></ListIcon>}
+                                title="Повторять каждую неделю"
+                                subtitle="Новая серия со следующей недели — цену покажем до подтверждения"
+                            />
+                        )}
+                        {calendarEvent && (
+                            <ListRow
+                                onClick={() => {
+                                    if (addToCalendar(calendarEvent) === 'ics') toast.info('Файл события скачан — откройте его, чтобы добавить в календарь');
+                                }}
+                                lead={<ListIcon><CalendarPlus size={20} /></ListIcon>}
+                                title="Добавить в календарь"
+                                subtitle={calendarHint()}
+                            />
+                        )}
+                        {entry.length > 0 && (
+                            <ListRow
+                                lead={<ListIcon><DoorOpen size={20} /></ListIcon>}
+                                title="Как войти"
+                                subtitle={<>{entry.map((line, i) => <span key={i} style={{ display: 'block' }}>{line}</span>)}</>}
+                            />
+                        )}
+                    </ListGroup>
                 </div>
             )}
             {telegramCard}

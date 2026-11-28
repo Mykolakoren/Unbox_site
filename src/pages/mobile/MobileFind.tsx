@@ -66,6 +66,12 @@ function locsOpenOn(locs: Set<string>, dayKey: string): Set<string> {
     return new Set(chosen.length ? chosen : ALL_LOCS.filter(l => isLocationOpenOn(l, dayKey)));
 }
 const ALL_SPACES: SpaceType[] = ['individual', 'group', 'capsule'];
+/* Лента дней на самом экране (28.11, шаг 1 плана мобильной брони). По рабочему
+ * сайту за 90 дней: только 11 % разовых броней делают на ближайшие сутки, 41 % —
+ * за 3–7 дней, 31 % — больше чем за неделю. Раньше любой день, кроме
+ * сегодняшнего, выбирался через шторку. Три недели закрывают почти все случаи,
+ * дальше — «Другой день» (до 60 дней: столько сервер отдаёт занятости). */
+const STRIP_DAYS = 21;
 type FindPrefs = { locs?: string[]; spaces?: string[]; dur?: number };
 
 function readFindPrefs(): FindPrefs {
@@ -439,6 +445,58 @@ export function MobileFind() {
     );
     const hotUntil = hotHidden.length ? minsToHm(hotHidden[hotHidden.length - 1].startMin) : null;
 
+    // Лента дней: сколько вариантов времени в каждый из ближайших дней — под те же
+    // «Сколько / Где / Тип» и по тем же правилам, что список ниже (иначе чип
+    // обещал бы время, которого в списке нет): при переносе без «срочных» окон,
+    // у админа — с прошедшим временем сегодня, если он его открыл.
+    // Занятость раскладываем по дням один раз, а не перебираем весь список на каждый день.
+    const occupancyByDay = useMemo(() => {
+        const m = new Map<string, BookingHistoryItem[]>();
+        for (const b of occupancy) {
+            if (b.status !== 'confirmed' && b.status !== 'pending_approval') continue;
+            const k = bookingDay(b);
+            if (!k) continue;
+            const arr = m.get(k);
+            if (arr) arr.push(b); else m.set(k, [b]);
+        }
+        return m;
+    }, [occupancy]);
+    // Ключ сегодняшнего дня — чтобы после полуночи лента пересчиталась, а не
+    // подписывала вчерашний день «Сегодня».
+    const todayKey = fmtDate(new Date(), 'yyyy-MM-dd');
+    const stripDays = useMemo(() => {
+        const out: { k: number; date: Date; key: string; free: number }[] = [];
+        for (let k = 0; k < STRIP_DAYS; k++) {
+            const d = addDays(new Date(todayKey + 'T00:00:00'), k);
+            const key = fmtDate(d, 'yyyy-MM-dd');
+            const windows = buildFreeWindows(occupancyByDay.get(key) ?? [], d, duration, locs, spaces, null, k === 0,
+                                             k === 0 && canBackdate && showPast ? backdateMin : 0);
+            const free = restrictHot ? windows.filter(w => !isHotStart(key, w.startMin)).length : windows.length;
+            out.push({ k, date: d, key, free });
+        }
+        return out;
+    }, [occupancyByDay, duration, locs, spaces, todayKey, canBackdate, showPast, backdateMin, restrictHot]);
+    const targetKey = fmtDate(targetDate, 'yyyy-MM-dd');
+    const targetInStrip = stripDays.some(x => x.key === targetKey);
+    /** Ближайший день после выбранного, где есть свободное время (для пустого дня). */
+    const nextFreeDay = useMemo(
+        () => stripDays.find(x => x.date.getTime() > targetDate.getTime() && x.free > 0) ?? null,
+        [stripDays, targetDate],
+    );
+    // Выбранный день всегда на виду: лента сама подъезжает к нему (первый раз — без анимации).
+    const stripRef = useRef<HTMLDivElement>(null);
+    const stripScrolled = useRef(false);
+    useEffect(() => {
+        const box = stripRef.current;
+        if (!box) return;
+        const el = box.querySelector<HTMLElement>('[data-day-selected="true"]');
+        if (!el) return;
+        const left = Math.max(0, el.offsetLeft - (box.clientWidth - el.offsetWidth) / 2);
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        box.scrollTo({ left, behavior: stripScrolled.current && !reduce ? 'smooth' : 'auto' });
+        stripScrolled.current = true;
+    }, [targetKey]);
+
     // Админ-бронь / админ-перенос (ревью админки №2): для кого — в полоске внизу
     // и в плашке переноса; после переноса чужой брони — обратно в админку.
     const adminFlow = useAdminFlow(s => s.active) && isAdminActor;
@@ -528,9 +586,8 @@ export function MobileFind() {
     const wlRoomId = wlRoomPick && waitlistRooms.some(r => r.id === wlRoomPick) ? wlRoomPick : wlRoomDefault;
     const wlRoom = wlRoomId ? RESOURCES.find(r => r.id === wlRoomId) : undefined;
 
-    // Строка-сводка: «Сегодня · 1 ч · оба центра · все помещения».
+    // Строка-сводка: «1 ч · UNBOX 99 · все помещения». День — в ленте над ней.
     const summary = [
-        formatRelativeDay(targetDate),
         formatBookingDuration(duration),
         // Называем центры, в которых поиск на этот день идёт на самом деле
         // (закрывшиеся к этой дате отпадают — см. locsOpenOn).
@@ -941,6 +998,85 @@ export function MobileFind() {
                     </div>
                 )}
 
+                {/* Лента дней (28.11): день меняется одним касанием прямо на экране.
+                    День, где под выбранную длительность ничего нет, помечен
+                    «занято» — его видно заранее, а не после нажатия. «Другой день»
+                    закреплён справа: до него не нужно листать три недели. */}
+                <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, paddingRight: 16 }}>
+                    <div
+                        ref={stripRef}
+                        role="group"
+                        aria-label="День"
+                        className="ui-chip-row ui-chip-row--scroll"
+                        style={{ position: 'relative', flex: 1, minWidth: 0, gap: 8, padding: '0 24px 2px 16px' }}
+                    >
+                        {stripDays.map(({ k, date, key, free }) => {
+                            const active = key === targetKey;
+                            const full = occupancyReady && free === 0 && locs.size > 0 && spaces.size > 0;
+                            const top = k === 0 ? 'Сегодня' : k === 1 ? 'Завтра' : formatWeekdayShort(date);
+                            return (
+                                <Chip
+                                    key={key}
+                                    selected={active}
+                                    data-day-selected={active ? 'true' : undefined}
+                                    onClick={() => jumpToDate(date)}
+                                    aria-label={`${formatRelativeDay(date, { capitalize: true })}${k < 2 ? `, ${formatDayMonth(date)}` : ''}${full ? ' — свободного времени нет' : ''}`}
+                                    style={{ ...dayChip, flex: '0 0 auto', minWidth: 68 }}
+                                >
+                                    <span style={{ fontWeight: 600, color: full && !active ? COLOR.ink60 : undefined }}>{top}</span>
+                                    <span style={dayChipSub}>{formatDayMonthShort(date)}{full ? ' · занято' : ''}</span>
+                                </Chip>
+                            );
+                        })}
+                    </div>
+                    {/* Дальше трёх недель (и прошлые дни админа) — системный календарь. */}
+                    <label
+                        className="m-find-otherday"
+                        style={{
+                            // Тот же язык «выбрано», что у Chip (label с полем даты
+                            // внутри не может быть кнопкой Chip).
+                            ...dayChip,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            minHeight: 44,
+                            marginBottom: 2,
+                            background: !targetInStrip ? COLOR.accentSoft : COLOR.card,
+                            color: !targetInStrip ? COLOR.accentInk : COLOR.ink,
+                            border: `1px solid ${!targetInStrip ? COLOR.accent : COLOR.ink20}`,
+                            boxShadow: !targetInStrip ? `inset 0 0 0 0.5px ${COLOR.accent}` : undefined,
+                            borderRadius: RADIUS.control,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            fontSize: TEXT.small,
+                            flex: '0 0 auto',
+                            minWidth: 64,
+                            position: 'relative',
+                        }}
+                    >
+                        <CalendarDays size={18} aria-hidden="true" />
+                        <span style={{ ...dayChipSub, color: !targetInStrip ? COLOR.accentInk : COLOR.ink60, fontWeight: !targetInStrip ? 600 : 500 }}>
+                            {!targetInStrip ? formatDayMonthShort(targetDate) : 'Другой'}
+                        </span>
+                        <input
+                            type="date"
+                            aria-label="Выбрать другой день"
+                            min={fmtDate(new Date(), 'yyyy-MM-dd')}
+                            // Сервер отдаёт занятость на 60 дней вперёд. Дальше этой
+                            // границы список показывал бы ВСЕ кабинеты свободными
+                            // (занятость не загружена) → клиент выбирал слот и получал
+                            // отказ уже на оформлении. Ограничиваем выбор.
+                            max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}
+                            value={!targetInStrip ? targetKey : ''}
+                            onChange={e => {
+                                if (!e.target.value) return;
+                                const [y, m, d] = e.target.value.split('-').map(Number);
+                                jumpToDate(new Date(y, m - 1, d, 0, 0, 0, 0));
+                            }}
+                            style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+                        />
+                    </label>
+                </div>
+
                 {/* Строка-сводка фильтров (G4-04): результаты — на первом экране. */}
                 <div style={{ padding: '0 16px' }}>
                     <button
@@ -1176,7 +1312,7 @@ export function MobileFind() {
                             compact
                             title="В этот день перенести можно только через администратора"
                             hint="Выберите другой день — или напишите администратору."
-                            action={{ label: 'Изменить день', onClick: () => setFiltersOpen(true) }}
+                            action={{ label: 'Следующий день', onClick: () => jumpToDate(addDays(targetDate, 1)) }}
                         />
                     )}
                     {occupancyReady && allSlots.length === 0 && locs.size > 0 && spaces.size > 0 && (
@@ -1186,9 +1322,11 @@ export function MobileFind() {
                             hint={waitlistEnabled
                                 ? 'Попробуйте другой день или длительность — или попросите сообщить, когда освободится.'
                                 : 'Попробуйте другой день, длительность или фильтры.'}
-                            action={dayOffset === 0 && waitlistStarts.length === 0
-                                // Вечером «сегодня» уже закончилось — сразу на завтра.
-                                ? { label: 'Смотреть завтра', onClick: () => { setDayOffset(1); setCustomDate(null); } }
+                            // Ближайший день, где под эту длительность есть время (28.11):
+                            // «Показать завтра» / «Показать пт, 4 дек.». Раньше вечером вели
+                            // на «завтра», даже если и там всё занято.
+                            action={nextFreeDay
+                                ? { label: `Показать ${formatRelativeDay(nextFreeDay.date, { capitalize: false })}`, onClick: () => jumpToDate(nextFreeDay.date) }
                                 : { label: 'Изменить поиск', onClick: () => setFiltersOpen(true) }}
                         />
                     )}
@@ -1240,7 +1378,9 @@ export function MobileFind() {
                                         <div style={{ marginTop: 12 }}>
                                             <Button
                                                 block
-                                                variant={slots.length === 0 ? 'primary' : 'secondary'}
+                                                // Главная кнопка пустого дня — «Показать ближайший свободный»;
+                                                // вторая такая же громкая рядом путала (28.11).
+                                                variant={slots.length === 0 && !nextFreeDay ? 'primary' : 'secondary'}
                                                 icon={<BellRing size={16} aria-hidden="true" />}
                                                 onClick={() => setWaitlistModalOpen(true)}
                                                 disabled={!wlRoom}
@@ -1272,7 +1412,7 @@ export function MobileFind() {
             <Sheet
                 open={filtersOpen}
                 onClose={() => setFiltersOpen(false)}
-                title="Когда и где искать"
+                title="Сколько и где искать"
                 footer={
                     <Button block onClick={() => setFiltersOpen(false)}>
                         {occupancyReady && slots.length > 0
@@ -1282,11 +1422,11 @@ export function MobileFind() {
                 }
             >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                    {/* When */}
-                    <FieldGroup label="Когда">
-                        {/* 25.10: админ — прошлые дни в пределах права «задним числом». */}
-                        {pastDayOptions.length > 0 && (
-                            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                    {/* День выбирается лентой на самом экране (28.11). В шторке остались
+                        только прошлые дни админа — «задним числом» (25.10). */}
+                    {pastDayOptions.length > 0 && (
+                        <FieldGroup label="Задним числом">
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                 {pastDayOptions.slice().reverse().map(k => {
                                     const d = addDays(new Date(), -k);
                                     const active = daysBack === k;
@@ -1297,110 +1437,14 @@ export function MobileFind() {
                                             onClick={() => { const x = new Date(d); x.setHours(0, 0, 0, 0); setCustomDate(x); setDayOffset(-1); }}
                                             style={dayChip}
                                         >
-                                            <span style={{ fontWeight: 600 }}>{k === 1 ? 'Вчера' : 'Задним числом'}</span>
+                                            <span style={{ fontWeight: 600 }}>{k === 1 ? 'Вчера' : formatWeekdayShort(d)}</span>
                                             <span style={dayChipSub}>{formatDayMonth(d)}</span>
                                         </Chip>
                                     );
                                 })}
                             </div>
-                        )}
-                        {/* Today/Tomorrow — flat 50/50 row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                            {[0, 1].map(off => {
-                                const d = addDays(new Date(), off);
-                                const top = off === 0 ? 'Сегодня' : 'Завтра';
-                                const bot = formatDayMonth(d);
-                                const active = dayOffset === off;
-                                return (
-                                    <Chip
-                                        key={off}
-                                        selected={active}
-                                        onClick={() => setDayOffset(off)}
-                                        style={{ ...dayChip, width: '100%', padding: '10px 16px' }}
-                                    >
-                                        <span style={{ fontSize: TEXT.body, fontWeight: 600 }}>{top}</span>
-                                        <span style={dayChipSub}>{bot}</span>
-                                    </Chip>
-                                );
-                            })}
-                        </div>
-                        {/* Next 5 days as compact square chips + "Другой день" */}
-                        <ChipsRow>
-                            {[2, 3, 4, 5, 6, 7, 8].map(off => {
-                                const d = addDays(new Date(), off);
-                                const wd = formatWeekdayShort(d);
-                                const dayLabel = formatDayMonthShort(d);
-                                const active = dayOffset === off;
-                                return (
-                                    <Chip
-                                        key={off}
-                                        selected={active}
-                                        onClick={() => { setDayOffset(off); setCustomDate(null); }}
-                                        style={{ ...dayChip, alignItems: 'center', flex: '0 0 auto', minWidth: 64 }}
-                                    >
-                                        <span style={{ fontWeight: 600 }}>{wd}</span>
-                                        <span style={dayChipSub}>{dayLabel}</span>
-                                    </Chip>
-                                );
-                            })}
-                            {/* Native date input — covers any future date past the
-                                7-day chip strip. Wrapping the <input> in a label
-                                lets us style it like the other chips while still
-                                popping the OS date picker on tap. */}
-                            <label
-                                style={{
-                                    // Тот же язык «выбрано», что у Chip (label с полем даты
-                                    // внутри не может быть кнопкой Chip).
-                                    ...dayChip,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    background: dayOffset === -1 ? COLOR.accentSoft : COLOR.card,
-                                    color: dayOffset === -1 ? COLOR.accentInk : COLOR.ink,
-                                    border: `1px solid ${dayOffset === -1 ? COLOR.accent : COLOR.ink20}`,
-                                    boxShadow: dayOffset === -1 ? `inset 0 0 0 0.5px ${COLOR.accent}` : undefined,
-                                    borderRadius: RADIUS.control,
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    fontSize: TEXT.small,
-                                    flex: '0 0 auto',
-                                    minWidth: 88,
-                                    position: 'relative',
-                                }}
-                            >
-                                <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                    <CalendarDays size={14} aria-hidden="true" /> Другой
-                                </span>
-                                <span style={dayChipSub}>
-                                    {dayOffset === -1 && customDate
-                                        ? formatDayMonthShort(customDate)
-                                        : 'день'}
-                                </span>
-                                <input
-                                    type="date"
-                                    min={fmtDate(new Date(), 'yyyy-MM-dd')}
-                                    // Сервер отдаёт занятость на 60 дней вперёд. Дальше этой
-                                    // границы список показывал бы ВСЕ кабинеты свободными
-                                    // (занятость не загружена) → клиент выбирал слот и получал
-                                    // отказ уже на оформлении. Ограничиваем выбор.
-                                    max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}
-                                    value={customDate ? fmtDate(customDate, 'yyyy-MM-dd') : ''}
-                                    onChange={e => {
-                                        if (!e.target.value) return;
-                                        const [y, m, d] = e.target.value.split('-').map(Number);
-                                        const picked = new Date(y, m - 1, d, 0, 0, 0, 0);
-                                        setCustomDate(picked);
-                                        setDayOffset(-1);
-                                    }}
-                                    style={{
-                                        position: 'absolute',
-                                        inset: 0,
-                                        opacity: 0,
-                                        cursor: 'pointer',
-                                    }}
-                                />
-                            </label>
-                        </ChipsRow>
-                    </FieldGroup>
+                        </FieldGroup>
+                    )}
 
                     {/* Duration */}
                     {rescheduleId ? (

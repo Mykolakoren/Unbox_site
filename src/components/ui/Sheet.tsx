@@ -3,7 +3,7 @@ import {
     type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion, useDragControls, type PanInfo } from 'framer-motion';
+import { AnimatePresence, motion, useDragControls, useIsPresent, type PanInfo } from 'framer-motion';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
@@ -18,7 +18,8 @@ import { MOTION, Z } from '../../design/tokens';
  *  - портал в body на слое --z-sheet, то есть ВЫШЕ нижнего меню /m;
  *  - высота ограничена экраном, тело прокручивается внутри, а подвал
  *    с главной кнопкой (footer) всегда виден и учитывает вырез iPhone;
- *  - Esc закрывает (только верхнюю шторку, если их две), фокус заперт
+ *  - Esc и системная «Назад» на Android закрывают (только верхнюю шторку,
+ *    если их две), фокус заперт
  *    внутри и возвращается на кнопку, которая открыла шторку;
  *  - свайп вниз за ручку/шапку закрывает (быстрый рывок — тоже);
  *  - фон не прокручивается под шторкой (общий ref-counted лок);
@@ -89,6 +90,22 @@ function SheetPanel({
     onCloseRef.current = onClose;
     const dismissibleRef = useRef(dismissible);
     dismissibleRef.current = dismissible;
+    // Пока шторка уезжает (180 мс), «Назад» не должна закрывать её второй раз.
+    const isPresent = useIsPresent();
+    const presentRef = useRef(isPresent);
+    presentRef.current = isPresent;
+    // Сторож системной «Назад» (CloseWatcher). Снимаем его, как только шторка
+    // начала уезжать: иначе «Назад» в эти 180 мс молча съедалась бы.
+    const watcherRef = useRef<{ onclose: (() => void) | null; destroy: () => void } | null>(null);
+    const disarmWatcher = () => {
+        const w = watcherRef.current;
+        if (!w) return;
+        watcherRef.current = null;
+        w.onclose = null;
+        try { w.destroy(); } catch { /* уже закрыт */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { if (!isPresent) disarmWatcher(); }, [isPresent]);
 
     useScrollLock();
 
@@ -100,17 +117,56 @@ function SheetPanel({
             if (e.key !== 'Escape' || openStack[openStack.length - 1] !== id) return;
             if (!dismissibleRef.current) return;
             e.stopPropagation();
+            // preventDefault — чтобы «сторож закрытия» ниже не закрыл шторку второй раз.
+            e.preventDefault();
             onCloseRef.current();
         };
         document.addEventListener('keydown', onKey);
+        // Системная «Назад» на Android (28.11, шаг 1 плана мобильной брони): раньше
+        // она уводила со страницы, а шторка оставалась висеть над чужим экраном.
+        // CloseWatcher (Chrome/Edge/Samsung на Android) отдаёт «Назад» верхней
+        // шторке — без записей в истории браузера, поэтому маршруты не трогаем.
+        // Где его нет (iPhone, Firefox) — всё как раньше.
+        type Watcher = { onclose: (() => void) | null; destroy: () => void };
+        const WatcherCtor = (window as unknown as { CloseWatcher?: new () => Watcher }).CloseWatcher;
+        let mounted = true;
+        const arm = () => {
+            if (!WatcherCtor || !mounted) return;
+            try {
+                const w = new WatcherCtor();
+                w.onclose = () => {
+                    watcherRef.current = null;
+                    if (!presentRef.current) return;          // шторка уже уезжает
+                    // Браузер отдаёт «Назад» последнему созданному сторожу, а не верхней
+                    // шторке; а сторожей, созданных без касания, закрывает пачкой. Поэтому
+                    // закрываемся, только если мы верхние и закрывать можно; иначе
+                    // остаёмся и ждём следующую «Назад».
+                    if (openStack[openStack.length - 1] === id && dismissibleRef.current) {
+                        onCloseRef.current();
+                        // onClose мог не закрыть шторку («Закрыть без сохранения?» →
+                        // «Вернуться», идёт сохранение): тогда сторожим дальше, иначе
+                        // следующая «Назад» увела бы со страницы вместе с формой.
+                        setTimeout(() => { if (mounted && presentRef.current && !watcherRef.current) arm(); }, 60);
+                        return;
+                    }
+                    arm();
+                };
+                watcherRef.current = w;
+            } catch { watcherRef.current = null; }
+        };
+        // Взводим всегда, даже у «незакрываемой» шторки: пока идёт оплата, «Назад»
+        // не должна ни закрыть шторку под ней, ни увести со страницы.
+        arm();
         // Фокус внутрь после первого кадра (панель уже в DOM).
         const raf = requestAnimationFrame(() => {
             const target = initialFocus?.current ?? panelRef.current;
             target?.focus({ preventScroll: true });
         });
         return () => {
+            mounted = false;
             cancelAnimationFrame(raf);
             document.removeEventListener('keydown', onKey);
+            disarmWatcher();
             const i = openStack.lastIndexOf(id);
             if (i !== -1) openStack.splice(i, 1);
             if (opener && document.contains(opener)) opener.focus({ preventScroll: true });

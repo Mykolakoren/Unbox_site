@@ -3,6 +3,7 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { formatTimeRange } from '../../utils/format';
 import { priceLabel } from './priceLabel';
+import type { CalendarEvent } from '../../utils/calendar';
 
 /**
  * Общие подписи брони для клиентских экранов /m (волна 2).
@@ -82,4 +83,33 @@ export function paymentLine(b: BookingHistoryItem, start: Date | null): string {
     if (b.paymentMethod === 'bonus' && !((b.finalPrice ?? 0) > 0)) return price;
     if (b.paymentStatus === 'pending' && start) return `Спишем ${formatChargeAt(start)}: ${price}`;
     return price;
+}
+
+/** «Как войти» для центра брони — строки из данных центра (пусто — блока нет). */
+export function bookingEntry(b: BookingHistoryItem): string[] {
+    const lines = bookingPlace(b).location?.entry;
+    return Array.isArray(lines) ? lines.filter(x => typeof x === 'string' && x.trim() !== '') : [];
+}
+
+/**
+ * Событие для календаря телефона («В календарь», 28.11).
+ * Время брони — батумское (UTC+4, летнего времени в Грузии нет). Переводим его
+ * в точный момент, чтобы событие встало верно, даже если телефон живёт в
+ * другом поясе (тот же приём, что в «Свободно» для срочных броней).
+ */
+export function bookingCalendarEvent(b: BookingHistoryItem): CalendarEvent | null {
+    const start = bookingStartDate(b);
+    if (!start) return null;
+    const startUtc = new Date(Date.UTC(
+        start.getFullYear(), start.getMonth(), start.getDate(), start.getHours() - 4, start.getMinutes(),
+    ));
+    const place = bookingPlace(b);
+    const entry = bookingEntry(b);
+    return {
+        title: `Unbox · ${place.resource?.name ?? 'кабинет'}`,
+        description: [place.title, ...entry, 'Бронь: https://unbox.com.ge/m/bookings'].join('\n'),
+        location: place.location ? `${place.location.name}, ${place.location.address}, Батуми` : '',
+        startTime: startUtc,
+        endTime: new Date(startUtc.getTime() + (b.duration ?? 60) * 60000),
+    };
 }

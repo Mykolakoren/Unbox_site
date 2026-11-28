@@ -120,17 +120,39 @@ def test_find_application_link_stays_in_app():
 def test_find_results_first_filters_in_sheet():
     src = _read("src/pages/mobile/MobileFind.tsx")
     ret = src[src.find("\n    return (\n        <>"):]
+    i_strip = ret.find('aria-label="День"')
     i_summary = ret.find("onClick={() => setFiltersOpen(true)}")
     i_results = ret.find("{occupancyReady && slots.map(")
     i_sheet = ret.find("<Sheet")
-    i_when = ret.find('<FieldGroup label="Когда">')
-    assert -1 not in (i_summary, i_results, i_sheet, i_when), "не нашли сводку/результаты/шторку фильтров"
-    assert i_summary < i_results < i_sheet < i_when, \
+    i_how = ret.find('<FieldGroup label="Сколько">')
+    assert -1 not in (i_strip, i_summary, i_results, i_sheet, i_how), \
+        "не нашли ленту дней/сводку/результаты/шторку фильтров"
+    assert i_strip < i_summary < i_results < i_sheet < i_how, \
         "фильтры снова стоят над результатами — ответ уезжает со первого экрана"
     assert ">\n                            Изменить\n" in ret, "в строке-сводке нет «Изменить»"
     # 21.11 (переезд): центров стало три, сводка называет те, где поиск в этот день идёт.
-    assert "formatRelativeDay(targetDate)" in src and "locsOpenOn(locs, fmtDate(targetDate" in src, \
-        "сводка «Сегодня · 1 ч · центры» пропала"
+    assert "locsOpenOn(locs, fmtDate(targetDate" in src, "сводка «1 ч · центры» пропала"
+    # 28.11 (шаг 1 плана мобильной брони): день выбирается лентой на самом экране,
+    # а не в шторке; в шторке остались только прошлые дни админа.
+    assert "STRIP_DAYS" in src and "data-day-selected" in ret, "лента дней пропала с экрана «Свободно»"
+    sheet = ret[i_sheet:]
+    assert '<FieldGroup label="Когда">' not in sheet, "выбор дня снова продублирован в шторке фильтров"
+    assert '<FieldGroup label="Задним числом">' in sheet, "админ потерял прошлые дни («задним числом»)"
+
+
+def test_find_day_strip_counts_like_the_list():
+    """28.11: чип дня обещает время по тем же правилам, что список под ним —
+    иначе «свободный» день открывался пустым («переносит администратор»)."""
+    src = _read("src/pages/mobile/MobileFind.tsx")
+    block = _block(src, "const stripDays = useMemo(", "const targetKey")
+    assert "buildFreeWindows(" in block, "лента считает свободное время не той же функцией, что список"
+    assert "restrictHot" in block and "isHotStart(key" in block, \
+        "лента не прячет срочные окна при переносе — чип «свободен», а список пуст"
+    assert "backdateMin" in block, "лента не учитывает «прошедшее время» админа"
+    assert "todayKey" in block, "после полуночи лента подпишет вчерашний день «Сегодня»"
+    ret = src[src.find("\n    return (\n        <>"):]
+    assert "nextFreeDay" in ret and "Показать ${formatRelativeDay(nextFreeDay.date" in ret, \
+        "пустой день больше не ведёт на ближайший свободный"
 
 
 def test_find_prefs_in_try_catch():

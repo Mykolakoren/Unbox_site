@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors, BookOpen, UserRound, Info } from 'lucide-react';
+import { MapPin, Wallet, CalendarClock, CalendarPlus, DoorOpen, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors, BookOpen, UserRound, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
@@ -25,7 +25,9 @@ import { ListGroup, ListIcon, ListRow } from '../../components/ui/ListRow';
 import { ChoiceCard, ChoiceGroup } from '../../components/ui/ChoiceCard';
 import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
 import { hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../../utils/subscription';
-import { bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
+import { bookingCalendarEvent, bookingEndDate, bookingEntry, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
+import { addToCalendar, calendarHint } from '../../utils/calendar';
+import { dismissSeriesEnd, restoreSeriesEnd } from './seriesEnd';
 import { cancellationReasonText, cancelledRefund, reRentCaption, reRentConfirmBody, reRentToast, RE_RENT_TOO_EARLY_HINT } from './refundText';
 import { calculatePrice } from '../../utils/pricing';
 import { fmtHours, subscriptionHours } from '../../utils/paymentPriority';
@@ -33,6 +35,8 @@ import { resourceKind } from '../../utils/subscriptionHours';
 import { format as fmtDate } from 'date-fns';
 
 const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
+/** «Серия по вторникам в 17:00» — день недели для заголовка шторки серии. */
+const SERIES_WEEKDAY = ['по воскресеньям', 'по понедельникам', 'по вторникам', 'по средам', 'по четвергам', 'по пятницам', 'по субботам'];
 
 /**
  * Шторка брони: подробности и действия (волна 2 — на общем Sheet).
@@ -54,11 +58,14 @@ const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
  * 09.11 (владелец): «Пересдать» — только меньше чем за сутки до начала. Больше
  * суток — на месте кнопки подсказка «отмените бронь, деньги вернутся полностью».
  */
-export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
+export function BookingDetailSheet({ booking, onClose, initialMode = 'view', focusSeries = false }: {
     booking: BookingHistoryItem;
     onClose: () => void;
     /** Свайп «Отменить» в «Моих бронях» открывает сразу подтверждение (ревью №15). */
     initialMode?: 'view' | 'confirmCancel';
+    /** Открыли со строки «Серия заканчивается» на «Сегодня» — сразу подводим
+     *  к действиям серии (они внизу длинной шторки), 28.11. */
+    focusSeries?: boolean;
 }) {
     const { fetchBookings, currentUser, bookings } = useUserStore();
     const navigate = useNavigate();
@@ -139,6 +146,18 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
     const refund = isCancelled ? cancelledRefund(booking) : null;
     const reasonText = cancellationReasonText(booking);
     const route = mapsUrl(place.location);
+    // 28.11 (шаг 1 плана мобильной брони): «Как войти» и «В календарь».
+    const entry = bookingEntry(booking);
+    const calendarEvent = bookingCalendarEvent(booking);
+
+    const seriesRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!focusSeries) return;
+        // Шторка выезжает 220 мс — прокручиваем, когда она уже на месте.
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        const t = setTimeout(() => seriesRef.current?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' }), 280);
+        return () => clearTimeout(t);
+    }, [focusSeries]);
 
     async function doCancel() {
         setBusy('cancel');
@@ -233,6 +252,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                 groupId,
                 scope === 'tail' ? booking.id : undefined,
             );
+            dismissSeriesEnd(groupId);   // сам закончил серию — «продлить?» на «Сегодня» не предлагаем
             await fetchBookings();
             toast.success(`Отменено ${res.cancelled} ${ruPlural(res.cancelled, ['бронь', 'брони', 'броней'])}`);
             onClose();
@@ -247,7 +267,8 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
         setBusy('dismiss_series_reminder');
         try {
             await bookingsApi.dismissSeriesEndReminder(groupId);
-            toast.success('Серия завершится в срок — больше не напомним');
+            dismissSeriesEnd(groupId);   // и строку на «Сегодня» больше не показываем
+            toast.success('Серия закончится сама — больше не напомним');
             onClose();
         } catch (e: any) {
             toastApiError(e, 'Не удалось сохранить');
@@ -272,6 +293,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
         setBusy('extend_series');
         try {
             const res = await bookingsApi.extendRecurringSeries(groupId, n);
+            restoreSeriesEnd(groupId);
             await fetchBookings();
             toast.success(`Серия продлена на ${res.created} ${ruPlural(res.created, ['бронь', 'брони', 'броней'])} (${formatGel(res.totalCost, { sign: true, fraction: 0 })})`);
             onClose();
@@ -309,7 +331,10 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
             ? 'Бесплатно — оплату вернём полностью'
             : 'Бесплатно — оплата ещё не списана';
 
-    const dateTitle = dt ? formatDateLabel(dt, { capitalize: true }) : 'Бронь';
+    // Пришли со строки «Последняя бронь серии» — шторка про серию, так и называем.
+    const dateTitle = focusSeries && dt
+        ? `Серия ${SERIES_WEEKDAY[dt.getDay()]} в ${booking.startTime}`
+        : dt ? formatDateLabel(dt, { capitalize: true }) : 'Бронь';
     const title = mode === 'pickClient'
         ? 'Привязать клиента'
         : mode === 'confirmCancel'
@@ -434,6 +459,15 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                 </a>
                             ) : undefined}
                         />
+
+                        {/* Как войти — пока бронь впереди и текст для центра задан. */}
+                        {isLive && entry.length > 0 && (
+                            <ListRow
+                                lead={<ListIcon><DoorOpen size={20} /></ListIcon>}
+                                title="Как войти"
+                                subtitle={<>{entry.map((line, i) => <span key={i} style={{ display: 'block' }}>{line}</span>)}</>}
+                            />
+                        )}
 
                         {/* Цена */}
                         <ListRow
@@ -591,6 +625,17 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                             checkout with this booking's slot on the next
                             same weekday. У будущей — второстепенное действие
                             (у прошедшей это главная кнопка выше). */}
+                        {isLive && booking.status === 'confirmed' && calendarEvent && (
+                            <ActionRow
+                                icon={<CalendarPlus size={20} />}
+                                label="Добавить в календарь"
+                                sub={calendarHint()}
+                                onClick={() => {
+                                    if (addToCalendar(calendarEvent) === 'ics') toast.info('Файл события скачан — откройте его, чтобы добавить в календарь');
+                                }}
+                            />
+                        )}
+
                         {!isPast && (
                             <ActionRow
                                 icon={<Repeat size={20} />}
@@ -637,6 +682,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
 
                     {/* Series actions — only when this booking is part of a recurring series. */}
                     {(booking as any).recurringGroupId && isLive && (
+                        <div ref={seriesRef} style={{ scrollMarginTop: 8 }}>
                         <ListGroup bare title="Серия">
                             <ActionRow
                                 icon={<Plus size={20} />}
@@ -647,8 +693,8 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                             />
                             <ActionRow
                                 icon={<BellOff size={20} />}
-                                label="Пусть завершится в срок"
-                                sub="Не присылать больше напоминаний"
+                                label="Не продлевать"
+                                sub="Серия закончится сама — напоминать не будем"
                                 busy={busy === 'dismiss_series_reminder'}
                                 onClick={doDismissSeriesReminder}
                             />
@@ -674,6 +720,7 @@ export function BookingDetailSheet({ booking, onClose, initialMode = 'view' }: {
                                 </>
                             )}
                         </ListGroup>
+                        </div>
                     )}
                 </div>
             ) : (

@@ -1,6 +1,6 @@
 
 
-interface CalendarEvent {
+export interface CalendarEvent {
     title: string;
     description: string;
     location: string;
@@ -24,6 +24,12 @@ export const generateGoogleCalendarUrl = (event: CalendarEvent): string => {
     return url.toString();
 };
 
+/** Текст для .ics: запятая, точка с запятой и перенос строки — служебные знаки
+ *  формата; без экранирования адрес «Парнаваз Мепе, 99» обрезался на запятой. */
+function icsText(v: string): string {
+    return (v || '').replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/([,;])/g, '\\$1');
+}
+
 export const downloadIcsFile = (event: CalendarEvent) => {
     const formatDate = (date: Date) => date.toISOString().replace(/-|:|\.\d\d\d/g, "");
     const now = formatDate(new Date());
@@ -37,9 +43,9 @@ export const downloadIcsFile = (event: CalendarEvent) => {
         `DTSTAMP:${now}`,
         `DTSTART:${formatDate(event.startTime)}`,
         `DTEND:${formatDate(event.endTime)}`,
-        `SUMMARY:${event.title}`,
-        `DESCRIPTION:${event.description}`,
-        `LOCATION:${event.location}`,
+        `SUMMARY:${icsText(event.title)}`,
+        `DESCRIPTION:${icsText(event.description)}`,
+        `LOCATION:${icsText(event.location)}`,
         'END:VEVENT',
         'END:VCALENDAR'
     ].join('\r\n');
@@ -51,4 +57,30 @@ export const downloadIcsFile = (event: CalendarEvent) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+};
+
+/**
+ * «В календарь» одной кнопкой (28.11, шаг 1 плана мобильной брони).
+ * iPhone / iPad — файл .ics: его открывает системный «Календарь».
+ * Остальные (Android, компьютер) — готовое событие в Google Календаре.
+ */
+function isAppleTouch(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent;
+    // iPad в «настольном» режиме представляется Mac — отличаем по тач-экрану.
+    return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+/** Подпись под «Добавить в календарь»: что именно откроется на этом устройстве. */
+export const calendarHint = (): string =>
+    (isAppleTouch() ? 'Откроется файл для календаря телефона' : 'Откроется Google Календарь');
+
+/** Возвращает, каким путём пошли, — экран показывает короткий отклик. */
+export const addToCalendar = (event: CalendarEvent): 'ics' | 'google' => {
+    if (isAppleTouch()) {
+        downloadIcsFile(event);
+        return 'ics';
+    }
+    window.open(generateGoogleCalendarUrl(event), '_blank', 'noopener,noreferrer');
+    return 'google';
 };

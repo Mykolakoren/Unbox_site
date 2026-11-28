@@ -988,3 +988,7 @@
    («Мои брони» → SwipeRow) тянется на всю ширину, сумма и «›» — у правого края. */
 .ui-row > * > .ui-row,
 .ui-row > .ui-row { flex: 1 1 auto; min-width: 0; }
+
+/* «Другой день» на «Свободно» — это label с невидимым полем даты внутри:
+ * рамку фокуса с клавиатуры рисуем на самом label (28.11). */
+.m-find-otherday:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }

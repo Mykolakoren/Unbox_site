@@ -30,5 +30,33 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Забронировать кабинет",
+      "short_name": "Забронировать",
+      "description": "Свободное время по дням",
+      "url": "/m/find",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Мои брони",
+      "short_name": "Мои брони",
+      "description": "Ближайшие брони и серии",
+      "url": "/m/bookings",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }
