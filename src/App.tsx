@@ -74,7 +74,6 @@ const MobileFind = lazy(() => import('./pages/mobile/MobileFind').then(m => ({ d
 const MobileProfile = lazy(() => import('./pages/mobile/MobileProfile').then(m => ({ default: m.MobileProfile })));
 const MobileProfileEdit = lazy(() => import('./pages/mobile/MobileProfileEdit').then(m => ({ default: m.MobileProfileEdit })));
 const MobileCheckout = lazy(() => import('./pages/mobile/MobileCheckout').then(m => ({ default: m.MobileCheckout })));
-const MobileCalendar = lazy(() => import('./pages/mobile/MobileCalendar').then(m => ({ default: m.MobileCalendar })));
 const MobileCrmLayout = lazy(() => import('./pages/mobile/crm/MobileCrmLayout').then(m => ({ default: m.MobileCrmLayout })));
 const MobileCrmToday = lazy(() => import('./pages/mobile/crm/MobileCrmToday').then(m => ({ default: m.MobileCrmToday })));
 const MobileCrmClients = lazy(() => import('./pages/mobile/crm/MobileCrmClients').then(m => ({ default: m.MobileCrmClients })));
@@ -394,7 +393,9 @@ function App() {
           <Route path="subscription" element={<MobileSubscription />} />
           <Route path="bonuses" element={<MobileBonuses />} />
           <Route path="checkout" element={<MobileCheckout />} />
-          <Route path="calendar" element={<MobileCalendar />} />
+          {/* Отдельного «Календаря» больше нет (шаг 2, 28.11): день по кабинетам —
+              сетка на «Свободно». Старые ссылки и закладки ведут туда же. */}
+          <Route path="calendar" element={<Navigate to="/m/find" replace />} />
           {/* Client-facing pages that reuse the desktop component
               inside the mobile shell. They're already responsive enough
               for phone width; a native mobile rewrite is planned later. */}

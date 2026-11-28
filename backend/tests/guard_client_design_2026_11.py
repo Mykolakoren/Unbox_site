@@ -24,7 +24,7 @@ M = "src/pages/mobile/"
 CLIENT_FILES = [
     "MobileLayout.tsx", "MobileToday.tsx", "MobileMyBookings.tsx", "MobileFind.tsx",
     "MobileCheckout.tsx", "BookingDetailSheet.tsx", "MobileProfile.tsx", "MobileProfileEdit.tsx",
-    "MobileSubscription.tsx", "MobileBonuses.tsx", "MobileBalance.tsx", "MobileCalendar.tsx",
+    "MobileSubscription.tsx", "MobileBonuses.tsx", "MobileBalance.tsx", "DayGrid.tsx",
     "MobilePlaces.tsx", "MobileSpecialists.tsx", "NotificationsBell.tsx", "OnboardingTour.tsx",
     "InstallBanner.tsx", "LoadStates.tsx", "SwipeRow.tsx", "TelegramConnectCard.tsx",
     "ClientPickerSheet.tsx", "PullIndicator.tsx",
@@ -49,7 +49,8 @@ def test_screens_use_shared_parts():
         "MobileToday.tsx": ["<MobilePageHeader", "<ListGroup", "<ListRow"],
         # 09.11 фаза 3 (общие файлы): строки броней — сам ListRow (as="div" внутри SwipeRow), без ручных ui-row__*
         "MobileMyBookings.tsx": ["<MobilePageHeader", "<ListGroup", "<ListRow", 'as="div"', "priceTrail("],
-        "MobileFind.tsx": ["<MobilePageHeader", "<ChoiceCard", "<ChoiceGroup", "<Chip"],
+        # 28.11 (шаг 2): фильтров (ChoiceCard) на «Свободно» нет — день показывает сетка DayGrid.
+        "MobileFind.tsx": ["<MobilePageHeader", "<Chip", "<DayGrid", "<EmptyState", "<Button"],
         "MobileCheckout.tsx": ["<MobilePageHeader", "<ChoiceCard"],
         "BookingDetailSheet.tsx": ["<ListGroup bare", "<ListRow", "<ChoiceCard"],
         "MobileProfile.tsx": ["<ListGroup", "<ListRow", "<ChoiceCard"],
@@ -59,7 +60,6 @@ def test_screens_use_shared_parts():
         "MobileSpecialists.tsx": ["<MobilePageHeader", "<ListGroup", "kind=\"search\""],
         "MobilePlaces.tsx": ["<ListGroup", "<ListRow"],
         "NotificationsBell.tsx": ["<ListGroup bare", "<ListRow"],
-        "MobileCalendar.tsx": ["<Chip"],
         "OnboardingTour.tsx": ["<Button"],
     }
     for f, parts in need.items():
@@ -116,13 +116,20 @@ def test_bookings_rows_quiet():
     assert "paymentStatus === 'waived'" in badges and "!== 'pending'" not in badges, "«Оплачено» у каждой строки — шум"
 
 
-def test_find_wall_and_filters():
+
+def test_find_grid_look():
+    """28.11 (шаг 2): «стена» плиток заменена сеткой дня. Занятое — ровная углублённая
+    плашка с подписью (не только цвет и без штриховки-градиента), своё — язык
+    «выбрано» (accent-soft + рамка), выбранное время — заливка главной кнопки."""
     src = _code(M + "MobileFind.tsx")
-    assert "repeat(auto-fill, minmax(100px, 1fr))" in src, "плитки «Свободно» снова разной ширины"
-    assert "SLOT_ROW_LIMIT" in src and "ещё {hidden}" in src, "длинная строка кабинетов не сворачивается"
-    assert 'layout="tile"' in src and "columns={3}" in src, "тип помещения — три плитки ChoiceCard"
     assert "ui-chip-row--scroll" in src, "ряд дней без затухания справа"
     assert "function CheckCard" not in src, "самодельная карточка с чёрной галочкой вернулась"
+    grid = _code(M + "DayGrid.tsx")
+    assert "background: COLOR.ink10," in grid and "занято" in grid, "занятое на сетке без подписи — различается только цветом"
+    assert "gradient(" not in grid, "штриховка-градиент на сетке — на телефоне только ровные заливки"
+    assert "background: COLOR.accentSoft, color: COLOR.accentInk," in grid, "своя бронь на сетке не на языке «выбрано»"
+    assert "background: COLOR.accentFill, color: COLOR.onAccentFill," in grid, "выбранное время не заливкой главной кнопки"
+    assert "COLOR.ink," not in grid.replace("COLOR.accentInk : COLOR.ink,", ""), "на сетке появилась чёрная заливка"
 
 
 def test_notifications_calm():

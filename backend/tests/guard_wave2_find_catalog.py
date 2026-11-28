@@ -37,7 +37,8 @@ SRC = ROOT / "src"
 
 B_FILES = (
     "src/pages/mobile/MobileFind.tsx",
-    "src/pages/mobile/MobileCalendar.tsx",
+    "src/pages/mobile/DayGrid.tsx",
+    "src/pages/mobile/dayGridModel.ts",
     "src/pages/mobile/MobilePlaces.tsx",
     "src/pages/SubscriptionsPage.tsx",
     "src/pages/LocationDetailsPage.tsx",
@@ -96,14 +97,22 @@ def test_find_protected_logic_untouched():
     # 09.11 (ревизия мобильного, владелец «делай всё»): шторка подтверждения брони под
     # CRM-сессию с ценой, «было → станет» с именем клиента, возврат в админку после
     # переноса — осознанная правка (проверяет regression/money-reviewer перед выкладкой).
-    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "46ec215c302ef84d", \
+    # 28.11 (шаг 2 плана мобильной брони — сетка дня; разобрано regression- и money-reviewer,
+    # построчное сравнение со старой версией): длительность приходит параметром durMin — её
+    # выбирают на полосе под сеткой (привязка к сессии: duration: durMin; обычная бронь: слоты
+    # до startMin + durMin; перенос: moveMin = длительность самой брони, как и раньше); отказ и
+    # сбой переноса снимают выделение на сетке. Защита от двойного тапа (inFlightRef),
+    # админ-бронь, путь к анкете и состав данных для оформления не менялись.
+    assert _sha(_block(src, "async function chooseWindow(", "\n    return (\n")) == "939c3c619d083245", \
         "chooseWindow изменилась — оформление/перенос/привязка трогать нельзя"
 
 
 def test_find_occupancy_and_60_days():
     src = _read("src/pages/mobile/MobileFind.tsx")
     assert "const occupancyReady = occupancyStatus === 'ready';" in src
-    assert "{occupancyReady && slots.map(" in src, "окна снова видны до загрузки занятости"
+    # 28.11 (шаг 2): вместо списка окон — сетка дня; правило то же: только после загрузки занятости.
+    assert "{occupancyReady && gridHasRows && (\n                    <DayGrid" in src, \
+        "сетка снова видна до загрузки занятости — занятое выглядит свободным"
     assert "max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}" in src, \
         "пропала граница 60 дней в выборе даты"
 
@@ -117,37 +126,39 @@ def test_find_application_link_stays_in_app():
 
 # ── MobileFind: вёрстка ────────────────────────────────────────────────
 
-def test_find_results_first_filters_in_sheet():
+
+def test_find_grid_on_first_screen_no_filters():
+    """28.11 (шаг 2 плана мобильной брони, владелец: «сетка вместо списка, список как
+    запасной вид не оставлять»): на экране лента дней и сразу сетка кабинетов.
+    Шторки «Сколько и где искать» больше нет — длительность выбирается на полосе
+    под сеткой, центр и тип помещения видны колонками."""
     src = _read("src/pages/mobile/MobileFind.tsx")
-    ret = src[src.find("\n    return (\n        <>"):]
+    code = _strip_comments(src)
+    ret = code[code.find("\n    return (\n        <>"):]
     i_strip = ret.find('aria-label="День"')
-    i_summary = ret.find("onClick={() => setFiltersOpen(true)}")
-    i_results = ret.find("{occupancyReady && slots.map(")
-    i_sheet = ret.find("<Sheet")
-    i_how = ret.find('<FieldGroup label="Сколько">')
-    assert -1 not in (i_strip, i_summary, i_results, i_sheet, i_how), \
-        "не нашли ленту дней/сводку/результаты/шторку фильтров"
-    assert i_strip < i_summary < i_results < i_sheet < i_how, \
-        "фильтры снова стоят над результатами — ответ уезжает со первого экрана"
-    assert ">\n                            Изменить\n" in ret, "в строке-сводке нет «Изменить»"
-    # 21.11 (переезд): центров стало три, сводка называет те, где поиск в этот день идёт.
-    assert "locsOpenOn(locs, fmtDate(targetDate" in src, "сводка «1 ч · центры» пропала"
-    # 28.11 (шаг 1 плана мобильной брони): день выбирается лентой на самом экране,
-    # а не в шторке; в шторке остались только прошлые дни админа.
+    i_grid = ret.find("<DayGrid")
+    i_bar = ret.find('className="m-grid-bar"')
+    assert -1 not in (i_strip, i_grid, i_bar), "не нашли ленту дней / сетку / полосу выбранного времени"
+    assert i_strip < i_grid < i_bar, "сетка дня уехала из-под ленты дней"
+    assert "setFiltersOpen" not in code and "slots.map(" not in code, \
+        "вернулся список окон или шторка фильтров — на экране снова два пути к брони"
     assert "STRIP_DAYS" in src and "data-day-selected" in ret, "лента дней пропала с экрана «Свободно»"
-    sheet = ret[i_sheet:]
-    assert '<FieldGroup label="Когда">' not in sheet, "выбор дня снова продублирован в шторке фильтров"
-    assert '<FieldGroup label="Задним числом">' in sheet, "админ потерял прошлые дни («задним числом»)"
+    # Прошлые дни админа («задним числом») переехали из шторки в ленту дней.
+    assert "pastDayOptions.slice().reverse().map(" in ret and "задним числом" in ret, \
+        "админ потерял прошлые дни («задним числом»)"
+    assert "Показать прошедшее время сегодня" in ret, "админ потерял прошедшее время сегодняшнего дня"
 
 
-def test_find_day_strip_counts_like_the_list():
-    """28.11: чип дня обещает время по тем же правилам, что список под ним —
+
+def test_find_day_strip_counts_like_the_grid():
+    """28.11: чип дня обещает время по тем же правилам, что сетка под ним —
     иначе «свободный» день открывался пустым («переносит администратор»)."""
     src = _read("src/pages/mobile/MobileFind.tsx")
     block = _block(src, "const stripDays = useMemo(", "const targetKey")
-    assert "buildFreeWindows(" in block, "лента считает свободное время не той же функцией, что список"
+    assert "buildFreeWindows(" in block, "лента считает свободное время не той же функцией, что сетка"
+    assert "searchDuration" in block, "лента ищет не ту длительность, что сетка (час; при переносе — вся бронь)"
     assert "restrictHot" in block and "isHotStart(key" in block, \
-        "лента не прячет срочные окна при переносе — чип «свободен», а список пуст"
+        "лента не прячет срочные окна при переносе — чип «свободен», а выбрать нечего"
     assert "backdateMin" in block, "лента не учитывает «прошедшее время» админа"
     assert "todayKey" in block, "после полуночи лента подпишет вчерашний день «Сегодня»"
     ret = src[src.find("\n    return (\n        <>"):]
@@ -166,22 +177,35 @@ def test_find_prefs_in_try_catch():
     assert uses == 2, f"localStorage в MobileFind только через readFindPrefs/writeFindPrefs (нашли {uses})"
 
 
-def test_find_waitlist_and_calendar_link():
+
+def test_find_waitlist_and_no_calendar_screen():
     src = _read("src/pages/mobile/MobileFind.tsx")
     code = _strip_comments(src)
     assert "import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeModal';" in src
-    assert "<WaitlistSubscribeModal" in code and "Сообщить, когда освободится" in code
-    assert "ExternalLink" not in code, "у «Календаря» снова значок внешней ссылки"
-    assert "navigate('/m/calendar')" in code
+    # 28.11 (шаг 2): подписка — касанием занятого времени на сетке; только в обычной
+    # брони (не при переносе, не под сессию CRM, не для тех, кому бронь закрыта).
+    assert "<WaitlistSubscribeModal" in code and "сообщим, когда освободится" in code
+    assert "onPickBusy={waitlistEnabled ? pickBusy : undefined}" in code, \
+        "занятое время нажимается и там, где подписка не положена"
+    assert "const waitlistEnabled = canBook && !rescheduleId && !linkSessionMeta;" in code
+    assert "ExternalLink" not in code
+    assert "navigate('/m/calendar')" not in code, "кнопка «Календарь» вернулась — день по кабинетам уже на сетке"
     assert "залы 7, 8, 9" not in src, "X3-20: кабинет 9 закрыт — «залы 7, 8»"
-    assert "GROUP_HALLS_SUB" in code
 
 
-def test_calendar_back_and_hint():
-    src = _read("src/pages/mobile/MobileCalendar.tsx")
-    assert "<MobilePageHeader" in src and 'fallbackTo="/m/find"' in src, "у календаря нет «Назад»"
-    assert "+ Свободно" in src and "Нажмите на свободный час" in src, "свободные часы снова не выглядят нажимаемыми"
-    assert "color: 'transparent'" not in src
+
+def test_calendar_merged_into_find():
+    """28.11 (шаг 2): отдельного «Календаря» нет — старые ссылки и закладки ведут на
+    «Свободно», а свободное время на сетке — настоящие кнопки с подписью."""
+    app = _read("src/App.tsx")
+    assert '<Route path="calendar" element={<Navigate to="/m/find" replace />} />' in app, \
+        "старая ссылка /m/calendar больше никуда не ведёт"
+    assert not (ROOT / "src/pages/mobile/MobileCalendar.tsx").exists(), "экран «Календарь» вернулся — два пути к брони"
+    find = _read("src/pages/mobile/MobileFind.tsx")
+    assert "'Нажмите на свободное время.'" in find, "над сеткой нет подсказки, что свободное нажимается"
+    grid = _read("src/pages/mobile/DayGrid.tsx")
+    assert 'className="m-grid-cell"' in grid and "— свободно`}" in grid, "свободная ячейка — не кнопка с подписью"
+    assert "color: 'transparent'" not in grid
 
 
 # ── Каталожные страницы ────────────────────────────────────────────────
@@ -203,7 +227,7 @@ def test_catalog_pages_one_header():
 
 def test_only_rentable_rooms():
     for rel in ("src/pages/mobile/MobilePlaces.tsx", "src/pages/LocationDetailsPage.tsx",
-                "src/pages/CabinetPage.tsx", "src/pages/mobile/MobileCalendar.tsx"):
+                "src/pages/CabinetPage.tsx", "src/pages/mobile/dayGridModel.ts"):
         assert "isActive !== false" in _read(rel), f"{rel}: показывает закрытые кабинеты (кабинет 9)"
     cab = _read("src/pages/CabinetPage.tsx")
     assert "resource.isActive === false" in cab, "страница закрытого кабинета снова открывается"

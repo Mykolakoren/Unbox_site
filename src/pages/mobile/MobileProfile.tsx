@@ -164,13 +164,13 @@ export function MobileProfile() {
                     sub={`Имя, телефон · Telegram ${tgConnected ? 'подключён' : 'не подключён'}`}
                     onClick={() => navigate('/m/profile')}
                 />
-                {/* Любимый кабинет — первым при поиске свободного времени.
+                {/* Любимый кабинет — выделен на сетке «Свободно» (28.11; раньше стоял первым в списке).
                     09.11 фаза 3: строка списка «Любимый кабинет · Любой ›», выбор — в шторке
                     (выпадающий список ломал колонку и в тёмной теме терял стрелку). */}
                 <MenuRow
                     icon={<Star size={18} />}
                     label="Любимый кабинет"
-                    sub="Покажем его первым при поиске свободного времени"
+                    sub="Выделим его на экране «Свободно»"
                     value={favLabel}
                     onClick={() => setFavOpen(true)}
                 />
@@ -247,7 +247,7 @@ export function MobileProfile() {
                 open={favOpen}
                 onClose={() => setFavOpen(false)}
                 title="Любимый кабинет"
-                description="Покажем его первым при поиске свободного времени."
+                description="Выделим его название на экране «Свободно», чтобы колонку было легче найти."
                 footer={<Button block onClick={() => setFavOpen(false)}>Готово</Button>}
             >
                 <ChoiceGroup label="Любимый кабинет">

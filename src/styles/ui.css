@@ -992,3 +992,25 @@
 /* «Другой день» на «Свободно» — это label с невидимым полем даты внутри:
  * рамку фокуса с клавиатуры рисуем на самом label (28.11). */
 .m-find-otherday:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* Сетка дня на «Свободно» (шаг 2 мобильной брони, 28.11). Свободная ячейка —
+ * прозрачная кнопка на светлой дорожке кабинета: откликается на касание сразу.
+ * Полоса выбранного времени выезжает снизу. */
+.m-grid-cell {
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--dur-press) ease;
+}
+.m-grid-cell:active:not(:disabled) { background: var(--color-accent-soft); }
+.m-grid-cell:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) {
+  .m-grid-cell:hover:not(:disabled) { background: var(--color-sunken); }
+}
+.m-grid-bar { animation: mGridBarIn var(--dur-ui) var(--ease-out-strong) backwards; }
+@keyframes mGridBarIn {
+  from { opacity: 0; transform: translate3d(0, 16px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-grid-bar { animation: none; }
+}

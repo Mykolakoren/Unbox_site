@@ -287,7 +287,9 @@ def test_extend_has_price_and_confirm():
 
 def test_chip_price_and_series_quote():
     find = _code("src/pages/mobile/MobileFind.tsx")
-    assert "chipPrice(s.startMin, rid)" in find and "группа ${" in find
+    # 28.11 (шаг 2): цена — на полосе выбранного времени, до оформления.
+    assert "windowPrice(selection.startMin, selection.roomId, selection.duration)" in find \
+        and "для группы ${selPrice.group}" in find
     assert "Пиковые часы 09–10 и 20–22" not in find
     co = _code("src/pages/mobile/MobileCheckout.tsx")
     assert "useState(4)" in co, "число повторов по умолчанию снова не 4"
@@ -298,7 +300,10 @@ def test_chip_price_and_series_quote():
 
 def test_durations():
     find = _code("src/pages/mobile/MobileFind.tsx")
-    assert "[60, 90, 120, 150, 180, 240]" in find and "MAX_DURATION = 9 * 60" in find and "'Больше…'" in find
+    # 28.11 (шаг 2): на полосе под сеткой — все длительности от часа до 9 ч с шагом
+    # 30 минут, которые помещаются от выбранного начала (в том числе 2,5 и 4 ч).
+    assert "MIN_DURATION = 60" in find and "MAX_DURATION = 9 * 60" in find
+    assert "for (let d = MIN_DURATION; d <= run; d += GRID_STEP_MIN) out.push(d);" in find
     co = _code("src/pages/mobile/MobileCheckout.tsx")
     assert "[60, 90, 120, 150, 180, 240].map" in co and "length: 17" in co
 
@@ -321,16 +326,21 @@ def test_telegram_card_and_rules():
 
 def test_minor_items():
     find = _code("src/pages/mobile/MobileFind.tsx")
-    assert "вариантов'" in find and "Найдено: ${" not in find, "№13: снова «Найдено: N»"
-    assert "m-find-waitlist" in find, "№13: «Сообщить» не поднят над списком"
+    assert "Найдено: ${" not in find, "№13: снова «Найдено: N»"
+    # 28.11 (шаг 2): «Сообщить, когда освободится» — касанием занятого времени на сетке.
+    assert "onPickBusy={waitlistEnabled ? pickBusy : undefined}" in find, "№13: «Сообщить» недоступно с сетки"
     co = _code("src/pages/mobile/MobileCheckout.tsx")
     assert "с баланса ничего не спишем" in co and "из бонусов — с баланса {formatGel(0)}" not in co, "№14"
     mb = _code("src/pages/mobile/MobileMyBookings.tsx")
     assert "open(b, 'confirmCancel')" in mb and "initialMode={openMode}" in mb, "№15"
     sp = _code("src/pages/SubscriptionsPage.tsx")
     assert "Ваш тариф" in sp and "Оформить в Telegram" in sp, "№16"
-    cal = _code("src/pages/mobile/MobileCalendar.tsx")
-    assert "disabled={past}" in cal and "j * 30" in cal, "№17"
+    # №17 (28.11: «Календарь» слит в сетку «Свободно»): начало в :00 или :30,
+    # прошедшее время — не кнопка.
+    cal = _code("src/pages/mobile/DayGrid.tsx")
+    assert "const closed = closedReason(t);" in cal and "t += GRID_STEP_MIN" in cal, "№17"
+    assert "t <= pastUntilMin ? 'прошло'" in find, "№17"
+    assert "GRID_STEP_MIN = 30" in _code("src/pages/mobile/dayGridModel.ts"), "№17"
     assert "только на бронь, которую покрывает целиком" not in _code("src/pages/mobile/MobileBonuses.tsx"), "№18"
     # 09.11 фаза 3: строка брони по образцу ListRow — сумма справа коротко
     # (priceTrail: «Абонемент» / сумма, доплата второй строкой), а не длинным priceLabel.
@@ -359,7 +369,7 @@ def test_admin_booking_flow():
 
 def test_crm_link_session_confirm():
     find = _code("src/pages/mobile/MobileFind.tsx")
-    assert "if (linkSessionMeta) { setLinkPick({ startMin, resourceId }); return; }" in find, \
+    assert "if (linkSessionMeta) { setLinkPick({ startMin, resourceId, duration: durMin }); return; }" in find, \
         "бронь под сессию снова создаётся одним тапом"
     assert "Забронировать и привязать" in find and "Отправили админу на подтверждение" in find
     assert "status === 'pending_approval'" in find

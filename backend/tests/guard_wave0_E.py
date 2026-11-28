@@ -99,18 +99,25 @@ def test_my_bookings_empty_only_after_load():
 def test_own_bookings_filter_uses_camel_case_uuid():
     """После toCamelCase поле называется userUuid; user_uuid всегда undefined —
     мёртвая проверка прятала брони, где user_id ≠ текущий email."""
-    for rel in ("pages/mobile/MobileToday.tsx", "pages/mobile/MobileMyBookings.tsx", "pages/mobile/MobileCalendar.tsx"):
+    for rel in ("pages/mobile/MobileToday.tsx", "pages/mobile/MobileMyBookings.tsx"):
         src = _read(rel)
         assert "(b as any).user_uuid" not in src, f"{rel}: снова мёртвая проверка user_uuid"
         assert "(b as any).userUuid ===" in src, f"{rel}: пропала проверка по userUuid"
+    # 28.11 (шаг 2): «Календарь» слит в «Свободно» — свои брони на сетке дня
+    # определяются там же, по тому же полю.
+    find = _read("pages/mobile/MobileFind.tsx")
+    assert "user_uuid" not in find, "MobileFind: снова мёртвая проверка user_uuid"
+    assert "(b as { userUuid?: string }).userUuid === currentUser.id" in find, \
+        "MobileFind: свои брони на сетке не узнаются по userUuid"
 
 
 def test_find_hides_free_rooms_until_occupancy_ready():
     """/m/find: пока занятость не загружена или упала — никаких «свободно»."""
     src = _read("pages/mobile/MobileFind.tsx")
     assert "const occupancyReady = occupancyStatus === 'ready';" in src
-    assert "{occupancyReady && slots.map(" in src, \
-        "чипы снова показываются без загруженной занятости — занятые кабинеты выглядят свободными"
+    # 28.11 (шаг 2): вместо чипов — сетка дня; правило то же.
+    assert "{occupancyReady && gridHasRows && (\n                    <DayGrid" in src, \
+        "сетка снова показывается без загруженной занятости — занятые кабинеты выглядят свободными"
     assert "occupancyStatus === 'error' && (" in src and "<LoadErrorCard" in src, \
         "при сбое занятости нет ошибки с «Повторить»"
 
@@ -131,9 +138,14 @@ def test_find_chips_guard_double_tap():
     assert "inFlightRef.current = true;" in link, "привязка: блокировка ставится не ДО запроса"
     resch = body[body.find("if (rescheduleBooking) {"):body.find("bookingsApi.rescheduleBooking(")]
     assert "inFlightRef.current = true;" in resch, "перенос: блокировка ставится не ДО запроса"
-    assert "disabled={chipsBusy}" in src, "чипы не блокируются, пока идёт запрос"
-    assert "const isPending = pendingChip ===" in src and '<Loader2 size={11} className="animate-spin" />' in src, \
-        "нет спиннера на нажатом чипе — человек не видит, что запрос идёт, и жмёт ещё раз"
+    # 28.11 (шаг 2): вместо чипов — сетка и полоса «Дальше»; блокируются обе.
+    assert src.count("disabled={chipsBusy}") >= 3, "сетка, длительности и «Дальше» не блокируются, пока идёт запрос"
+    head_free = src[src.find("function pickFree("):src.find("function pickDuration(")]
+    assert "if (chipsBusy || inFlightRef.current) return;" in head_free, \
+        "касание сетки проходит, пока идёт запрос, — второй перенос / вторая бронь"
+    grid = _read("pages/mobile/DayGrid.tsx")
+    assert "selectionPending={pendingChip != null}" in src and "{selectionPending && <Loader2" in grid, \
+        "нет спиннера на выбранном времени — человек не видит, что запрос идёт, и жмёт ещё раз"
 
 
 if __name__ == "__main__":

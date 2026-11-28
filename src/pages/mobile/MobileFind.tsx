@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BellRing, CalendarDays, Info, Link as LinkIcon, Loader2, MessageCircle, Move, Repeat, SlidersHorizontal, X } from 'lucide-react';
+import { BellRing, CalendarDays, Info, Link as LinkIcon, Loader2, MessageCircle, Move, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -22,38 +22,38 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
-import { ChoiceCard, ChoiceGroup } from '../../components/ui/ChoiceCard';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
-import { Field, Select } from '../../components/ui/Field';
 import { WaitlistSubscribeModal } from '../../components/ui/WaitlistSubscribeModal';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { catalogPath } from '../../utils/catalogPath';
-import { calculatePrice } from '../../utils/pricing';
+import { calculatePrice, isPeakTime } from '../../utils/pricing';
+import { PRICING_CONFIG } from '../../utils/pricingConfig';
 import { isHotStart, ymdOf } from '../../utils/bookingPolicy';
 import { fmtHours, paymentPlan, subscriptionHours } from '../../utils/paymentPriority';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
-import { ruPlural } from '../../utils/plural';
 import { isBookingAdmin } from './crmAccess';
 import { resourceKind } from '../../utils/subscriptionHours';
 import { useAdminFlow } from './adminFlow';
-import { isLocationOpenOn, isLocationStillRunning } from '../../utils/locationDates';
+import { isLocationOpenOn } from '../../utils/locationDates';
+import { BookingDetailSheet } from './BookingDetailSheet';
+import { DayGrid, type GridSelection } from './DayGrid';
+import { GRID_END_MIN, GRID_START_MIN, GRID_STEP_MIN, buildDayColumns, freeRunMin, roomsOpenOn, touchesReRent } from './dayGridModel';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
-// 09.11 (ревью №12): + 2,5 и 4 ч; остальное до 9 ч — «Больше…» (шаг 30 минут).
-const DURATIONS = [60, 90, 120, 150, 180, 240]; // minutes
+// Бронь — от часа до 9 часов, шаг 30 минут. Длительность выбирается на полосе
+// под сеткой: там только те варианты, что помещаются от выбранного начала.
+const MIN_DURATION = 60;
 const MAX_DURATION = 9 * 60;
-const MORE_DURATIONS = Array.from({ length: (MAX_DURATION - 60) / 30 + 1 }, (_, i) => 60 + i * 30);
 const isValidDuration = (n: number) => Number.isFinite(n) && n >= 60 && n <= MAX_DURATION && n % 30 === 0;
 const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
 
-/* Волна 2, пакет B (G4-04): последний выбор «Где / Тип / Сколько» запоминаем
- * на этом устройстве, чтобы сводка «Сегодня · 1 ч · оба центра» чаще всего
- * была готовой. Хранилище может быть недоступно (приватный режим, запрет
- * сайта) — тогда просто работаем с настройками по умолчанию. */
-// v2 (переезд 21.11.2026): появился UNBOX 99 — старый сохранённый выбор
-// «Где» его не содержал, поэтому начинаем с чистого листа (все центры).
+/* Последнюю выбранную длительность запоминаем на этом устройстве: касание
+ * свободного времени сразу выделяет «как в прошлый раз». Хранилище может быть
+ * недоступно (приватный режим, запрет сайта) — тогда час по умолчанию.
+ * Раньше здесь же хранились «Где» и «Тип помещения»: с сеткой (шаг 2, 28.11)
+ * фильтров нет — на экране все кабинеты, которые сдаются в выбранный день. */
 const FIND_PREFS_KEY = 'unbox_find_prefs_v2';
 const ALL_LOCS = ['unbox_99', 'unbox_one', 'unbox_uni'];
 
@@ -66,13 +66,16 @@ function locsOpenOn(locs: Set<string>, dayKey: string): Set<string> {
     return new Set(chosen.length ? chosen : ALL_LOCS.filter(l => isLocationOpenOn(l, dayKey)));
 }
 const ALL_SPACES: SpaceType[] = ['individual', 'group', 'capsule'];
+// Сетка показывает все центры и все типы помещений — этими наборами считаем окна.
+const EVERY_LOC: Set<string> = new Set(ALL_LOCS);
+const EVERY_SPACE: Set<SpaceType> = new Set(ALL_SPACES);
 /* Лента дней на самом экране (28.11, шаг 1 плана мобильной брони). По рабочему
  * сайту за 90 дней: только 11 % разовых броней делают на ближайшие сутки, 41 % —
  * за 3–7 дней, 31 % — больше чем за неделю. Раньше любой день, кроме
  * сегодняшнего, выбирался через шторку. Три недели закрывают почти все случаи,
  * дальше — «Другой день» (до 60 дней: столько сервер отдаёт занятости). */
 const STRIP_DAYS = 21;
-type FindPrefs = { locs?: string[]; spaces?: string[]; dur?: number };
+type FindPrefs = { dur?: number };
 
 function readFindPrefs(): FindPrefs {
     try {
@@ -91,29 +94,6 @@ function writeFindPrefs(prefs: FindPrefs) {
     } catch {
         /* приватный режим / нет места — не страшно */
     }
-}
-
-/** Сохранённый набор, если он непустой и весь из допустимых значений. */
-function validSet<T extends string>(saved: unknown, allowed: readonly T[]): Set<T> | null {
-    if (!Array.isArray(saved) || saved.length === 0) return null;
-    const ok = saved.filter((x): x is T => allowed.includes(x as T));
-    return ok.length === saved.length ? new Set(ok) : null;
-}
-
-// Большие залы для подписи фильтра — из данных (X3-20: раньше подпись перечисляла и 9-й,
-// а кабинет 9 закрыт).
-const GROUP_HALLS_SUB = (() => {
-    const nums = RESOURCES
-        .filter(r => r.type === 'cabinet' && r.isActive !== false && (r.capacity ?? 0) > 4)
-        .map(r => r.name.replace(/^Кабинет\s*/, ''));
-    return nums.length > 1 ? `залы ${nums.join(', ')}` : nums.length === 1 ? `зал ${nums[0]}` : 'группы';
-})();
-
-const SPACE_WORD: Record<SpaceType, string> = { individual: 'кабинет', group: 'зал', capsule: 'капсула' };
-
-/** «19 вариантов времени» — число стартов, а не кнопок-кабинетов (ревью №13). */
-function timesWord(n: number): string {
-    return `${n} ${ruPlural(n, ['вариант', 'варианта', 'вариантов'])} времени`;
 }
 
 /** Сколько дней от сегодня до даты (полночь к полуночи). */
@@ -140,7 +120,6 @@ export function MobileFind() {
     const occupancyStatus = useUserStore(s => s.occupancyStatus);
     const occupancyReady = occupancyStatus === 'ready';
     const reset = useBookingStore(s => s.reset);
-    const favCab = getFavoriteCabinet(currentUser?.id);
     // Новую бронь сервер создаст только специалисту или админу. Остальным
     // свободные окна показываем, но вместо оформления — анкета.
     const canBook = canBookCabinets(currentUser);
@@ -254,7 +233,6 @@ export function MobileFind() {
     })();
     const [dayOffset, setDayOffset] = useState(initialDayOffset); // 0=today, 1=tomorrow, … or -1 = custom
     const [customDate, setCustomDate] = useState<Date | null>(initialDayOffset === -1 ? initialCustomDate : null);
-    const [moreDurOpen, setMoreDurOpen] = useState(false);
     const [duration, setDuration] = useState(initialDuration);
 
     // Mirror state back to URL whenever it changes so the back-stack preserves
@@ -277,31 +255,17 @@ export function MobileFind() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dayOffset, customDate, duration]);
     // Предвыбор кабинета: клиент пришёл из «Наши центры» → кабинет → «Забронировать»
-    // (CabinetPage/LocationDetailsPage передают ?cab=<resourceId>). Сужаем фильтры
-    // на локацию и тип этого кабинета, чтобы клиент сразу видел нужный кабинет, а не
-    // общий список. Фильтры остаются переключаемыми — можно расширить руками.
+    // (CabinetPage/LocationDetailsPage передают ?cab=<resourceId>). На сетке видны
+    // все кабинеты дня, поэтому ничего не сужаем — имя этого кабинета выделено.
     const cabParam = searchParams.get('cab');
-    const cabResource = cabParam ? RESOURCES.find(r => r.id === cabParam) : null;
-    const spaceOfRes = (r: any): SpaceType =>
-        r.type === 'capsule' ? 'capsule' : (r.formats?.includes('group') ? 'group' : 'individual');
-
-    // Multi-select state — all checked by default; user uncheck to narrow.
-    // Using Set lets us treat add/remove uniformly via toggle().
-    const [locs, setLocs] = useState<Set<string>>(() => {
-        const loc = cabResource?.locationId;   // Resource.locationId — string | undefined
-        if (loc) return new Set([loc]);
-        return validSet(savedPrefs.locs, ALL_LOCS) ?? new Set(ALL_LOCS);
-    });
-    const [spaces, setSpaces] = useState<Set<SpaceType>>(() => {
-        if (cabResource) return new Set([spaceOfRes(cabResource)]);
-        return validSet(savedPrefs.spaces, ALL_SPACES) ?? new Set(ALL_SPACES);
-    });
-    // Фильтры свёрнуты в строку-сводку; «Изменить» открывает шторку.
-    const [filtersOpen, setFiltersOpen] = useState(false);
     useEffect(() => {
-        if (!rememberPrefs || locs.size === 0 || spaces.size === 0) return;
-        writeFindPrefs({ locs: [...locs], spaces: [...spaces], dur: duration });
-    }, [rememberPrefs, locs, spaces, duration]);
+        if (rememberPrefs) writeFindPrefs({ dur: duration });
+    }, [rememberPrefs, duration]);
+    // Выбранное на сетке время: кабинет, начало, длительность. Полоса «Дальше»
+    // внизу появляется только с ним.
+    const [selection, setSelection] = useState<GridSelection | null>(null);
+    // Своя бронь на сетке открывается той же шторкой, что в «Моих бронях».
+    const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
     const [rescheduling, setRescheduling] = useState(false);
     // Защита от повторного тапа, пока идёт запрос привязки/переноса. Второй
     // тап по соседнему кабинету создавал ВТОРУЮ бронь (со списанием), а при
@@ -410,14 +374,23 @@ export function MobileFind() {
     useEffect(() => {
         if (daysBack > 0) void ensureBookingsRange(targetDate, addDays(targetDate, 1));
     }, [daysBack, targetDate, ensureBookingsRange]);
+    // На какую длительность ищем НАЧАЛО. Обычная бронь: час — минимум; на сколько
+    // растянуть, человек выбирает уже после касания (полоса внизу). Перенос
+    // двигает бронь целиком — начало годится, только если она помещается вся.
+    const searchDuration = rescheduleId ? duration : MIN_DURATION;
     const allSlots = useMemo(
         // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
         // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
         // легальны.
-        () => buildFreeWindows(occupancy, targetDate, duration, locs, spaces, favCab, dayOffset === 0,
-                               canBackdate && (showPast || daysBack > 0) ? backdateMin : 0,
-                               canBackdate ? daysBack : 0),
-        [occupancy, targetDate, duration, locs, spaces, favCab, dayOffset, canBackdate, showPast, backdateMin, daysBack],
+        () => {
+            // Прошлый день без права «задним числом» (чужая ссылка ?date=): сервер
+            // такую бронь не создаст — не предлагаем.
+            if (daysBack > 0 && backdateMin === 0) return [];
+            return buildFreeWindows(occupancy, targetDate, searchDuration, EVERY_LOC, EVERY_SPACE, null, dayOffset === 0,
+                                    canBackdate && (showPast || daysBack > 0) ? backdateMin : 0,
+                                    canBackdate ? daysBack : 0);
+        },
+        [occupancy, targetDate, searchDuration, dayOffset, canBackdate, showPast, backdateMin, daysBack],
     );
 
     // 09.11 (ревью №1): при переносе не-админа сервер откажет, если новое время
@@ -445,15 +418,18 @@ export function MobileFind() {
     );
     const hotUntil = hotHidden.length ? minsToHm(hotHidden[hotHidden.length - 1].startMin) : null;
 
-    // Лента дней: сколько вариантов времени в каждый из ближайших дней — под те же
-    // «Сколько / Где / Тип» и по тем же правилам, что список ниже (иначе чип
-    // обещал бы время, которого в списке нет): при переносе без «срочных» окон,
+    // Лента дней: есть ли в каждом из ближайших дней свободное начало — по тем же
+    // правилам, что сетка ниже (иначе чип обещал бы время, которого на сетке
+    // нет): при переносе — под длительность брони и без «срочных» окон,
     // у админа — с прошедшим временем сегодня, если он его открыл.
     // Занятость раскладываем по дням один раз, а не перебираем весь список на каждый день.
     const occupancyByDay = useMemo(() => {
         const m = new Map<string, BookingHistoryItem[]>();
         for (const b of occupancy) {
-            if (b.status !== 'confirmed' && b.status !== 'pending_approval') continue;
+            // completed — бронь уже прошла (в базе она по-прежнему confirmed, и сервер
+            // считает её при проверке пересечений): у админа «задним числом» прошедший
+            // день иначе выглядел пустым. Расчёт окон (buildFreeWindows) их сам отбросит.
+            if (b.status !== 'confirmed' && b.status !== 'pending_approval' && b.status !== 'completed') continue;
             const k = bookingDay(b);
             if (!k) continue;
             const arr = m.get(k);
@@ -469,15 +445,15 @@ export function MobileFind() {
         for (let k = 0; k < STRIP_DAYS; k++) {
             const d = addDays(new Date(todayKey + 'T00:00:00'), k);
             const key = fmtDate(d, 'yyyy-MM-dd');
-            const windows = buildFreeWindows(occupancyByDay.get(key) ?? [], d, duration, locs, spaces, null, k === 0,
+            const windows = buildFreeWindows(occupancyByDay.get(key) ?? [], d, searchDuration, EVERY_LOC, EVERY_SPACE, null, k === 0,
                                              k === 0 && canBackdate && showPast ? backdateMin : 0);
             const free = restrictHot ? windows.filter(w => !isHotStart(key, w.startMin)).length : windows.length;
             out.push({ k, date: d, key, free });
         }
         return out;
-    }, [occupancyByDay, duration, locs, spaces, todayKey, canBackdate, showPast, backdateMin, restrictHot]);
+    }, [occupancyByDay, searchDuration, todayKey, canBackdate, showPast, backdateMin, restrictHot]);
     const targetKey = fmtDate(targetDate, 'yyyy-MM-dd');
-    const targetInStrip = stripDays.some(x => x.key === targetKey);
+    const targetInStrip = stripDays.some(x => x.key === targetKey) || (daysBack > 0 && pastDayOptions.includes(daysBack));
     /** Ближайший день после выбранного, где есть свободное время (для пустого дня). */
     const nextFreeDay = useMemo(
         () => stripDays.find(x => x.date.getTime() > targetDate.getTime() && x.free > 0) ?? null,
@@ -496,6 +472,73 @@ export function MobileFind() {
         box.scrollTo({ left, behavior: stripScrolled.current && !reduce ? 'smooth' : 'auto' });
         stripScrolled.current = true;
     }, [targetKey]);
+
+    // ── Сетка дня (шаг 2, 28.11): кабинеты колонками, занятое видно. ──
+    const isOwnBooking = (b: BookingHistoryItem) =>
+        !!currentUser && (b.userId === currentUser.email || (b as { userUuid?: string }).userUuid === currentUser.id);
+    const gridRooms = useMemo(() => roomsOpenOn(targetKey, ALL_LOCS), [targetKey]);
+    const columns = useMemo(
+        () => buildDayColumns(occupancyByDay.get(targetKey) ?? [], gridRooms, isOwnBooking),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [occupancyByDay, targetKey, gridRooms, currentUser?.id, currentUser?.email],
+    );
+    const showCenter = new Set(gridRooms.map(r => r.locationId)).size > 1;
+    // Где можно НАЧАТЬ — решает тот же расчёт, что был у списка (slots): сетка
+    // только рисует день. Ключ — «минута|кабинет».
+    const startable = useMemo(() => {
+        const set = new Set<string>();
+        for (const w of slots) for (const rid of w.freeResIds) set.add(`${w.startMin}|${rid}`);
+        return set;
+    }, [slots]);
+    // До какой минуты время «прошло» (те же границы, что в buildFreeWindows):
+    // сегодня — до текущей минуты (у админа с открытым прошедшим — минус его
+    // окно «задним числом»), прошлый день — по окну админа, будущий — ничего.
+    const nowMin = tbilisiNow().totalMins;
+    const pastUntilMin = daysBack > 0
+        ? (backdateMin === 0 ? Infinity : canBackdate ? Math.max(0, nowMin - backdateMin + daysBack * 1440) : 0)
+        : dayOffset === 0 ? Math.max(0, nowMin - (canBackdate && showPast ? backdateMin : 0)) : 0;
+    // Сегодня день рисуем с текущего часа: прошедшее утро — пустая прокрутка.
+    // Админ, открывший прошедшее время, и прошлые дни видят день целиком.
+    const firstRowMin = dayOffset === 0 && !(canBackdate && showPast)
+        ? Math.max(GRID_START_MIN, Math.min(Math.floor(nowMin / 60) * 60, GRID_END_MIN))
+        : GRID_START_MIN;
+    const gridHasRows = gridRooms.length > 0 && firstRowMin < GRID_END_MIN;
+    // Пиковые часы: надбавка за час — на шкале времени и в подписи под сеткой.
+    const isPeakMin = (t: number) => isPeakTime(minsToHHMM(t));
+    const peakTag = `+${formatGel(PRICING_CONFIG.peak_hours.surcharge_per_hour_gel, { fraction: 'auto' })}`;
+    const peakVisible = useMemo(() => {
+        for (let t = firstRowMin; t < GRID_END_MIN; t += GRID_STEP_MIN) if (isPeakTime(minsToHHMM(t))) return true;
+        return false;
+    }, [firstRowMin]);
+    // Цена часа — до касания (раньше она стояла на каждой кнопке списка): «Час — 20 ₾,
+    // с пометкой «+5 ₾» — 25 ₾». Ставки — из данных кабинетов и настроек цен.
+    const priceHint = useMemo(() => {
+        const rates = gridRooms.map(r => r.hourlyRate).filter(n => Number.isFinite(n));
+        if (rates.length === 0) return '';
+        const min = Math.min(...rates);
+        const from = rates.every(n => n === min) ? '' : 'от ';
+        const hour = `Час — ${from}${formatGel(min, { fraction: 'auto' })}`;
+        if (!peakVisible) return `${hour}.`;
+        const peak = formatGel(min + PRICING_CONFIG.peak_hours.surcharge_per_hour_gel, { fraction: 'auto' });
+        return `${hour}, с пометкой «${peakTag}» — ${from}${peak}.`;
+    }, [gridRooms, peakVisible, peakTag]);
+    // День сменили или время заняли, пока человек выбирал, — выделение снимаем.
+    useEffect(() => { setSelection(null); }, [targetKey]);
+    useEffect(() => {
+        if (!selection || inFlightRef.current) return;
+        const col = columns.find(c => c.room.id === selection.roomId);
+        if (!col || freeRunMin(col, selection.startMin, selection.duration) < selection.duration) setSelection(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [columns]);
+    const selCol = selection ? columns.find(c => c.room.id === selection.roomId) ?? null : null;
+    /** Длительности, которые помещаются от выбранного начала (до ближайшей брони или закрытия). */
+    const fitDurations = useMemo(() => {
+        if (!selection || !selCol) return [] as number[];
+        const run = freeRunMin(selCol, selection.startMin, MAX_DURATION);
+        const out: number[] = [];
+        for (let d = MIN_DURATION; d <= run; d += GRID_STEP_MIN) out.push(d);
+        return out;
+    }, [selection, selCol]);
 
     // Админ-бронь / админ-перенос (ревью админки №2): для кого — в полоске внизу
     // и в плашке переноса; после переноса чужой брони — обратно в админку.
@@ -525,86 +568,50 @@ export function MobileFind() {
     }, [adminFlow, forName, setAdminForName]);
     const afterRescheduleTo = adminFlow || rescheduleIsForeign ? '/m/admin/bookings' : '/m/bookings';
 
-    // Цена на чипе (ревью №5): фактическая цена этого окна с пиком; у залов —
+    // Цена выбранного времени (ревью №5): фактическая, с пиком; у залов —
     // «от … · группа …». Та же функция, что на оформлении (calculatePrice),
     // со своей персональной скидкой. Недельную скидку покажет оформление.
-    const chipPrice = (startMin: number, rid: string): string | null => {
+    // Админ-бронь «за другого»: скидка — того, для кого бронь (как на оформлении),
+    // а пока клиент не выбран — без личной скидки. Раньше админ видел цену со
+    // СВОЕЙ скидкой, а клиенту на оформлении выходила другая.
+    const priceUser = adminFlow
+        ? (bookingForUser ? users.find(u => u.email === bookingForUser || u.id === bookingForUser) ?? null : null)
+        : currentUser;
+    const windowPrice = (startMin: number, rid: string, durMin: number): { main: string; group: string | null; peak: number } | null => {
         const r = RESOURCES.find(x => x.id === rid);
         if (!r) return null;
         const start = new Date(targetDate); start.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-        const end = new Date(start.getTime() + duration * 60000);
+        const end = new Date(start.getTime() + durMin * 60000);
         const price = (format: 'individual' | 'group') => calculatePrice({
             format, startTime: start, endTime: end, extras: [], resourceId: rid,
-            personalDiscountPercent: currentUser?.personalDiscountPercent,
-            pricingSystem: currentUser?.pricingSystem,
-        }).finalPrice;
-        const unit = duration === 60 ? '/ч' : '';
+            personalDiscountPercent: priceUser?.personalDiscountPercent,
+            pricingSystem: priceUser?.pricingSystem,
+        });
         const fmt = (n: number) => formatGel(n, { fraction: 'auto' });
         const ind = price('individual');
         const isHall = r.type !== 'capsule' && (r.capacity ?? 4) > 4 && (r.formats?.includes('group') ?? false);
-        if (isHall) return `от ${fmt(ind)}${unit} · группа ${fmt(price('group')).replace(/\s?₾$/, '')}`;
-        return `${fmt(ind)}${unit}`;
+        // Формат (индивидуально / группа) выбирается на оформлении — здесь обе цены.
+        // Надбавка за пик — из самого расчёта: она уже внутри цены.
+        return {
+            main: fmt(ind.finalPrice),
+            group: isHall ? fmt(price('group').finalPrice) : null,
+            peak: ind.finalPrice > 0 ? (ind.peakSurcharge ?? 0) : 0,
+        };
     };
 
-    const toggleLoc = (id: string) => {
-        setLocs(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id); else next.add(id);
-            return next;
-        });
-    };
-    const toggleSpace = (id: SpaceType) => {
-        setSpaces(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id); else next.add(id);
-            return next;
-        });
-    };
-
-    // «Сообщить, когда освободится» (G4-06, X2-08): когда окон нет или нужного
-    // кабинета нет в списке — подписка через общее окно WaitlistSubscribeModal.
+    // «Сообщить, когда освободится» (G4-06, X2-08): касание занятого времени на
+    // сетке — подписка на это время через общее окно WaitlistSubscribeModal.
+    // Раньше время и кабинет выбирались двумя списками под результатами.
     const waitlistEnabled = canBook && !rescheduleId && !linkSessionMeta;
-    const waitlistRooms = useMemo(
-        () => searchRooms(locsOpenOn(locs, fmtDate(targetDate, 'yyyy-MM-dd')), spaces),
-        [locs, spaces, targetDate],
-    );
-    const waitlistStarts = useMemo(() => {
-        const out: number[] = [];
-        const minStart = dayOffset === 0 ? tbilisiNow().totalMins : 0;
-        for (let t = 9 * 60; t + duration <= 22 * 60; t += 30) {
-            if (t > minStart) out.push(t);
-        }
-        return out;
-    }, [dayOffset, duration]);
-    const [waitlistPickerOpen, setWaitlistPickerOpen] = useState(false);
-    const [wlStartPick, setWlStartPick] = useState<number | null>(null);
-    const [wlRoomPick, setWlRoomPick] = useState<string | null>(null);
-    const [waitlistModalOpen, setWaitlistModalOpen] = useState(false);
-    const wlStart = wlStartPick != null && waitlistStarts.includes(wlStartPick) ? wlStartPick : (waitlistStarts[0] ?? null);
-    const wlRoomDefault = [cabResource?.id, favCab].find(id => id && waitlistRooms.some(r => r.id === id))
-        ?? waitlistRooms[0]?.id ?? null;
-    const wlRoomId = wlRoomPick && waitlistRooms.some(r => r.id === wlRoomPick) ? wlRoomPick : wlRoomDefault;
-    const wlRoom = wlRoomId ? RESOURCES.find(r => r.id === wlRoomId) : undefined;
+    const [waitlistPick, setWaitlistPick] = useState<{ roomId: string; startMin: number; endMin: number } | null>(null);
+    const wlRoom = waitlistPick ? RESOURCES.find(r => r.id === waitlistPick.roomId) : undefined;
 
-    // Строка-сводка: «1 ч · UNBOX 99 · все помещения». День — в ленте над ней.
-    const summary = [
-        formatBookingDuration(duration),
-        // Называем центры, в которых поиск на этот день идёт на самом деле
-        // (закрывшиеся к этой дате отпадают — см. locsOpenOn).
-        locs.size === 0 ? 'центр не выбран'
-            : LOCATIONS.filter(l => locsOpenOn(locs, fmtDate(targetDate, 'yyyy-MM-dd')).has(l.id)).map(l => l.name).join(', '),
-        spaces.size === ALL_SPACES.length ? 'все помещения'
-            : spaces.size === 0 ? 'тип не выбран'
-                : ALL_SPACES.filter(x => spaces.has(x)).map(x => SPACE_WORD[x]).join(', '),
-    ].join(' · ');
     const title = linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно';
-    // 09.11 фаза 3: строки времени с >4 кабинетами свёрнуты в «ещё N» — какие раскрыли.
-    const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
     useDocumentTitle(title);
 
     // crm-ux №9 (09.11): под сессию CRM — сначала короткое подтверждение с ценой
     // и тем, чем заплатим, а не бронь с одного касания по слоту.
-    const [linkPick, setLinkPick] = useState<{ startMin: number; resourceId: string } | null>(null);
+    const [linkPick, setLinkPick] = useState<{ startMin: number; resourceId: string; duration: number } | null>(null);
 
     const bonusHoursAvail = useActiveBonusHours(linkSessionMeta ? currentUser?.id : null, false);
     /** Сводка для шторки «Забронировать и привязать»: цена, чем заплатим, срочность. */
@@ -613,12 +620,12 @@ export function MobileFind() {
         const r = RESOURCES.find(x => x.id === linkPick.resourceId);
         const format = ((r?.formats?.[0] as 'individual' | 'group' | 'intervision') || 'individual');
         const start = new Date(targetDate); start.setHours(Math.floor(linkPick.startMin / 60), linkPick.startMin % 60, 0, 0);
-        const end = new Date(start.getTime() + duration * 60000);
+        const end = new Date(start.getTime() + linkPick.duration * 60000);
         const price = calculatePrice({
             format, startTime: start, endTime: end, extras: [], resourceId: linkPick.resourceId,
             personalDiscountPercent: currentUser?.personalDiscountPercent, pricingSystem: currentUser?.pricingSystem,
         });
-        const hours = duration / 60;
+        const hours = linkPick.duration / 60;
         const sub = subscriptionHours(currentUser?.subscription, {
             format, bookingDate: targetDate, bookings, ownerEmail: currentUser?.email,
             resourceKind: resourceKind(linkPick.resourceId), liftPause: true,
@@ -649,22 +656,99 @@ export function MobileFind() {
         const deferred = startMs - Date.now() > 24 * 3600 * 1000;
         return {
             room: [r?.name ?? linkPick.resourceId, LOCATIONS.find(l => l.id === r?.locationId)?.name].filter(Boolean).join(' · '),
-            time: `${formatDayMonth(targetDate)}, ${minsToHHMM(linkPick.startMin)}–${minsToHHMM(linkPick.startMin + duration)}`,
+            time: `${formatDayMonth(targetDate)}, ${minsToHHMM(linkPick.startMin)}–${minsToHHMM(linkPick.startMin + linkPick.duration)}`,
             price: formatGel(price.finalPrice),
             pay,
             hot,
             when: hot ? 'спишем, когда администратор подтвердит' : deferred ? 'спишем за сутки до начала' : 'спишем сразу',
         };
-    }, [linkPick, targetDate, duration, currentUser, bookings, bonusHoursAvail, isAdminActor]);
+    }, [linkPick, targetDate, currentUser, bookings, bonusHoursAvail, isAdminActor]);
 
-    /** Тап по чипу: под сессию CRM — сначала шторка подтверждения (crm-ux №9). */
-    function pickWindow(startMin: number, resourceId: string) {
-        if (!resourceId || inFlightRef.current) return;
-        if (linkSessionMeta) { setLinkPick({ startMin, resourceId }); return; }
-        void chooseWindow(startMin, resourceId);
+    // Перенос: где бронь стоит сейчас — обводим на сетке её дня.
+    const oldPlace = (() => {
+        if (!rescheduleBooking || bookingDay(rescheduleBooking) !== targetKey || !rescheduleBooking.startTime) return null;
+        const [h, m] = rescheduleBooking.startTime.split(':').map(Number);
+        const startMin = h * 60 + m;
+        return { roomId: String(rescheduleBooking.resourceId ?? ''), startMin, endMin: startMin + (rescheduleBooking.duration ?? 60) };
+    })();
+    // Полоса с выбранным временем: длительность, цена, «Дальше». При переносе её
+    // нет — касание сразу показывает «было → станет».
+    const barOpen = !!selection && !!selCol && !rescheduleId && occupancyReady;
+    const selPrice = selection ? windowPrice(selection.startMin, selection.roomId, selection.duration) : null;
+    // Что ограничивает длительность от выбранного начала: чужая бронь или закрытие.
+    const selLimit = (() => {
+        if (!selection || !selCol) return '';
+        const run = freeRunMin(selCol, selection.startMin, MAX_DURATION);
+        if (run >= MAX_DURATION) return '';
+        const until = selection.startMin + run;
+        const why = until >= GRID_END_MIN ? `центр закрывается в ${minsToHm(GRID_END_MIN)}` : `с ${minsToHm(until)} занято`;
+        // Привычная длительность (под сессию CRM — длительность сессии) не
+        // поместилась — говорим прямо, а не молча укорачиваем.
+        if (duration > run) {
+            return linkSessionMeta
+                ? `Сессия — ${formatBookingDuration(duration)}, но ${why}: кабинет получится короче.`
+                : `Обычно вы берёте ${formatBookingDuration(duration)}, но ${why}.`;
+        }
+        return fitDurations.length <= 4 ? `Дольше нельзя: ${why}.` : '';
+    })();
+
+    /** Касание свободного времени на сетке. */
+    function pickFree(roomId: string, startMin: number) {
+        if (chipsBusy || inFlightRef.current) return;
+        const col = columns.find(c => c.room.id === roomId);
+        if (!col) return;
+        const run = freeRunMin(col, startMin, MAX_DURATION);
+        // Начать можно, если так считает расчёт окон И на сетке хватает места
+        // (бронь с началом в :15/:45 расчёт окон не видит, а сетка закрывает
+        // оба соседних получаса — верим более строгому).
+        if (!startable.has(`${startMin}|${roomId}`) || run < searchDuration) {
+            // Свободно, но начать здесь нельзя — говорим почему.
+            if (rescheduleId && run < searchDuration) {
+                toast.info(`${col.room.name}: бронь на ${formatBookingDuration(searchDuration)} сюда не помещается — свободно до ${minsToHm(startMin + run)}.`);
+            } else if (run < MIN_DURATION) {
+                toast.info(`${col.room.name}: с ${minsToHm(startMin)} свободно только полчаса. Бронь — от часа, начните раньше.`);
+            } else {
+                toast.info('Это время выбрать нельзя.');
+            }
+            return;
+        }
+        if (rescheduleId) {
+            // Перенос: длительность — как в брони; сразу «было → станет». Пока сама
+            // бронь не загрузилась, ничего не выделяем — chooseWindow скажет подождать.
+            if (rescheduleBooking) setSelection({ roomId, startMin, duration: searchDuration });
+            void chooseWindow(startMin, roomId, searchDuration);
+            return;
+        }
+        // Обычная бронь: привычная длительность, но не длиннее свободного отрезка.
+        setSelection({ roomId, startMin, duration: Math.max(MIN_DURATION, Math.min(duration, run)) });
     }
 
-    async function chooseWindow(startMin: number, resourceId: string) {
+    /** Другая длительность на полосе под сеткой — её же запоминаем на следующий раз. */
+    function pickDuration(d: number) {
+        if (!selection || chipsBusy) return;
+        setSelection({ ...selection, duration: d });
+        setDuration(d);
+    }
+
+    /** Касание занятого времени: подписка «сообщить, когда освободится». Время
+     *  предсказуемое — ровно тот час, в который попал палец (а не «получас под
+     *  пальцем плюс привычная длительность»): в окне подписки его не поправить. */
+    function pickBusy(roomId: string, startMin: number) {
+        let from = Math.floor(startMin / 60) * 60;
+        while (from <= pastUntilMin && from < GRID_END_MIN) from += GRID_STEP_MIN;
+        const to = Math.min(from + 60, GRID_END_MIN);
+        if (to - from < GRID_STEP_MIN) return;
+        setWaitlistPick({ roomId, startMin: from, endMin: to });
+    }
+
+    /** «Дальше» на полосе: под сессию CRM — сначала шторка подтверждения (crm-ux №9). */
+    function pickWindow(startMin: number, resourceId: string, durMin: number) {
+        if (!resourceId || inFlightRef.current) return;
+        if (linkSessionMeta) { setLinkPick({ startMin, resourceId, duration: durMin }); return; }
+        void chooseWindow(startMin, resourceId, durMin);
+    }
+
+    async function chooseWindow(startMin: number, resourceId: string, durMin: number) {
         if (!resourceId) return;
         if (inFlightRef.current) return;
         // Link-session path: create the booking (server picks bonus →
@@ -685,7 +769,7 @@ export function MobileFind() {
                     // отметкой UTC с поясом, и сервер падал 500 (обход 10.10).
                     date: fmtDate(targetDate, 'yyyy-MM-dd') as unknown as Date,
                     startTime: minsToHHMM(startMin),
-                    duration,
+                    duration: durMin,
                     format: (resource?.formats?.[0] as 'individual' | 'group' | 'intervision') || 'individual',
                     paymentMethod: 'balance',
                     extras: [],
@@ -738,7 +822,7 @@ export function MobileFind() {
                 : '';
             // 09.11 (ревью №1): что изменится — словами, до нажатия.
             const changes: string[] = [];
-            const durMin = rescheduleBooking.duration ?? duration;
+            const moveMin = rescheduleBooking.duration ?? durMin;
             const newStart = new Date(targetDate); newStart.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
             const newStartMs = Date.UTC(newStart.getFullYear(), newStart.getMonth(), newStart.getDate(),
                 newStart.getHours() - 4, newStart.getMinutes());
@@ -766,7 +850,7 @@ export function MobileFind() {
             } else {
                 const newPrice = calculatePrice({
                     format: (src.format as 'individual' | 'group' | 'intervision') || 'individual',
-                    startTime: newStart, endTime: new Date(newStart.getTime() + durMin * 60000), extras: [],
+                    startTime: newStart, endTime: new Date(newStart.getTime() + moveMin * 60000), extras: [],
                     resourceId,
                     // Скидка — того, чья бронь (админ переносит чужую — не своя).
                     personalDiscountPercent: rescheduleIsForeign ? undefined : currentUser?.personalDiscountPercent,
@@ -796,7 +880,7 @@ export function MobileFind() {
                 ),
                 confirmLabel: 'Перенести',
             });
-            if (!ok) { inFlightRef.current = false; return; }
+            if (!ok) { inFlightRef.current = false; setSelection(null); return; }
             setPendingChip(`${startMin}|${resourceId}`);
             setRescheduling(true);
             let left = false;
@@ -808,7 +892,7 @@ export function MobileFind() {
                     // 28.10 (Егор): перенос двигает бронь ЦЕЛИКОМ — длительность
                     // всегда из самой брони (кнопок длительности при переносе
                     // больше нет). Заменяет правило 02.06 «длительность из UI».
-                    newDuration: rescheduleBooking.duration ?? duration,
+                    newDuration: moveMin,
                 });
                 await fetchBookings();
                 toast.success(rescheduleOwnerName ? `Бронь перенесена: ${rescheduleOwnerName}` : 'Бронь перенесена');
@@ -820,7 +904,7 @@ export function MobileFind() {
                     : (detail?.conflicts ? `Конфликт: ${detail.conflicts.map((c: any) => c.date).join(', ')}` : (e.message || 'Не удалось перенести'));
                 toast.error(msg);
             } finally {
-                if (!left) { setRescheduling(false); releaseChips(); }
+                if (!left) { setRescheduling(false); releaseChips(); setSelection(null); }
             }
             return;
         }
@@ -851,7 +935,7 @@ export function MobileFind() {
         }
 
         const slotStrs: string[] = [];
-        for (let m = startMin; m < startMin + duration; m += 30) {
+        for (let m = startMin; m < startMin + durMin; m += 30) {
             slotStrs.push(`${resourceId}|${minsToHHMM(m)}`);
         }
         const resource = RESOURCES.find(r => r.id === resourceId);
@@ -873,30 +957,22 @@ export function MobileFind() {
     return (
         <>
             <div style={{
-                paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+                // С открытой полосой — запас снизу, чтобы вечерние часы не прятались под ней.
+                paddingBottom: barOpen
+                    ? 'calc(300px + env(safe-area-inset-bottom, 0px))'
+                    : 'calc(24px + env(safe-area-inset-bottom, 0px))',
                 display: 'flex', flexDirection: 'column', gap: 16,
             }}>
-                {/* 09.11 фаза 3: общая крупная шапка. Календарь — экран внутри
-                    приложения: без значка внешней ссылки и без липкой кнопки,
-                    перекрывавшей первый результат. */}
+                {/* 09.11 фаза 3: общая крупная шапка. Отдельного «Календаря» больше
+                    нет (шаг 2, 28.11): день по кабинетам — прямо здесь, на сетке. */}
                 <MobilePageHeader
                     variant="large"
                     title={title}
                     subtitle={(linkSessionMeta || rescheduleId)
                         ? (linkSessionMeta
-                            ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
-                            : 'Выберите новое время — старый слот освободится.')
+                            ? 'Выберите свободное время — забронируем и привяжем к сессии.'
+                            : 'Выберите новое время — прежнее освободится после переноса.')
                         : undefined}
-                    action={!linkSessionMeta && !rescheduleId ? (
-                        <Button
-                            variant="secondary"
-                            size="touch"
-                            icon={<CalendarDays size={16} aria-hidden="true" />}
-                            onClick={() => navigate('/m/calendar')}
-                        >
-                            Календарь
-                        </Button>
-                    ) : undefined}
                 />
 
                 {/* Ещё не специалист — наверху объясняем, почему оформить бронь
@@ -985,7 +1061,7 @@ export function MobileFind() {
                             <LinkIcon size={18} />
                             <div style={{ flex: 1, fontSize: TEXT.small, lineHeight: 1.4 }}>
                                 <b>Привязываем кабинет к сессии:</b>{' '}
-                                {linkSessionMeta.date ? formatDayMonth(linkSessionMeta.date) : ''} в {linkSessionMeta.time} · {linkSessionMeta.duration} мин
+                                {linkSessionMeta.date ? formatDayMonth(linkSessionMeta.date) : ''} в {linkSessionMeta.time} · {linkSessionMeta.duration % 30 === 0 && linkSessionMeta.duration >= 60 ? formatBookingDuration(linkSessionMeta.duration) : `${linkSessionMeta.duration} мин`}
                             </div>
                             <button
                                 onClick={() => navigate(`/m/crm/today${linkSessionMeta.date ? `?date=${linkSessionMeta.date}` : ''}`)}
@@ -999,9 +1075,10 @@ export function MobileFind() {
                 )}
 
                 {/* Лента дней (28.11): день меняется одним касанием прямо на экране.
-                    День, где под выбранную длительность ничего нет, помечен
-                    «занято» — его видно заранее, а не после нажатия. «Другой день»
-                    закреплён справа: до него не нужно листать три недели. */}
+                    День, где свободного часа нет (при переносе — куда бронь не
+                    помещается), помечен «занято» — его видно заранее, а не после
+                    нажатия. «Другой день» закреплён справа: до него не нужно
+                    листать три недели. У админа слева — прошлые дни «задним числом». */}
                 <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, paddingRight: 16 }}>
                     <div
                         ref={stripRef}
@@ -1010,9 +1087,26 @@ export function MobileFind() {
                         className="ui-chip-row ui-chip-row--scroll"
                         style={{ position: 'relative', flex: 1, minWidth: 0, gap: 8, padding: '0 24px 2px 16px' }}
                     >
+                        {pastDayOptions.slice().reverse().map(k => {
+                            const d = addDays(new Date(todayKey + 'T00:00:00'), -k);
+                            const active = daysBack === k;
+                            return (
+                                <Chip
+                                    key={`past-${k}`}
+                                    selected={active}
+                                    data-day-selected={active ? 'true' : undefined}
+                                    onClick={() => { setCustomDate(d); setDayOffset(-1); }}
+                                    aria-label={`${k === 1 ? 'Вчера' : formatWeekdayShort(d)}, ${formatDayMonth(d)} — задним числом`}
+                                    style={{ ...dayChip, flex: '0 0 auto', minWidth: 68 }}
+                                >
+                                    <span style={{ fontWeight: 600 }}>{k === 1 ? 'Вчера' : formatWeekdayShort(d)}</span>
+                                    <span style={dayChipSub}>{formatDayMonthShort(d)} · задним числом</span>
+                                </Chip>
+                            );
+                        })}
                         {stripDays.map(({ k, date, key, free }) => {
                             const active = key === targetKey;
-                            const full = occupancyReady && free === 0 && locs.size > 0 && spaces.size > 0;
+                            const full = occupancyReady && free === 0;
                             const top = k === 0 ? 'Сегодня' : k === 1 ? 'Завтра' : formatWeekdayShort(date);
                             return (
                                 <Chip
@@ -1077,83 +1171,27 @@ export function MobileFind() {
                     </label>
                 </div>
 
-                {/* Строка-сводка фильтров (G4-04): результаты — на первом экране. */}
-                <div style={{ padding: '0 16px' }}>
-                    <button
-                        type="button"
-                        onClick={() => setFiltersOpen(true)}
-                        aria-haspopup="dialog"
-                        aria-expanded={filtersOpen}
-                        aria-label={`Поиск: ${summary}. Изменить`}
-                        className="press"
-                        style={{
-                            width: '100%',
-                            minHeight: 48,
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '8px 12px',
-                            background: COLOR.card,
-                            border: `1px solid ${COLOR.ink10}`,
-                            borderRadius: RADIUS.control,
-                            color: COLOR.ink,
-                            fontFamily: 'inherit',
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        <SlidersHorizontal size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                        <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.small, fontWeight: 500, lineHeight: 1.35 }}>
-                            {summary}
-                        </span>
-                        <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk, flexShrink: 0 }}>
-                            Изменить
-                        </span>
-                    </button>
-                    {/* 09.11 (ревью №5): пик уже в цене на кнопке кабинета — отдельная
-                        оранжевая строка больше не нужна. «Сообщить, когда
-                        освободится» — сразу под поиском, а не под всем списком (№13). */}
-                    {occupancyReady && waitlistEnabled && waitlistRooms.length > 0 && waitlistStarts.length > 0
-                        && slots.length > 0 && !waitlistPickerOpen && (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setWaitlistPickerOpen(true);
-                                // Карточка подписки — под списком: подводим к ней.
-                                setTimeout(() => document.getElementById('m-find-waitlist')
-                                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
-                            }}
-                            style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44,
-                                background: 'none', border: 'none', padding: 0, marginTop: 4,
-                                color: COLOR.accentInk, fontFamily: 'inherit', fontSize: TEXT.small, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
-                            }}
-                        >
-                            <BellRing size={16} aria-hidden="true" /> Нет нужного времени? Сообщить, когда освободится
-                        </button>
-                    )}
-                </div>
-
-                {/* Results. Чипы — только когда занятость загружена: пока
-                    грузится — заглушки, при сбое — ошибка с «Повторить». */}
-                <div style={{ padding: '0 16px' }}>
-                    <SectionTitle live>
-                        {!occupancyReady
-                            ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
-                            : slots.length === 0 ? 'Свободных окон нет'
-                                : `${timesWord(slots.length)} · с ${minsToHm(slots[0].startMin)} до ${minsToHm(slots[slots.length - 1].startMin)}`}
-                    </SectionTitle>
+                {/* Что с занятостью и как пользоваться сеткой. Сетка — только когда
+                    занятость загружена: пока грузится — заглушки, при сбое —
+                    ошибка с «Повторить» (иначе занятое выглядело бы свободным). */}
+                <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {canBackdate && dayOffset === 0 && (
                         <Button variant="secondary" size="touch" onClick={() => setShowPast(v => !v)}
-                                style={{ marginBottom: 10 }}>
+                                style={{ alignSelf: 'flex-start' }}>
                             {showPast ? 'Скрыть прошедшее время' : 'Показать прошедшее время сегодня'}
                         </Button>
                     )}
-                    {/* Статус запроса — рядом со списком, а не над «Когда»:
-                        чипы обычно ниже первого экрана, и надпись вверху
-                        никто не видел. */}
+                    <p aria-live="polite" style={{ margin: 0, fontSize: TEXT.small, color: COLOR.ink60, lineHeight: 1.45 }}>
+                        {!occupancyReady
+                            ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
+                            : slots.length === 0 || !gridHasRows ? ''
+                                : rescheduleId ? 'Нажмите на новое время. Пунктиром обведено нынешнее.'
+                                    : `${linkSessionMeta ? 'Нажмите на время для сессии.' : 'Нажмите на свободное время.'} ${priceHint}`}
+                    </p>
                     {chipsBusy && (
                         <div role="status" style={{
                             display: 'flex', alignItems: 'center', gap: 6,
-                            fontSize: TEXT.small, color: COLOR.ink60, marginBottom: 8,
+                            fontSize: TEXT.small, color: COLOR.ink60,
                         }}>
                             <Loader2 size={14} className="animate-spin" />
                             {linking ? 'Создаём бронь и привязываем…' : 'Переносим…'}
@@ -1167,145 +1205,22 @@ export function MobileFind() {
                         />
                     )}
                     {!occupancyReady && occupancyStatus !== 'error' && <SkeletonRows height={84} />}
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        {/* One chip per (time, resource) — owner+Galina 2026-05-31:
-                            раньше строка показывала «Свободно: Каб.1, Каб.2, ...»
-                            и тап всегда брал первый из списка. Пользователь
-                            думал что бронит Каб.2, а вписывался Каб.1. Теперь
-                            каждый кабинет — отдельная кликабельная карточка. */}
-                        {occupancyReady && hotHidden.length > 0 && (
-                            <div role="note" style={{
-                                display: 'flex', gap: 8, alignItems: 'flex-start',
-                                background: STATUS.info.bg, color: STATUS.info.fg,
-                                borderRadius: RADIUS.control, padding: '10px 12px', marginBottom: 8, fontSize: TEXT.small, lineHeight: 1.45,
-                            }}>
-                                <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-                                <span>
-                                    Время до {hotUntil} не показываем: перенос на ближайшие часы (меньше 12 ч до начала,
-                                    в выходные — 24 ч) делает только администратор.{' '}
-                                    <a href={ADMIN_TG_URL} target="_blank" rel="noopener noreferrer"
-                                       style={{ color: 'inherit', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                        <MessageCircle size={14} aria-hidden="true" /> Написать администратору
-                                    </a>
-                                </span>
-                            </div>
-                        )}
-                        {/* 09.11 фаза 3: «стена» стала тише — плитки одной ширины
-                            (сетка), без рамки, на sunken; под ценой — центр, если
-                            ищем в обоих; больше 4 кабинетов в строке — «ещё N». */}
-                        {occupancyReady && slots.map(s => {
-                            const expanded = expandedRows.has(s.startMin);
-                            const hidden = s.freeResIds.length > SLOT_ROW_LIMIT && !expanded
-                                ? s.freeResIds.length - (SLOT_ROW_LIMIT - 1)
-                                : 0;
-                            const shown = hidden > 0 ? s.freeResIds.slice(0, SLOT_ROW_LIMIT - 1) : s.freeResIds;
-                            return (
-                            <div
-                                key={s.startMin}
-                                style={{
-                                    // Волна 2 (G4-05): строка «время слева — кабинеты справа»
-                                    // с тонкой линией вместо карточки на каждое время.
-                                    display: 'grid',
-                                    gridTemplateColumns: '52px minmax(0, 1fr)',
-                                    gap: 8,
-                                    alignItems: 'start',
-                                    padding: '10px 0',
-                                    borderTop: `1px solid ${COLOR.ink08}`,
-                                }}
-                            >
-                                <div className="num" style={{ fontSize: TEXT.body, fontWeight: 600, color: COLOR.ink, lineHeight: '48px' }}>
-                                    {minsToHm(s.startMin)}
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 6 }}>
-                                    {shown.map(rid => {
-                                        const r = RESOURCES.find(x => x.id === rid);
-                                        const isReRent = s.reRentResIds.includes(rid);
-                                        const isPending = pendingChip === `${s.startMin}|${rid}`;
-                                        // 09.11 (ревью №5): цена этого окна с пиком, у залов — «от … · группа …».
-                                        const label = chipPrice(s.startMin, rid);
-                                        const center = locs.size > 1 ? centerShort(r?.locationId) : '';
-                                        return (
-                                            <button
-                                                key={rid}
-                                                onClick={() => pickWindow(s.startMin, rid)}
-                                                disabled={chipsBusy}
-                                                aria-busy={isPending || undefined}
-                                                className="press"
-                                                title={isReRent ? 'Слот на пересдаче — кто-то освободил, можно забрать' : undefined}
-                                                style={{
-                                                    // Пересдача — янтарная подложка: «особый» слот.
-                                                    background: isReRent ? STATUS.pending.bg : COLOR.sunken,
-                                                    color: isReRent ? STATUS.pending.fg : COLOR.ink,
-                                                    border: 'none',
-                                                    borderRadius: RADIUS.control,
-                                                    // Главный тап брони — цель 44 px (было 32).
-                                                    minHeight: 48,
-                                                    minWidth: 0,
-                                                    padding: '6px 10px',
-                                                    fontSize: TEXT.small,
-                                                    fontWeight: 600,
-                                                    cursor: chipsBusy ? 'default' : 'pointer',
-                                                    fontFamily: 'inherit',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: 6,
-                                                    textAlign: 'left',
-                                                    // Пока идёт запрос — все чипы
-                                                    // неактивны, нажатый остаётся ярким.
-                                                    opacity: chipsBusy && !isPending ? 0.5 : 1,
-                                                    pointerEvents: chipsBusy ? 'none' : undefined,
-                                                }}
-                                            >
-                                                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.25 }}>
-                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                                        {isReRent && <Repeat size={12} aria-hidden="true" />}
-                                                        {r?.name ?? rid}
-                                                    </span>
-                                                    {/* Ставка прямо на чипе: цена не должна
-                                                        появляться впервые только на оформлении. */}
-                                                    {(label || center || isReRent) && (
-                                                        <span className="num" style={{ fontSize: TEXT.caption, fontWeight: 500, color: isReRent ? STATUS.pending.fg : COLOR.ink60 }}>
-                                                            {[label, center, isReRent ? 'пересдача' : ''].filter(Boolean).join(' · ')}
-                                                        </span>
-                                                    )}
-                                                </span>
-                                                {isPending && <Loader2 size={11} className="animate-spin" />}
-                                            </button>
-                                        );
-                                    })}
-                                    {hidden > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setExpandedRows(prev => new Set(prev).add(s.startMin))}
-                                            disabled={chipsBusy}
-                                            aria-label={`Показать ещё ${hidden} на ${minsToHm(s.startMin)}`}
-                                            style={{
-                                                background: 'transparent',
-                                                border: `1px dashed ${COLOR.ink20}`,
-                                                borderRadius: RADIUS.control,
-                                                minHeight: 48,
-                                                padding: '6px 10px',
-                                                fontFamily: 'inherit',
-                                                fontSize: TEXT.small,
-                                                fontWeight: 600,
-                                                color: COLOR.accentInk,
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            ещё {hidden}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                            );
-                        })}
-                    </div>
-                    {occupancyReady && slots.length === 0 && (locs.size === 0 || spaces.size === 0) && (
-                        <EmptyState
-                            compact
-                            title="Не выбрано, где искать"
-                            hint="Выберите хотя бы один центр и тип помещения."
-                        />
+                    {occupancyReady && hotHidden.length > 0 && (
+                        <div role="note" style={{
+                            display: 'flex', gap: 8, alignItems: 'flex-start',
+                            background: STATUS.info.bg, color: STATUS.info.fg,
+                            borderRadius: RADIUS.control, padding: '10px 12px', fontSize: TEXT.small, lineHeight: 1.45,
+                        }}>
+                            <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                            <span>
+                                Время до {hotUntil} выбрать нельзя: перенос на ближайшие часы (меньше 12 ч до начала,
+                                в выходные — 24 ч) делает только администратор.{' '}
+                                <a href={ADMIN_TG_URL} target="_blank" rel="noopener noreferrer"
+                                   style={{ color: 'inherit', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    <MessageCircle size={14} aria-hidden="true" /> Написать администратору
+                                </a>
+                            </span>
+                        </div>
                     )}
                     {occupancyReady && allSlots.length > 0 && slots.length === 0 && (
                         <EmptyState
@@ -1315,238 +1230,160 @@ export function MobileFind() {
                             action={{ label: 'Следующий день', onClick: () => jumpToDate(addDays(targetDate, 1)) }}
                         />
                     )}
-                    {occupancyReady && allSlots.length === 0 && locs.size > 0 && spaces.size > 0 && (
+                    {occupancyReady && allSlots.length === 0 && (
                         <EmptyState
                             compact
-                            title="В этот день всё занято"
-                            hint={waitlistEnabled
-                                ? 'Попробуйте другой день или длительность — или попросите сообщить, когда освободится.'
-                                : 'Попробуйте другой день, длительность или фильтры.'}
-                            // Ближайший день, где под эту длительность есть время (28.11):
-                            // «Показать завтра» / «Показать пт, 4 дек.». Раньше вечером вели
-                            // на «завтра», даже если и там всё занято.
+                            title={daysBack > 0 && backdateMin === 0 ? 'Этот день уже прошёл'
+                                : dayOffset === 0 && !gridHasRows ? 'Сегодня время уже закончилось'
+                                    : rescheduleId ? `На ${formatBookingDuration(searchDuration)} в этот день места нет`
+                                        : 'В этот день свободного часа нет'}
+                            hint={daysBack > 0 && backdateMin === 0
+                                ? 'Кабинет на прошедшее время бронирует администратор.'
+                                : waitlistEnabled && gridHasRows
+                                    ? 'Выберите другой день — или нажмите на занятое время: сообщим, когда освободится.'
+                                    : 'Выберите другой день.'}
+                            // Ближайший день, где есть время (28.11): «Показать завтра» /
+                            // «Показать пт, 4 дек.». Раньше вечером вели на «завтра»,
+                            // даже если и там всё занято.
                             action={nextFreeDay
                                 ? { label: `Показать ${formatRelativeDay(nextFreeDay.date, { capitalize: false })}`, onClick: () => jumpToDate(nextFreeDay.date) }
-                                : { label: 'Изменить поиск', onClick: () => setFiltersOpen(true) }}
+                                : undefined}
                         />
                     )}
-
-                    {/* «Сообщить, когда освободится»: при пустом дне — сразу
-                        открытая карточка, иначе — тихая кнопка под списком. */}
-                    {occupancyReady && waitlistEnabled && waitlistRooms.length > 0 && waitlistStarts.length > 0 && (
-                        (slots.length === 0 || waitlistPickerOpen) ? (
-                            <div id="m-find-waitlist" style={{
-                                marginTop: 16,
-                                border: `1px solid ${COLOR.ink10}`,
-                                borderRadius: RADIUS.sheet,
-                                padding: 16,
-                                background: COLOR.card,
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: TEXT.body, fontWeight: 600 }}>
-                                    <BellRing size={18} aria-hidden="true" />
-                                    Сообщить, когда освободится
-                                </div>
-                                <p style={{ fontSize: TEXT.small, color: COLOR.ink60, margin: '4px 0 12px' }}>
-                                    Выберите время и кабинет — пришлём сообщение, как только в этом центре освободится место.
-                                </p>
-                                {wlStart != null && (
-                                    <>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: 8 }}>
-                                            <Field label="Время">
-                                                <Select
-                                                    value={String(wlStart)}
-                                                    onChange={e => setWlStartPick(Number(e.target.value))}
-                                                >
-                                                    {waitlistStarts.map(t => (
-                                                        <option key={t} value={t}>{minsToHHMM(t)}–{minsToHHMM(t + duration)}</option>
-                                                    ))}
-                                                </Select>
-                                            </Field>
-                                            <Field label="Кабинет">
-                                                <Select
-                                                    value={wlRoomId ?? ''}
-                                                    onChange={e => setWlRoomPick(e.target.value)}
-                                                >
-                                                    {waitlistRooms.map(rr => (
-                                                        <option key={rr.id} value={rr.id}>
-                                                            {rr.name}{locs.size > 1 ? ` · ${LOCATIONS.find(l => l.id === rr.locationId)?.name ?? ''}` : ''}
-                                                        </option>
-                                                    ))}
-                                                </Select>
-                                            </Field>
-                                        </div>
-                                        <div style={{ marginTop: 12 }}>
-                                            <Button
-                                                block
-                                                // Главная кнопка пустого дня — «Показать ближайший свободный»;
-                                                // вторая такая же громкая рядом путала (28.11).
-                                                variant={slots.length === 0 && !nextFreeDay ? 'primary' : 'secondary'}
-                                                icon={<BellRing size={16} aria-hidden="true" />}
-                                                onClick={() => setWaitlistModalOpen(true)}
-                                                disabled={!wlRoom}
-                                            >
-                                                Сообщить, когда освободится
-                                            </Button>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        ) : (
-                            <div style={{ marginTop: 12 }}>
-                                <Button
-                                    variant="quiet"
-                                    icon={<BellRing size={16} aria-hidden="true" />}
-                                    onClick={() => setWaitlistPickerOpen(true)}
-                                    style={{ whiteSpace: 'normal', textAlign: 'left', paddingLeft: 0 }}
-                                >
-                                    Нет нужного времени? Сообщить, когда освободится
-                                </Button>
-                            </div>
-                        )
-                    )}
                 </div>
+
+                {/* Сетка дня (шаг 2, 28.11): кабинеты колонками, время слева. Занятое
+                    заштриховано, свои брони выделены и открываются касанием. */}
+                {occupancyReady && gridHasRows && (
+                    <DayGrid
+                        columns={columns}
+                        firstRowMin={firstRowMin}
+                        // Закрыто для выбора: прошедшее время и — при переносе не админом —
+                        // «срочные» часы (их переносит только администратор).
+                        closedReason={t => (t <= pastUntilMin ? 'прошло'
+                            : restrictHot && isHotStart(targetYmd, t) ? 'через админа' : null)}
+                        isPeak={isPeakMin}
+                        peakTag={peakTag}
+                        selection={selection}
+                        selectionPending={pendingChip != null}
+                        oldPlace={oldPlace}
+                        // Кабинет, с которым пришли со страницы кабинета; иначе — любимый из профиля.
+                        highlightRoomId={cabParam ?? getFavoriteCabinet(currentUser?.id)}
+                        showCenter={showCenter}
+                        disabled={chipsBusy}
+                        onPickFree={pickFree}
+                        onPickBusy={waitlistEnabled ? pickBusy : undefined}
+                        // При переносе и привязке к сессии свои брони не открываем:
+                        // из их шторки легко начать второй перенос поверх первого.
+                        onPickMine={b => { if (!rescheduleId && !linkSessionMeta) setOpenBooking(b); }}
+                        onClearSelection={() => { if (!chipsBusy) setSelection(null); }}
+                    />
+                )}
+
+                {occupancyReady && gridHasRows && waitlistEnabled && (
+                    <p style={{
+                        margin: 0, padding: '0 16px', display: 'flex', gap: 6, alignItems: 'flex-start',
+                        fontSize: TEXT.small, color: COLOR.ink60, lineHeight: 1.45,
+                    }}>
+                        <BellRing size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                        <span>Нужное время занято? Нажмите на него — сообщим, когда освободится.</span>
+                    </p>
+                )}
             </div>
 
-
-            {/* Фильтры — в шторке. Результаты за ней обновляются сразу. */}
-            <Sheet
-                open={filtersOpen}
-                onClose={() => setFiltersOpen(false)}
-                title="Сколько и где искать"
-                footer={
-                    <Button block onClick={() => setFiltersOpen(false)}>
-                        {occupancyReady && slots.length > 0
-                            ? `Показать: ${timesWord(slots.length)}`
-                            : 'Готово'}
-                    </Button>
-                }
-            >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                    {/* День выбирается лентой на самом экране (28.11). В шторке остались
-                        только прошлые дни админа — «задним числом» (25.10). */}
-                    {pastDayOptions.length > 0 && (
-                        <FieldGroup label="Задним числом">
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                {pastDayOptions.slice().reverse().map(k => {
-                                    const d = addDays(new Date(), -k);
-                                    const active = daysBack === k;
-                                    return (
-                                        <Chip
-                                            key={`past-${k}`}
-                                            selected={active}
-                                            onClick={() => { const x = new Date(d); x.setHours(0, 0, 0, 0); setCustomDate(x); setDayOffset(-1); }}
-                                            style={dayChip}
-                                        >
-                                            <span style={{ fontWeight: 600 }}>{k === 1 ? 'Вчера' : formatWeekdayShort(d)}</span>
-                                            <span style={dayChipSub}>{formatDayMonth(d)}</span>
-                                        </Chip>
-                                    );
-                                })}
-                            </div>
-                        </FieldGroup>
-                    )}
-
-                    {/* Duration */}
-                    {rescheduleId ? (
-                        // Перенос двигает бронь целиком — выбор длительности не
-                        // предлагаем (путал: Егор 28.10).
-                        <FieldGroup label="Сколько">
-                            <div style={{ fontSize: TEXT.body, color: COLOR.ink, padding: '10px 0' }}>
-                                {formatBookingDuration(duration)} — как в брони
-                            </div>
-                        </FieldGroup>
-                    ) : (
-                    <FieldGroup label="Сколько">
-                        <ChipsRow>
-                            {DURATIONS.map(d => {
-                                const active = duration === d;
-                                return (
-                                    <Chip
-                                        key={d}
-                                        selected={active}
-                                        onClick={() => setDuration(d)}
-                                        style={{ flex: '0 0 auto', padding: '0 16px' }}
-                                    >
-                                        {formatBookingDuration(d)}
-                                    </Chip>
-                                );
-                            })}
-                            {(() => {
-                                const custom = !DURATIONS.includes(duration);
-                                const active = custom || moreDurOpen;
-                                return (
-                                    <Chip
-                                        selected={active}
-                                        aria-expanded={moreDurOpen}
-                                        onClick={() => setMoreDurOpen(o => !o)}
-                                        style={{ flex: '0 0 auto', padding: '0 16px' }}
-                                    >
-                                        {custom ? formatBookingDuration(duration) : 'Больше…'}
-                                    </Chip>
-                                );
-                            })()}
-                        </ChipsRow>
-                        {(moreDurOpen || !DURATIONS.includes(duration)) && (
-                            <div style={{ marginTop: 8 }}>
-                                <Field label="Длительность (до 9 часов)">
-                                    <Select value={String(duration)} onChange={e => setDuration(Number(e.target.value))}>
-                                        {MORE_DURATIONS.map(d => (
-                                            <option key={d} value={d}>{formatBookingDuration(d)}</option>
-                                        ))}
-                                    </Select>
-                                </Field>
+            {/* Полоса выбранного времени — над нижним меню, как кнопка на оформлении.
+                Длительности — только те, что помещаются от выбранного начала;
+                цена пересчитывается сразу. */}
+            {barOpen && selection && selCol && (
+                <div style={{
+                    position: 'fixed',
+                    bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: '100%',
+                    maxWidth: 480,
+                    zIndex: Z.sticky,
+                }}>
+                    <div
+                        className="m-grid-bar"
+                        role="region"
+                        aria-label="Выбранное время"
+                        style={{
+                            background: COLOR.card,
+                            borderTop: `1px solid ${COLOR.ink10}`,
+                            boxShadow: `0 24px 0 0 ${COLOR.card}`,
+                            padding: '10px 16px 12px',
+                            display: 'flex', flexDirection: 'column', gap: 10,
+                        }}
+                    >
+                        <div
+                            role="group"
+                            aria-label="На сколько"
+                            className="ui-chip-row ui-chip-row--scroll"
+                            style={{ gap: 8, margin: '0 -16px', padding: '0 24px 0 16px' }}
+                        >
+                            {fitDurations.map(d => (
+                                <Chip
+                                    key={d}
+                                    selected={selection.duration === d}
+                                    disabled={chipsBusy}
+                                    onClick={() => pickDuration(d)}
+                                    style={{ flex: '0 0 auto', padding: '0 14px' }}
+                                >
+                                    {formatBookingDuration(d)}
+                                </Chip>
+                            ))}
+                        </div>
+                        {/* Почему длительностей мало — словами: иначе привычные 2 часа
+                            молча превращаются в час (дальше занято). */}
+                        {selLimit && (
+                            <div style={{ fontSize: TEXT.small, color: COLOR.ink60, lineHeight: 1.35, marginTop: -4 }}>
+                                {selLimit}
                             </div>
                         )}
-                    </FieldGroup>
-                    )}
-
-                    {/* Where — multi-select */}
-                    <FieldGroup label="Где">
-                        <ChoiceGroup label="Где" columns={2}>
-                            {LOCATIONS.filter(l => ALL_LOCS.includes(l.id) && isLocationStillRunning(l.id)).map(l => (
-                                <ChoiceCard
-                                    key={l.id}
-                                    selected={locs.has(l.id)}
-                                    onClick={() => toggleLoc(l.id)}
-                                    title={l.name}
-                                    description={l.address}
-                                    style={{ alignItems: 'flex-start' }}
-                                />
-                            ))}
-                        </ChoiceGroup>
-                    </FieldGroup>
-
-                    {/* Space type — multi-select */}
-                    <FieldGroup label="Тип помещения">
-                        {/* 09.11 фаза 3: три плитки одной ширины в шторке (третья вылезала
-                            за поле на 360 px), «Большой зал» → «Зал» (переносился). */}
-                        <ChoiceGroup label="Тип помещения" columns={3}>
-                            <ChoiceCard
-                                layout="tile"
-                                selected={spaces.has('individual')}
-                                onClick={() => toggleSpace('individual')}
-                                title="Кабинет"
-                                description="до 4 чел."
-                            />
-                            <ChoiceCard
-                                layout="tile"
-                                selected={spaces.has('group')}
-                                onClick={() => toggleSpace('group')}
-                                title="Зал"
-                                description={GROUP_HALLS_SUB}
-                            />
-                            <ChoiceCard
-                                layout="tile"
-                                selected={spaces.has('capsule')}
-                                onClick={() => toggleSpace('capsule')}
-                                title="Капсула"
-                                description="1 чел."
-                            />
-                        </ChoiceGroup>
-                    </FieldGroup>
-
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div aria-live="polite" style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
+                                <div style={{ fontSize: TEXT.small, color: COLOR.ink60, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {selCol.room.name}
+                                    {showCenter ? ` · ${LOCATIONS.find(l => l.id === selCol.room.locationId)?.name ?? ''}` : ''}
+                                    {' · '}{formatRelativeDay(targetDate, { capitalize: false })}
+                                </div>
+                                <div className="num" style={{ fontSize: TEXT.body, fontWeight: 600 }}>
+                                    {minsToHm(selection.startMin)}–{minsToHm(selection.startMin + selection.duration)}
+                                    <span style={{ fontWeight: 500 }}> · {formatBookingDuration(selection.duration)}</span>
+                                </div>
+                                <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                                    <span className="num" style={{ fontSize: TEXT.body, fontWeight: 600, color: COLOR.ink }}>
+                                        {selPrice?.main}
+                                    </span>
+                                    {selPrice?.group ? ` · для группы ${selPrice.group}` : ''}
+                                    {selPrice && selPrice.peak > 0 ? ` · в т.ч. пик ${formatGel(selPrice.peak, { fraction: 'auto' })}` : ''}
+                                </div>
+                                {/* Полоса показывает стоимость; чем она спишется (часы абонемента,
+                                    бонус, баланс) — решается на оформлении. */}
+                                {!adminFlow && currentUser?.subscription && (
+                                    <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                                        Абонемент или баланс — выберете дальше.
+                                    </div>
+                                )}
+                            </div>
+                            <Button
+                                size="touch"
+                                disabled={chipsBusy}
+                                onClick={() => pickWindow(selection.startMin, selection.roomId, selection.duration)}
+                                style={{ flexShrink: 0, minWidth: 112, minHeight: 52, fontSize: TEXT.body }}
+                            >
+                                Дальше
+                            </Button>
+                        </div>
+                        {touchesReRent(selCol, selection.startMin, selection.startMin + selection.duration) && (
+                            <div style={{ fontSize: TEXT.small, color: STATUS.pending.fg, lineHeight: 1.35 }}>
+                                Пересдача: это время освободил другой специалист — его можно занять.
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </Sheet>
+            )}
 
             {/* crm-ux №9: подтверждение брони под сессию CRM — цена и чем заплатим. */}
             <Sheet
@@ -1556,7 +1393,7 @@ export function MobileFind() {
                 footer={linkPick ? (
                     <>
                         <Button block loading={linking} disabled={linking}
-                                onClick={() => { void chooseWindow(linkPick.startMin, linkPick.resourceId); }}>
+                                onClick={() => { void chooseWindow(linkPick.startMin, linkPick.resourceId, linkPick.duration); }}>
                             {linkSummary?.hot ? 'Отправить на подтверждение и привязать' : 'Забронировать и привязать'}
                         </Button>
                         <Button variant="secondary" block disabled={linking} onClick={() => setLinkPick(null)}>
@@ -1578,6 +1415,11 @@ export function MobileFind() {
                                 <dd style={{ margin: 0, fontWeight: 600, textAlign: 'right' }}>{v}</dd>
                             </div>
                         ))}
+                        {linkPick && linkSessionMeta && linkPick.duration < linkSessionMeta.duration && (
+                            <div style={{ background: STATUS.pending.bg, color: STATUS.pending.fg, borderRadius: RADIUS.control, padding: '10px 12px', lineHeight: 1.45 }}>
+                                Кабинет — на {formatBookingDuration(linkPick.duration)}, а сессия длится {linkSessionMeta.duration} мин. Бронь будет короче сессии.
+                            </div>
+                        )}
                         {linkSummary.hot && (
                             <div style={{ background: STATUS.pending.bg, color: STATUS.pending.fg, borderRadius: RADIUS.control, padding: '10px 12px', lineHeight: 1.45 }}>
                                 Срочная бронь (меньше 12 часов до начала, в выходные — 24, или вечером на утро) — уйдёт администратору на подтверждение. Время за вами держится, пока он решает.
@@ -1587,61 +1429,26 @@ export function MobileFind() {
                 )}
             </Sheet>
 
-            {waitlistModalOpen && wlRoom && wlStart != null && (
+            {waitlistPick && wlRoom && (
                 <WaitlistSubscribeModal
                     isOpen
-                    onClose={() => setWaitlistModalOpen(false)}
+                    onClose={() => setWaitlistPick(null)}
                     resourceId={wlRoom.id}
                     resourceName={wlRoom.name}
                     locationName={LOCATIONS.find(l => l.id === wlRoom.locationId)?.name}
                     date={targetDate}
-                    startTime={minsToHHMM(wlStart)}
-                    endTime={minsToHHMM(wlStart + duration)}
-                    onSubscribed={() => setWaitlistPickerOpen(false)}
+                    startTime={minsToHHMM(waitlistPick.startMin)}
+                    endTime={minsToHHMM(waitlistPick.endMin)}
+                />
+            )}
+
+            {openBooking && (
+                <BookingDetailSheet
+                    booking={openBooking}
+                    onClose={() => setOpenBooking(null)}
                 />
             )}
         </>
-    );
-}
-
-function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-        <div>
-            <SectionTitle>{label}</SectionTitle>
-            {children}
-        </div>
-    );
-}
-
-/** live — диктор зачитывает изменения («Найдено: 13»). */
-function SectionTitle({ children, live }: { children: React.ReactNode; live?: boolean }) {
-    return (
-        <div aria-live={live ? 'polite' : undefined} style={{
-            fontSize: TEXT.caption,
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: COLOR.ink60,
-            marginBottom: 8,
-        }}>{children}</div>
-    );
-}
-
-function ChipsRow({ children }: { children: React.ReactNode }) {
-    // 09.11 фаза 3: общий ряд-лента с затуханием справа — видно, что листается.
-    return (
-        <div className="ui-chip-row ui-chip-row--scroll" style={{
-            display: 'flex',
-            gap: 8,
-            overflowX: 'auto',
-            paddingBottom: 4,
-            // Лента до краёв шторки (поля тела шторки — 24 px).
-            margin: '0 -24px',
-            padding: '0 24px 4px',
-            scrollbarWidth: 'none',
-        }}>
-            {children}
-        </div>
     );
 }
 
@@ -1656,16 +1463,6 @@ const dayChip: React.CSSProperties = {
 };
 const dayChipSub: React.CSSProperties = { fontSize: TEXT.caption, fontWeight: 500, color: COLOR.ink60 };
 
-/** Больше кабинетов в строке времени — сворачиваем в «ещё N». */
-const SLOT_ROW_LIMIT = 4;
-
-/** Короткое имя центра под ценой плитки: «One» / «Uni». */
-function centerShort(locationId?: string): string {
-    if (!locationId) return '';
-    const name = LOCATIONS.find(l => l.id === locationId)?.name ?? '';
-    return name.replace(/^Unbox\s*/i, '');
-}
-
 /** Крестик в плашке режима — цель касания 44×44. */
 const bannerCloseBtn: React.CSSProperties = {
     background: 'transparent',
@@ -1679,20 +1476,6 @@ const bannerCloseBtn: React.CSSProperties = {
     display: 'grid',
     placeItems: 'center',
 };
-
-/** Кабинеты под текущие фильтры — для «Сообщить, когда освободится».
- *  Те же правила, что в buildFreeWindows (её не трогаем): сдаваемые,
- *  не Neo School, выбранный центр и тип («Кабинет» — до 4 чел.,
- *  «Большой зал» — больше 4 или групповой формат, «Капсула» — капсулы). */
-function searchRooms(locs: Set<string>, spaces: Set<SpaceType>) {
-    return RESOURCES.filter(r => {
-        if (r.locationId === 'neo_school' || !r.locationId || r.isActive === false || !locs.has(r.locationId)) return false;
-        if (r.type === 'capsule') return spaces.has('capsule');
-        const cap = r.capacity ?? 4;
-        const canGroup = r.formats?.includes('group') ?? false;
-        return (spaces.has('individual') && cap <= 4) || (spaces.has('group') && (cap > 4 || canGroup));
-    }).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-}
 
 // ─── availability math ────────────────────────────────────────────
 function minsToHHMM(m: number) {

@@ -521,7 +521,8 @@ def test_reschedule_asks_before_moving():
     i = f.index("if (rescheduleBooking) {")
     body = f[i:f.index("await bookingsApi.rescheduleBooking(", i)]
     assert "await askConfirm({" in body and "title: 'Перенести бронь?'" in body
-    assert "if (!ok) { inFlightRef.current = false; return; }" in body
+    # 28.11 (шаг 2): отказ от переноса ещё и снимает выделение на сетке.
+    assert "if (!ok) { inFlightRef.current = false; setSelection(null); return; }" in body
 
 
 def test_repeat_goes_after_source_day():

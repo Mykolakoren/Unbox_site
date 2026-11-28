@@ -73,8 +73,11 @@ def test_extend_still_blocked_by_normal_booking():
 def test_mobile_reschedule_moves_whole_booking():
     mf = open(os.path.join(_REPO, "src/pages/mobile/MobileFind.tsx"), encoding="utf-8").read()
     assert "setDuration(rescheduleBooking.duration ?? 60);" in mf, "длительность переноса снова подгоняется под кнопки"
-    assert "newDuration: rescheduleBooking.duration ?? duration," in mf
-    assert "{formatBookingDuration(duration)} — как в брони" in mf, "при переносе снова предлагаются 1/2/3 ч"
+    # 28.11 (шаг 2, сетка): длительность переноса — по-прежнему из самой брони.
+    assert "const moveMin = rescheduleBooking.duration ?? durMin;" in mf and "newDuration: moveMin," in mf
+    # Полосы с выбором длительности при переносе нет, а начало годится, только если бронь помещается целиком.
+    assert "const barOpen = !!selection && !!selCol && !rescheduleId && occupancyReady;" in mf, "при переносе снова предлагаются 1/2/3 ч"
+    assert "const searchDuration = rescheduleId ? duration : MIN_DURATION;" in mf
 
 
 if __name__ == "__main__":
